@@ -1,0 +1,1 @@
+import { useQuery } from "@tanstack/react-query"; import { api } from "../../../lib/api"; export const useMarketAnalyst=(ticker:string)=>useQuery({queryKey:["quant","market","analyst",ticker],queryFn:()=>api<any>(`/api/quant/market/analyst/${encodeURIComponent(ticker.trim())}`),enabled:!!ticker.trim()});

@@ -1,0 +1,1 @@
+import { useQuery } from "@tanstack/react-query"; import { api } from "../../../lib/api"; export const useMarketSentiment=(ticker:string,limit=10)=>useQuery({queryKey:["quant","market","sentiment",ticker,limit],queryFn:()=>api<any>(`/api/quant/market/sentiment/${encodeURIComponent(ticker.trim())}?limit=${Math.min(Math.max(Math.floor(limit), 1), 100)}`),enabled:!!ticker.trim()});

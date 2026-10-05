@@ -1,0 +1,1 @@
+import { useQuery } from "@tanstack/react-query"; import { api } from "../../../lib/api"; export const useExperiments=()=>useQuery({queryKey:["quant","experiments"],queryFn:()=>api<any[]>("/api/quant/experiments")});

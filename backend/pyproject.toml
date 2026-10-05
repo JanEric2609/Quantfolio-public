@@ -1,0 +1,434 @@
+[project]
+name = "quantfolio-backend"
+version = "0.1.0"
+description = "FastAPI backend for QuantFolio"
+requires-python = ">=3.11"
+dependencies = [
+  "PyJWT>=2.9",
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "sqlalchemy>=2.0,<2.1",
+  "psycopg[binary]>=3.1",
+  "alembic>=1.13",
+  "pydantic-settings>=2.2",
+  "cryptography>=42.0",
+  "python-multipart>=0.0.9",
+  "webauthn>=2.0",
+  "fints>=5.0,<6",
+  "apscheduler>=3.10",
+  "redis>=5.0",
+  "httpx>=0.27",
+  "openai>=1.30",
+  "anthropic>=0.35",
+  "pgvector>=0.3",
+  "yfinance>=0.2",
+  "alpha-vantage>=2.3",
+  "finnhub-python>=2.4",
+  "praw>=7.7",
+  "numpy>=1.26",
+  "pandas>=2.2,<3",
+  "scipy>=1.12",
+  "fredapi>=0.5",
+  "vectorbt>=0.26",
+  "plotly>=6.0,<7",
+  "skfolio>=0.7,<1",
+  "scikit-learn>=1.4",
+  "lightgbm>=4.3",
+  "xgboost>=2.0",
+  "torch>=2.2",
+  "finrl>=0.3",
+  # finrl's __init__.py unconditionally imports finrl.trade + finrl.train,
+  # which eagerly pull in these two even though this app's quant_rl only
+  # uses finrl.meta.* (portfolio/stock-trading envs, preprocessors). Safe,
+  # actively-maintained, no dependency conflicts. alpaca_trade_api and wrds
+  # (the other two finrl.trade/finrl.train transitive deps) are NOT real
+  # PyPI dependencies — see backend/alpaca_trade_api/__init__.py and
+  # backend/wrds/__init__.py for why they're vendored stubs instead.
+  "exchange_calendars>=4.13",
+  "stockstats>=0.6",
+  "stable-baselines3>=2.3",
+  "gymnasium>=0.29",
+  "ta>=0.11",
+  "mlflow>=2.12",
+  "joblib>=1.3",
+  "hmmlearn>=0.3",
+  # The live regime model since 2026-09-28 (ADR 0004 amendment). Upstream is
+  # dormant since Jan 2025: pinned exact; the classifier falls back to the
+  # HMM when it is missing.
+  "jumpmodels==0.1.1",
+  "slowapi>=0.1.9",
+  "defusedxml>=0.7",
+  "pyarrow>=17.0",
+  "duckdb>=1.5,<2",
+  "justetf-scraping@git+https://github.com/druzsan/justetf-scraping.git@bf6717c2a7721a1678befb8feb1e331773368577",
+]
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+# alpaca_trade_api, wrds: vendored stub packages, NOT the real PyPI
+# dependencies — see their __init__.py docstrings for why.
+include = ["app*", "alpaca_trade_api*", "wrds*"]
+
+[project.optional-dependencies]
+dkb_robo = [
+  "dkb_robo>=0.28",
+]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "pytest-cov>=5.0",
+  "pytest-timeout>=2.1",
+  "pytest-xdist>=3.8",
+  "ruff>=0.5,<0.16",  # 0.16.0 has a rule-resolution regression: extend-select=[BLE001,S608] pulls in whole unrelated categories (B, S, ASYNC, YTT), producing 1500+ false positives
+  "pyright>=1.1.400",
+  "import-linter>=2.0",  # Wave 0 architecture gates (lint-imports); grimp is its analysis engine
+  "grimp>=2.0",
+  "schemathesis>=4.0",  # Wave 0 opt-in API conformance fuzz (SCHEMATHESIS=1-gated test; manual CI job only)
+]
+bert = [
+  "transformers>=4.40",
+  "torch>=2.2",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-n 6"
+
+# Pyright config lives in pyrightconfig.json (takes precedence over [tool.pyright]).
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+extend-select = ["BLE001", "S608"]
+
+[tool.ruff.lint.per-file-ignores]
+"app/**" = ["BLE001"]
+"tests/*" = ["BLE001", "S608"]
+"alembic/versions/*" = ["S608"]
+# ── ADR 0015 Phase 5 architecture ledger (four-layer restructure) ─────────
+#
+# import-linter contracts that make NEW architectural violations impossible.
+# `backend/app/` is a four-layer tree, each layer depending only on layers
+# below it:
+#
+#   app.interface   FastAPI transport (routers, response envelope).
+#   app.decision    the live recommendation/execution loop and its own
+#                   post-hoc scorekeeping.
+#   app.lab         research / backtest / signal-search / measurement
+#                   harness; produces gated evidence and candidates.
+#   app.foundation  base infra, persistence, data access, shared numerical
+#                   and narration kernels.
+#
+# `app.main` and `app.worker` are process entrypoints that sit at the `app`
+# root, siblings of the four layers; they legitimately import across all of
+# them and are deliberately outside the layers contract.
+#
+# Every ignore_imports entry below is a SEEDED, pre-existing exception. New
+# violations fail CI; seeded ones may only shrink (an entry whose import
+# disappears is reported as "unmatched" and alerts at `warn` level so stale
+# ledger rows get pruned).
+#
+# One cross-layer exception is carried forward deliberately by Phase 5 and
+# documented in app/lab/CONTEXT.md:
+#
+#   1. `regime` lives in `lab` (it imports `quant_ml.registry` at module
+#      level) but is read from four `foundation` modules via lazy,
+#      function-local imports. Reclassifying those four readers would be an
+#      architectural change, out of scope for a zero-behaviour-change phase.
+#
+# (A second one, `dkb.service -> verification.engine`, was retired in 2026-10:
+# the call only recomputed the confidence score, which was deleted.)
+#
+# Historical wave map (pre-Phase-5 debt, re-pathed under the new tree):
+#   Wave 1 — core/models split: `app.foundation.core` is a regular package,
+#           entities inherit from `app.foundation.core.db_base.Base`, and the
+#           "Core never imports the models layer" contract below is active.
+#           Its single ignore entry is the bootstrap exception: create_all()'s
+#           lazy entities import.
+#   Wave 2 — notification seam (envelope/notify/telegram_bot)
+#   Wave 3 — fx + portfolio service seams (fx_cvt<->fx_rates,
+#            portfolio<->portfolio_service)
+#   Wave 4 — decision-loop cuts (advisor/discover/graduation/jobs/
+#            llm_portfolio/paper_portfolio six-way tangle)
+#   Wave 5 — api layering (api<->portfolio_analysis)
+[tool.importlinter]
+root_packages = ["app"]
+unmatched_ignore_imports_alerting = "warn"
+
+# ── Phase 5 contract 1: the four-layer spine ───────────────────────────────
+# Higher layers may import lower ones; never the reverse. This structurally
+# subsumes the pre-Phase-5 "Foundation services never import the decision
+# loop" contract (an 11-source / 6-forbidden hand-maintained list) and the
+# pre-Phase-5 "Global layering" contract (api > services > models > core) —
+# `models` and `core` are now `app.foundation.models` / `app.foundation.core`,
+# so their ordering is enforced intra-layer by the dedicated contract below.
+[[tool.importlinter.contracts]]
+name = "Global layering"
+type = "layers"
+layers = [
+    "app.interface",
+    "app.decision",
+    "app.lab",
+    "app.foundation",
+]
+ignore_imports = [
+    # Exception 1: `regime` is lab-tier (module-level quant_ml.registry
+    # import) but three foundation modules read it through lazy,
+    # function-local imports. Pre-existing edges, carried forward verbatim
+    # (metrics_wrappers -> lab.regime.gate went away on 2026-10-04 with the
+    # regime-tilted rebalance).
+    "app.foundation.portfolio_analysis -> app.lab.regime.macro_snapshot",
+    "app.foundation.research -> app.lab.regime.macro_snapshot",
+    "app.foundation.llm_research -> app.lab.regime",
+]
+
+# ── Phase 5 contract 2: nothing below the transport reaches back up ────────
+# Direct rename of the pre-Phase-5 zero-debt "Services never import the API
+# layer" contract. Still zero seeded debt — it must stay that way.
+[[tool.importlinter.contracts]]
+name = "Services never import the interface layer"
+type = "forbidden"
+source_modules = [
+    "app.foundation",
+    "app.lab",
+    "app.decision",
+]
+forbidden_modules = ["app.interface"]
+ignore_imports = [
+]
+
+# ── Phase 5 contract 3: decision-loop packages are independent ─────────────
+# Membership shrinks from 12 to 7. The five departures are free: they belong
+# to a different layer once the physical boundary is honest, not because debt
+# was paid down — `alphacrafter` is lab-tier, and `dkb` / `imports` /
+# `tax_calc` / `finagent` are foundation-tier. `app.foundation.portfolio`
+# stays a member: it is foundation-tier by layer but still participates in
+# this cluster's pairwise ledger, and dropping it would loosen the contract.
+# The Wave-3/4 ignore ledger is re-partitioned accordingly: rows with both
+# endpoints still inside the shrunk cluster carry forward verbatim under new
+# paths; rows where one endpoint left the cluster are now ordinary
+# cross-layer edges governed by contract 1 and are not re-seeded here.
+[[tool.importlinter.contracts]]
+name = "Decision-loop packages are independent"
+type = "independence"
+modules = [
+    "app.decision.advisor",
+    "app.decision.discover",
+    "app.decision.graduation",
+    "app.decision.llm_portfolio",
+    "app.decision.paper_portfolio",
+    "app.decision.portfolio_advisor",
+    "app.foundation.portfolio",
+]
+ignore_imports = [
+    # ── Wave 3 (survivors): shared-classification seams ────────────────────
+    "app.decision.discover.dossier_writer -> app.foundation.expected_return",
+    #
+    # ── Wave 4: decision-loop cuts ─────────────────────────────────────────
+    # Scheduler hub fan-in: registering with jobs is legitimate. jobs.py is
+    # generic infra now (no domain imports), so these edges dead-end — kept
+    # documented because the imports themselves remain (lazy, one-directional).
+    "app.decision.discover.orchestrator -> app.foundation.jobs",
+    # advisor <-> discover <-> graduation <-> llm_portfolio <-> paper_portfolio
+    "app.decision.advisor.llm_decision -> app.decision.llm_portfolio.review",
+    "app.decision.advisor.reflection -> app.decision.llm_portfolio.review",
+    "app.decision.advisor.diagnostics -> app.decision.llm_portfolio.review",
+    # Council-wiring consolidation: evolution's champion/challenger rounds run
+    # the real Multi-Agent Council through the llm_portfolio facade
+    # (build_council_context, CompetitionOrchestrator, create_default_config)
+    # so CompetitionDecision.council_result_json is genuinely populated. Same
+    # direction as the three edges above, so no cycle: llm_portfolio.agents
+    # has no imports back into advisor.
+    "app.decision.advisor.evolution -> app.decision.llm_portfolio",
+    "app.decision.advisor.cycle -> app.decision.paper_portfolio",
+    "app.decision.advisor.diagnostics -> app.decision.paper_portfolio",
+    # Sleeve seeding lives in paper_portfolio.seed_paper_portfolio_from_real;
+    # strategy.py reaches it directly (dissolves the strategy->cycle back-edge).
+    "app.decision.advisor.strategy -> app.decision.paper_portfolio",
+    "app.decision.advisor.recommendations -> app.decision.graduation.state",
+    # The evolution registrar lives in advisor/jobs.py; its body legitimately
+    # scores graduation as part of each evolution round.
+    "app.decision.advisor.jobs -> app.decision.graduation.evaluator",
+    "app.decision.advisor.jobs -> app.decision.graduation.state",
+    # Sanctioned public-surface edge (Wave A): advisor reads discover's
+    # STYLE_FRAMINGS via discover.framings — the ONE documented
+    # advisor→discover-family reach, pending a shared-facades extraction.
+    "app.decision.advisor.strategy -> app.decision.discover.framings",
+    "app.decision.advisor.cycle -> app.decision.discover.ledger",
+    "app.decision.advisor.cycle -> app.decision.discover.calibrator",
+    "app.decision.advisor.cycle -> app.decision.discover.predictor",
+    "app.decision.graduation.state -> app.decision.advisor.strategy",
+    "app.decision.graduation.evaluator -> app.decision.advisor.strategy",
+    # _ai_portfolios() reads ADVISOR_MANDATE so it scopes to advisor's own
+    # champion/challenger sleeves instead of the broader (and wrong)
+    # managed_by == "llm" filter, which also matched llm_portfolio's unrelated
+    # mandate A/B portfolios. Submodule import (not the advisor facade root)
+    # deliberately, to avoid pulling in advisor.jobs's own graduation
+    # evaluator/state imports and forming a package-level cycle.
+    "app.decision.graduation.evaluator -> app.decision.advisor.cycle",
+    "app.decision.llm_portfolio.mirror -> app.decision.paper_portfolio",
+    "app.decision.llm_portfolio.review -> app.decision.paper_portfolio",
+    "app.decision.llm_portfolio.gates -> app.decision.discover.tradeability",
+    "app.decision.llm_portfolio.context -> app.foundation.portfolio.name_resolver",
+    "app.decision.discover.dossier_writer -> app.decision.llm_portfolio.review",
+    # The discovery_resolution registrar lives in discover/jobs.py; its body
+    # refreshes the advisor scorecard after scoring each user's matured
+    # predictions (advisor loop E2).
+    "app.decision.discover.jobs -> app.decision.advisor.scorecard",
+    "app.decision.discover.pipeline -> app.foundation.portfolio.bridge",
+]
+
+# ── Phase 5 contract 4: intra-foundation core/models ordering ──────────────
+# Was "Core never imports the models layer" over app.core / app.models; both
+# now nest one level deeper inside foundation. Same single bootstrap ignore.
+[[tool.importlinter.contracts]]
+name = "Core never imports the models layer"
+type = "forbidden"
+source_modules = ["app.foundation.core"]
+forbidden_modules = ["app.foundation.models"]
+ignore_imports = [
+    # Bootstrap exception: db.py's create_all() lazily imports the entities
+    # package so every model registers on Base.metadata before create_all
+    # runs. The reverse direction (models -> core.db_base) is the intended
+    # dependency and stays ungated.
+    "app.foundation.core.db -> app.foundation.models.entities",
+]
+
+# ── Phase 5 contract 5 (×6): decision-loop facades are the only public
+# surface. Cross-context consumers must import the package root (facade), not
+# internal submodules. `paper_portfolio` is a flat module with no internal
+# submodules, so no contract targets it. `app.interface` and `app.worker` are
+# out of scope here.
+[[tool.importlinter.contracts]]
+name = "Decision-loop internals are facade-only: advisor"
+type = "forbidden"
+source_modules = [
+    "app.decision.discover",
+    "app.decision.graduation",
+    "app.decision.llm_portfolio",
+    "app.decision.portfolio_advisor",
+    "app.decision.recommendation_engine",
+    "app.decision.verification",
+    "app.foundation.portfolio",
+    "app.foundation.imports",
+    "app.foundation.finagent",
+    "app.lab.alphacrafter",
+]
+forbidden_modules = ["app.decision.advisor.*"]
+allow_indirect_imports = true
+ignore_imports = [
+    # Seeded deep-import debt (facades & freeze). Pre-existing cross-context
+    # seams, each already sanctioned verbatim in the independence ledger
+    # above. Consumers migrate to the package-root facade in a future wave;
+    # rows shrink only.
+    "app.decision.discover.jobs -> app.decision.advisor.scorecard",
+    "app.decision.graduation.evaluator -> app.decision.advisor.strategy",
+    "app.decision.graduation.evaluator -> app.decision.advisor.cycle",
+    "app.decision.graduation.state -> app.decision.advisor.strategy",
+]
+
+[[tool.importlinter.contracts]]
+name = "Decision-loop internals are facade-only: discover"
+type = "forbidden"
+source_modules = [
+    "app.decision.advisor",
+    "app.decision.graduation",
+    "app.decision.llm_portfolio",
+    "app.decision.portfolio_advisor",
+    "app.foundation.portfolio",
+    "app.foundation.imports",
+    "app.foundation.finagent",
+    "app.lab.alphacrafter",
+]
+forbidden_modules = ["app.decision.discover.*"]
+allow_indirect_imports = true
+ignore_imports = [
+    "app.decision.advisor.cycle -> app.decision.discover.calibrator",
+    "app.decision.advisor.cycle -> app.decision.discover.ledger",
+    "app.decision.advisor.cycle -> app.decision.discover.predictor",
+    "app.decision.advisor.strategy -> app.decision.discover.framings",
+    "app.decision.llm_portfolio.gates -> app.decision.discover.tradeability",
+]
+
+[[tool.importlinter.contracts]]
+name = "Decision-loop internals are facade-only: graduation"
+type = "forbidden"
+source_modules = [
+    "app.decision.advisor",
+    "app.decision.discover",
+    "app.decision.llm_portfolio",
+    "app.decision.portfolio_advisor",
+    "app.foundation.portfolio",
+    "app.foundation.imports",
+    "app.foundation.finagent",
+    "app.lab.alphacrafter",
+]
+forbidden_modules = ["app.decision.graduation.*"]
+allow_indirect_imports = true
+ignore_imports = [
+    "app.decision.advisor.jobs -> app.decision.graduation.evaluator",
+    "app.decision.advisor.jobs -> app.decision.graduation.state",
+    "app.decision.advisor.recommendations -> app.decision.graduation.state",
+]
+
+[[tool.importlinter.contracts]]
+name = "Decision-loop internals are facade-only: llm_portfolio"
+type = "forbidden"
+source_modules = [
+    "app.decision.advisor",
+    "app.decision.discover",
+    "app.decision.graduation",
+    "app.decision.portfolio_advisor",
+    "app.decision.recommendation_engine",
+    "app.decision.verification",
+    "app.foundation.portfolio",
+    "app.foundation.imports",
+    "app.foundation.finagent",
+    "app.lab.alphacrafter",
+]
+forbidden_modules = ["app.decision.llm_portfolio.*"]
+allow_indirect_imports = true
+ignore_imports = [
+    "app.decision.advisor.diagnostics -> app.decision.llm_portfolio.review",
+    "app.decision.advisor.llm_decision -> app.decision.llm_portfolio.review",
+    "app.decision.advisor.reflection -> app.decision.llm_portfolio.review",
+    "app.decision.discover.dossier_writer -> app.decision.llm_portfolio.review",
+]
+
+# recommendation_engine's sole cross-context consumer (app.decision.ai, a flat
+# module outside the independence cluster) must go through the package-root
+# facade, not internal submodules like v2_adapter/orchestrator directly.
+[[tool.importlinter.contracts]]
+name = "Decision-loop internals are facade-only: recommendation_engine"
+type = "forbidden"
+source_modules = ["app.decision.ai"]
+forbidden_modules = ["app.decision.recommendation_engine.*"]
+allow_indirect_imports = true
+
+# New in Phase 5: verification is decision-tier with real internal submodules
+# (trust, risk, stress, alerts). Its cross-context consumers read it through
+# the package root. No seeded exceptions remain (the DKB-ingestion call into
+# verification.engine was retired with the confidence score in 2026-10).
+[[tool.importlinter.contracts]]
+name = "Decision-loop internals are facade-only: verification"
+type = "forbidden"
+source_modules = [
+    "app.decision.advisor",
+    "app.decision.discover",
+    "app.decision.graduation",
+    "app.decision.llm_portfolio",
+    "app.decision.portfolio_advisor",
+    "app.foundation.portfolio",
+    "app.foundation.dkb",
+    "app.foundation.imports",
+    "app.foundation.finagent",
+    "app.lab.alphacrafter",
+]
+forbidden_modules = ["app.decision.verification.*"]
+allow_indirect_imports = true

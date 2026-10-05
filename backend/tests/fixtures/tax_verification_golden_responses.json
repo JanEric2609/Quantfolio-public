@@ -1,0 +1,775 @@
+{
+  "tax_basiszins": {
+    "GET /basiszins": {
+      "items": [
+        {
+          "basiszins": 0.032,
+          "year": 2026
+        },
+        {
+          "basiszins": 0.0253,
+          "year": 2025
+        },
+        {
+          "basiszins": 0.0229,
+          "year": 2024
+        },
+        {
+          "basiszins": 0.0255,
+          "year": 2023
+        },
+        {
+          "basiszins": -0.0005,
+          "year": 2022
+        },
+        {
+          "basiszins": -0.0045,
+          "year": 2021
+        },
+        {
+          "basiszins": 0.0007,
+          "year": 2020
+        },
+        {
+          "basiszins": 0.0052,
+          "year": 2019
+        },
+        {
+          "basiszins": 0.0087,
+          "year": 2018
+        }
+      ]
+    }
+  },
+  "tax_box3_disabled": {
+    "GET /box3 (DE residency, disabled)": {
+      "disabled": true,
+      "estimate": true,
+      "lines": [],
+      "not_tax_advice": true,
+      "provenance": {},
+      "reason": "Dutch Box 3 estimation requires tax_residency_country = 'NL'.",
+      "tax": {}
+    }
+  },
+  "tax_box3_nl": {
+    "GET /box3 (NL)": {
+      "calculation": {
+        "bank_fictitious_return_eur": 360.0,
+        "bank_rate_pct": 1.44,
+        "box3_tax_eur": 318.07,
+        "debt_deduction_eur": 262.0,
+        "debt_rate_pct": 2.62,
+        "effective_tax_rate_pct": 0.33,
+        "fictitious_return_eur": 3626.0,
+        "fictitious_return_rate_pct": 3.8168,
+        "investment_fictitious_return_eur": 3528.0,
+        "investment_rate_pct": 5.88
+      },
+      "estimate": true,
+      "jurisdiction": "NL",
+      "label": "NL Box 3 (wealth tax) estimate -- always verify with your accountant.",
+      "not_tax_advice": true,
+      "tax_year": 2026,
+      "wealth": {
+        "bank_deposits_eur": 25000.0,
+        "days_resident_nl": 365,
+        "debts_eur": 10000.0,
+        "investments_eur": 60000.0,
+        "is_prorated": true,
+        "tax_free_allowance_eur": 57000.0,
+        "taxable_eur": 18000.0,
+        "total_eur": 95000.0
+      }
+    }
+  },
+  "tax_box3_zero_wealth": {
+    "GET /box3 (zero wealth)": {
+      "calculation": {
+        "bank_fictitious_return_eur": 0.0,
+        "bank_rate_pct": 0.0,
+        "box3_tax_eur": 0.0,
+        "debt_deduction_eur": 0.0,
+        "debt_rate_pct": 0.0,
+        "effective_tax_rate_pct": 0.0,
+        "fictitious_return_eur": 0.0,
+        "fictitious_return_rate_pct": 0.0,
+        "investment_fictitious_return_eur": 0.0,
+        "investment_rate_pct": 0.0
+      },
+      "estimate": true,
+      "jurisdiction": "NL",
+      "label": "NL Box 3 (wealth tax) estimate -- always verify with your accountant.",
+      "not_tax_advice": true,
+      "tax_year": 2026,
+      "wealth": {
+        "bank_deposits_eur": 0.0,
+        "days_resident_nl": 365,
+        "debts_eur": 0.0,
+        "investments_eur": 0.0,
+        "is_prorated": true,
+        "tax_free_allowance_eur": 57000.0,
+        "taxable_eur": 0.0,
+        "total_eur": 0.0
+      }
+    }
+  },
+  "tax_events_create": {
+    "POST /events": {
+      "estimate": true,
+      "id": "9a1778eb-0420-4710-9eda-2f1e4f0bafe2",
+      "not_tax_advice": true
+    }
+  },
+  "tax_events_delete": {
+    "DELETE /events/{id}": {
+      "deleted": "085486f2-8981-4dc4-bcb2-f0ab6e156434"
+    },
+    "POST /events (for delete)": {
+      "estimate": true,
+      "id": "085486f2-8981-4dc4-bcb2-f0ab6e156434",
+      "not_tax_advice": true
+    }
+  },
+  "tax_events_list": {
+    "GET /events": {
+      "estimate": true,
+      "items": [
+        {
+          "bucket": null,
+          "confidence": "estimate",
+          "event_date": "2025-12-31",
+          "event_type": "vorabpauschale",
+          "foreign_country": null,
+          "foreign_wht_eur": 0.0,
+          "fund_class": "aktien",
+          "gross_eur": 20.0,
+          "id": "tax-ev-vorab",
+          "institution": null,
+          "isin": "IE00B4BNMY34",
+          "name": null,
+          "notes": null,
+          "realised_gain_eur": null,
+          "source": "manual",
+          "source_ref": null,
+          "symbol": null,
+          "tax_year": 2025,
+          "teilfreistellung_pct": 30.0,
+          "withheld_eur": 0.0
+        },
+        {
+          "bucket": "sonstige",
+          "confidence": "estimate",
+          "event_date": "2025-09-10",
+          "event_type": "sale",
+          "foreign_country": null,
+          "foreign_wht_eur": 0.0,
+          "fund_class": "other",
+          "gross_eur": 0.0,
+          "id": "tax-ev-sale-loss",
+          "institution": null,
+          "isin": "DE000TEST02",
+          "name": null,
+          "notes": null,
+          "realised_gain_eur": -50.0,
+          "source": "manual",
+          "source_ref": null,
+          "symbol": null,
+          "tax_year": 2025,
+          "teilfreistellung_pct": 0.0,
+          "withheld_eur": 0.0
+        },
+        {
+          "bucket": "aktien",
+          "confidence": "estimate",
+          "event_date": "2025-08-15",
+          "event_type": "sale",
+          "foreign_country": null,
+          "foreign_wht_eur": 0.0,
+          "fund_class": "aktien",
+          "gross_eur": 0.0,
+          "id": "tax-ev-sale-gain",
+          "institution": null,
+          "isin": "IE00B4BNMY34",
+          "name": null,
+          "notes": null,
+          "realised_gain_eur": 200.0,
+          "source": "manual",
+          "source_ref": null,
+          "symbol": null,
+          "tax_year": 2025,
+          "teilfreistellung_pct": 30.0,
+          "withheld_eur": 0.0
+        },
+        {
+          "bucket": null,
+          "confidence": "estimate",
+          "event_date": "2025-07-01",
+          "event_type": "interest",
+          "foreign_country": null,
+          "foreign_wht_eur": 0.0,
+          "fund_class": null,
+          "gross_eur": 50.0,
+          "id": "tax-ev-int",
+          "institution": null,
+          "isin": null,
+          "name": "Tagesgeld",
+          "notes": null,
+          "realised_gain_eur": null,
+          "source": "manual",
+          "source_ref": null,
+          "symbol": null,
+          "tax_year": 2025,
+          "teilfreistellung_pct": 0.0,
+          "withheld_eur": 0.0
+        },
+        {
+          "bucket": null,
+          "confidence": "estimate",
+          "event_date": "2025-06-02",
+          "event_type": "dividend",
+          "foreign_country": "US",
+          "foreign_wht_eur": 15.0,
+          "fund_class": "aktien",
+          "gross_eur": 100.0,
+          "id": "tax-ev-div",
+          "institution": null,
+          "isin": "IE00B4BNMY34",
+          "name": "Vanguard FTSE All-World",
+          "notes": null,
+          "realised_gain_eur": null,
+          "source": "manual",
+          "source_ref": null,
+          "symbol": null,
+          "tax_year": 2025,
+          "teilfreistellung_pct": 30.0,
+          "withheld_eur": 2.5
+        },
+        {
+          "bucket": null,
+          "confidence": "estimate",
+          "event_date": "2025-06-02",
+          "event_type": "withholding",
+          "foreign_country": null,
+          "foreign_wht_eur": 0.0,
+          "fund_class": null,
+          "gross_eur": 0.0,
+          "id": "tax-ev-wht",
+          "institution": null,
+          "isin": null,
+          "name": "Abgeltungsteuer Vorauszahlung",
+          "notes": null,
+          "realised_gain_eur": null,
+          "source": "manual",
+          "source_ref": null,
+          "symbol": null,
+          "tax_year": 2025,
+          "teilfreistellung_pct": 0.0,
+          "withheld_eur": 10.0
+        }
+      ],
+      "not_tax_advice": true
+    }
+  },
+  "tax_harvest_disabled": {
+    "GET /harvest (no NV certificate)": {
+      "bank_rooms": [],
+      "enabled": false,
+      "estimate": true,
+      "label": "Estimate only -- broker statements (Steuerbescheinigung / Ertr\u00e4gnisaufstellung) remain the source of truth. Not tax advice.",
+      "mode": "allowance",
+      "not_tax_advice": true,
+      "reason": "Enter the Freistellungsauftrag you gave each bank in the tax settings (or file an NV certificate) to plan tax-free gain harvesting.",
+      "skipped": [],
+      "steps": [],
+      "tax_year": 2026,
+      "warnings": []
+    }
+  },
+  "tax_harvest_nv": {
+    "GET /harvest (NV certificate)": {
+      "bank_rooms": [
+        {
+          "bank": "dkb",
+          "label": "DKB",
+          "nv_covers": true,
+          "room_eur": null
+        },
+        {
+          "bank": "scalable",
+          "label": "Scalable Capital",
+          "nv_covers": true,
+          "room_eur": null
+        }
+      ],
+      "enabled": true,
+      "estimate": true,
+      "health_insurance": "foreign",
+      "label": "Estimate only -- broker statements (Steuerbescheinigung / Ertr\u00e4gnisaufstellung) remain the source of truth. Not tax advice.",
+      "mode": "nv",
+      "not_tax_advice": true,
+      "nv_certificate": {
+        "expires_in_days": 138,
+        "valid_until": "2026-12-31"
+      },
+      "reason": null,
+      "room": {
+        "capital_income_so_far_eur": 0.0,
+        "family_insurance_room_eur": 7780.0,
+        "grundfreibetrag_eur": 12348.0,
+        "mode": "nv",
+        "other_income_eur": 0.0,
+        "projected_capital_income_eur": 0.0,
+        "room_eur": 7780.0,
+        "sparer_pauschbetrag_eur": 1000.0,
+        "tax_free_room_eur": 13348.0
+      },
+      "skipped": [],
+      "steps": [],
+      "tax_year": 2026,
+      "totals": {
+        "future_tax_avoided_eur": 0.0,
+        "taxable_gain_eur": 0.0,
+        "trading_cost_eur": 0.0
+      },
+      "warnings": [
+        {
+          "code": "foreign_insurance",
+          "message": "Austrian \u00d6GK co-insurance of a child in education has no income limit (Sec. 123 ASVG), but for a family member living in Germany EU rules (Reg. 883/2004 Art. 1(i)) may test the German family-insurance limit instead, so the room is kept within it to be safe. Austrian Familienbeihilfe (17,212 \u20ac a year, Sec. 5 FLAG) does not count income taxed at the flat rate."
+        },
+        {
+          "code": "return_nv",
+          "message": "Hand the NV certificate back to every bank once its conditions stop holding, e.g. when you start working."
+        },
+        {
+          "code": "settle_in_year",
+          "message": "Trade by mid-December so the sale settles in the tax year, and buy the same units back the same day."
+        }
+      ]
+    }
+  },
+  "tax_jurisdictions": {
+    "GET /jurisdictions": {
+      "jurisdictions": [
+        {
+          "code": "DE",
+          "label": "German income tax (KESt/Soli)",
+          "name": "Germany"
+        },
+        {
+          "code": "NL",
+          "label": "Dutch asset tax (Box 3)",
+          "name": "Netherlands"
+        }
+      ]
+    }
+  },
+  "tax_kap_disabled": {
+    "GET /reports/kap (disabled)": {
+      "disabled": true,
+      "estimate": true,
+      "form": "Anlage KAP",
+      "lines": [],
+      "not_tax_advice": true,
+      "provenance": {},
+      "reason": "Tax estimation is disabled. Enable 'tax_estimation_enabled' in Control Center.",
+      "tax": {},
+      "tax_year": 2025
+    }
+  },
+  "tax_kap_filled": {
+    "GET /reports/kap (filled)": {
+      "allowance": {
+        "amount_eur": 1000.0,
+        "remaining_after_eur": 1000.0,
+        "used_before_eur": 0.0,
+        "used_now_eur": 0.0
+      },
+      "carryforward": {
+        "aktien_loss_eur": 5800.0,
+        "sonstige_loss_eur": 50.0
+      },
+      "estimate": true,
+      "form": "Anlage KAP",
+      "lines": {
+        "form": "Anlage KAP",
+        "line_19_vorabpauschale": -580.0,
+        "line_37_kest_paid": 10.0,
+        "line_41_anrechenbare_auslaendische_steuer": 15.0,
+        "line_7_kapitalertraege": -430.0,
+        "line_8_gewinne_aktien": 0.0,
+        "year_hint": "2025-form layout (Anlage KAP-INV) \u2014 verify against the current year's form."
+      },
+      "not_tax_advice": true,
+      "tax": {
+        "church_tax_eur": 0.0,
+        "church_tax_rate": 0.0,
+        "kest_after_foreign_wht_eur": 0.0,
+        "kest_already_paid_eur": 10.0,
+        "kest_due_eur": 0.0,
+        "kest_rate": 0.25,
+        "settlement_eur": -10.0,
+        "soli_eur": 0.0,
+        "total_tax_due_eur": 0.0
+      },
+      "tax_year": 2025
+    }
+  },
+  "tax_lots_create": {
+    "POST /lots": {
+      "estimate": true,
+      "id": "a3fabcaa-5802-4746-81d7-a38b9a5928ce",
+      "not_tax_advice": true
+    }
+  },
+  "tax_lots_delete": {
+    "DELETE /lots/{id}": {
+      "deleted": "f5ec273c-4987-4c19-9fb1-39efb067ecb2"
+    },
+    "POST /lots (for delete)": {
+      "estimate": true,
+      "id": "f5ec273c-4987-4c19-9fb1-39efb067ecb2",
+      "not_tax_advice": true
+    }
+  },
+  "tax_lots_list": {
+    "GET /lots": {
+      "estimate": true,
+      "items": [
+        {
+          "acquired_at": "2023-06-01",
+          "closed_at": null,
+          "confidence": "estimate",
+          "cost_basis_eur": 500.0,
+          "fees_eur": 0.0,
+          "fund_class": "other",
+          "id": "tax-lot-cash-fund",
+          "isin": "DE000TEST02",
+          "name": "Geldmarkt Fonds",
+          "quantity_initial": 5.0,
+          "quantity_remaining": 5.0,
+          "source": "manual",
+          "source_ref": null,
+          "symbol": null,
+          "teilfreistellung_pct": 0.0
+        },
+        {
+          "acquired_at": "2024-01-15",
+          "closed_at": null,
+          "confidence": "estimate",
+          "cost_basis_eur": 1000.0,
+          "fees_eur": 1.5,
+          "fund_class": "aktien",
+          "id": "tax-lot-vwce",
+          "isin": "IE00B4BNMY34",
+          "name": "Vanguard FTSE All-World",
+          "quantity_initial": 10.0,
+          "quantity_remaining": 10.0,
+          "source": "manual",
+          "source_ref": null,
+          "symbol": "VWCE.DE",
+          "teilfreistellung_pct": 30.0
+        }
+      ],
+      "not_tax_advice": true
+    }
+  },
+  "tax_lots_seed_disabled": {
+    "POST /lots/seed-from-activity (disabled)": {
+      "disabled": true,
+      "estimate": true,
+      "lines": [],
+      "not_tax_advice": true,
+      "provenance": {},
+      "reason": "Tax estimation is disabled. Enable 'tax_estimation_enabled' in Control Center.",
+      "tax": {}
+    }
+  },
+  "tax_lots_seed_enabled": {
+    "POST /lots/seed-from-activity (enabled)": {
+      "created": 0,
+      "estimate": true,
+      "not_tax_advice": true
+    }
+  },
+  "tax_overview_auto_disabled": {
+    "GET /overview (auto, disabled)": {
+      "disabled": true,
+      "estimate": true,
+      "lines": [],
+      "not_tax_advice": true,
+      "provenance": {},
+      "reason": "Tax estimation is disabled. Enable 'tax_estimation_enabled' in Control Center.",
+      "tax": {}
+    }
+  },
+  "tax_overview_de_filled": {
+    "GET /overview (DE filled)": {
+      "allowance": {
+        "amount_eur": 1000.0,
+        "remaining_after_eur": 1000.0,
+        "used_before_eur": 0.0,
+        "used_now_eur": 0.0
+      },
+      "anlage_kap_mapping": {
+        "form": "Anlage KAP",
+        "line_19_vorabpauschale": -580.0,
+        "line_37_kest_paid": 10.0,
+        "line_41_anrechenbare_auslaendische_steuer": 15.0,
+        "line_7_kapitalertraege": -430.0,
+        "line_8_gewinne_aktien": 0.0,
+        "year_hint": "2025-form layout (Anlage KAP-INV) \u2014 verify against the current year's form."
+      },
+      "carryforward": {
+        "aktien_loss_eur": 5800.0,
+        "sonstige_loss_eur": 50.0
+      },
+      "estimate": true,
+      "label": "Estimate only -- broker statements (Steuerbescheinigung / Ertr\u00e4gnisaufstellung) remain the source of truth. Not tax advice.",
+      "lines": {
+        "dividends_gross_eur": 100.0,
+        "dividends_taxable_eur": -2900.0,
+        "foreign_wht_creditable_eur": 15.0,
+        "foreign_wht_excess_eur": 0.0,
+        "general_loss_offset_eur": 0.0,
+        "interest_gross_eur": 50.0,
+        "net_aktien_eur": 0.0,
+        "net_sonstige_gain_eur": 0.0,
+        "realised_gain_aktien_eur": 0.0,
+        "realised_gain_sonstige_eur": 0.0,
+        "realised_loss_aktien_eur": 5800.0,
+        "realised_loss_sonstige_eur": 50.0,
+        "taxable_income_after_allowance_eur": 0.0,
+        "taxable_income_before_allowance_eur": 0.0,
+        "vorabpauschale_taxable_eur": -580.0
+      },
+      "not_tax_advice": true,
+      "position": {
+        "applicable": true,
+        "estimate": true,
+        "final_tax_eur": 0.0,
+        "flat_rate_tax_eur": 0.0,
+        "headline": "No tax on this year's capital income, and none withheld.",
+        "not_tax_advice": true,
+        "notes": [
+          "Final tax: the lower of the flat 25 % (plus Soli and church tax) and the personal tariff on capital income above the Sparer-Pauschbetrag and the 36 \u20ac Sonderausgaben-Pauschbetrag.",
+          "Under the tariff, church tax and Soli are left out; below the Soli exemption limit there is none."
+        ],
+        "nv_valid_for_year": false,
+        "other_income_eur": 0.0,
+        "owed_with_return_eur": 0.0,
+        "projected_capital_income_eur": 0.0,
+        "refund_with_return_eur": 0.0,
+        "tariff_assumed": false,
+        "tariff_tax_eur": 0.0,
+        "tax_year": 2025,
+        "use_guenstigerpruefung": false,
+        "withheld_by_banks_eur": 0.0
+      },
+      "provenance": {
+        "events_by_source": {
+          "manual": 6
+        },
+        "events_total": 6
+      },
+      "tax": {
+        "church_tax_eur": 0.0,
+        "church_tax_rate": 0.0,
+        "kest_after_foreign_wht_eur": 0.0,
+        "kest_already_paid_eur": 10.0,
+        "kest_due_eur": 0.0,
+        "kest_rate": 0.25,
+        "settlement_eur": -10.0,
+        "soli_eur": 0.0,
+        "total_tax_due_eur": 0.0
+      },
+      "tax_year": 2025,
+      "vorabpauschale_estimate": {
+        "estimated_from_holdings": false,
+        "fund_year": 2024,
+        "items": [],
+        "taxable_eur": 0.0
+      }
+    }
+  },
+  "tax_overview_nl": {
+    "GET /overview (NL)": {
+      "calculation": {
+        "bank_fictitious_return_eur": 0.0,
+        "bank_rate_pct": 0.0,
+        "box3_tax_eur": 0.0,
+        "debt_deduction_eur": 0.0,
+        "debt_rate_pct": 0.0,
+        "effective_tax_rate_pct": 0.0,
+        "fictitious_return_eur": 0.0,
+        "fictitious_return_rate_pct": 0.0,
+        "investment_fictitious_return_eur": 0.0,
+        "investment_rate_pct": 0.0
+      },
+      "estimate": true,
+      "jurisdiction": "NL",
+      "label": "NL Box 3 (wealth tax) estimate -- always verify with your accountant.",
+      "not_tax_advice": true,
+      "tax_year": 2026,
+      "wealth": {
+        "bank_deposits_eur": 0.0,
+        "days_resident_nl": 365,
+        "debts_eur": 0.0,
+        "investments_eur": 0.0,
+        "is_prorated": true,
+        "tax_free_allowance_eur": 57000.0,
+        "taxable_eur": 0.0,
+        "total_eur": 0.0
+      }
+    }
+  },
+  "tax_residency_list_empty": {
+    "GET /residency (empty)": {
+      "periods": []
+    }
+  },
+  "tax_residency_list_filled": {
+    "GET /residency (filled)": {
+      "periods": [
+        {
+          "country": "NL",
+          "id": "tax-res-nl",
+          "valid_from": "2026-01-01",
+          "valid_to": null
+        }
+      ]
+    }
+  },
+  "tax_residency_post": {
+    "POST /residency": {
+      "country": "DE",
+      "estimate": true,
+      "id": "6f7bd41c-ed26-4a2f-a425-29fa099cdb2d",
+      "not_tax_advice": true,
+      "valid_from": "2025-01-01"
+    }
+  },
+  "tax_sale_fifo_disabled": {
+    "POST /sales/fifo (disabled)": {
+      "disabled": true,
+      "estimate": true,
+      "lines": [],
+      "not_tax_advice": true,
+      "provenance": {},
+      "reason": "Tax estimation is disabled. Enable 'tax_estimation_enabled' in Control Center.",
+      "tax": {}
+    }
+  },
+  "tax_sale_fifo_enabled": {
+    "POST /sales/fifo (enabled)": {
+      "estimate": true,
+      "gross_eur": 239.0,
+      "id": "137473c6-8f5a-4866-b0a9-bb8f54fef177",
+      "not_tax_advice": true,
+      "realised_gain_eur": 39.0
+    }
+  },
+  "tax_settings_default": {
+    "GET /settings (defaults)": {
+      "settings": {
+        "church_tax": "none",
+        "freistellungsauftrag_amount": 1000,
+        "freistellungsauftrag_dkb_eur": null,
+        "freistellungsauftrag_other_banks_eur": null,
+        "freistellungsauftrag_scalable_eur": null,
+        "freistellungsauftrag_used": 0,
+        "tax_bafoeg": false,
+        "tax_estimation_enabled": true,
+        "tax_health_insurance": "unknown",
+        "tax_interest_rate_dkb": null,
+        "tax_nv_certificate": false,
+        "tax_nv_filed_dkb": null,
+        "tax_nv_filed_scalable": null,
+        "tax_nv_valid_until": null,
+        "tax_other_income_eur": 0,
+        "tax_residency_country": "DE",
+        "tax_spouse_allowance": false
+      }
+    }
+  },
+  "tax_settings_put": {
+    "PUT /settings": {
+      "settings": {
+        "church_tax": "0.09",
+        "freistellungsauftrag_amount": 2000.0,
+        "freistellungsauftrag_dkb_eur": null,
+        "freistellungsauftrag_other_banks_eur": null,
+        "freistellungsauftrag_scalable_eur": null,
+        "freistellungsauftrag_used": 250.0,
+        "tax_bafoeg": false,
+        "tax_estimation_enabled": true,
+        "tax_health_insurance": "unknown",
+        "tax_interest_rate_dkb": null,
+        "tax_nv_certificate": false,
+        "tax_nv_filed_dkb": null,
+        "tax_nv_filed_scalable": null,
+        "tax_nv_valid_until": null,
+        "tax_other_income_eur": 0,
+        "tax_residency_country": "DE",
+        "tax_spouse_allowance": true
+      }
+    }
+  },
+  "tax_settings_seeded": {
+    "GET /settings (seeded)": {
+      "settings": {
+        "church_tax": "none",
+        "freistellungsauftrag_amount": 1000.0,
+        "freistellungsauftrag_dkb_eur": null,
+        "freistellungsauftrag_other_banks_eur": null,
+        "freistellungsauftrag_scalable_eur": null,
+        "freistellungsauftrag_used": 0,
+        "tax_bafoeg": false,
+        "tax_estimation_enabled": true,
+        "tax_health_insurance": "unknown",
+        "tax_interest_rate_dkb": null,
+        "tax_nv_certificate": false,
+        "tax_nv_filed_dkb": null,
+        "tax_nv_filed_scalable": null,
+        "tax_nv_valid_until": null,
+        "tax_other_income_eur": 0,
+        "tax_residency_country": "DE",
+        "tax_spouse_allowance": false
+      }
+    }
+  },
+  "tax_vorab_disabled": {
+    "POST /vorabpauschale/estimate (disabled)": {
+      "disabled": true,
+      "estimate": true,
+      "lines": [],
+      "not_tax_advice": true,
+      "provenance": {},
+      "reason": "Tax estimation is disabled. Enable 'tax_estimation_enabled' in Control Center.",
+      "tax": {}
+    }
+  },
+  "tax_vorab_enabled": {
+    "POST /vorabpauschale/estimate (enabled)": {
+      "basisertrag_eur": 17.71,
+      "basiszins": 0.0253,
+      "basiszins_known": true,
+      "classification": {
+        "source": "user",
+        "value": "aktien"
+      },
+      "confidence": "estimate",
+      "distributions_eur": 0.0,
+      "estimate": true,
+      "fund_class": "aktien",
+      "fund_gain_eur": 50.0,
+      "isin": "IE00B4BNMY34",
+      "months_held": 12,
+      "not_tax_advice": true,
+      "tax_year": 2025,
+      "taxable_after_teilfreistellung_eur": 12.4,
+      "teilfreistellung_pct": 0.3,
+      "vorabpauschale_eur": 17.71
+    }
+  }
+}

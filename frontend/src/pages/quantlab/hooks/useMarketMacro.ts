@@ -1,0 +1,1 @@
+import { useQuery } from "@tanstack/react-query"; import { api } from "../../../lib/api"; export const useMarketMacro=()=>useQuery({queryKey:["quant","market","macro"],queryFn:()=>api<any>("/api/quant/market/macro")});

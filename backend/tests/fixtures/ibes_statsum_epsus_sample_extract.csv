@@ -1,0 +1,4 @@
+ticker,cusip,oftic,statpers,fpedats,fpi,measure,numest,medest,meanest,stdev,highest,lowest,actual,anndats_act,curr,usfirm
+0001AA,12345678,AAA,2023-01-31,2023-12-31,1,EPS,5,1.23,1.25,0.05,1.30,1.20,,,USD,1
+0001AA,12345678,AAA,2023-02-28,2023-12-31,1,EPS,6,1.24,1.26,0.04,1.30,1.20,,,USD,1
+0002BB,87654321,BBB,2023-01-31,2023-12-31,1,EPS,3,2.50,2.55,0.10,2.70,2.40,2.60,2024-02-15,USD,1

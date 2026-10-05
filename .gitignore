@@ -1,0 +1,48 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+.pytest_cache/
+node_modules/
+dist/
+.vite/
+dev-dist/
+coverage/
+frontend/.env.local
+.quantfolio/
+.claude/scheduled_tasks.lock
+.omo/
+thoughts/
+.review/
+cookies.txt
+.cache/
+*.cache/
+.claude/worktrees/
+
+# Python coverage data
+.coverage
+.coverage.*
+
+# finrl's own debug plots/CSVs (StockPortfolioEnv/StockTradingEnv.step()),
+# written to a hardcoded "results/" path relative to cwd on the terminal
+# step of RL training/rollout — not read by this app.
+backend/results/
+
+# scratch WRDS bulk-download extracts (multi-GB CSVs) used to verify data
+# loaders against real data -- not fixtures, never meant to be committed.
+backend/tmp_wrds_extracts/
+
+# TypeScript incremental build state
+*.tsbuildinfo
+
+# Stray local artefacts (never tracked)
+/Code/
+.superpowers/
+.claude/settings.local.json
+backend/chart-error-page.html

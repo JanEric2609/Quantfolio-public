@@ -1,0 +1,58 @@
+[Unit]
+Description=QuantFolio FastAPI
+After=network.target postgresql.service redis-server.service
+
+[Service]
+# Scalable sync runs `sudo -u scalable-cli-user` (docs/scalable.md): do not add
+# NoNewPrivileges, RestrictSUIDSGID, ProtectSystem=strict or ProtectHome here, nor
+# any setting that turns NoNewPrivileges on by itself (ProtectKernelTunables and
+# the others listed under Sandboxing below).
+Environment=LANG=C.UTF-8
+Environment=LC_ALL=C.UTF-8
+Environment=PYTHONUTF8=1
+# Defaults; the same names in /opt/quantfolio/.env override them (settings from
+# EnvironmentFile= win over Environment=).
+#
+# API_HOST       Address uvicorn listens on. 0.0.0.0 keeps the old behaviour; set it to
+#                this LXC's LAN address (10.0.0.21) so a second interface (e.g. Tailscale)
+#                cannot reach the API around Caddy. The web LXC's Caddy must still reach it,
+#                so do not set 127.0.0.1 on a split web/app deployment.
+# FORWARDED_ALLOW_IPS  The proxy addresses uvicorn believes X-Forwarded-For from: the web LXC.
+#                Without it every client looks like Caddy, the login lockout and the rate
+#                limiter see one shared address, and one attacker locks the owner out. Never "*".
+#                Single-node installs (Caddy on this host): 127.0.0.1.
+Environment=API_HOST=0.0.0.0
+Environment=API_PORT=8000
+Environment=FORWARDED_ALLOW_IPS=10.0.0.23
+WorkingDirectory=/opt/quantfolio/backend
+EnvironmentFile=/opt/quantfolio/.env
+ExecStart=/opt/quantfolio/backend/.venv/bin/uvicorn app.main:app --host ${API_HOST} --port ${API_PORT} --proxy-headers --forwarded-allow-ips ${FORWARDED_ALLOW_IPS}
+Restart=always
+RestartSec=5
+User=quantfolio
+
+# Sandboxing.
+# Deliberately NOT set here (nor on quantfolio-worker.service):
+#   NoNewPrivileges, ProtectHome, ProtectSystem=strict, RestrictSUIDSGID
+#       The API and the worker run `sudo -n -u scalable-cli-user
+#       /usr/local/libexec/quantfolio-sc-ro` (read-only broker adapter). That needs
+#       setuid sudo to keep working inside this unit, and scalable-cli-user's home
+#       must stay writable for its session state.
+#   ProtectKernelTunables, ProtectKernelModules, ProtectKernelLogs, ProtectClock,
+#   ProtectHostname, PrivateDevices, LockPersonality, MemoryDenyWriteExecute,
+#   RestrictRealtime, RestrictNamespaces, RestrictAddressFamilies, SystemCallFilter,
+#   SystemCallArchitectures, SystemCallLog
+#       Each installs a seccomp filter, and for a unit with a non-root User= systemd
+#       then turns NoNewPrivileges on by itself (context_has_no_new_privileges in
+#       systemd's exec code, 252 and later), which stops sudo just the same.
+#   PrivateTmp
+#       The worker writes the PIT Parquet panel, the Quant Lab signal batch and the
+#       Fama-French cache under /tmp/quantfolio_* and the API reads them; a private
+#       /tmp per unit would split them. Revisit once those directories move to
+#       /var/lib/quantfolio (settings parquet_panel_dir, quant_lab_signal_batch_dir,
+#       quant_factors_ff_cache_dir).
+ProtectSystem=full
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

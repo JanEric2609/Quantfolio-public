@@ -1,0 +1,214 @@
+# QuantFolio Caddy Reverse Proxy Configuration
+# TLS termination, reverse proxy, metrics passthrough
+# On the web LXC, the API runs on the app LXC. Set APP_UPSTREAM=10.0.0.21:8000
+# in Caddy's environment, or rely on the default. The web LXC has no local API.
+
+# ====================================================================
+# CONFIGURATION OPTIONS
+# ====================================================================
+
+# Domain configuration:
+# - Replace {$DOMAIN} with your domain (e.g., quantfolio.example.com)
+# - Or use environment variable: export DOMAIN=quantfolio.example.com
+# - Default to localhost for LAN-only (self-signed)
+
+(domain) {
+  # This snippet is used to set the domain correctly depending on deployment
+  # For LAN: remove this block and use :443 directly with self-signed
+  # For public: set DOMAIN env var to your domain
+}
+
+# ====================================================================
+# PRODUCTION: Public domain with Let's Encrypt ACME
+# ====================================================================
+# Uncomment and adjust if you have a public domain
+
+# https://{$DOMAIN:quantfolio.local} {
+#   encode zstd gzip
+#
+#   # Logs
+#   log {
+#     output file /var/log/caddy/quantfolio.log
+#     format json
+#   }
+#
+#   # Health checks and metrics (pass through, no auth)
+#   handle /healthz {
+#     reverse_proxy {$APP_UPSTREAM:10.0.0.21:8000}
+#   }
+#
+#   handle /health {
+#     reverse_proxy {$APP_UPSTREAM:10.0.0.21:8000}
+#   }
+#
+#   # Metrics endpoint (optionally gated)
+#   handle /metrics {
+#     reverse_proxy {$APP_UPSTREAM:10.0.0.21:8000}
+#   }
+#
+#   # API endpoints (auth may be required via FastAPI)
+#   handle /api/* {
+#     reverse_proxy {$APP_UPSTREAM:10.0.0.21:8000}
+#   }
+#
+#   # Frontend static + SPA
+#   handle {
+#     root * /opt/quantfolio/frontend/dist
+#     @noCache path /index.html /sw.js /manifest.webmanifest
+#     header @noCache Cache-Control "no-cache"
+#     @immutable path /assets/*
+#     header @immutable Cache-Control "public, max-age=31536000, immutable"
+#     try_files {path} /index.html
+#     file_server
+#   }
+#
+#   # TLS via Let's Encrypt (automatic)
+#   tls {
+#     dns cloudflare {$CLOUDFLARE_API_TOKEN}  # or use acme_dns for other providers
+#   }
+# }
+
+# ====================================================================
+# DEVELOPMENT/LAN: Self-signed TLS
+# ====================================================================
+# For local Proxmox deployment (web LXC at 10.0.0.23 or quantfolio.local)
+
+# Generate self-signed cert first:
+# caddy gen-certificate --ca=local quantfolio.local
+# Then uncomment this block:
+
+# https://quantfolio.local:443 {
+#   encode zstd gzip
+#
+#   # Logs
+#   log {
+#     output stdout
+#     format json
+#   }
+#
+#   # Health checks and metrics
+#   handle /healthz {
+#     reverse_proxy {$APP_UPSTREAM:10.0.0.21:8000}
+#   }
+#
+#   handle /health {
+#     reverse_proxy {$APP_UPSTREAM:10.0.0.21:8000}
+#   }
+#
+#   handle /metrics {
+#     reverse_proxy {$APP_UPSTREAM:10.0.0.21:8000}
+#   }
+#
+#   # API endpoints
+#   handle /api/* {
+#     reverse_proxy {$APP_UPSTREAM:10.0.0.21:8000}
+#   }
+#
+#   # Frontend static + SPA
+#   handle {
+#     root * /opt/quantfolio/frontend/dist
+#     @noCache path /index.html /sw.js /manifest.webmanifest
+#     header @noCache Cache-Control "no-cache"
+#     @immutable path /assets/*
+#     header @immutable Cache-Control "public, max-age=31536000, immutable"
+#     try_files {path} /index.html
+#     file_server
+#   }
+#
+#   # Self-signed TLS (generated above)
+#   tls /etc/caddy/certificates/quantfolio.local.crt /etc/caddy/certificates/quantfolio.local.key
+# }
+
+# ====================================================================
+# CURRENT: LAN HTTP (for Tier 0 without TLS)
+# ====================================================================
+# Used by the current Proxmox web LXC. For single-node local testing, set
+# APP_UPSTREAM=127.0.0.1:8000 before starting Caddy.
+
+:80 {
+  encode zstd gzip
+
+  log {
+    output stdout
+    format console
+  }
+
+  # Health checks (no auth, pass through)
+  handle /healthz {
+    reverse_proxy {$APP_UPSTREAM:10.0.0.21:8000}
+  }
+
+  handle /health {
+    reverse_proxy {$APP_UPSTREAM:10.0.0.21:8000}
+  }
+
+  # Metrics endpoint (pass through for monitoring)
+  handle /metrics {
+    reverse_proxy {$APP_UPSTREAM:10.0.0.21:8000}
+  }
+
+  # API endpoints
+  handle /api/* {
+    reverse_proxy {$APP_UPSTREAM:10.0.0.21:8000}
+  }
+
+  # Frontend static + SPA
+  handle {
+    root * /opt/quantfolio/frontend/dist
+
+    # The API sets its own security headers (main.py SecurityHeadersMiddleware);
+    # the SPA shell needs them too. No script-src CSP yet: it needs an audit of
+    # the chart libraries' inline styles/eval first. Add HSTS only on TLS sites.
+    header {
+      X-Content-Type-Options "nosniff"
+      X-Frame-Options "DENY"
+      Referrer-Policy "strict-origin-when-cross-origin"
+      Permissions-Policy "camera=(), microphone=(), geolocation=()"
+      Content-Security-Policy "frame-ancestors 'none'; object-src 'none'; base-uri 'self'"
+    }
+
+    # index.html (and the PWA service worker) must always be revalidated —
+    # each build hashes JS/CSS chunk filenames and wipes the old ones, so a
+    # cached index.html or sw.js from a previous deploy can reference a
+    # chunk that no longer exists, breaking every lazy-loaded route.
+    @noCache path /index.html /sw.js /manifest.webmanifest
+    header @noCache Cache-Control "no-cache"
+
+    # Hashed chunk files are immutable per build; cache them aggressively.
+    @immutable path /assets/*
+    header @immutable Cache-Control "public, max-age=31536000, immutable"
+
+    try_files {path} /index.html
+    file_server
+  }
+}
+
+# ====================================================================
+# NOTES FOR PRODUCTION SETUP
+# ====================================================================
+#
+# 1. Self-signed cert (LAN only):
+#    caddy gen-certificate --ca=local quantfolio.local
+#    # Creates /etc/caddy/certificates/
+#    # Add CA to your computer: /etc/caddy/pki/authorities/local/root.crt
+#
+# 2. Let's Encrypt (public domain):
+#    # Ensure DNS points to your Proxmox host
+#    # Caddy will auto-renew 30 days before expiry
+#    # Email for renewal notices (optional): tls admin@example.com
+#
+# 3. Port forwarding (from home router to Proxmox web LXC):
+#    # Forward 80 → 10.0.0.23:80
+#    # Forward 443 → 10.0.0.23:443
+#    # Only needed if accessing from outside LAN
+#
+# 4. Performance tuning:
+#    # Caddy caches reverse proxy connections
+#    # For better throughput, tune in production:
+#    #   - Increase `max_host_conns` if many concurrent requests
+#    #   - Enable `reverse_proxy_header_up` for custom headers
+#
+# 5. Monitoring:
+#    # Caddy metrics: http://localhost:2019/metrics
+#    # Check backend health: http://localhost:2019/health
+#    # Admin API: curl http://localhost:2019/api/config/apps/http

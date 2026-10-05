@@ -1,0 +1,42 @@
+{
+  "module_cycles": [],
+  "package_cycles": [
+    [
+      "app.decision",
+      "app.decision.advisor",
+      "app.decision.discover",
+      "app.decision.graduation",
+      "app.decision.llm_portfolio",
+      "app.decision.recommendation_engine"
+    ],
+    [
+      "app.foundation",
+      "app.foundation.data_backbone",
+      "app.foundation.data_engineering",
+      "app.foundation.dkb",
+      "app.foundation.finagent",
+      "app.foundation.llm",
+      "app.foundation.portfolio",
+      "app.foundation.providers",
+      "app.lab",
+      "app.lab.alphacrafter",
+      "app.lab.attribution",
+      "app.lab.backtest_vbt",
+      "app.lab.evidence_gate",
+      "app.lab.factor_premia",
+      "app.lab.performance_ledger",
+      "app.lab.pooled_model",
+      "app.lab.quant_lab",
+      "app.lab.regime",
+      "app.lab.satellite"
+    ],
+    [
+      "app.foundation.core",
+      "app.foundation.models"
+    ],
+    [
+      "app.interface",
+      "app.interface.api"
+    ]
+  ]
+}

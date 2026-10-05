@@ -1,0 +1,30 @@
+# Local development services. Not the production topology (that is the 4-LXC
+# Proxmox deployment, see docs/deployment.md).
+#
+# Both services listen on the loopback interface only, and both need a password
+# from the environment: copy infra/.env.compose.example to infra/.env (or export
+# the variables) before `docker compose up`.
+#
+#   POSTGRES_PASSWORD  -> DATABASE_URL=postgresql+psycopg://quantfolio:<it>@127.0.0.1:5432/quantfolio
+#   REDIS_PASSWORD     -> REDIS_URL=redis://:<it>@127.0.0.1:6379/0
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB: quantfolio
+      POSTGRES_USER: quantfolio
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD (see the header of infra/docker-compose.yml)}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD (see the header of infra/docker-compose.yml)}"]
+    ports:
+      - "127.0.0.1:6379:6379"
+
+volumes:
+  postgres_data:

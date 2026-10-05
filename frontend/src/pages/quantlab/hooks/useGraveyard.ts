@@ -1,0 +1,1 @@
+import { useQuery } from "@tanstack/react-query"; import { api } from "../../../lib/api"; export const useGraveyard=()=>useQuery({queryKey:["quant","graveyard"],queryFn:()=>api<any[]>("/api/quant/graveyard")});

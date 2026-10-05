@@ -1,0 +1,31 @@
+# HOST-LEVEL unit — install on the Proxmox host itself, NOT inside a container.
+#
+# Container 112 (quantfolio-llm) bind-mounts /dev/nvidia*; on a cold host boot
+# those nodes do not exist until something initializes the driver, so guest
+# autostart races it (this is what broke GPU inference on 2026-06-19).
+# nvidia-smi creates /dev/nvidia0 + /dev/nvidiactl; nvidia-modprobe -u creates
+# /dev/nvidia-uvm with the current (dynamic!) major number.
+#
+# Install (as root on the Proxmox host):
+#   cp infra/systemd/nvidia-dev-nodes.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable --now nvidia-dev-nodes.service
+#
+# NOTE: /dev/nvidia-uvm's major shifts on driver updates. If CUDA breaks in
+# container 112 after a driver upgrade while nvidia-smi still works, compare
+# `grep nvidia-uvm /proc/devices` on the host against the
+# `lxc.cgroup2.devices.allow` entries in /etc/pve/lxc/112.conf.
+
+[Unit]
+Description=Create NVIDIA device nodes before LXC guests start
+Before=pve-guests.service
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/nvidia-smi
+ExecStart=/bin/sh -c '/usr/bin/nvidia-modprobe -u -c=0 || true'
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,282 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, master]
+    paths-ignore:
+      - 'docs/**'
+      - 'infra/**'
+      - '*.md'
+      - '.github/dependabot.yml'
+      - '.github/workflows/pullfrog.yml'
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - 'docs/**'
+      - 'infra/**'
+      - '*.md'
+      - '.github/dependabot.yml'
+      - '.github/workflows/pullfrog.yml'
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  # ── Detect what changed ──────────────────────────────────────────────
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - '.github/workflows/ci.yml'
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/ci.yml'
+
+  # ── Backend lint + tests + coverage ──────────────────────────────────
+  backend:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Prod runs TimescaleDB + pgvector; the live migration test
+        # (tests/test_migrations.py) needs both extensions.
+        image: timescale/timescaledb-ha:pg16
+        env:
+          POSTGRES_DB: quantfolio
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/pip install -e ".[dev]"
+
+      - name: Lint with Ruff
+        working-directory: backend
+        run: .venv/bin/ruff check app/
+
+      - name: Enforce import contracts (import-linter)
+        working-directory: backend
+        run: .venv/bin/lint-imports
+
+      - name: Check for new import cycles (grimp)
+        working-directory: backend
+        run: .venv/bin/python scripts/check_no_new_cycles.py
+
+      - name: Run migrations (SQLite)
+        working-directory: backend
+        run: |
+          DATABASE_URL="sqlite:///ci_test.db" .venv/bin/alembic upgrade head
+          rm -f ci_test.db
+
+      - name: Run backend tests with coverage
+        working-directory: backend
+        env:
+          DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/quantfolio"
+        run: .venv/bin/pytest -n auto --cov=app --cov-report=term-missing --cov-report=html --timeout=120 -q
+
+      - name: Upload backend coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        # Informational only: a full artifact quota must not fail a green run.
+        continue-on-error: true
+        with:
+          name: coverage-backend
+          path: backend/htmlcov/
+
+  # ── Backend type-check (separate job for parallelism) ─────────────────
+  type-check-backend:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/pip install -e ".[dev]"
+
+      - name: Type-check with pyright
+        working-directory: backend
+        run: .venv/bin/pyright app/
+
+  # ── API contract gate: openapi.json snapshot + oasdiff breaking changes ──
+  api-contract:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/pip install -e ".[dev]"
+
+      - name: Preserve committed API contract as diff base
+        run: cp docs/api/openapi.json openapi-base.json
+
+      - name: Regenerate OpenAPI snapshot from HEAD
+        working-directory: backend
+        env:
+          DATABASE_URL: "sqlite:///:memory:"
+        run: .venv/bin/python scripts/export_openapi.py
+
+      - name: Fail on breaking API changes (oasdiff, ERR severity)
+        uses: oasdiff/oasdiff-action/breaking@v0
+        with:
+          base: openapi-base.json
+          revision: docs/api/openapi.json
+          fail-on: ERR
+          review: false
+
+  # ── OPTIONAL: Schemathesis API fuzz — manual dispatch only, non-blocking ──
+  api-fuzz-experimental:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    continue-on-error: true
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/pip install -e ".[dev]"
+
+      - name: Schemathesis conformance fuzz (SCHEMATHESIS=1-gated test)
+        working-directory: backend
+        env:
+          DATABASE_URL: "sqlite:///:memory:"
+          SCHEMATHESIS: "1"
+        run: .venv/bin/pytest tests/test_api_contract_schemathesis.py -q -n 0
+
+  # ── Frontend type-check + tests + coverage + build ───────────────────
+  frontend:
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: TypeScript type-check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Run frontend tests with coverage
+        working-directory: frontend
+        run: npx vitest run --coverage
+
+      - name: Production build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Security audit
+        working-directory: frontend
+        run: |
+          # Scoped to production dependencies — dev-only build tooling (e.g. vite-plugin-pwa's
+          # workbox-build -> ejs -> jake -> filelist -> minimatch -> brace-expansion chain) never
+          # ships to users, so it's excluded via --omit=dev rather than gating the build on it.
+          npm audit --omit=dev --json > audit.json || true
+          # Accepted exception: react-router / react-router-dom GHSA-qwww-vcr4-c8h2 (RSC-mode
+          # CSRF bypass). This app is a client-only Vite SPA using createBrowserRouter — it never
+          # runs RSC mode, so the vulnerable code path is unreachable. No non-breaking upstream
+          # fix exists yet (patched only outside the 7.12.0-8.2.0 range via a downgrade below our
+          # declared ^7.18.0). Re-evaluate when react-router publishes a patched 7.x/8.x release.
+          UNACCEPTED=$(jq -r '.vulnerabilities | to_entries | map(select(.key != "react-router" and .key != "react-router-dom")) | length' audit.json)
+          if [ "$UNACCEPTED" -gt 0 ]; then
+            echo "New high-severity vulnerabilities found beyond the accepted react-router exception:"
+            jq -r '.vulnerabilities | to_entries | map(select(.key != "react-router" and .key != "react-router-dom")) | .[].key' audit.json
+            exit 1
+          fi
+          echo "No unaccepted high-severity vulnerabilities in production dependencies."
+
+      - name: Upload frontend coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        # Informational only: a full artifact quota must not fail a green run.
+        continue-on-error: true
+        with:
+          name: coverage-frontend
+          path: frontend/coverage/

@@ -1,0 +1,1 @@
+import { useQuery } from "@tanstack/react-query"; import { api } from "../../../lib/api"; export const useResearchSummary=()=>useQuery({queryKey:["quant","research","summary"],queryFn:()=>api<any>("/api/quant/research/summary")});
