@@ -77,6 +77,10 @@ The reference deployment is four Proxmox LXCs (database, API and scheduler, LLM,
 
 [docs/README.md](docs/README.md) is the index: Scalable, the tax cockpit, the Quant Lab, research, deployment, runbooks and the architecture decision records.
 
+## Credits
+
+Much of the code was written with [Claude Code](https://claude.com/claude-code), Anthropic's coding agent, working under the owner's direction and review.
+
 ## Licence
 
 [MIT](LICENSE). Security issues: see [SECURITY.md](SECURITY.md).
