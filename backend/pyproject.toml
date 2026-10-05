@@ -82,7 +82,7 @@ dev = [
   "pytest-cov>=5.0",
   "pytest-timeout>=2.1",
   "pytest-xdist>=3.8",
-  "ruff>=0.5,<0.16",  # 0.16.0 has a rule-resolution regression: extend-select=[BLE001,S608] pulls in whole unrelated categories (B, S, ASYNC, YTT), producing 1500+ false positives
+  "ruff>=0.5,<0.17",  # 0.16.0 has a rule-resolution regression: extend-select=[BLE001,S608] pulls in whole unrelated categories (B, S, ASYNC, YTT), producing 1500+ false positives
   "pyright>=1.1.400",
   "import-linter>=2.0",  # Wave 0 architecture gates (lint-imports); grimp is its analysis engine
   "grimp>=2.0",
