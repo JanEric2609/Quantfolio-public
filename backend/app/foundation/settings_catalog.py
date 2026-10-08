@@ -291,6 +291,9 @@ _reg(CatalogEntry("plan_core_isins", "profile", "Extra core ETF ISINs",
 _reg(CatalogEntry("plan_tilt_isins", "profile", "Factor tilt ETF ISINs",
     "Factor ETFs held as the tilt sleeve. The monthly tilt money is shared equally across them.",
     placeholder="IE00BP3QZ825", section="Monthly plan", advanced=True))
+_reg(CatalogEntry("allocator_universe_isins", "profile", "Allocator candidate ETFs",
+    "ETFs the Quant Lab allocator may split new money across (comma-separated ISINs). Empty uses MSCI World + Emerging Markets IMI.",
+    placeholder="IE00B4L5Y983, IE00BK5BQT80, IE00BKM4GZ66", section="Monthly plan", advanced=True))
 
 _reg(CatalogEntry("mc_cma_real_return", "profile", "Expected real return",
     "Long-run return a year after inflation, compounded, that the Monte Carlo projection grows the book at. "

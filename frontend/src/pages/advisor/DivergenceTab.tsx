@@ -71,7 +71,7 @@ export function DivergenceTab() {
                 <th className="py-2 pr-3 text-right">Your weight</th>
                 <th className="py-2 pr-3 text-right">Champion</th>
                 <th className="py-2 pr-3 text-right">Δ</th>
-                <th className="py-2 pr-3 text-right">Confidence (raw → calibrated)</th>
+                <th className="py-2 pr-3 text-right" title="The model's own confidence, not a probability. A calibrated probability appears once 100 issue dates have resolved.">Model's own confidence (not a probability) → calibrated</th>
                 <th className="py-2 pr-3 text-right">MC P5/P50/P95</th>
                 <th className="py-2 pr-4">Thesis</th>
               </tr>
@@ -107,7 +107,7 @@ export function DivergenceTab() {
                         {pct(row.confidence_raw, 0)} →{" "}
                         <span className="font-medium">
                           {row.confidence_calibrated === null
-                            ? "uncalibrated"
+                            ? "not yet calibrated"
                             : pct(row.confidence_calibrated, 0)}
                         </span>
                       </>

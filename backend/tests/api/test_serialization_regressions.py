@@ -88,7 +88,7 @@ def test_accounts_returns_200_with_rows():
             name="Giro",
             institution="DKB",
             account_type="cash",
-            iban="DE00120300000000007356",
+            iban="DE00120300000000001234",
             currency="EUR",
             balance=Decimal("2000.00"),
             last_synced=datetime(2026, 6, 10, 12, 0, tzinfo=UTC),

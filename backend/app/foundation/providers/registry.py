@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -24,6 +25,7 @@ from app.foundation.providers.openbb_provider import OpenBBProvider
 from app.foundation.providers.tiingo_provider import TiingoProvider
 from app.foundation.providers.twelvedata_provider import TwelveDataProvider
 from app.foundation.providers.rate_limiter import acquire_all, create_limiters
+from app.foundation.providers.utils import is_us_listing
 from app.foundation.providers.yfinance_provider import YFinanceProvider
 from app.foundation.settings import get_public_settings, get_secret, resolve_openbb_default_provider
 
@@ -33,6 +35,17 @@ _REGISTRY_CACHE_TTL = 300  # 5 minutes
 _registry_cache: tuple[float, ProviderRegistry] | None = None
 
 _PER_PROVIDER_TIMEOUT_S = float(os.getenv("PER_PROVIDER_TIMEOUT_S") or "30")
+
+
+_ISIN_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
+
+
+def _is_us_symbol(symbol: str) -> bool:
+    """False for an exchange-suffixed ticker (EUNL.DE) or a non-US ISIN."""
+    candidate = symbol.strip().upper()
+    if _ISIN_RE.match(candidate):
+        return candidate.startswith("US")
+    return is_us_listing(candidate)
 
 
 class ProviderRegistry:
@@ -161,10 +174,18 @@ class ProviderRegistry:
     # Distinct from the general provider_chain_json order get_history() uses,
     # which deliberately prefers yfinance for quotes/fundamentals (ADR 0010) —
     # that preference is wrong for the price-history writer specifically.
-    _PRICE_HISTORY_PROVIDER_ORDER = ["tiingo", "twelvedata", "databento", "eod"]
+    _PRICE_HISTORY_PROVIDER_ORDER = ["tiingo", "twelvedata", "databento"]
+    # Providers that only know US listings: asking them for a European symbol
+    # wastes a call (and a rate-limit slot) per symbol.
+    _US_ONLY_HISTORY_PROVIDERS = frozenset({"tiingo", "databento", "alpaca", "finnhub", "alphavantage"})
+    # EODHD's free plan is 20 calls a day, burned within a minute by the
+    # ingestion universe: never part of automatic ingestion, for any symbol.
+    # Use it only by asking for it: get_price_history(..., provider="eod").
+    _EXPLICIT_ONLY_HISTORY_PROVIDERS = frozenset({"eod"})
 
     def get_price_history(
         self, symbol: str, start: str | None = None, end: str | None = None, days: int | None = None,
+        provider: str | None = None,
     ) -> dict[str, Any]:
         """Price history for bar_prices ingestion, routed to quant-grade sources first.
 
@@ -175,8 +196,16 @@ class ProviderRegistry:
         get_history(), where yfinance is deliberately preferred.
         """
         by_name = {p.name: p for p in self.providers}
-        ordered = [by_name[name] for name in self._PRICE_HISTORY_PROVIDER_ORDER if name in by_name]
-        ordered += [p for p in self.providers if p.name not in self._PRICE_HISTORY_PROVIDER_ORDER]
+        if provider is not None:
+            chosen = [by_name[provider]] if provider in by_name else []
+            return self.first_success("get_history", symbol, start=start, end=end, days=days, providers=chosen)
+        skip: set[str] = set(self._EXPLICIT_ONLY_HISTORY_PROVIDERS)
+        if not _is_us_symbol(symbol):
+            skip |= self._US_ONLY_HISTORY_PROVIDERS
+        ordered = [by_name[name] for name in self._PRICE_HISTORY_PROVIDER_ORDER if name in by_name and name not in skip]
+        ordered += [
+            p for p in self.providers if p.name not in self._PRICE_HISTORY_PROVIDER_ORDER and p.name not in skip
+        ]
         return self.first_success("get_history", symbol, start=start, end=end, days=days, providers=ordered)
 
     def get_fundamentals(self, symbol: str) -> dict[str, Any]:

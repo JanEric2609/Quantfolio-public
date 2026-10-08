@@ -125,6 +125,9 @@ def get_real_holdings_summary(db: Session, user_id: str) -> dict[str, Any]:
     if not positions:
         return _empty_holdings_summary()
 
+    from app.foundation.portfolio.cost_basis import resolve_depot_costs
+
+    depot_costs = resolve_depot_costs(db, user_id, positions)
     total_value = Decimal("0")
     position_dicts: list[dict[str, Any]] = []
 
@@ -134,7 +137,12 @@ def get_real_holdings_summary(db: Session, user_id: str) -> dict[str, Any]:
 
         cost_basis: Decimal | None = None
         unrealized_pnl: Decimal | None = None
-        if pos.avg_buy_price is not None:
+        dc = depot_costs.get(pos.id)
+        if pos.avg_buy_price is None and dc is not None and dc.cost_eur is not None:
+            # No broker average (DKB over FinTS): the Einstandswert entered by hand / FIFO lots.
+            cost_basis = dc.cost_eur
+            unrealized_pnl = cv - cost_basis
+        elif pos.avg_buy_price is not None:
             cost_basis = pos.avg_buy_price * pos.quantity
             if pos.current_price is not None:
                 unrealized_pnl = (pos.current_price - pos.avg_buy_price) * pos.quantity
@@ -157,6 +165,11 @@ def get_real_holdings_summary(db: Session, user_id: str) -> dict[str, Any]:
                 "source": pos.source,
                 "broker": pos.broker_label,
                 "account_id": pos.account_id,
+                "position_id": pos.id,
+                "cost_source": (dc.source if dc and pos.avg_buy_price is None else None) or (
+                    "broker" if pos.avg_buy_price is not None else None
+                ),
+                "can_enter_cost": pos.source == "dkb" and cost_basis is None,
             }
         )
 

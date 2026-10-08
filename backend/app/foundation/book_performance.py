@@ -114,7 +114,7 @@ def _load_holdings(db: Session, user_id: str, start: date | None):
     return {d: dict(v) for d, v in by_day.items()}, meta, broker_price
 
 
-def _dividends_by_day(db: Session, user_id: str, start: str) -> dict[str, float]:
+def _dividends_by_day(db: Session, user_id: str, start: str, isins: set[str] | None = None) -> dict[str, float]:
     from app.foundation.models.entities import TaxLedgerEvent
 
     out: dict[str, float] = defaultdict(float)
@@ -124,6 +124,9 @@ def _dividends_by_day(db: Session, user_id: str, start: str) -> dict[str, float]
         .all()
     ):
         day = ev.event_date.isoformat()
+        # A dividend of a fund the snapshots never held is not part of this book's return.
+        if isins is not None and ev.isin and ev.isin.upper() not in isins:
+            continue
         if day >= start:
             out[day] += float(ev.gross_eur or 0)
     return dict(out)
@@ -184,7 +187,12 @@ def compute_book_performance(
             total += q * p
         return total, complete
 
-    dividends = _dividends_by_day(db, user_id, first)
+    dividends: dict[str, float] = defaultdict(float)
+    for ddate, amount in _dividends_by_day(db, user_id, first, {i.upper() for i in meta}).items():
+        # Paid on a day without a price (weekend, holiday): it counts on the next day in the grid.
+        i = bisect_right(days, ddate)
+        i = i - 1 if i > 0 and days[i - 1] == ddate else i
+        dividends[days[min(i, len(days) - 1)]] += amount
     bench_symbol = (benchmark or benchmark_ticker(db)).upper()
     bench_closes = eur_closes(db, bench_symbol, days=span_days, rate_cache=rate_cache)
     bench_at = _price_lookup(bench_closes)[1] if bench_closes else (lambda _day: None)
@@ -212,8 +220,7 @@ def compute_book_performance(
         contributions += flow
         if abs(flow) > 0.005:
             irr_flows.append((date.fromisoformat(day), -flow))
-        if div:
-            irr_flows.append((date.fromisoformat(day), div))
+        # The dividend is already in ``flow`` (cash leaving the book), so it is not a second IRR flow.
         b = bench_at(day)
         series.append({
             "date": day, "unit_value": round(unit, 6), "value": round(v_now, 2), "net_flow": round(flow, 2),

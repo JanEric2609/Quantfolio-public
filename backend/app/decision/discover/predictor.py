@@ -45,6 +45,7 @@ def store_prediction(
     mc_prob_positive: float | None = None,
     price_at_prediction: float | None = None,
     portfolio_id: str | None = None,
+    provenance_json: dict[str, Any] | None = None,
 ) -> DiscoveryPrediction:
     """Create and persist a single forward-prediction ledger row.
 
@@ -60,6 +61,8 @@ def store_prediction(
         run_id:   DiscoverRun.id that this prediction belongs to.
         isin:     Optional ISIN.
         config_id: Optional DiscoveryConfig.id that produced the signal weights.
+        provenance_json: What produced the call (ADR 0018 §10). Written with
+            the row and append-only afterwards (Postgres trigger).
 
     Returns:
         The newly created ``DiscoveryPrediction`` (already added to *db*).
@@ -112,6 +115,7 @@ def store_prediction(
         is_financial_advice=False,
         config_id=config_id,
         portfolio_id=portfolio_id,
+        provenance_json=provenance_json,
     )
     db.add(prediction)
     db.flush()

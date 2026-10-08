@@ -110,7 +110,7 @@ export function FactorPremiaCard() {
       <CardHeader>
         <CardTitle className="text-base">Factor premia: the tilt's evidence</CardTitle>
         <CardDescription>
-          Pre-registered value, momentum and quality-style portfolios on the JKP data (top vs bottom third, within
+          Pre-registered value, momentum, quality-style, low-volatility and size portfolios on the JKP data (top vs bottom third, within
           country and month). A strategy passes with at least 20 years of data, a Newey-West t ≥ 2, a positive return
           after its publication year, and a positive long-only return over the market after a 58 % decay haircut, factor
           ETF costs and German tax. Only a pass on the world markets can unlock the tilt on "This month", because the

@@ -196,7 +196,14 @@ def test_waits_for_a_missing_horizon_close_then_gives_up_after_grace():
     assert resolve_due_predictions(db, now=NOW, loader=_loader(stale)) == []
     assert db.query(DiscoveryPrediction).one().outcome_status == "pending"
 
-    later = RESOLVE_AT + timedelta(days=8)
+    # A data outage of a few weeks is not a delisting: still pending, with the reason recorded.
+    row = db.query(DiscoveryPrediction).one()
+    assert row.score_json["waiting"]["reason"] == "no_close_after_horizon"
+    mid = RESOLVE_AT + timedelta(days=20)
+    assert resolve_due_predictions(db, now=mid, loader=_loader(stale)) == []
+    assert db.query(DiscoveryPrediction).one().outcome_status == "pending"
+
+    later = RESOLVE_AT + timedelta(days=31)
     resolved = resolve_due_predictions(db, now=later, loader=_loader(stale))
     assert len(resolved) == 1
     row = db.query(DiscoveryPrediction).one()
@@ -207,13 +214,25 @@ def test_waits_for_a_missing_horizon_close_then_gives_up_after_grace():
     assert row.score_json["outcome"]["exit_basis"] == "last_close"
 
 
+def test_stale_prices_that_recover_within_grace_resolve_normally():
+    db = _memory_db()
+    user = _user(db)
+    _prediction(db, user, "SAP.DE")
+    stale = {"SAP.DE": {ENTRY: 100.0, date(2026, 8, 28): 104.0}, "EUNL.DE": {ENTRY: 80.0, EXIT: 84.0}}
+    assert resolve_due_predictions(db, now=RESOLVE_AT + timedelta(days=12), loader=_loader(stale)) == []
+    recovered = {"SAP.DE": {ENTRY: 100.0, EXIT: 110.0}, "EUNL.DE": {ENTRY: 80.0, EXIT: 84.0}}
+    resolve_due_predictions(db, now=RESOLVE_AT + timedelta(days=13), loader=_loader(recovered))
+    row = db.query(DiscoveryPrediction).one()
+    assert row.outcome_status == "resolved" and row.realised_return == pytest.approx(0.10)
+
+
 def test_no_data_at_all_is_delisted_after_grace():
     db = _memory_db()
     user = _user(db)
     _prediction(db, user, "NOPE")
 
     assert resolve_due_predictions(db, now=NOW, loader=_loader({})) == []
-    resolve_due_predictions(db, now=RESOLVE_AT + timedelta(days=8), loader=_loader({}))
+    resolve_due_predictions(db, now=RESOLVE_AT + timedelta(days=31), loader=_loader({}))
 
     row = db.query(DiscoveryPrediction).one()
     assert row.outcome_status == "delisted"
@@ -228,7 +247,7 @@ def test_missing_benchmark_waits_then_falls_back_to_the_raw_return():
 
     assert resolve_due_predictions(db, now=NOW, loader=_loader(prices)) == []
 
-    resolve_due_predictions(db, now=RESOLVE_AT + timedelta(days=8), loader=_loader(prices))
+    resolve_due_predictions(db, now=RESOLVE_AT + timedelta(days=31), loader=_loader(prices))
     row = db.query(DiscoveryPrediction).one()
     assert row.outcome_status == "resolved"
     assert row.realised_return == pytest.approx(0.10)

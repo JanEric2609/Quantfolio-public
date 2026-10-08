@@ -92,6 +92,10 @@ class IntegrationTestResponse(BaseModel):
     message: str
     # Set when the result was recorded (a test of the saved configuration).
     tested_at: str | None = None
+    # Machine-readable outcome of a provider probe (not_applicable, rate_limited,
+    # auth, network, http_error, no_data) and the symbol it was probed with.
+    reason: str | None = None
+    probe_symbol: str | None = None
 
 
 class SettingsPayload(BaseModel):

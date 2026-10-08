@@ -15,11 +15,11 @@ function renderAt(path: string) {
 }
 
 describe("QuantLabHeader", () => {
-  it("shows the eight primary views as one tab row and marks the current one", () => {
+  it("shows the five primary views as one tab row and marks the current one", () => {
     renderAt("/quantlab/risk");
 
     const row = screen.getByRole("navigation", { name: "Quant Lab views" });
-    expect(PRIMARY_VIEWS).toHaveLength(8);
+    expect(PRIMARY_VIEWS).toHaveLength(5);
     for (const view of PRIMARY_VIEWS) {
       expect(within(row).getByRole("link", { name: view.label })).toHaveAttribute("href", `/quantlab/${view.id}`);
     }
@@ -33,15 +33,15 @@ describe("QuantLabHeader", () => {
     await userEvent.click(screen.getByRole("button", { name: /more views/i }));
 
     const more = MORE_VIEW_GROUPS.flatMap((group) => group.views);
-    // 16: Verification left Quant Lab for /trust (Can I trust it?).
-    expect(more.length + PRIMARY_VIEWS.length).toBe(16);
+    // 15: Verification left Quant Lab for /trust; Goals moved into Monte Carlo.
+    expect(more.length + PRIMARY_VIEWS.length).toBe(15);
     for (const view of more) {
-      expect(await screen.findByRole("menuitem", { name: view.label })).toHaveAttribute("href", `/quantlab/${view.id}`);
+      expect(await screen.findByRole("menuitem", { name: new RegExp(`^${view.label}`) })).toHaveAttribute("href", `/quantlab/${view.id}`);
     }
   });
 
   it("keeps the menu button neutral while a primary view is open", () => {
-    renderAt("/quantlab/backtest");
+    renderAt("/quantlab/allocator");
     expect(screen.getByRole("button", { name: /more views/i })).not.toHaveAttribute("aria-current");
   });
 

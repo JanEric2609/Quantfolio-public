@@ -1,6 +1,107 @@
 {
   "components": {
     "schemas": {
+      "AciDateOut": {
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "inside": {
+            "title": "Inside",
+            "type": "integer"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "date",
+          "inside",
+          "n"
+        ],
+        "title": "AciDateOut",
+        "type": "object"
+      },
+      "AciOut": {
+        "description": "Online conformal correction of the stated ranges (ADR 0018 \u00a76).",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "alpha_now": {
+            "title": "Alpha Now",
+            "type": "number"
+          },
+          "alpha_target": {
+            "title": "Alpha Target",
+            "type": "number"
+          },
+          "corrected": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RangeCoverageOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gamma": {
+            "title": "Gamma",
+            "type": "number"
+          },
+          "matured_weeks": {
+            "title": "Matured Weeks",
+            "type": "integer"
+          },
+          "per_date": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AciDateOut"
+            },
+            "title": "Per Date",
+            "type": "array"
+          },
+          "raw_same_dates": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RangeCoverageOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "weeks_needed": {
+            "title": "Weeks Needed",
+            "type": "integer"
+          },
+          "widen_now": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Widen Now"
+          }
+        },
+        "required": [
+          "active",
+          "matured_weeks",
+          "weeks_needed",
+          "alpha_target",
+          "alpha_now",
+          "gamma"
+        ],
+        "title": "AciOut",
+        "type": "object"
+      },
       "ActivateConfigRequest": {
         "properties": {},
         "title": "ActivateConfigRequest",
@@ -870,6 +971,18 @@
             "title": "Frozen At Issue",
             "type": "boolean"
           },
+          "horizon_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Longest holding period (trading days) of the benchmarked calls.",
+            "title": "Horizon Days"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/CallOut"
@@ -1004,6 +1117,28 @@
               }
             ],
             "title": "Name"
+          },
+          "pool_rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pool Rank"
+          },
+          "pool_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pool Size"
           },
           "recommendation_id": {
             "anyOf": [
@@ -1566,6 +1701,32 @@
         "title": "CoreLookThrough",
         "type": "object"
       },
+      "CorpOut": {
+        "properties": {
+          "dsc": {
+            "description": "Discrimination: Brier gained over the base rate.",
+            "title": "Dsc",
+            "type": "number"
+          },
+          "mcb": {
+            "description": "Miscalibration (CORP): Brier lost to unreliable probabilities.",
+            "title": "Mcb",
+            "type": "number"
+          },
+          "unc": {
+            "description": "Uncertainty: Brier of the base rate.",
+            "title": "Unc",
+            "type": "number"
+          }
+        },
+        "required": [
+          "mcb",
+          "dsc",
+          "unc"
+        ],
+        "title": "CorpOut",
+        "type": "object"
+      },
       "CreateConfigRequest": {
         "properties": {
           "config_json": {
@@ -1626,6 +1787,88 @@
           "password"
         ],
         "title": "Credentials",
+        "type": "object"
+      },
+      "DailyTestsOut": {
+        "properties": {
+          "bet_cap": {
+            "title": "Bet Cap",
+            "type": "number"
+          },
+          "clip": {
+            "title": "Clip",
+            "type": "number"
+          },
+          "factor_neutral": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactorNeutralOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "families": {
+            "items": {
+              "$ref": "#/components/schemas/FamilyTestOut"
+            },
+            "title": "Families",
+            "type": "array"
+          },
+          "fdr_level": {
+            "title": "Fdr Level",
+            "type": "number"
+          },
+          "horizon_days": {
+            "title": "Horizon Days",
+            "type": "integer"
+          },
+          "min_days_for_state": {
+            "title": "Min Days For State",
+            "type": "integer"
+          },
+          "paired": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PairedComparisonOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prior_var": {
+            "title": "Prior Var",
+            "type": "number"
+          },
+          "sigma_ref": {
+            "title": "Sigma Ref",
+            "type": "number"
+          },
+          "start": {
+            "description": "First day an observation may enter an e-value (ADR 0018).",
+            "title": "Start",
+            "type": "string"
+          },
+          "threshold": {
+            "title": "Threshold",
+            "type": "number"
+          }
+        },
+        "required": [
+          "start",
+          "clip",
+          "sigma_ref",
+          "prior_var",
+          "bet_cap",
+          "fdr_level",
+          "threshold",
+          "min_days_for_state",
+          "horizon_days",
+          "families"
+        ],
+        "title": "DailyTestsOut",
         "type": "object"
       },
       "DataCoverageResponse": {
@@ -1695,6 +1938,45 @@
           "gaps_count"
         ],
         "title": "DataCoverageResponse",
+        "type": "object"
+      },
+      "DecayOut": {
+        "properties": {
+          "after_haircut": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Haircut"
+          },
+          "full_period": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Period"
+          },
+          "last_10_years": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last 10 Years"
+          }
+        },
+        "title": "DecayOut",
         "type": "object"
       },
       "DeletedOut": {
@@ -2001,6 +2283,29 @@
         "title": "DkbSyncResponse",
         "type": "object"
       },
+      "EPathPointOut": {
+        "properties": {
+          "day": {
+            "title": "Day",
+            "type": "string"
+          },
+          "e_harm": {
+            "title": "E Harm",
+            "type": "number"
+          },
+          "e_skill": {
+            "title": "E Skill",
+            "type": "number"
+          }
+        },
+        "required": [
+          "day",
+          "e_skill",
+          "e_harm"
+        ],
+        "title": "EPathPointOut",
+        "type": "object"
+      },
       "EnvelopeBudgetSet": {
         "properties": {
           "budgeted_amount": {
@@ -2295,6 +2600,46 @@
           "envelopes"
         ],
         "title": "EnvelopesOut",
+        "type": "object"
+      },
+      "EvidenceGateFreshness": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "n_trials": {
+            "title": "N Trials",
+            "type": "integer"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "n_trials"
+        ],
+        "title": "EvidenceGateFreshness",
         "type": "object"
       },
       "ExpenseIn": {
@@ -2889,6 +3234,504 @@
         "title": "FactorEvidenceCardResponse",
         "type": "object"
       },
+      "FactorGateOut": {
+        "properties": {
+          "build": {
+            "title": "Build",
+            "type": "number"
+          },
+          "drop": {
+            "title": "Drop",
+            "type": "number"
+          },
+          "min_fit_days": {
+            "title": "Min Fit Days",
+            "type": "integer"
+          },
+          "min_oos_days": {
+            "title": "Min Oos Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "build",
+          "drop",
+          "min_oos_days",
+          "min_fit_days"
+        ],
+        "title": "FactorGateOut",
+        "type": "object"
+      },
+      "FactorNeutralOut": {
+        "properties": {
+          "gate": {
+            "$ref": "#/components/schemas/FactorGateOut"
+          },
+          "row": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FactorNeutralRowOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "study": {
+            "$ref": "#/components/schemas/FactorStudyOut"
+          }
+        },
+        "required": [
+          "study",
+          "gate"
+        ],
+        "title": "FactorNeutralOut",
+        "type": "object"
+      },
+      "FactorNeutralRowOut": {
+        "properties": {
+          "first_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Day"
+          },
+          "last_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Day"
+          },
+          "mean_21d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean 21D"
+          },
+          "mean_ci_21d": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Ci 21D"
+          },
+          "n_days": {
+            "title": "N Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "n_days"
+        ],
+        "title": "FactorNeutralRowOut",
+        "type": "object"
+      },
+      "FactorStudyOut": {
+        "description": "ADR 0018 \u00a78: recorded once per spec version; \"waiting\" until it can be.",
+        "properties": {
+          "betas": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Betas"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "enum": [
+                  "build",
+                  "drop",
+                  "neither"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision"
+          },
+          "n_backfilled_picks": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Backfilled Picks"
+          },
+          "n_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Days"
+          },
+          "n_oos_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Oos Days"
+          },
+          "oos_r2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oos R2"
+          },
+          "spec": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spec"
+          },
+          "spec_version": {
+            "title": "Spec Version",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "waiting",
+              "decided"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "spec_version"
+        ],
+        "title": "FactorStudyOut",
+        "type": "object"
+      },
+      "FamilyTestOut": {
+        "properties": {
+          "e_harm": {
+            "title": "E Harm",
+            "type": "number"
+          },
+          "e_harm_peak": {
+            "default": 1.0,
+            "title": "E Harm Peak",
+            "type": "number"
+          },
+          "e_skill": {
+            "title": "E Skill",
+            "type": "number"
+          },
+          "e_skill_peak": {
+            "default": 1.0,
+            "title": "E Skill Peak",
+            "type": "number"
+          },
+          "family": {
+            "enum": [
+              "F1",
+              "F2",
+              "F3"
+            ],
+            "title": "Family",
+            "type": "string"
+          },
+          "first_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Day"
+          },
+          "last_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Day"
+          },
+          "mean_21d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean 21D"
+          },
+          "mean_ci_21d": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Ci 21D"
+          },
+          "mean_open": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Open"
+          },
+          "n_clipped": {
+            "default": 0,
+            "title": "N Clipped",
+            "type": "integer"
+          },
+          "n_days": {
+            "description": "Trading days with something open since the start; each is one observation.",
+            "title": "N Days",
+            "type": "integer"
+          },
+          "n_empty_days": {
+            "default": 0,
+            "title": "N Empty Days",
+            "type": "integer"
+          },
+          "n_stale_days": {
+            "default": 0,
+            "title": "N Stale Days",
+            "type": "integer"
+          },
+          "n_tests": {
+            "title": "N Tests",
+            "type": "integer"
+          },
+          "path": {
+            "items": {
+              "$ref": "#/components/schemas/EPathPointOut"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "posterior": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PosteriorOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pre_registration": {
+            "$ref": "#/components/schemas/PreRegistrationOut"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "rho1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rho1"
+          },
+          "rho1_flag": {
+            "default": false,
+            "title": "Rho1 Flag",
+            "type": "boolean"
+          },
+          "role": {
+            "enum": [
+              "primary",
+              "secondary"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "sd_daily": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sd Daily"
+          },
+          "series": {
+            "enum": [
+              "ideas",
+              "ranking",
+              "advisor"
+            ],
+            "title": "Series",
+            "type": "string"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "too_early",
+              "skill",
+              "harm",
+              "no_evidence"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "threshold": {
+            "title": "Threshold",
+            "type": "number"
+          },
+          "time_to_know": {
+            "$ref": "#/components/schemas/TimeToKnowOut"
+          }
+        },
+        "required": [
+          "family",
+          "series",
+          "role",
+          "question",
+          "start",
+          "n_days",
+          "e_skill",
+          "e_harm",
+          "threshold",
+          "n_tests",
+          "state",
+          "pre_registration",
+          "time_to_know"
+        ],
+        "title": "FamilyTestOut",
+        "type": "object"
+      },
+      "FanOut": {
+        "properties": {
+          "percentiles": {
+            "items": {
+              "$ref": "#/components/schemas/FanPointOut"
+            },
+            "title": "Percentiles",
+            "type": "array"
+          },
+          "share_beat": {
+            "description": "Share of simulated ten-year periods that beat the ETF after costs and tax.",
+            "title": "Share Beat",
+            "type": "number"
+          },
+          "years": {
+            "title": "Years",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "years",
+          "percentiles",
+          "share_beat"
+        ],
+        "title": "FanOut",
+        "type": "object"
+      },
+      "FanPointOut": {
+        "properties": {
+          "cumulative_excess": {
+            "title": "Cumulative Excess",
+            "type": "number"
+          },
+          "p": {
+            "title": "P",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "p",
+          "cumulative_excess"
+        ],
+        "title": "FanPointOut",
+        "type": "object"
+      },
       "FeedListIn": {
         "properties": {
           "urls": {
@@ -2918,6 +3761,41 @@
           "url"
         ],
         "title": "FeedTestRequest",
+        "type": "object"
+      },
+      "ForecastGridOut": {
+        "properties": {
+          "assumption": {
+            "title": "Assumption",
+            "type": "number"
+          },
+          "q50_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q50 Days"
+          },
+          "q50_years": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q50 Years"
+          }
+        },
+        "required": [
+          "assumption"
+        ],
+        "title": "ForecastGridOut",
         "type": "object"
       },
       "GainHarvestNoticeOut": {
@@ -3154,6 +4032,55 @@
         "title": "GainHarvestStepOut",
         "type": "object"
       },
+      "GateCheckOut": {
+        "properties": {
+          "ci": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "90 % run-block bootstrap interval.",
+            "title": "Ci"
+          },
+          "mean_gap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Gap"
+          },
+          "n_names": {
+            "title": "N Names",
+            "type": "integer"
+          },
+          "n_runs": {
+            "title": "N Runs",
+            "type": "integer"
+          },
+          "reject_stage": {
+            "title": "Reject Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "n_runs",
+          "reject_stage",
+          "n_names"
+        ],
+        "title": "GateCheckOut",
+        "type": "object"
+      },
       "GraveyardIn": {
         "properties": {
           "config": {
@@ -3196,6 +4123,90 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HaircutOut": {
+        "properties": {
+          "after_tax_factor": {
+            "title": "After Tax Factor",
+            "type": "number"
+          },
+          "implementation_cost": {
+            "title": "Implementation Cost",
+            "type": "number"
+          },
+          "publication_decay": {
+            "title": "Publication Decay",
+            "type": "number"
+          }
+        },
+        "required": [
+          "publication_decay",
+          "implementation_cost",
+          "after_tax_factor"
+        ],
+        "title": "HaircutOut",
+        "type": "object"
+      },
+      "HistoryOut": {
+        "properties": {
+          "disclosures": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Disclosures",
+            "type": "array"
+          },
+          "haircut": {
+            "$ref": "#/components/schemas/HaircutOut"
+          },
+          "n_trials": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Trials"
+          },
+          "not_covered": {
+            "title": "Not Covered",
+            "type": "string"
+          },
+          "ranking_model": {
+            "$ref": "#/components/schemas/RankingModelOut"
+          },
+          "satellite": {
+            "$ref": "#/components/schemas/SatelliteOut"
+          },
+          "tilt_cards": {
+            "items": {
+              "$ref": "#/components/schemas/TiltCardOut"
+            },
+            "title": "Tilt Cards",
+            "type": "array"
+          },
+          "tilt_review": {
+            "$ref": "#/components/schemas/TiltReviewOut"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "tilt_cards",
+          "ranking_model",
+          "satellite",
+          "tilt_review",
+          "haircut",
+          "not_covered",
+          "disclosures"
+        ],
+        "title": "HistoryOut",
         "type": "object"
       },
       "HoldingIn": {
@@ -3429,6 +4440,93 @@
         "title": "HoldingsBackfillResponse",
         "type": "object"
       },
+      "IcDecayOut": {
+        "properties": {
+          "horizon_days": {
+            "title": "Horizon Days",
+            "type": "integer"
+          },
+          "mean_ic": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Ic"
+          },
+          "n_runs": {
+            "title": "N Runs",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "horizon_days",
+          "n_runs"
+        ],
+        "title": "IcDecayOut",
+        "type": "object"
+      },
+      "IcSummaryOut": {
+        "properties": {
+          "icir": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icir"
+          },
+          "mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean"
+          },
+          "n_runs": {
+            "title": "N Runs",
+            "type": "integer"
+          },
+          "share_positive": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Positive"
+          },
+          "t_nw": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Newey-West t of the mean IC (lag 5 runs).",
+            "title": "T Nw"
+          }
+        },
+        "required": [
+          "n_runs"
+        ],
+        "title": "IcSummaryOut",
+        "type": "object"
+      },
       "ImportResponse": {
         "properties": {
           "created_ids": {
@@ -3555,6 +4653,128 @@
         "title": "IncomeSourceOut",
         "type": "object"
       },
+      "IngredientAttributionResponse": {
+        "description": "Per-ingredient rank IC on live shadow-ledger data (ADR 0019 \u00a75).\n\nInformation only: it feeds no score and changes no gate. Each run is one\ncross-section (ingredient scores from ``components_json`` vs resolved\nforward excess returns); the IC series runs over runs. Stocks in one\ncohort move together, so ``effective_n_stocks`` (mean-pairwise-correlation\nadjustment) is fewer than the ~200 names.",
+        "properties": {
+          "effective_n_stocks": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective N Stocks"
+          },
+          "horizon_days": {
+            "title": "Horizon Days",
+            "type": "integer"
+          },
+          "ingredients": {
+            "items": {
+              "$ref": "#/components/schemas/IngredientAttributionRow"
+            },
+            "title": "Ingredients",
+            "type": "array"
+          },
+          "n_runs": {
+            "title": "N Runs",
+            "type": "integer"
+          },
+          "n_stocks": {
+            "title": "N Stocks",
+            "type": "integer"
+          },
+          "rho_bar": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rho Bar"
+          }
+        },
+        "required": [
+          "horizon_days",
+          "n_runs",
+          "n_stocks",
+          "rho_bar",
+          "effective_n_stocks",
+          "ingredients"
+        ],
+        "title": "IngredientAttributionResponse",
+        "type": "object"
+      },
+      "IngredientAttributionRow": {
+        "properties": {
+          "mean_ic": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Ic"
+          },
+          "n_runs": {
+            "title": "N Runs",
+            "type": "integer"
+          },
+          "p_holm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Holm"
+          },
+          "p_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Value"
+          },
+          "signal": {
+            "title": "Signal",
+            "type": "string"
+          },
+          "t_stat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "T Stat"
+          }
+        },
+        "required": [
+          "signal",
+          "n_runs",
+          "mean_ic",
+          "t_stat",
+          "p_value",
+          "p_holm"
+        ],
+        "title": "IngredientAttributionRow",
+        "type": "object"
+      },
       "IntegrationTestRequest": {
         "properties": {
           "meta": {
@@ -3617,6 +4837,28 @@
           "ok": {
             "title": "Ok",
             "type": "boolean"
+          },
+          "probe_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Probe Symbol"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
           },
           "service": {
             "title": "Service",
@@ -4793,6 +6035,11 @@
       },
       "MonthlyPlanResponse": {
         "properties": {
+          "acc_dist_note": {
+            "default": "",
+            "title": "Acc Dist Note",
+            "type": "string"
+          },
           "actions": {
             "items": {
               "$ref": "#/components/schemas/PlanAction"
@@ -4867,6 +6114,16 @@
             ],
             "title": "Drift Band Pp"
           },
+          "evidence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanEvidence"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "generated_at": {
             "title": "Generated At",
             "type": "string"
@@ -4933,6 +6190,14 @@
               "$ref": "#/components/schemas/PlanSleeve"
             },
             "title": "Sleeves",
+            "type": "array"
+          },
+          "suggested_funds": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SuggestedFund"
+            },
+            "title": "Suggested Funds",
             "type": "array"
           },
           "tracking_error_budget": {
@@ -5098,6 +6363,151 @@
           }
         },
         "title": "OptimStressRequest",
+        "type": "object"
+      },
+      "PairedComparisonOut": {
+        "description": "Advisor minus Discover picks on common days; descriptive, never a verdict.",
+        "properties": {
+          "enough_days": {
+            "default": false,
+            "title": "Enough Days",
+            "type": "boolean"
+          },
+          "mean_21d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean 21D"
+          },
+          "mean_ci_21d": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Ci 21D"
+          },
+          "n_days": {
+            "title": "N Days",
+            "type": "integer"
+          },
+          "n_days_advisor_only": {
+            "default": 0,
+            "title": "N Days Advisor Only",
+            "type": "integer"
+          },
+          "n_days_ideas_only": {
+            "default": 0,
+            "title": "N Days Ideas Only",
+            "type": "integer"
+          },
+          "n_days_pre_registration": {
+            "default": 0,
+            "title": "N Days Pre Registration",
+            "type": "integer"
+          },
+          "path": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PairedPointOut"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "share_advisor_ahead": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Advisor Ahead"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "start",
+          "n_days"
+        ],
+        "title": "PairedComparisonOut",
+        "type": "object"
+      },
+      "PairedGapOut": {
+        "properties": {
+          "ci": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "90 % run-block bootstrap interval.",
+            "title": "Ci"
+          },
+          "mean_gap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Gap"
+          },
+          "n_runs": {
+            "title": "N Runs",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "n_runs"
+        ],
+        "title": "PairedGapOut",
+        "type": "object"
+      },
+      "PairedPointOut": {
+        "properties": {
+          "cumulative": {
+            "title": "Cumulative",
+            "type": "number"
+          },
+          "day": {
+            "title": "Day",
+            "type": "string"
+          }
+        },
+        "required": [
+          "day",
+          "cumulative"
+        ],
+        "title": "PairedPointOut",
         "type": "object"
       },
       "PasskeyAuthenticateVerifyRequest": {
@@ -5479,6 +6889,22 @@
         "title": "PlanCash",
         "type": "object"
       },
+      "PlanEvidence": {
+        "properties": {
+          "satellite": {
+            "$ref": "#/components/schemas/SatelliteEvidence"
+          },
+          "tilt": {
+            "$ref": "#/components/schemas/TiltEvidence"
+          }
+        },
+        "required": [
+          "tilt",
+          "satellite"
+        ],
+        "title": "PlanEvidence",
+        "type": "object"
+      },
       "PlanPosition": {
         "properties": {
           "isin": {
@@ -5645,6 +7071,29 @@
         "title": "PortfolioReportResponse",
         "type": "object"
       },
+      "PositionCostIn": {
+        "properties": {
+          "einstandswert_eur": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "description": "Total cost of the units held now, as the DKB app shows it.",
+            "title": "Einstandswert Eur"
+          }
+        },
+        "required": [
+          "einstandswert_eur"
+        ],
+        "title": "PositionCostIn",
+        "type": "object"
+      },
       "PositionIdentity": {
         "description": "Name/ticker pair for a position, before or after repair.",
         "properties": {
@@ -5672,6 +7121,114 @@
           }
         },
         "title": "PositionIdentity",
+        "type": "object"
+      },
+      "PosteriorOut": {
+        "properties": {
+          "ci_high_21d": {
+            "title": "Ci High 21D",
+            "type": "number"
+          },
+          "ci_low_21d": {
+            "title": "Ci Low 21D",
+            "type": "number"
+          },
+          "mean_21d": {
+            "title": "Mean 21D",
+            "type": "number"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "p_positive": {
+            "description": "Posterior chance the edge is positive. Never a verdict.",
+            "title": "P Positive",
+            "type": "number"
+          },
+          "sample_mean_21d": {
+            "title": "Sample Mean 21D",
+            "type": "number"
+          },
+          "sample_se_21d": {
+            "title": "Sample Se 21D",
+            "type": "number"
+          },
+          "sensitivity": {
+            "items": {
+              "$ref": "#/components/schemas/PosteriorSensitivityOut"
+            },
+            "title": "Sensitivity",
+            "type": "array"
+          },
+          "shrinkage": {
+            "description": "Weight on the data: tau^2 / (tau^2 + se^2).",
+            "title": "Shrinkage",
+            "type": "number"
+          },
+          "tau_21d": {
+            "description": "Prior standard deviation of the edge, per 21 trading days.",
+            "title": "Tau 21D",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tau_21d",
+          "n",
+          "sample_mean_21d",
+          "sample_se_21d",
+          "shrinkage",
+          "mean_21d",
+          "ci_low_21d",
+          "ci_high_21d",
+          "p_positive"
+        ],
+        "title": "PosteriorOut",
+        "type": "object"
+      },
+      "PosteriorSensitivityOut": {
+        "properties": {
+          "mean_21d": {
+            "title": "Mean 21D",
+            "type": "number"
+          },
+          "p_positive": {
+            "title": "P Positive",
+            "type": "number"
+          },
+          "tau_21d": {
+            "title": "Tau 21D",
+            "type": "number"
+          }
+        },
+        "required": [
+          "tau_21d",
+          "p_positive",
+          "mean_21d"
+        ],
+        "title": "PosteriorSensitivityOut",
+        "type": "object"
+      },
+      "PreRegistrationOut": {
+        "properties": {
+          "mean_21d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean 21D"
+          },
+          "n_days": {
+            "default": 0,
+            "title": "N Days",
+            "type": "integer"
+          }
+        },
+        "title": "PreRegistrationOut",
         "type": "object"
       },
       "PriceEnsureRequest": {
@@ -5838,6 +7395,17 @@
               }
             ],
             "title": "Benchmark"
+          },
+          "benchmark_overlap_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Overlap Pct"
           },
           "diagnostics": {
             "anyOf": [
@@ -6466,6 +8034,36 @@
         "title": "QueueStatusResponse",
         "type": "object"
       },
+      "QuintileOut": {
+        "properties": {
+          "mean_excess": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Excess"
+          },
+          "n_runs": {
+            "title": "N Runs",
+            "type": "integer"
+          },
+          "quintile": {
+            "description": "1 = the highest composite scores.",
+            "title": "Quintile",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "quintile",
+          "n_runs"
+        ],
+        "title": "QuintileOut",
+        "type": "object"
+      },
       "RAGRetrieveRequest": {
         "properties": {
           "item_type_filter": {
@@ -6549,6 +8147,357 @@
           "nominal"
         ],
         "title": "RangeCoverageOut",
+        "type": "object"
+      },
+      "RankingMetricsOut": {
+        "properties": {
+          "exploratory": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RankingSectionOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Back-filled snapshots: exploratory, never in a verdict."
+          },
+          "horizon_days": {
+            "title": "Horizon Days",
+            "type": "integer"
+          },
+          "ic_hac_lag": {
+            "title": "Ic Hac Lag",
+            "type": "integer"
+          },
+          "live": {
+            "$ref": "#/components/schemas/RankingSectionOut"
+          },
+          "min_stocks": {
+            "title": "Min Stocks",
+            "type": "integer"
+          },
+          "verdict_note": {
+            "title": "Verdict Note",
+            "type": "string"
+          }
+        },
+        "required": [
+          "horizon_days",
+          "min_stocks",
+          "ic_hac_lag",
+          "live",
+          "verdict_note"
+        ],
+        "title": "RankingMetricsOut",
+        "type": "object"
+      },
+      "RankingModelOut": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "data_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data To"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/RankingModelRowOut"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "pbo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pbo"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "status"
+        ],
+        "title": "RankingModelOut",
+        "type": "object"
+      },
+      "RankingModelRowOut": {
+        "properties": {
+          "dsr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dsr"
+          },
+          "first_month": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Month"
+          },
+          "ic_mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ic Mean"
+          },
+          "ic_t": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ic T"
+          },
+          "last_month": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Month"
+          },
+          "long_only_annual": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Long Only Annual"
+          },
+          "long_short_annual": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Long Short Annual"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months"
+          },
+          "recent_ic_mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recent Ic Mean"
+          },
+          "recent_long_short_annual": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recent Long Short Annual"
+          },
+          "recent_months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recent Months"
+          }
+        },
+        "title": "RankingModelRowOut",
+        "type": "object"
+      },
+      "RankingSectionOut": {
+        "properties": {
+          "etf_ic": {
+            "$ref": "#/components/schemas/IcSummaryOut"
+          },
+          "first_issue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Issue"
+          },
+          "gate_check": {
+            "items": {
+              "$ref": "#/components/schemas/GateCheckOut"
+            },
+            "title": "Gate Check",
+            "type": "array"
+          },
+          "ic": {
+            "$ref": "#/components/schemas/IcSummaryOut"
+          },
+          "ic_decay": {
+            "items": {
+              "$ref": "#/components/schemas/IcDecayOut"
+            },
+            "title": "Ic Decay",
+            "type": "array"
+          },
+          "last_issue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Issue"
+          },
+          "n_cohort_runs": {
+            "title": "N Cohort Runs",
+            "type": "integer"
+          },
+          "n_outcomes": {
+            "title": "N Outcomes",
+            "type": "integer"
+          },
+          "n_runs": {
+            "title": "N Runs",
+            "type": "integer"
+          },
+          "n_snapshots": {
+            "title": "N Snapshots",
+            "type": "integer"
+          },
+          "outcome_status": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Outcome Status",
+            "type": "object"
+          },
+          "picked_vs_rest": {
+            "$ref": "#/components/schemas/PairedGapOut"
+          },
+          "quintiles": {
+            "items": {
+              "$ref": "#/components/schemas/QuintileOut"
+            },
+            "title": "Quintiles",
+            "type": "array"
+          },
+          "sector_neutral_ic": {
+            "$ref": "#/components/schemas/IcSummaryOut"
+          },
+          "tiers": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TiersOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "n_runs",
+          "n_cohort_runs",
+          "n_snapshots",
+          "n_outcomes",
+          "ic",
+          "ic_decay",
+          "sector_neutral_ic",
+          "quintiles",
+          "picked_vs_rest",
+          "gate_check",
+          "etf_ic"
+        ],
+        "title": "RankingSectionOut",
         "type": "object"
       },
       "RealPortfolioMetricsResponse": {
@@ -7845,6 +9794,17 @@
             "title": "Broker Label",
             "type": "string"
           },
+          "dynamization_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dynamization Rate"
+          },
           "frequency": {
             "title": "Frequency",
             "type": "string"
@@ -7886,6 +9846,22 @@
             ],
             "title": "Next Execution Date"
           },
+          "not_running_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Not Running Reason"
+          },
+          "running": {
+            "default": true,
+            "title": "Running",
+            "type": "boolean"
+          },
           "sleeve": {
             "title": "Sleeve",
             "type": "string"
@@ -7912,6 +9888,17 @@
             "title": "By Sleeve",
             "type": "object"
           },
+          "core_needed_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Core Needed Eur"
+          },
           "items": {
             "default": [],
             "items": {
@@ -7920,10 +9907,44 @@
             "title": "Items",
             "type": "array"
           },
+          "last_fetch_failed": {
+            "default": false,
+            "title": "Last Fetch Failed",
+            "type": "boolean"
+          },
           "monthly_eur": {
             "default": 0.0,
             "title": "Monthly Eur",
             "type": "number"
+          },
+          "other_budget_eur": {
+            "default": 0.0,
+            "title": "Other Budget Eur",
+            "type": "number"
+          },
+          "other_budget_pct": {
+            "default": 0.0,
+            "title": "Other Budget Pct",
+            "type": "number"
+          },
+          "stopped": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RunningSavingsPlan"
+            },
+            "title": "Stopped",
+            "type": "array"
+          },
+          "synced_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synced At"
           }
         },
         "title": "RunningSavingsPlans",
@@ -7950,6 +9971,166 @@
           "value"
         ],
         "title": "SankeyLinkOut",
+        "type": "object"
+      },
+      "SatelliteBestOut": {
+        "properties": {
+          "dsr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dsr"
+          },
+          "mean_annual": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Annual"
+          },
+          "months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "sharpe_annual": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe Annual"
+          }
+        },
+        "title": "SatelliteBestOut",
+        "type": "object"
+      },
+      "SatelliteEvidence": {
+        "properties": {
+          "gate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceGateFreshness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "unlocked": {
+            "title": "Unlocked",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "unlocked"
+        ],
+        "title": "SatelliteEvidence",
+        "type": "object"
+      },
+      "SatelliteOut": {
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "best": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SatelliteBestOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "dsr_bar": {
+            "title": "Dsr Bar",
+            "type": "number"
+          },
+          "n_candidates": {
+            "default": 0,
+            "title": "N Candidates",
+            "type": "integer"
+          },
+          "pbo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pbo"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "unlocked": {
+            "title": "Unlocked",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "available",
+          "unlocked",
+          "dsr_bar"
+        ],
+        "title": "SatelliteOut",
         "type": "object"
       },
       "ScalableLoginOut": {
@@ -9338,6 +11519,109 @@
         "title": "StockReportResponse",
         "type": "object"
       },
+      "StoredPlanAction": {
+        "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "amount_eur": {
+            "title": "Amount Eur",
+            "type": "number"
+          },
+          "broker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broker"
+          },
+          "fulfilled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fulfilled At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "instrument": {
+            "title": "Instrument",
+            "type": "string"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "month": {
+            "title": "Month",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "sleeve": {
+            "title": "Sleeve",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          }
+        },
+        "required": [
+          "id",
+          "month",
+          "sleeve",
+          "kind",
+          "amount_eur",
+          "instrument",
+          "status"
+        ],
+        "title": "StoredPlanAction",
+        "type": "object"
+      },
       "StressScenarioResultOut": {
         "properties": {
           "description": {
@@ -9715,6 +11999,45 @@
           "current_spend"
         ],
         "title": "SubstitutionRequest",
+        "type": "object"
+      },
+      "SuggestedFund": {
+        "properties": {
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "overridden": {
+            "default": false,
+            "title": "Overridden",
+            "type": "boolean"
+          },
+          "sleeve": {
+            "title": "Sleeve",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sleeve",
+          "name",
+          "why"
+        ],
+        "title": "SuggestedFund",
         "type": "object"
       },
       "TargetAllocationItem": {
@@ -11575,6 +13898,510 @@
         "title": "TestEmailResponse",
         "type": "object"
       },
+      "TierOut": {
+        "properties": {
+          "hit_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hit Rate"
+          },
+          "n_runs": {
+            "title": "N Runs",
+            "type": "integer"
+          },
+          "range": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "90 % Beta(1, 1) range on the runs (effective labels).",
+            "title": "Range"
+          },
+          "tier": {
+            "enum": [
+              "top",
+              "middle",
+              "bottom"
+            ],
+            "title": "Tier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "n_runs",
+          "tier"
+        ],
+        "title": "TierOut",
+        "type": "object"
+      },
+      "TierRateOut": {
+        "properties": {
+          "hit_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hit Rate"
+          },
+          "n_runs": {
+            "title": "N Runs",
+            "type": "integer"
+          },
+          "range": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "90 % Beta(1, 1) range on the runs (effective labels).",
+            "title": "Range"
+          }
+        },
+        "required": [
+          "n_runs"
+        ],
+        "title": "TierRateOut",
+        "type": "object"
+      },
+      "TiersOut": {
+        "properties": {
+          "base": {
+            "$ref": "#/components/schemas/TierRateOut"
+          },
+          "n_eff": {
+            "description": "Issue dates behind the rates: the effective number of labels.",
+            "title": "N Eff",
+            "type": "integer"
+          },
+          "tiers": {
+            "items": {
+              "$ref": "#/components/schemas/TierOut"
+            },
+            "title": "Tiers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "n_eff",
+          "base",
+          "tiers"
+        ],
+        "title": "TiersOut",
+        "type": "object"
+      },
+      "TiltCardOut": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/TiltCheckOut"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "citation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citation"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "decay": {
+            "$ref": "#/components/schemas/DecayOut"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "fan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FanOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gates_tilt": {
+            "default": false,
+            "title": "Gates Tilt",
+            "type": "boolean"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "long_short_t": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Long Short T"
+          },
+          "months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months"
+          },
+          "passed": {
+            "default": false,
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy"
+          },
+          "t_bar": {
+            "default": 2.0,
+            "title": "T Bar",
+            "type": "number"
+          },
+          "tracking_error_annual": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Error Annual"
+          },
+          "worst_5y_excess": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst 5Y Excess"
+          }
+        },
+        "required": [
+          "decay"
+        ],
+        "title": "TiltCardOut",
+        "type": "object"
+      },
+      "TiltCheckOut": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "passed"
+        ],
+        "title": "TiltCheckOut",
+        "type": "object"
+      },
+      "TiltEvidence": {
+        "properties": {
+          "passed": {
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "reason": {
+            "default": "",
+            "title": "Reason",
+            "type": "string"
+          },
+          "unlocked": {
+            "title": "Unlocked",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "passed",
+          "unlocked"
+        ],
+        "title": "TiltEvidence",
+        "type": "object"
+      },
+      "TiltReviewOut": {
+        "properties": {
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "not_live",
+              "too_early",
+              "inside",
+              "under_review"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "note"
+        ],
+        "title": "TiltReviewOut",
+        "type": "object"
+      },
+      "TimeToKnowOut": {
+        "properties": {
+          "assumption": {
+            "title": "Assumption",
+            "type": "number"
+          },
+          "assumption_unit": {
+            "enum": [
+              "excess_per_21d",
+              "rank_ic"
+            ],
+            "title": "Assumption Unit",
+            "type": "string"
+          },
+          "basket_sd_21d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basket Sd 21D"
+          },
+          "grid": {
+            "items": {
+              "$ref": "#/components/schemas/ForecastGridOut"
+            },
+            "title": "Grid",
+            "type": "array"
+          },
+          "ic_sd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ic Sd"
+          },
+          "max_days": {
+            "title": "Max Days",
+            "type": "integer"
+          },
+          "p_within": {
+            "items": {
+              "$ref": "#/components/schemas/WithinOut"
+            },
+            "title": "P Within",
+            "type": "array"
+          },
+          "q10_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q10 Days"
+          },
+          "q10_years": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q10 Years"
+          },
+          "q50_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q50 Days"
+          },
+          "q50_years": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q50 Years"
+          },
+          "q90_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q90 Days"
+          },
+          "q90_years": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q90 Years"
+          },
+          "sd_daily": {
+            "title": "Sd Daily",
+            "type": "number"
+          },
+          "sd_measured": {
+            "default": false,
+            "title": "Sd Measured",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "assumption_unit",
+          "assumption",
+          "sd_daily",
+          "max_days"
+        ],
+        "title": "TimeToKnowOut",
+        "type": "object"
+      },
       "TokenResponse": {
         "properties": {
           "session": {
@@ -11959,6 +14786,72 @@
         "title": "TransactionUpdate",
         "type": "object"
       },
+      "TypeRangeCoverageOut": {
+        "properties": {
+          "aci": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AciOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ci_high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci High"
+          },
+          "ci_low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Low"
+          },
+          "k": {
+            "title": "K",
+            "type": "integer"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "nominal": {
+            "title": "Nominal",
+            "type": "number"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          }
+        },
+        "required": [
+          "k",
+          "n",
+          "nominal"
+        ],
+        "title": "TypeRangeCoverageOut",
+        "type": "object"
+      },
       "TypeVerdictOut": {
         "properties": {
           "benchmark_label": {
@@ -12007,6 +14900,18 @@
             ],
             "title": "Bss Ci"
           },
+          "cadence_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Median trading days between rebalance dates (1 below 5 dates).",
+            "title": "Cadence Days"
+          },
           "calibration_caption": {
             "anyOf": [
               {
@@ -12034,9 +14939,30 @@
             "title": "Call Hits",
             "type": "integer"
           },
+          "corp": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CorpOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "e_harm": {
             "title": "E Harm",
             "type": "number"
+          },
+          "e_harm_lower": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "E Harm Lower"
           },
           "e_harm_peak": {
             "default": 1.0,
@@ -12053,10 +14979,46 @@
             "title": "E Skill Crossed Strong",
             "type": "boolean"
           },
+          "e_skill_lower": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Legacy e-value if every call still in flight resolved at its worst; only this may cross.",
+            "title": "E Skill Lower"
+          },
           "e_skill_peak": {
             "default": 1.0,
             "title": "E Skill Peak",
             "type": "number"
+          },
+          "family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Calendar-time family whose test sets the state (F1 ideas, F3 advisor).",
+            "title": "Family"
+          },
+          "h_eff": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Chains the observed issue cadence needs per horizon window (used for dates needed).",
+            "title": "H Eff"
           },
           "hac_lag": {
             "default": 0,
@@ -12092,9 +15054,20 @@
             "title": "Hits",
             "type": "integer"
           },
+          "horizon_days": {
+            "default": 21,
+            "description": "Holding period (trading days); also the lag-h of the e-process.",
+            "title": "Horizon Days",
+            "type": "integer"
+          },
           "label": {
             "title": "Label",
             "type": "string"
+          },
+          "lag_h": {
+            "default": 21,
+            "title": "Lag H",
+            "type": "integer"
           },
           "mean_excess": {
             "anyOf": [
@@ -12136,6 +15109,18 @@
             "title": "N Delisted",
             "type": "integer"
           },
+          "n_eff_stated": {
+            "default": 0,
+            "description": "Issue dates behind the stated probabilities: the effective labels.",
+            "title": "N Eff Stated",
+            "type": "integer"
+          },
+          "n_holds": {
+            "default": 0,
+            "description": "Logged holds, left out of hit statistics by design.",
+            "title": "N Holds",
+            "type": "integer"
+          },
           "n_issue_days": {
             "default": 0,
             "title": "N Issue Days",
@@ -12150,7 +15135,13 @@
                 "type": "null"
               }
             ],
+            "description": "Simulated median issue days until this verdict would say skill at the target hit rate.",
             "title": "N Needed"
+          },
+          "n_needed_is_lower_bound": {
+            "default": false,
+            "title": "N Needed Is Lower Bound",
+            "type": "boolean"
           },
           "n_stated_p": {
             "default": 0,
@@ -12160,6 +15151,12 @@
           "n_tests": {
             "default": 0,
             "title": "N Tests",
+            "type": "integer"
+          },
+          "n_unscored": {
+            "default": 0,
+            "description": "Resolved calls that could not be scored (no benchmark price).",
+            "title": "N Unscored",
             "type": "integer"
           },
           "next_resolution_at": {
@@ -12187,7 +15184,7 @@
           "range_coverage": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/RangeCoverageOut"
+                "$ref": "#/components/schemas/TypeRangeCoverageOut"
               },
               {
                 "type": "null"
@@ -12231,6 +15228,18 @@
             ],
             "title": "Type",
             "type": "string"
+          },
+          "years_needed": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "n_needed dates at this cadence, in years (252 trading days).",
+            "title": "Years Needed"
           }
         },
         "required": [
@@ -12344,6 +15353,75 @@
       },
       "VerdictOut": {
         "properties": {
+          "assumed_edge": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Assumed true mean excess return per 21-day date, for the time-to-know number.",
+            "title": "Assumed Edge"
+          },
+          "assumed_sd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Assumed standard deviation of one date's basket excess return.",
+            "title": "Assumed Sd"
+          },
+          "cadence_days": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cadence Days"
+          },
+          "daily_tests": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DailyTestsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ebh_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "e-value one rejection needs under e-BH: K / alpha.",
+            "title": "Ebh Threshold"
+          },
+          "excess_clip": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Excess returns are clipped to +-this before betting.",
+            "title": "Excess Clip"
+          },
           "fdr_level": {
             "anyOf": [
               {
@@ -12355,18 +15433,119 @@
             ],
             "title": "Fdr Level"
           },
+          "first_resolution_due": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Resolution Due"
+          },
           "frozen_at_issue": {
             "default": true,
             "title": "Frozen At Issue",
             "type": "boolean"
           },
+          "h_eff": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "H Eff"
+          },
           "headline": {
             "title": "Headline",
             "type": "string"
           },
+          "horizon_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Horizon Days"
+          },
+          "legacy_method_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legacy Method Note"
+          },
           "method_note": {
             "title": "Method Note",
             "type": "string"
+          },
+          "min_calls_for_interval": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Calls For Interval"
+          },
+          "min_calls_for_reliability": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Calls For Reliability"
+          },
+          "min_calls_for_state": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rebalance dates before a state other than too early.",
+            "title": "Min Calls For State"
+          },
+          "min_n_eff_for_probability": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Issue dates before any probability is stated.",
+            "title": "Min N Eff For Probability"
+          },
+          "min_units_for_interval": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Units For Interval"
           },
           "n_needed": {
             "anyOf": [
@@ -12379,9 +15558,19 @@
             ],
             "title": "N Needed"
           },
+          "n_needed_is_lower_bound": {
+            "default": false,
+            "title": "N Needed Is Lower Bound",
+            "type": "boolean"
+          },
           "n_tests": {
             "default": 0,
             "title": "N Tests",
+            "type": "integer"
+          },
+          "n_unscored": {
+            "default": 0,
+            "title": "N Unscored",
             "type": "integer"
           },
           "resolved_calls": {
@@ -12430,6 +15619,17 @@
             },
             "title": "Types",
             "type": "array"
+          },
+          "years_needed": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years Needed"
           }
         },
         "required": [
@@ -12954,6 +16154,24 @@
           "horizon_tag"
         ],
         "title": "WatchlistOut",
+        "type": "object"
+      },
+      "WithinOut": {
+        "properties": {
+          "p": {
+            "title": "P",
+            "type": "number"
+          },
+          "years": {
+            "title": "Years",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "years",
+          "p"
+        ],
+        "title": "WithinOut",
         "type": "object"
       },
       "WorkerStatus": {
@@ -18349,6 +21567,95 @@
         ]
       }
     },
+    "/api/dkb/positions/{position_id}/cost": {
+      "delete": {
+        "operationId": "clear_position_cost_api_dkb_positions__position_id__cost_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "position_id",
+            "required": true,
+            "schema": {
+              "title": "Position Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clear Position Cost",
+        "tags": [
+          "dkb"
+        ]
+      },
+      "put": {
+        "description": "Store the DKB-app Einstandswert of a position as an opening FIFO lot (FinTS may not deliver one).",
+        "operationId": "set_position_cost_api_dkb_positions__position_id__cost_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "position_id",
+            "required": true,
+            "schema": {
+              "title": "Position Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PositionCostIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Position Cost",
+        "tags": [
+          "dkb"
+        ]
+      }
+    },
     "/api/dkb/provider/status": {
       "get": {
         "operationId": "provider_status_api_dkb_provider_status_get",
@@ -18834,6 +22141,28 @@
           }
         },
         "summary": "Factor Premia Cards",
+        "tags": [
+          "evidence"
+        ]
+      }
+    },
+    "/api/evidence/ingredient-attribution": {
+      "get": {
+        "description": "Weekly per-ingredient table with Holm-corrected p-values (ADR 0019 \u00a75).",
+        "operationId": "ingredient_attribution_api_evidence_ingredient_attribution_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngredientAttributionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ingredient Attribution",
         "tags": [
           "evidence"
         ]
@@ -21514,6 +24843,86 @@
         ]
       }
     },
+    "/api/plan/actions": {
+      "get": {
+        "description": "Stored plan actions, newest month first, optionally filtered to one month.",
+        "operationId": "list_actions_api_plan_actions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "month",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Month"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StoredPlanAction"
+                  },
+                  "title": "Response List Actions Api Plan Actions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Actions",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
+    "/api/plan/actions/snapshot": {
+      "post": {
+        "description": "Store this month's computed plan actions (idempotent per month).\n\nA placed order the next sync finds is linked back to its action, so the\nDecide page can show which plan action a trade fulfils (ADR 0019 \u00a73).",
+        "operationId": "snapshot_actions_api_plan_actions_snapshot_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StoredPlanAction"
+                  },
+                  "title": "Response Snapshot Actions Api Plan Actions Snapshot Post",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Snapshot Actions",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
     "/api/plan/month": {
       "get": {
         "description": "This month's plan: how to split the contribution, and whether anything else changes.",
@@ -21758,7 +25167,7 @@
     },
     "/api/portfolio/advisor/pending": {
       "get": {
-        "description": "Recommendations waiting for Accept / Reject / Snooze, newest first.\n\nPending means approval state ``approved_candidate`` or ``needs_review``, not\nexpired, created within ``max_age_days``; plus snoozed ones whose snooze is\nolder than ``SNOOZE_DAYS``. ``total`` counts every pending item (for badges),\n``items`` is capped at ``limit``. Only the caller's own rows are returned.",
+        "description": "Recommendations waiting for Accept / Reject / Snooze, newest first.\n\nPending means approval state ``approved_candidate`` or ``needs_review``, not\nexpired, created within ``max_age_days``; plus snoozed ones whose snooze is\nolder than ``SNOOZE_DAYS``. ``total`` counts every pending item (for badges),\n``items`` is capped at ``limit``. ``research_count`` is how many tickers were\nheld back because their evidence is not proven yet (research, not decisions). Only the caller's own rows are returned.",
         "operationId": "list_pending_recommendations_api_portfolio_advisor_pending_get",
         "parameters": [
           {
@@ -22448,7 +25857,7 @@
     },
     "/api/portfolio/target-allocation/drift": {
       "get": {
-        "description": "Return current allocation mapped to target taxonomy, targets, and drift.",
+        "description": "Return current allocation mapped to target taxonomy, targets, and drift.\n\nThe ``sleeves`` section reports the monthly plan's sleeve targets\n(core/tilt/satellite from ``decision.monthly_plan``) \u2014 the single place\nthat defines targets (ADR 0019 \u00a71) \u2014 next to the hand-set asset-taxonomy\nfigures above it, so the two can be checked against each other.",
         "operationId": "get_drift_api_portfolio_target_allocation_drift_get",
         "responses": {
           "200": {
@@ -24271,6 +27680,100 @@
         ]
       }
     },
+    "/api/quant/portfolio/allocator": {
+      "get": {
+        "description": "How to split the next contribution across a candidate ETF universe.\n\nTargets are covariance-only (Ledoit-Wolf, EUR returns); the money goes to\nthe most underweight candidates first and nothing is sold. Candidates not\nheld yet count with a value of 0.",
+        "operationId": "portfolio_allocator_api_quant_portfolio_allocator_get",
+        "parameters": [
+          {
+            "description": "Amount to split; defaults to monthly_contribution_eur.",
+            "in": "query",
+            "name": "contribution_eur",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Amount to split; defaults to monthly_contribution_eur.",
+              "title": "Contribution Eur"
+            }
+          },
+          {
+            "description": "Cap per instrument (fraction).",
+            "in": "query",
+            "name": "max_weight",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 1,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cap per instrument (fraction).",
+              "title": "Max Weight"
+            }
+          },
+          {
+            "description": "Comma-separated candidate ISINs; defaults to allocator_universe_isins.",
+            "in": "query",
+            "name": "isins",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated candidate ISINs; defaults to allocator_universe_isins.",
+              "title": "Isins"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Portfolio Allocator Api Quant Portfolio Allocator Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Portfolio Allocator",
+        "tags": [
+          "quant",
+          "quant-portfolio"
+        ]
+      }
+    },
     "/api/quant/portfolio/factors": {
       "get": {
         "operationId": "portfolio_factors_api_quant_portfolio_factors_get",
@@ -24589,7 +28092,7 @@
     },
     "/api/quant/portfolio/real/rebalance": {
       "get": {
-        "description": "Band rebalancing toward a covariance-only target: new money first, sales only on a breach.",
+        "description": "Band rebalancing toward the plan's sleeves (default) or a covariance-only target: new money first, sales only on a breach.",
         "operationId": "real_portfolio_rebalance_api_quant_portfolio_real_rebalance_get",
         "parameters": [
           {
@@ -24605,13 +28108,13 @@
             }
           },
           {
-            "description": "equal, inverse_vol, min_variance, erc or hrp",
+            "description": "sleeves (your plan, default), or a covariance target: equal, inverse_vol, min_variance, erc, hrp",
             "in": "query",
             "name": "target",
             "required": false,
             "schema": {
-              "default": "erc",
-              "description": "equal, inverse_vol, min_variance, erc or hrp",
+              "default": "sleeves",
+              "description": "sleeves (your plan, default), or a covariance target: equal, inverse_vol, min_variance, erc, hrp",
               "title": "Target",
               "type": "string"
             }
@@ -27373,6 +30876,50 @@
           }
         },
         "summary": "Get Calls",
+        "tags": [
+          "trust"
+        ]
+      }
+    },
+    "/api/trust/history": {
+      "get": {
+        "description": "What decades of past data say (simulated, not live); it tests none of the live calls.",
+        "operationId": "get_history_api_trust_history_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get History",
+        "tags": [
+          "trust"
+        ]
+      }
+    },
+    "/api/trust/ranking": {
+      "get": {
+        "description": "How well Discover's score sorted every scored stock (descriptive; the verdict is F2).",
+        "operationId": "get_ranking_api_trust_ranking_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RankingMetricsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Ranking",
         "tags": [
           "trust"
         ]

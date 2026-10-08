@@ -21,6 +21,7 @@ from app.interface.api.safe_endpoint import safe_endpoint
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import (
     DiscoverCandidate,
+    DiscoverCandidateSnapshot,
     DiscoverRun,
     DiscoveryConfig,
     DiscoveryConfigReview,
@@ -124,6 +125,11 @@ class CandidateResponse(BaseModel):
     # auto-approved. Withheld candidates stay visible here with this badge;
     # they are never silently hidden.
     withheld: bool = False
+    # Rank by composite among the run's evaluable stocks, frozen in the shadow
+    # ledger (ADR 0018 §6: the score is shown as a tier, not a probability).
+    # Null for ETFs, rejected names, and runs before the ledger existed.
+    pool_rank: int | None = None
+    pool_size: int | None = None
 
 
 class RunDetailResponse(BaseModel):
@@ -273,6 +279,14 @@ def get_run(
     else:
         recommendations_by_id = {}
 
+    pool = {
+        symbol: (rank, size)
+        for symbol, rank, size in db.query(
+            DiscoverCandidateSnapshot.symbol, DiscoverCandidateSnapshot.stock_rank,
+            DiscoverCandidateSnapshot.n_evaluable_stocks,
+        ).filter(DiscoverCandidateSnapshot.run_id == run_id, DiscoverCandidateSnapshot.user_id == user.id)
+    }
+
     def _to_candidate(
         c: DiscoverCandidate,
         dossiers_by_id: dict[str, RecommendationDossier],
@@ -292,6 +306,9 @@ def get_run(
             dossier_id=c.dossier_id,
             recommendation_id=c.recommendation_id,
         )
+        rank, size = pool.get(c.symbol, (None, None))
+        if rank is not None:
+            base.pool_rank, base.pool_size = rank, size
         # Populate dossier-derived fields if dossier exists
         if c.dossier_id and c.dossier_id in dossiers_by_id:
             dossier = dossiers_by_id[c.dossier_id]

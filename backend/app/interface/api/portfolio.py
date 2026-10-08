@@ -427,7 +427,13 @@ def get_drift(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Return current allocation mapped to target taxonomy, targets, and drift."""
+    """Return current allocation mapped to target taxonomy, targets, and drift.
+
+    The ``sleeves`` section reports the monthly plan's sleeve targets
+    (core/tilt/satellite from ``decision.monthly_plan``) — the single place
+    that defines targets (ADR 0019 §1) — next to the hand-set asset-taxonomy
+    figures above it, so the two can be checked against each other.
+    """
     portfolio = main_portfolio(db, user.id)
     holdings = db.query(Holding).filter(Holding.portfolio_id == portfolio.id).all()
     raw = allocation_by_asset_type(holdings)
@@ -458,8 +464,18 @@ def get_drift(
         tgt = target_map.get(at, {})
         drift[at] = round(curr - tgt.get("target_pct", 0.0), 2)
 
+    from app.decision.monthly_plan import sleeve_plan
+
+    sleeves = sleeve_plan(db, user.id)
+
     return {
         "current": current,
         "targets": [_serialize_target_allocation(r) for r in rows],
         "drift": drift,
+        "sleeves": {
+            "targets": sleeves["targets"],
+            "unlocked": sleeves["unlocked"],
+            "labels": sleeves["labels"],
+            "band_pp": sleeves["band_pp"],
+        },
     }

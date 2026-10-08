@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/ca
 import { Button } from "../../components/ui/button";
 import { Badge } from "../../components/ui/badge";
 
-import { type DiscoverCandidate, parseConcerns } from "../../lib/api";
+import { type DiscoverCandidate, type TrustRankingSection, parseConcerns } from "../../lib/api";
 import { formatPercentPoints } from "../../lib/format";
 import { ScoreBar } from "../ui/ScoreBar";
 import { ConcernBadges } from "./ConcernBadges";
@@ -13,6 +13,40 @@ import { DossierActions } from "./DossierActions";
 interface ShortlistCardsProps {
   candidates: DiscoverCandidate[];
   onOpenDossier: (candidate: DiscoverCandidate) => void;
+  /** Measured hit rates per score tier from the shadow ledger (ADR 0018 §6), when there are any. */
+  tiers?: TrustRankingSection["tiers"];
+}
+
+type Tier = "top" | "middle" | "bottom";
+
+const TIER_TEXT: Record<Tier, string> = { top: "top third", middle: "middle third", bottom: "bottom third" };
+
+function tierOf(rank: number, size: number): Tier {
+  const third = Math.min(3, Math.max(1, Math.ceil((rank / size) * 3)));
+  return third === 1 ? "top" : third === 2 ? "middle" : "bottom";
+}
+
+function pct(value: number | null | undefined): string {
+  return value == null ? "—" : `${Math.round(value * 100)} %`;
+}
+
+/** "Rank 3 of 187 scored stocks (top third) · that tier beat your ETF 54 % of the time …": a tier, never a probability. */
+function PoolRank({ candidate, tiers }: { candidate: DiscoverCandidate; tiers?: TrustRankingSection["tiers"] }) {
+  const rank = candidate.pool_rank;
+  const size = candidate.pool_size;
+  if (rank == null || !size) return null;
+  const tier = tierOf(rank, size);
+  const measured = tiers && tiers.n_eff > 0 ? tiers.tiers.find((t) => t.tier === tier) : undefined;
+  return (
+    <p className="text-xs text-text-secondary" data-testid="pool-rank">
+      Rank {rank} of {size} scored stocks ({TIER_TEXT[tier]} of this run)
+      {measured && measured.hit_rate != null && tiers
+        ? `. Stocks in that tier beat your ETF over 21 days ${pct(measured.hit_rate)} of the time${
+            measured.range ? ` (90 %: ${pct(measured.range[0])} to ${pct(measured.range[1])})` : ""
+          }, against ${pct(tiers.base.hit_rate)} for every scored stock, over ${tiers.n_eff} dates.`
+        : ". Not a probability: how often a tier beats your ETF shows here once its outcomes are measured."}
+    </p>
+  );
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -63,7 +97,7 @@ function BrokerBadges({ tradeable }: { tradeable: Record<string, unknown> | null
   );
 }
 
-export function ShortlistCards({ candidates, onOpenDossier }: ShortlistCardsProps) {
+export function ShortlistCards({ candidates, onOpenDossier, tiers }: ShortlistCardsProps) {
   // Best first: the API returns a run's candidates by symbol, which put
   // AMD ahead of every stronger name.
   const shortlisted = candidates
@@ -124,6 +158,7 @@ export function ShortlistCards({ candidates, onOpenDossier }: ShortlistCardsProp
               </CardHeader>
               <CardContent className="space-y-4">
                 <ScoreBar label="Signal score" value={conviction} hint="Composite ranking score from 0 to 1, built from trailing signals. Not a probability that the pick beats the market." />
+                <PoolRank candidate={candidate} tiers={tiers} />
 
                 <div className="flex items-center gap-3">
                   <Badge variant="secondary" className="flex items-center gap-1 text-xs">

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -35,6 +35,7 @@ from app.foundation.market import quote as market_quote
 
 from app.foundation import quant_metrics
 from app.foundation.metrics_snapshots import upsert_metrics_snapshot
+from app.foundation.paper_cash import MAX_QUOTE_AGE_TRADING_DAYS
 from app.foundation.settings import get_risk_free_rate
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,9 @@ def paper_quote_eur(
     """Latest price of ``ticker`` in EUR, with the listing price and currency it came from.
 
     ``price`` is ``None`` when there is no quote or no exchange rate: a
-    dollar price must never be booked as euros.
+    dollar price must never be booked as euros. ``stale`` is True when the
+    price is older than :data:`MAX_QUOTE_AGE_TRADING_DAYS`
+    trading days: value at it, never trade at it.
     """
     from app.foundation.eur_prices import eur_price
 
@@ -63,11 +66,39 @@ def paper_quote_eur(
     local = q.get("price")
     if not local or float(local) <= 0:
         return {"price": None, "local": None, "currency": q.get("currency")}
+    # Staleness is the quote's own age; the provider-failure flag alone only
+    # matters when the age is unknown.
+    stale = _quote_is_stale(db, ticker, provider_stale=bool(q.get("stale")))
     return {
         "price": eur_price(db, ticker, float(local), rate_cache=rate_cache),
         "local": float(local),
         "currency": q.get("currency"),
+        "stale": stale,
     }
+
+
+def _quote_is_stale(db: Session, ticker: str, *, provider_stale: bool = False) -> bool:
+    """True when the newest cached bar of *ticker* is older than :data:`MAX_QUOTE_AGE_TRADING_DAYS`.
+
+    With no cached bar the age is unknown: stale only if the provider failed.
+    """
+    import numpy as np
+
+    from app.foundation.models.entities import PriceCache
+
+    row = (
+        db.query(PriceCache.date)
+        .filter(PriceCache.ticker == ticker.upper())
+        .order_by(PriceCache.date.desc())
+        .first()
+    )
+    if row is None or row[0] is None:
+        return provider_stale
+    last = row[0].date() if isinstance(row[0], datetime) else row[0]
+    today = now_utc().date()
+    if last >= today:
+        return False
+    return int(np.busday_count(last, today)) > MAX_QUOTE_AGE_TRADING_DAYS
 
 
 def inception_date(portfolio: PaperPortfolio) -> date:
@@ -110,39 +141,10 @@ def resolve_paper_asset_type(db: Session, ticker: str, isin: str | None = None) 
 
 
 def resolve_instrument_name(db: Session, ticker: str, isin: str | None = None) -> str:
-    """Best-effort real instrument name for a new ``PaperHolding`` row.
+    """Best-effort real instrument name (see ``foundation.instrument_names``)."""
+    from app.foundation.instrument_names import resolve_instrument_name as _resolve
 
-    Bypass fix (F9, #2): callers previously wrote ``name=ticker.upper()`` —
-    a mangled ticker string, not a real name — which also starves
-    ``classify_instrument``'s name-based money-market detection for any
-    downstream re-classification (e.g. ``resolve_paper_asset_type`` above,
-    or ``advisor/decision.py``'s book-holding classification) that reads
-    ``PaperHolding.name`` later. Same lookup order as
-    ``resolve_paper_asset_type``: the ``Asset`` registry, then the most
-    recent Discover-sourced candidate name. Falls back to the ticker only
-    when neither source has anything — unchanged behaviour for tickers with
-    no available metadata.
-    """
-    from app.foundation.models.entities import Asset, DiscoverCandidate
-
-    ticker_u = ticker.upper()
-    asset = None
-    if isin:
-        asset = db.query(Asset).filter(Asset.isin == isin).one_or_none()
-    if asset is None:
-        asset = db.query(Asset).filter(Asset.symbol == ticker_u).one_or_none()
-    if asset is not None and asset.name:
-        return asset.name
-
-    cand = (
-        db.query(DiscoverCandidate.name)
-        .filter(DiscoverCandidate.symbol == ticker_u, DiscoverCandidate.name.isnot(None))
-        .order_by(DiscoverCandidate.id.desc())
-        .first()
-    )
-    if cand and cand[0]:
-        return cand[0]
-    return ticker_u
+    return _resolve(db, ticker, isin)
 
 
 def get_or_create_paper_portfolio(db: Session, user_id: str) -> tuple[PaperPortfolio, bool]:
@@ -202,10 +204,13 @@ def get_or_create_paper_portfolio(db: Session, user_id: str) -> tuple[PaperPortf
         return portfolio, False
 
     seeded_from_dkb = False
+    _set_benchmark_base(portfolio, _benchmark_base_quote(db))
     if has_dkb:
         _seed_holdings(db, portfolio.id, user_id)
         recompute_baseline_value(db, portfolio.id)
         seeded_from_dkb = True
+    else:
+        db.commit()
 
     return portfolio, seeded_from_dkb
 
@@ -258,7 +263,27 @@ def reset_portfolio(db: Session, portfolio_id: str, *, reason: str = "reset") ->
     flows_q = db.query(PaperCashFlow).filter(PaperCashFlow.portfolio_id == portfolio_id)
     metrics_q = db.query(MetricsSnapshot).filter(MetricsSnapshot.portfolio_id == portfolio_id)
     cards_q = db.query(AdvisorScorecard).filter(AdvisorScorecard.portfolio_id == portfolio_id)
-    payload = {
+
+    # Everything that may touch the network (and so commit a price-cache row)
+    # happens before the first change: the archive, the deletes, the seed and
+    # the baseline then go in ONE transaction, committed once at the end.
+    try:
+        final = get_summary(db, portfolio_id)
+    except Exception as exc:  # noqa: BLE001 - a pricing outage must not block a reset
+        logger.warning("reset: final NAV unavailable for %s: %s", portfolio_id, exc)
+        final = {}
+    total_cash, has_accounts = synced_cash(db, portfolio.user_id)
+    plan = _plan_seed(db, portfolio.user_id) if has_accounts else []
+    bench_base = _benchmark_base_quote(db)
+
+    payload: dict[str, Any] = {
+        "final": {
+            "total_value": final.get("total_value"),
+            "total_return_pct": final.get("total_return_pct"),
+            "benchmark": final.get("benchmark"),
+            "benchmark_return_pct": (final.get("benchmark") or {}).get("total_return_pct"),
+            "as_of": now_utc().isoformat(),
+        },
         "portfolio": {
             "name": portfolio.name, "mandate": portfolio.mandate, "currency": portfolio.currency,
             "initial_cash": str(portfolio.initial_cash),
@@ -281,19 +306,21 @@ def reset_portfolio(db: Session, portfolio_id: str, *, reason: str = "reset") ->
         portfolio_id=portfolio_id, user_id=portfolio.user_id, inception_at=portfolio.inception_at or portfolio.created_at,
         reason=reason[:200], payload_json=json.dumps(payload, default=str),
     )
-    db.add(archive)
-    for q in (trades_q, flows_q, snaps_q, metrics_q, cards_q, holdings_q):
-        q.delete(synchronize_session=False)
-
-    total_cash, has_accounts = synced_cash(db, portfolio.user_id)
-    portfolio.initial_cash = total_cash if has_accounts else _FALLBACK_CASH
-    portfolio.inception_at = now_utc()
-    db.commit()
-    db.expire_all()
-
-    if has_accounts:
-        _seed_holdings(db, portfolio_id, portfolio.user_id)
-    baseline = recompute_baseline_value(db, portfolio_id)
+    try:
+        db.add(archive)
+        for q in (trades_q, flows_q, snaps_q, metrics_q, cards_q, holdings_q):
+            q.delete(synchronize_session=False)
+        portfolio.initial_cash = total_cash if has_accounts else _FALLBACK_CASH
+        portfolio.inception_at = now_utc()
+        _set_benchmark_base(portfolio, bench_base)
+        db.flush()
+        db.expire_all()
+        _apply_seed(db, portfolio_id, plan)
+        baseline = recompute_baseline_value(db, portfolio_id, commit=False)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     holdings_count = db.query(PaperHolding).filter(PaperHolding.portfolio_id == portfolio_id).count()
     logger.info("reset paper portfolio %s (%s): archive %s, %d holdings, baseline %.2f",
                 portfolio_id, reason, archive.id, holdings_count, float(baseline))
@@ -308,9 +335,11 @@ def reset_portfolio(db: Session, portfolio_id: str, *, reason: str = "reset") ->
     }
 
 
-def _seed_holdings(db: Session, portfolio_id: str, user_id: str) -> None:
-    """Copy the synced positions (DKB, Scalable) into PaperHoldings, one per ISIN, at today's EUR price.
+def _plan_seed(db: Session, user_id: str) -> list[dict[str, Any]]:
+    """The synced positions (DKB, Scalable) as holdings to seed, one per ISIN, at today's EUR price.
 
+    Does all the price lookups (which may fetch live and commit a cache row)
+    so :func:`_apply_seed` can run inside one transaction without network.
     The cost of a seeded unit is its market price at the seed, not what was
     paid for it at the broker: the paper run starts today, so its return
     starts at 0 and measures only what happens from here.
@@ -322,6 +351,7 @@ def _seed_holdings(db: Session, portfolio_id: str, user_id: str) -> None:
     positions = combined_positions(db, user_id, include_unreconciled=True)
     logger.info("_seed_holdings: found %d synced positions for user %s", len(positions), user_id)
     rate_cache: dict[str, dict[str, float] | None] = {}
+    plan: list[dict[str, Any]] = []
     for pos in positions:
         if pos.quantity <= 0:
             continue
@@ -341,17 +371,55 @@ def _seed_holdings(db: Session, portfolio_id: str, user_id: str) -> None:
         if price is None:
             logger.warning("_seed_holdings: no price for %s; not seeded", pos.key)
             continue
+        plan.append({
+            "isin": pos.isin or None, "ticker": pos.ticker, "name": pos.name, "quantity": pos.quantity,
+            "price": price,
+            "asset_type": resolve_holding_asset_type(db, isin=pos.isin or None, symbol=pos.ticker, name=pos.name),
+        })
+    return plan
+
+
+def _apply_seed(db: Session, portfolio_id: str, plan: list[dict[str, Any]]) -> None:
+    """Add the planned holdings. No commit: the caller owns the transaction."""
+    for item in plan:
         db.add(PaperHolding(
-            portfolio_id=portfolio_id,
-            isin=pos.isin or None,
-            ticker=pos.ticker,
-            name=pos.name,
-            quantity=pos.quantity,
-            avg_buy_price=price,
-            asset_type=resolve_holding_asset_type(db, isin=pos.isin or None, symbol=pos.ticker, name=pos.name),
+            portfolio_id=portfolio_id, isin=item["isin"], ticker=item["ticker"], name=item["name"],
+            quantity=item["quantity"], avg_buy_price=item["price"], asset_type=item["asset_type"],
             currency="EUR",
         ))
+    db.flush()
+
+
+def _seed_holdings(db: Session, portfolio_id: str, user_id: str) -> None:
+    """Copy the synced positions into PaperHoldings (see :func:`_plan_seed`) and commit."""
+    _apply_seed(db, portfolio_id, _plan_seed(db, user_id))
     db.commit()
+
+
+def _benchmark_base_quote(db: Session) -> tuple[float | None, datetime]:
+    """The benchmark's current fresh EUR quote, and the moment it was taken.
+
+    Looked up with the same source (:func:`paper_quote_eur`) the sleeve's
+    holdings are seeded at, so both start at the same instant. ``None`` when
+    there is no fresh quote (the close on/before inception is used instead).
+    """
+    from app.foundation.eur_prices import benchmark_ticker
+
+    try:
+        q = paper_quote_eur(db, benchmark_ticker(db).upper())
+    except Exception as exc:  # noqa: BLE001 - no benchmark base is not fatal
+        logger.warning("benchmark base quote failed: %s", exc)
+        return None, now_utc()
+    price = q.get("price")
+    if price and price > 0 and not q.get("stale"):
+        return float(price), now_utc()
+    return None, now_utc()
+
+
+def _set_benchmark_base(portfolio: PaperPortfolio, base: tuple[float | None, datetime]) -> None:
+    price, at = base
+    portfolio.benchmark_base_price = None if price is None else Decimal(str(price))
+    portfolio.benchmark_base_at = at if price is not None else None
 
 
 def seed_paper_portfolio_from_real(
@@ -404,6 +472,7 @@ def seed_paper_portfolio_from_real(
     db.commit()
     db.refresh(portfolio)
 
+    _set_benchmark_base(portfolio, _benchmark_base_quote(db))
     _seed_holdings(db, portfolio.id, user_id)
     recompute_baseline_value(db, portfolio.id)
     db.refresh(portfolio)
@@ -416,21 +485,29 @@ def seed_paper_portfolio_from_real(
 
 
 def _current_cash_balance(portfolio: PaperPortfolio, db: Session) -> Decimal:
-    """Compute current cash from initial_cash and all trades.
+    """Current cash (see ``foundation.paper_cash.paper_cash_balance``)."""
+    from app.foundation.paper_cash import paper_cash_balance
 
-    Commissions leave the sleeve on both sides, so they are subtracted once
-    regardless of side rather than being folded into ``value`` (which stays the
-    clean price * quantity notional the scorecard and attribution rely on).
-    """
-    rows = (
-        db.query(PaperTrade.side, PaperTrade.value, PaperTrade.fee)
-        .filter(PaperTrade.portfolio_id == portfolio.id)
-        .all()
-    )
-    total_buys = sum((r[1] for r in rows if r[0] == "buy"), Decimal("0"))
-    total_sells = sum((r[1] for r in rows if r[0] == "sell"), Decimal("0"))
-    total_fees = sum((r[2] or Decimal("0") for r in rows), Decimal("0"))
-    return portfolio.initial_cash - total_buys + total_sells - total_fees + _cash_flows_total(db, portfolio.id)
+    return paper_cash_balance(portfolio, db)
+
+
+def current_cash_balance(portfolio: PaperPortfolio, db: Session) -> Decimal:
+    """Cash of a paper portfolio after trades, fees and dividends (what ``execute_trade`` checks)."""
+    return _current_cash_balance(portfolio, db)
+
+
+def paper_order_fee(
+    db: Session, ticker: str, notional: float, *, isin: str | None = None, name: str | None = None,
+    side: str = "buy",
+) -> float:
+    """Scalable fee for one paper order (0.99 EUR; a Prime ETF buy from 250 EUR is free)."""
+    from app.foundation.broker_fees import scalable_order_fee
+
+    if notional <= 0:
+        return 0.0
+    if name is None:
+        name = resolve_instrument_name(db, ticker.upper(), isin)
+    return scalable_order_fee(float(notional), name, side)
 
 
 def _cash_flows_total(db: Session, portfolio_id: str) -> Decimal:
@@ -464,7 +541,7 @@ def _baseline_value(db: Session, portfolio: PaperPortfolio) -> Decimal:
     return fallback if fallback > 0 else (portfolio.initial_cash or Decimal("0"))
 
 
-def recompute_baseline_value(db: Session, portfolio_id: str) -> Decimal:
+def recompute_baseline_value(db: Session, portfolio_id: str, *, commit: bool = True) -> Decimal:
     """Set and persist baseline_value = initial_cash + cost basis of seeded holdings.
 
     Call this after any seed/reseed so total_return_pct is measured against the
@@ -475,7 +552,8 @@ def recompute_baseline_value(db: Session, portfolio_id: str) -> Decimal:
         raise ValueError("Portfolio not found")
     baseline = (portfolio.initial_cash or Decimal("0")) + _seeded_cost_basis(db, portfolio_id)
     portfolio.baseline_value = baseline
-    db.commit()
+    if commit:
+        db.commit()
     return baseline
 
 
@@ -500,8 +578,13 @@ def get_holdings(db: Session, portfolio_id: str) -> list[dict[str, Any]]:
     for h in holdings:
         quote = paper_quote_eur(db, h.ticker, rate_cache=rate_cache) if h.ticker else {"price": None}
         current_price: float | None = quote.get("price")
-        priced = current_price is not None and current_price > 0
-        if not priced:
+        has_price = current_price is not None and current_price > 0
+        # A stale quote still values the holding, but it is not "priced".
+        stale = has_price and bool(quote.get("stale"))
+        priced = has_price and not stale
+        if stale:
+            logger.warning("Quote for %s is stale; valued at the last price", h.ticker)
+        if not has_price:
             # Valued at cost, and flagged: no quote, or no exchange rate for it.
             current_price = float(h.avg_buy_price) if h.avg_buy_price and h.avg_buy_price > 0 else None
             logger.warning("No EUR price for %s; valued at cost", h.ticker)
@@ -528,6 +611,7 @@ def get_holdings(db: Session, portfolio_id: str) -> list[dict[str, Any]]:
                 "price_local": quote.get("local"),
                 "quote_currency": quote.get("currency"),
                 "priced": priced,
+                "stale": stale,
                 "market_value": float(market_value),
                 "unrealized_pnl": float(unrealized_pnl),
                 "return_pct": return_pct,
@@ -564,14 +648,55 @@ def get_snapshots(db: Session, portfolio_id: str, days: int = 365) -> list[Paper
     )
 
 
+def _isins_by_ticker(db: Session, portfolio_id: str, tickers: set[str]) -> dict[str, str]:
+    """Best-effort ISIN per ticker: the paper holding's, else the asset registry's."""
+    from app.foundation.models.entities import Asset
+
+    out: dict[str, str] = {}
+    if not tickers:
+        return out
+    for h in db.query(PaperHolding).filter(PaperHolding.portfolio_id == portfolio_id).all():
+        if h.ticker and h.isin:
+            out[h.ticker.upper()] = h.isin
+    missing = [t for t in tickers if t not in out]
+    if missing:
+        for symbol, isin in db.query(Asset.symbol, Asset.isin).filter(Asset.symbol.in_(missing)).all():
+            if symbol and isin:
+                out.setdefault(symbol.upper(), isin)
+    return out
+
+
+def _fund_flags(
+    db: Session, portfolio_id: str, tickers: set[str], isins: dict[str, str]
+) -> dict[str, bool]:
+    """Whether each ticker is a fund, from the holding's/asset's type and the instrument name."""
+    from app.foundation.withholding_tax import looks_like_fund
+
+    held = {
+        (h.ticker or "").upper(): h
+        for h in db.query(PaperHolding).filter(PaperHolding.portfolio_id == portfolio_id).all()
+    }
+    flags: dict[str, bool] = {}
+    for t in tickers:
+        h = held.get(t)
+        name = h.name if h is not None and h.name and h.name.upper() != t else resolve_instrument_name(db, t, isins.get(t))
+        flags[t] = looks_like_fund(name, h.asset_type if h is not None else None)
+    return flags
+
+
 def credit_dividends(db: Session, portfolio_id: str, today: date | None = None) -> list[dict[str, Any]]:
     """Credit cash dividends not yet booked, per share held at the ex-date, in EUR on that date.
 
     Looks at every instrument held now or traded since the start of the
     window. The quantity held at the ex-date is today's quantity less the
     net buys from the ex-date on (a buy on the ex-date gets no dividend).
-    Amounts are gross: the paper engine models no withholding or tax.
+    Amounts are net of the source withholding tax a German resident suffers
+    (``withholding_tax.withholding_rate``, by the issuer's ISIN country
+    prefix; 15 % when the ISIN is unknown). ``amount_per_unit`` keeps the
+    gross per-share figure, ``amount_eur`` the net credit.
     """
+    from app.foundation.withholding_tax import withholding_rate
+
     from app.foundation.data_backbone.listing_currency import resolve_quote_currency
     from app.foundation.eur_prices import eur_price
     from app.foundation.market import dividend_history
@@ -580,7 +705,8 @@ def credit_dividends(db: Session, portfolio_id: str, today: date | None = None) 
     if portfolio is None:
         raise ValueError("Portfolio not found")
     today = today or now_utc().date()
-    start = max(inception_date(portfolio), today - timedelta(days=DIVIDEND_LOOKBACK_DAYS))
+    inception_day = inception_date(portfolio)
+    start = max(inception_day, today - timedelta(days=DIVIDEND_LOOKBACK_DAYS))
     held = {
         (h.ticker or "").upper(): Decimal(h.quantity or 0)
         for h in db.query(PaperHolding).filter(PaperHolding.portfolio_id == portfolio_id).all()
@@ -592,6 +718,8 @@ def credit_dividends(db: Session, portfolio_id: str, today: date | None = None) 
         .all()
     )
     tickers = set(held) | {t.ticker.upper() for t in trades}
+    isins = _isins_by_ticker(db, portfolio_id, tickers)
+    fund_flags = _fund_flags(db, portfolio_id, tickers, isins)
     booked = {
         (f.ticker, f.date)
         for f in db.query(PaperCashFlow).filter(PaperCashFlow.portfolio_id == portfolio_id, PaperCashFlow.kind == "dividend")
@@ -606,7 +734,9 @@ def credit_dividends(db: Session, portfolio_id: str, today: date | None = None) 
             continue
         for row in rows:
             ex = date.fromisoformat(str(row["ex_date"])[:10])
-            if ex < start or ex > today or (ticker, ex) in booked:
+            # Strictly after the inception day: the seed price of that day is
+            # already ex-dividend, so an ex-date on it was never earned.
+            if ex < start or ex <= inception_day or ex > today or (ticker, ex) in booked:
                 continue
             qty = held.get(ticker, Decimal("0"))
             for t in trades:
@@ -618,7 +748,8 @@ def credit_dividends(db: Session, portfolio_id: str, today: date | None = None) 
             if per_unit_eur is None:
                 logger.warning("credit_dividends: no EUR rate for %s on %s; not credited yet", ticker, ex)
                 continue
-            amount = (qty * Decimal(str(per_unit_eur))).quantize(Decimal("0.01"))
+            net_factor = Decimal(str(1.0 - withholding_rate(isins.get(ticker), is_fund=fund_flags.get(ticker))))
+            amount = (qty * Decimal(str(per_unit_eur)) * net_factor).quantize(Decimal("0.01"))
             db.add(PaperCashFlow(
                 portfolio_id=portfolio_id, date=ex, kind="dividend", ticker=ticker, quantity=qty,
                 amount_per_unit=Decimal(str(row["amount"])), currency=(resolve_quote_currency(db, ticker) or "EUR")[:3],
@@ -641,18 +772,36 @@ def passive_benchmark(
     start = inception_date(portfolio)
     out: dict[str, Any] = {"symbol": symbol, "start": start.isoformat(), "available": False}
     closes = eur_closes(db, symbol, days=(date.today() - start).days + 15)
-    if not closes:
-        return out
     keys = sorted(closes)
-    before = [k for k in keys if k <= start.isoformat()]
-    if not before or (start - date.fromisoformat(before[-1])).days > 5:
+
+    # Start: the benchmark's EUR quote at the instant the sleeve was seeded
+    # (same source as the holdings). Older rows have none: fall back to the
+    # last close on or before the inception date.
+    stored = portfolio.benchmark_base_price
+    if stored is not None and stored > 0:
+        base = float(stored)
+        out["base_source"] = "seed_quote"
+    else:
+        before = [k for k in keys if k <= start.isoformat()]
+        if not before or (start - date.fromisoformat(before[-1])).days > 5:
+            return out
+        base = closes[before[-1]]
+        out["base_source"] = "close_on_inception"
+
+    # End: the quote the NAV is valued with, so both ends are like-for-like;
+    # the latest cached close only when there is no fresh quote.
+    end_quote = paper_quote_eur(db, symbol)
+    end_price = end_quote.get("price")
+    if end_price and end_price > 0 and not end_quote.get("stale"):
+        end, as_of = float(end_price), now_utc().date().isoformat()
+    elif keys:
+        end, as_of = closes[keys[-1]], keys[-1]
+    else:
         return out
-    base = closes[before[-1]]
-    last = keys[-1]
-    ret = closes[last] / base - 1.0
+    ret = end / base - 1.0
     out.update({
         "available": True,
-        "as_of": last,
+        "as_of": as_of,
         "total_return_pct": ret,
         "value": float(baseline) * (1.0 + ret),
     })
@@ -673,6 +822,7 @@ def get_summary(db: Session, portfolio_id: str) -> dict[str, Any]:
     total_value = cash_balance + securities_value
     baseline = _baseline_value(db, portfolio)
     total_return_pct = float((total_value - baseline) / baseline) if baseline else 0.0
+    stale_quotes = sorted(h["ticker"] for h in holdings if h.get("stale"))
 
     latest_snapshot = (
         db.query(PaperSnapshot)
@@ -743,11 +893,22 @@ def get_summary(db: Session, portfolio_id: str) -> dict[str, Any]:
         "holding_count": len(holdings),
         "trade_count": trade_count,
         "history_days": history_days,
+        # Holdings valued at a quote older than MAX_QUOTE_AGE_TRADING_DAYS.
+        "stale_quotes": stale_quotes,
     }
 
 
-def snapshot_paper_portfolio(db: Session, portfolio_id: str) -> dict[str, Any]:
-    """Create a daily PaperSnapshot from current holdings."""
+def snapshot_paper_portfolio(
+    db: Session, portfolio_id: str, as_of: date | None = None
+) -> dict[str, Any]:
+    """Create or update the daily PaperSnapshot of a date from current holdings.
+
+    Valuation convention: every dated row ends up as that date's END-OF-DAY
+    valuation. The 00:00 UTC job passes ``as_of`` = the date that just ended,
+    valuing at its last close and overwriting the provisional row the 10:00
+    advisor cycle wrote that day (which, called without ``as_of``, snapshots
+    "today" at the live quote right after trading).
+    """
     portfolio = db.get(PaperPortfolio, portfolio_id)
     if portfolio is None:
         raise ValueError("Portfolio not found")
@@ -756,7 +917,7 @@ def snapshot_paper_portfolio(db: Session, portfolio_id: str) -> dict[str, Any]:
     # MetricsSnapshot.as_of, and advisor/scorecard.py already keys its rows on
     # now_utc().date() — two clocks writing the same column produced an
     # off-by-one for late-evening runs in a Berlin (UTC+1/+2) deployment.
-    today = now_utc().date()
+    today = as_of or now_utc().date()
     try:
         credit_dividends(db, portfolio_id, today)
     except Exception as exc:  # noqa: BLE001 - a missing dividend must not cost the snapshot
@@ -767,6 +928,7 @@ def snapshot_paper_portfolio(db: Session, portfolio_id: str) -> dict[str, Any]:
     total_value = cash_balance + securities_value
     baseline = _baseline_value(db, portfolio)
     total_return_pct = float((total_value - baseline) / baseline) if baseline else 0.0
+    stale_quotes = sorted(h["ticker"] for h in holdings if h.get("stale"))
 
     existing = (
         db.query(PaperSnapshot)
@@ -798,6 +960,7 @@ def snapshot_paper_portfolio(db: Session, portfolio_id: str) -> dict[str, Any]:
         "cash_balance": float(cash_balance),
         "securities_value": float(securities_value),
         "total_return_pct": total_return_pct,
+        "stale_quotes": stale_quotes,
     }
 
 

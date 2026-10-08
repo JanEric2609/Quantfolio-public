@@ -498,8 +498,8 @@ def sync_dkb_to_wealth_ledger(db: Session, user_id: str) -> dict[str, int]:
             )
         except MultipleResultsFound:
             logger.error(
-                "DKB sync: multiple ConnectedAccount rows for user_id=%s external_id=%s",
-                user_id, external_id,
+                "DKB sync: multiple ConnectedAccount rows for user_id=%s external_id=...%s",
+                user_id, str(external_id)[-4:],
             )
             raise
         if connected is None:

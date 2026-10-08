@@ -16,18 +16,17 @@ import { cn } from "../../../lib/utils";
 export interface QuantLabView {
   id: string;
   label: string;
+  /** One line on what the view tells you (shown in "More views"). */
+  hint?: string;
 }
 
-/** The views in the tab row: your book, its risk, and the tools used most. */
+/** The views in the tab row: your book, its risk, where new money goes, and what the future could hold. */
 export const PRIMARY_VIEWS: QuantLabView[] = [
   { id: "overview", label: "Overview" },
   { id: "holdings", label: "Holdings" },
   { id: "risk", label: "Risk" },
-  { id: "optimisation", label: "Optimisation" },
+  { id: "allocator", label: "Allocator" },
   { id: "scenarios", label: "Monte Carlo" },
-  { id: "backtest", label: "Backtest" },
-  { id: "regime", label: "Regime" },
-  { id: "runs", label: "Runs" },
 ];
 
 /** Everything else, behind "More views". Every view keeps its URL. */
@@ -35,24 +34,26 @@ export const MORE_VIEW_GROUPS: { label: string; views: QuantLabView[] }[] = [
   {
     label: "Analysis",
     views: [
-      { id: "correlation", label: "Correlation" },
-      { id: "attribution", label: "Attribution" },
-      { id: "factors", label: "Factor dashboard" },
-      { id: "goals", label: "Goals" },
+      { id: "backtest", label: "Backtest", hint: "How a rule would have done on past prices." },
+      { id: "regime", label: "Regime", hint: "Whether markets look calm or stressed right now." },
+      { id: "correlation", label: "Correlation", hint: "How closely your holdings move together." },
+      { id: "attribution", label: "Attribution", hint: "Which holdings and factors drove your return." },
+      { id: "factors", label: "Factor dashboard", hint: "Value, size, momentum and quality exposure of the book." },
     ],
   },
   {
     label: "Research",
     views: [
-      { id: "research", label: "Research library" },
-      { id: "llm-research", label: "LLM research" },
-      { id: "intelligence", label: "Market intelligence" },
+      { id: "research", label: "Research library", hint: "Saved papers and notes behind the methods." },
+      { id: "llm-research", label: "LLM research", hint: "Questions answered by the language model, with sources." },
+      { id: "intelligence", label: "Market intelligence", hint: "News, sentiment and analyst views on your names." },
     ],
   },
   {
     label: "Runs",
     views: [
-      { id: "experiments", label: "Experiments" },
+      { id: "runs", label: "Runs", hint: "Log of model and backtest runs." },
+      { id: "experiments", label: "Experiments", hint: "Strategy ideas tested, and which failed." },
     ],
   },
 ];
@@ -100,13 +101,16 @@ function MoreViewsMenu({ currentId }: { currentId: string }) {
           <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent align="end" className="w-72">
         {MORE_VIEW_GROUPS.map((group) => (
           <DropdownMenuGroup key={group.label}>
             <DropdownMenuLabel className="text-xs uppercase tracking-wide">{group.label}</DropdownMenuLabel>
             {group.views.map((view) => (
               <DropdownMenuItem key={view.id} asChild className={cn("min-h-11 sm:min-h-0", view.id === currentId && "text-accent")}>
-                <Link to={`/quantlab/${view.id}`}>{view.label}</Link>
+                <Link to={`/quantlab/${view.id}`} className="flex flex-col items-start">
+                  <span>{view.label}</span>
+                  {view.hint && <span className="text-[11px] font-normal text-text-muted">{view.hint}</span>}
+                </Link>
               </DropdownMenuItem>
             ))}
           </DropdownMenuGroup>
@@ -183,7 +187,7 @@ export function QuantLabHeader({
         </div>
       </div>
 
-      {/* Row 2 — one tab row: the eight main views, the rest under "More views". */}
+      {/* Row 2 — one tab row: the five main views, the rest under "More views". */}
       <div className="flex items-stretch border-b border-border px-2">
         <TabNav
           tabs={PRIMARY_TABS}

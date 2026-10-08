@@ -396,3 +396,14 @@ def test_returns_list_delegates_to_static_method():
     assert len(series) == 2
     assert series[0] == pytest.approx(0.10)
     assert series[1] == pytest.approx(0.10)
+
+
+def test_returns_list_static_keeps_single_day_returns_across_a_foreign_holiday():
+    # B's market is shut on 2026-01-02; A trades every day. The 01-05 portfolio
+    # return must be a one-day return, not a two-day one.
+    a = {"2026-01-01": 100.0, "2026-01-02": 110.0, "2026-01-05": 121.0}
+    b = {"2026-01-01": 50.0, "2026-01-05": 55.0}
+    series, dates = PortfolioPriceService.returns_list_static({"A": a, "B": b}, {"A": 1.0, "B": 1.0})
+    assert dates == ["2026-01-02", "2026-01-05"]
+    assert series[0] == pytest.approx(0.5 * 0.10)  # B carried flat
+    assert series[1] == pytest.approx(0.5 * 0.10 + 0.5 * 0.10)

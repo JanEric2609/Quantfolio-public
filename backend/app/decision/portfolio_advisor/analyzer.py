@@ -1,16 +1,20 @@
 """Portfolio analysis: gap, concentration, drift detection."""
 from __future__ import annotations
 
-TARGET_ALLOCATION = {
-    "stock": 0.60,
-    "bond": 0.25,
-    "etf": 0.10,
-    "cash": 0.05,
-}
 
+def compute_gap_analysis(
+    holdings: list[dict],
+    lookthrough: dict | None = None,
+    *,
+    target: dict[str, float] | None = None,
+) -> dict:
+    """Analyze asset allocation gaps vs *target*.
 
-def compute_gap_analysis(holdings: list[dict], lookthrough: dict | None = None) -> dict:
-    """Analyze asset allocation gaps vs target."""
+    The target (asset type → fraction of the book, 0-1) is an explicit
+    argument: the single source of targets is the monthly plan's sleeves
+    (``decision.monthly_plan.sleeve_targets_from``), and this module defines
+    none of its own (ADR 0019 §1). Without a target no drift is computed.
+    """
     if not holdings:
         return {"asset_allocation": {}, "concentration": 0, "drift": [], "suggestions": []}
 
@@ -25,7 +29,7 @@ def compute_gap_analysis(holdings: list[dict], lookthrough: dict | None = None) 
 
     allocation = {k: round(v / total * 100, 1) for k, v in sorted(by_type.items())}
     concentration = compute_concentration_score(holdings)
-    drifts = detect_drift(holdings, TARGET_ALLOCATION, total)
+    drifts = detect_drift(holdings, target, total) if target else []
     suggestions = _generate_suggestions(allocation, drifts, concentration, holdings, lookthrough)
     return {
         "asset_allocation": allocation,

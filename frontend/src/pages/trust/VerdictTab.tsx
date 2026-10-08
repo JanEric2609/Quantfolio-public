@@ -5,10 +5,13 @@ import { Card } from "../../components/ui/card";
 import { Skeleton } from "../../components/ui/skeleton";
 import { ErrorState } from "../../components/composed/ErrorState";
 import { EvidenceChip } from "./EvidenceChip";
+import { FamilyTests } from "./FamilyTests";
+import { HistoryPanel } from "./HistoryPanel";
+import { RankingPanel } from "./RankingPanel";
 import { ReliabilityPlot } from "./ReliabilityPlot";
 import { TrustGlossary } from "./TrustGlossary";
 import { TypeSummary } from "./TypeSummary";
-import { STATE_META, aboutHundreds, firstResolutionDue, fmtDay, fmtInterval, fmtPp } from "./trustFormat";
+import { STATE_META, assumptionLabel, firstResolutionDue, fmtDay, fmtE, fmtPct, fmtPp, timeToKnowText } from "./trustFormat";
 import { useTrustVerdict } from "./useTrust";
 import type { TrustVerdict } from "../../lib/api";
 
@@ -37,62 +40,56 @@ function VerdictSkeleton() {
 }
 
 function ThreeNumbers({ data }: { data: TrustVerdict }) {
-  const needed = data.n_needed ?? data.types.find((t) => t.n_needed != null)?.n_needed ?? null;
-  const units = data.resolved_units ?? 0;
-  const target = Math.round((data.target_hit_rate ?? 0.55) * 100);
-  const skill = data.skill;
-  const skillCi = skill && skill.ci_low != null && skill.ci_high != null ? fmtInterval([skill.ci_low, skill.ci_high], "pp") : null;
+  const f1 = data.daily_tests?.families.find((f) => f.family === "F1");
+  if (!f1) return null;
+  const ci = f1.mean_ci_21d;
+  const ttk = f1.time_to_know;
   return (
     <div className="grid gap-3 sm:grid-cols-3">
       <BigNumber
-        label="Independent rebalance dates"
+        label="Trading days in the test"
         sub={
           <>
-            from {data.resolved_calls} resolved calls
-            {needed ? ` · about ${needed} dates needed to tell a ${target} % hit rate from a coin flip` : ""}
+            {f1.n_days ? `since ${fmtDay(f1.first_day)}` : `the test starts ${fmtDay(data.daily_tests?.start)}`} · an edge of{" "}
+            {assumptionLabel(ttk.assumption_unit, ttk.assumption)} would most likely show after {timeToKnowText(ttk)}
           </>
         }
       >
-        <span data-testid="trust-units">
-          {units}
-          {needed ? <span className="text-base font-normal text-text-muted"> of ~{aboutHundreds(needed)}</span> : null}
-        </span>
+        <span data-testid="trust-units">{f1.n_days.toLocaleString("en-US")}</span>
       </BigNumber>
       <BigNumber
-        label="Skill vs your ETF"
+        label="Picks vs your ETF"
         sub={
-          skill ? (
+          f1.mean_21d != null ? (
             <>
-              {skillCi ? `90 % interval ${skillCi} (Newey-West)` : "interval needs 8 dates"} · {skill.n} dates
-              <br />
-              mean excess return per rebalance date vs {skill.benchmark_label}
+              {ci ? `90 % interval ${fmtPp(ci[0], 2)} to ${fmtPp(ci[1], 2)}` : "interval needs more days"} · mean active
+              return per 21 trading days
+              {f1.posterior ? ` · chance the edge is positive ${fmtPct(f1.posterior.p_positive)} (not a verdict)` : ""}
             </>
           ) : (
-            "no resolved calls to compare yet"
+            "no trading day with open picks recorded yet"
           )
         }
       >
-        {skill ? fmtPp(skill.value) : "—"}
+        {f1.mean_21d != null ? fmtPp(f1.mean_21d, 2) : "—"}
       </BigNumber>
       <BigNumber
         label="Evidence"
         sub={
           <>
-            {STATE_META[data.state].meaning}
-            {data.n_tests ? ` Corrected for ${data.n_tests} looks (e-BH, 5 % false discoveries).` : ""}
+            {STATE_META[data.state].meaning} e-value {fmtE(f1.e_skill)} for skill, {fmtE(f1.e_harm)} for harm; one verdict
+            needs {f1.threshold}.
           </>
         }
       >
-        <EvidenceChip
-          type={{ state: data.state, n: units, n_needed: needed, benchmarked: true, type: "ideas" }}
-        />
+        <EvidenceChip type={{ state: f1.state, n: f1.n_days, n_needed: null, benchmarked: true, type: "ideas" }} />
       </BigNumber>
     </div>
   );
 }
 
 function FirstResolutions({ data }: { data: TrustVerdict }) {
-  const due = firstResolutionDue(data.types);
+  const due = data.first_resolution_due ?? firstResolutionDue(data.types);
   return (
     <Card className="flex items-start gap-3 p-4" role="status">
       <CalendarClock className="mt-0.5 h-5 w-5 shrink-0 text-text-muted" aria-hidden="true" />
@@ -146,15 +143,26 @@ export function VerdictTab() {
 
       {data.resolved_calls === 0 ? <FirstResolutions data={data} /> : null}
 
+      {data.daily_tests ? <FamilyTests tests={data.daily_tests} /> : null}
+
+      <RankingPanel />
+
       <section aria-labelledby="trust-types" className="space-y-3">
-        <h2 id="trust-types" className="text-sm font-semibold text-text-primary">
-          By prediction type
-        </h2>
+        <div>
+          <h2 id="trust-types" className="text-sm font-semibold text-text-primary">
+            Per rebalance date (descriptive)
+          </h2>
+          <p className="text-xs text-text-secondary">
+            The picks of one date as one basket, judged after their horizon. The verdict on each row comes from the test
+            above; the older per-date evidence is shown as a secondary number.
+          </p>
+        </div>
         <div className="grid gap-3 lg:grid-cols-2">
           {data.types.map((t) => (
-            <TypeSummary key={t.type} type={t} />
+            <TypeSummary key={t.type} type={t} verdict={data} />
           ))}
         </div>
+        {data.legacy_method_note ? <p className="text-[11px] text-text-muted">{data.legacy_method_note}</p> : null}
       </section>
 
       <section aria-labelledby="trust-calibration" className="space-y-3">
@@ -169,13 +177,21 @@ export function VerdictTab() {
           </div>
         ) : (
           <p className="text-sm text-text-secondary">
-            The reliability plot appears once 30 calls with a stated probability have resolved. Below that, a
+            The reliability plot appears once {data.min_calls_for_reliability ?? "enough"} calls with a stated probability have resolved. Below that, a
             handful of dots would look like information and be noise.
           </p>
         )}
+        <p className="text-xs text-text-muted">
+          No probability is stated for a pick until {data.min_n_eff_for_probability ?? 100} issue dates have resolved: picks
+          made on one date share one market move, so they count once. Until then Discover shows each pick's rank among the
+          stocks it scored, and how often that tier has beaten your ETF. The advisor's and the mandates' confidence is the
+          model's own confidence, not a probability.
+        </p>
       </section>
 
-      <TrustGlossary methodNote={data.method_note} needed={data.n_needed ?? null} target={data.target_hit_rate ?? null} />
+      <HistoryPanel />
+
+      <TrustGlossary methodNote={data.method_note} verdict={data} />
     </div>
   );
 }

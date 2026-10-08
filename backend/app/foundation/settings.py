@@ -242,6 +242,8 @@ DEFAULT_PUBLIC_SETTINGS: dict[str, Any] = {
     "plan_drift_band_pp": 5,
     "plan_core_isins": "",
     "plan_tilt_isins": "",
+    # Candidate ETFs the Quant Lab allocator splits new money across; empty = the core ETFs held.
+    "allocator_universe_isins": "",
     # Fixed cash kept aside (Tagesgeld and broker cash), never suggested for
     # investing. 0 = not set: the plan then suggests nothing from cash.
     "emergency_reserve_eur": 0,
@@ -715,13 +717,20 @@ def _unpack_secret(service: str, raw: str) -> tuple[str, dict[str, Any]]:
 CONNECTION_TESTS_KEY = "connection_tests_json"
 
 
-def record_connection_test(db: Session, service: str, ok: bool, message: str) -> str:
+def record_connection_test(
+    db: Session, service: str, ok: bool, message: str, *, reason: str | None = None, probe_symbol: str | None = None,
+) -> str:
     """Store the outcome of testing *service*'s saved configuration; returns the timestamp."""
     from datetime import UTC, datetime
 
     tested_at = datetime.now(UTC).isoformat()
     tests = get_connection_tests(db)
-    tests[service] = {"ok": ok, "message": message[:500], "tested_at": tested_at}
+    entry: dict[str, Any] = {"ok": ok, "message": message[:500], "tested_at": tested_at}
+    if reason:
+        entry["reason"] = reason
+    if probe_symbol:
+        entry["probe_symbol"] = probe_symbol
+    tests[service] = entry
     row = db.query(AppSetting).filter(AppSetting.key == CONNECTION_TESTS_KEY).one_or_none()
     if row is None:
         db.add(AppSetting(key=CONNECTION_TESTS_KEY, value_json=json.dumps(tests)))

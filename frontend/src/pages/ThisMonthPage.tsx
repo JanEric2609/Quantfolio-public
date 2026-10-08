@@ -1,13 +1,23 @@
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { AlertTriangle, CalendarCheck, CheckCircle2, Info, Lock, PiggyBank, RefreshCw, Repeat, Settings2 } from "lucide-react";
+import { AlertTriangle, CalendarCheck, CheckCircle2, ChevronRight, Info, Lock, RefreshCw, Settings2 } from "lucide-react";
 import { PageHeader } from "../components/composed/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Skeleton } from "../components/ui/skeleton";
 import { formatCurrency, formatDate, formatDateTime, formatMonth, formatPercentPoints } from "../lib/format";
-import { getMonthlyPlan, type MonthlyPlan, type PlanAction, type PlanCash, type PlanSleeve } from "../lib/api";
+import {
+  getMonthlyPlan,
+  type MonthlyPlan,
+  type PlanAction,
+  type PlanCash,
+  type PlanSavingsPlans,
+  type PlanSleeve,
+  type RunningSavingsPlan,
+  type SuggestedFund,
+} from "../lib/api";
 
 // The plan API reports shares in percent units (12.5 = 12,5 %), not fractions.
 function pct(value: number): string {
@@ -38,30 +48,52 @@ const ACTION_BADGE: Record<PlanAction["kind"], { label: string; variant: "warnin
   one_off: { label: "Optional one-off", variant: "secondary" },
 };
 
+/** One required or optional step: what, where, how much; the "how to" sits behind an expander. */
 function ActionRow({ action }: { action: PlanAction }) {
   const badge = ACTION_BADGE[action.kind] ?? ACTION_BADGE.order;
   return (
-    <div className="flex flex-col gap-1 border-b border-border py-3 last:border-0 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium text-text-primary">{action.instrument}</span>
-          {action.ticker && <span className="font-mono text-xs text-text-secondary">{action.ticker}</span>}
-          <Badge variant={badge.variant}>{badge.label}</Badge>
-          {action.broker_label && <Badge variant="outline">{action.broker_label}</Badge>}
+    <div className="border-b border-border py-3 last:border-0">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-text-primary">{action.instrument}</span>
+            {action.ticker && <span className="font-mono text-xs text-text-secondary">{action.ticker}</span>}
+            <Badge variant={badge.variant}>{badge.label}</Badge>
+            {action.broker_label && <Badge variant="outline">{action.broker_label}</Badge>}
+          </div>
         </div>
-        <div className="mt-0.5 text-sm text-text-secondary">{action.note}</div>
+        <div className="shrink-0 font-display text-xl font-semibold tabular-nums text-text-primary">
+          {action.kind === "sale" ? "−" : ""}
+          {formatCurrency(action.amount_eur, "EUR")}
+        </div>
       </div>
-      <div className="font-display text-xl font-semibold tabular-nums text-text-primary">
-        {action.kind === "sale" ? "−" : ""}
-        {formatCurrency(action.amount_eur, "EUR")}
-      </div>
+      <details className="group mt-1">
+        <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-xs text-accent hover:underline">
+          <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" /> How to
+        </summary>
+        <p className="mt-1 text-sm text-text-secondary">{action.note}</p>
+      </details>
     </div>
+  );
+}
+
+/** A collapsed section: the information stays, the page stays short. */
+function Details({ title, summary, children }: { title: string; summary?: string; children: ReactNode }) {
+  return (
+    <details className="group rounded-lg border border-border bg-surface-1">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium text-text-primary">
+        <ChevronRight className="h-4 w-4 shrink-0 transition-transform group-open:rotate-90" />
+        {title}
+        {summary && <span className="ml-auto min-w-0 truncate text-xs font-normal text-text-secondary">{summary}</span>}
+      </summary>
+      <div className="space-y-3 border-t border-border p-4">{children}</div>
+    </details>
   );
 }
 
 type LookThrough = NonNullable<MonthlyPlan["core_look_through"]>;
 
-function SleeveCard({ sleeve, lookThrough }: { sleeve: PlanSleeve; lookThrough?: LookThrough | null }) {
+function SleeveCard({ sleeve, lookThrough, fund }: { sleeve: PlanSleeve; lookThrough?: LookThrough | null; fund?: SuggestedFund | null }) {
   const positions = sleeve.positions ?? [];
   return (
     <Card className="min-w-0">
@@ -90,6 +122,12 @@ function SleeveCard({ sleeve, lookThrough }: { sleeve: PlanSleeve; lookThrough?:
           <span>target {pct(sleeve.target_pct)}</span>
         </div>
         <p className="text-sm text-text-secondary">{sleeve.status}</p>
+        {fund && (
+          <p className="text-sm text-text-secondary">
+            <span className="font-medium text-text-primary">Suggested fund: {fund.isin ?? fund.name}. </span>
+            {fund.why}
+          </p>
+        )}
         {lookThrough && (
           <p className="text-sm text-text-secondary">
             {lookThrough.em_pct != null ? (
@@ -140,70 +178,160 @@ function SleeveCard({ sleeve, lookThrough }: { sleeve: PlanSleeve; lookThrough?:
   );
 }
 
-const SLEEVE_NAMES: Record<string, string> = { core: "Core", tilt: "Factor tilt", satellite: "Stock picks" };
-
-/** Savings plans the brokers already run, so the plan never asks for one twice. */
-function RunningPlansCard({ running }: { running: NonNullable<MonthlyPlan["savings_plans"]> }) {
+/** A sleeve that is still locked: one line, with the way to settings. */
+function LockedSleeveLine({ sleeve, fund }: { sleeve: PlanSleeve; fund?: SuggestedFund | null }) {
   return (
-    <Card className="min-w-0">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Repeat className="h-4 w-4 text-text-secondary" /> Savings plans that already run
-        </CardTitle>
-        <CardDescription>{formatCurrency(running.monthly_eur, "EUR")} a month, read from your broker.</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <ul className="space-y-2 text-sm">
-          {running.items.map((p) => (
-            <li key={`${p.broker}-${p.isin ?? p.name}`} className="flex justify-between gap-3">
-              <span className="min-w-0">
-                <span className="block truncate text-text-primary" title={p.isin ?? undefined}>{p.name}</span>
-                <span className="text-xs text-text-secondary">
-                  {SLEEVE_NAMES[p.sleeve] ?? p.sleeve} · {p.broker_label}
-                  {p.next_execution_date ? ` · next ${formatDate(p.next_execution_date)}` : ""}
-                </span>
-              </span>
-              <span className="shrink-0 tabular-nums text-text-primary">
-                {p.monthly_eur == null ? `${formatCurrency(p.amount_eur, "EUR")} ${p.frequency.toLowerCase()}` : `${formatCurrency(p.monthly_eur, "EUR")}/month`}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </CardContent>
-    </Card>
+    <li className="flex flex-col gap-1 py-2 text-sm sm:flex-row sm:items-start sm:justify-between">
+      <span className="flex min-w-0 gap-2">
+        <Lock className="mt-0.5 h-4 w-4 shrink-0 text-text-secondary" />
+        <span className="min-w-0">
+          <span className="font-medium text-text-primary">{sleeve.label}</span>
+          <span className="text-text-secondary">
+            {" "}· target 0 % · you hold {formatCurrency(sleeve.current_eur, "EUR")} ({pct(sleeve.current_pct)}), cap {pct(sleeve.max_pct)}
+          </span>
+          <span className="block text-text-secondary">{sleeve.status}</span>
+          {fund && fund.isin && (
+            <span className="block text-text-secondary">Suggested fund once unlocked: {fund.isin} — {fund.name}.</span>
+          )}
+        </span>
+      </span>
+      <Link to="/settings/profile#monthly-plan" className="shrink-0 text-xs text-accent underline-offset-2 hover:underline">
+        Open in settings
+      </Link>
+    </li>
   );
 }
 
-/** Tagesgeld and free broker cash against the fixed emergency reserve. Giro money never counts. */
-function CashCard({ cash }: { cash: PlanCash }) {
+const SLEEVE_NAMES: Record<string, string> = { core: "Core", tilt: "Factor tilt", satellite: "Stock picks" };
+
+function PlanLine({ p }: { p: RunningSavingsPlan }) {
+  return (
+    <li className="flex justify-between gap-3">
+      <span className="min-w-0">
+        <span className="block truncate text-text-primary" title={p.isin ?? undefined}>{p.name}</span>
+        <span className="text-xs text-text-secondary">
+          {p.broker_label}
+          {p.next_execution_date ? ` · next ${formatDate(p.next_execution_date)}` : ""}
+          {p.dynamization_rate ? ` · grows ${p.dynamization_rate} %/yr` : ""}
+          {p.not_running_reason === "paused" ? " · paused" : ""}
+          {p.not_running_reason === "overdue" ? " · overdue, no run seen" : ""}
+        </span>
+      </span>
+      <span className="shrink-0 tabular-nums text-text-primary">
+        {p.monthly_eur == null ? `${formatCurrency(p.amount_eur, "EUR")} ${p.frequency.toLowerCase()}` : `${formatCurrency(p.monthly_eur, "EUR")}/month`}
+      </span>
+    </li>
+  );
+}
+
+/** Savings plans the brokers already run, grouped by sleeve, checked against the monthly budget. */
+function RunningPlans({ running, contribution }: { running: PlanSavingsPlans; contribution: number }) {
+  const active = running.items.filter((p) => p.running !== false);
+  const stopped = running.items.filter((p) => p.running === false);
+  const groups = ["core", "tilt", "satellite"]
+    .map((key) => ({ key, items: active.filter((p) => p.sleeve === key) }))
+    .filter((g) => g.items.length > 0);
+  const picks = running.other_budget_eur ?? 0;
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-text-secondary">
+        {formatCurrency(running.monthly_eur, "EUR")} a month, read from your broker
+        {running.synced_at ? ` as of ${formatDateTime(running.synced_at)}` : ""}.
+      </p>
+      {running.last_fetch_failed && (
+        <p className="flex gap-2 text-sm text-warning">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>The last sync could not read your savings plans, so this list may be out of date. A plan you deleted can still show here.</span>
+        </p>
+      )}
+      {groups.map((g) => (
+        <div key={g.key}>
+          <div className="flex justify-between text-xs font-medium uppercase tracking-wide text-text-secondary">
+            <span>{SLEEVE_NAMES[g.key] ?? g.key}</span>
+            <span className="tabular-nums">{formatCurrency(running.by_sleeve[g.key] ?? 0, "EUR")}/month</span>
+          </div>
+          <ul className="mt-1 space-y-2 text-sm">
+            {g.items.map((p, i) => <PlanLine key={`${p.broker}-${p.isin ?? p.name}-${i}`} p={p} />)}
+          </ul>
+        </div>
+      ))}
+      {running.core_needed_eur != null && contribution > 0 && (
+        <p className="border-t border-border pt-2 text-sm text-text-secondary">
+          Budget check: of your {formatCurrency(contribution, "EUR")} a month,{" "}
+          {picks > 0 ? `${formatCurrency(picks, "EUR")} goes into your own plans and ` : ""}
+          the core plans need {formatCurrency(running.core_needed_eur, "EUR")}; they run{" "}
+          {formatCurrency(running.by_sleeve.core ?? 0, "EUR")}.
+        </p>
+      )}
+      {stopped.length > 0 && (
+        <div>
+          <div className="text-xs font-medium uppercase tracking-wide text-text-secondary">Not running (not counted)</div>
+          <ul className="mt-1 space-y-2 text-sm">
+            {stopped.map((p, i) => <PlanLine key={`${p.broker}-${p.isin ?? p.name}-${i}`} p={p} />)}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Overnight/Tagesgeld-type savings and free broker cash against the fixed emergency reserve. Giro money never counts. */
+function CashBreakdown({ cash }: { cash: PlanCash }) {
   const total = cash.savings_eur + cash.broker_cash_eur;
   return (
-    <Card className="min-w-0">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <PiggyBank className="h-4 w-4 text-text-secondary" /> Cash
-        </CardTitle>
-        <CardDescription>Tagesgeld and free broker cash; your giro account is spending money and never counts.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-1 text-sm tabular-nums">
-        <div className="flex justify-between"><span className="text-text-secondary">Tagesgeld</span><span>{formatCurrency(cash.savings_eur, "EUR")}</span></div>
-        <div className="flex justify-between"><span className="text-text-secondary">Free at the broker</span><span>{formatCurrency(cash.broker_cash_eur, "EUR")}</span></div>
-        {cash.reserve_set ? (
+    <div className="space-y-1 text-sm tabular-nums">
+      <p className="pb-1 text-text-secondary">
+        Savings accounts and free broker cash; your giro account is spending money and never counts.
+      </p>
+      <div className="flex justify-between gap-3">
+        <span className="text-text-secondary">Overnight / savings accounts (Scalable overnight, DKB Tagesgeld)</span>
+        <span className="shrink-0">{formatCurrency(cash.savings_eur, "EUR")}</span>
+      </div>
+      <div className="flex justify-between"><span className="text-text-secondary">Free at the broker</span><span>{formatCurrency(cash.broker_cash_eur, "EUR")}</span></div>
+      {cash.reserve_set ? (
+        <>
+          <div className="flex justify-between"><span className="text-text-secondary">Emergency reserve</span><span>−{formatCurrency(cash.emergency_reserve_eur, "EUR")}</span></div>
+          <div className="flex justify-between border-t border-border pt-1 font-medium text-text-primary">
+            <span>Investable</span><span>{formatCurrency(cash.investable_eur, "EUR")}</span>
+          </div>
+        </>
+      ) : (
+        total > 0 && (
+          <p className="pt-1 text-text-secondary">
+            Set your emergency reserve in the <Link to="/settings/profile#monthly-plan" className="text-accent underline-offset-2 hover:underline">plan settings</Link> to see how much is investable.
+          </p>
+        )
+      )}
+    </div>
+  );
+}
+
+/** When the stock-picking evidence gate last ran, and what the factor-tilt check says. */
+function EvidenceBlock({ evidence }: { evidence: NonNullable<MonthlyPlan["evidence"]> }) {
+  const gate = evidence.satellite.gate;
+  return (
+    <div className="space-y-2 text-sm text-text-secondary">
+      <p className="flex flex-wrap items-center gap-2">
+        <span className="font-medium text-text-primary">Stock picks:</span>
+        {gate ? (
           <>
-            <div className="flex justify-between"><span className="text-text-secondary">Emergency reserve</span><span>−{formatCurrency(cash.emergency_reserve_eur, "EUR")}</span></div>
-            <div className="flex justify-between border-t border-border pt-1 font-medium text-text-primary">
-              <span>Investable</span><span>{formatCurrency(cash.investable_eur, "EUR")}</span>
-            </div>
+            checked {gate.as_of ? formatDate(gate.as_of) : "on an unknown date"} against {gate.n_trials} trials
+            {gate.stale && <Badge variant="warning">out of date</Badge>}
           </>
         ) : (
-          total > 0 && (
-            <p className="pt-1 text-text-secondary">
-              Set your emergency reserve in the <Link to="/settings/profile#monthly-plan" className="text-accent underline-offset-2 hover:underline">plan settings</Link> to see how much is investable.
-            </p>
-          )
+          "not checked yet"
         )}
-      </CardContent>
-    </Card>
+      </p>
+      <p>
+        <span className="font-medium text-text-primary">Factor tilt:</span>{" "}
+        {evidence.tilt.unlocked
+          ? "evidence passed and a tilt fund is chosen."
+          : evidence.tilt.passed
+            ? "evidence passed, but no tilt fund is chosen. Set one in the plan settings to use it."
+            : "no factor strategy has passed its evidence check yet."}
+      </p>
+      <Link to="/evidence" className="text-accent underline-offset-2 hover:underline">Open the evidence page</Link>
+    </div>
   );
 }
 
@@ -253,6 +381,10 @@ export function ThisMonthPage() {
   const sleeves = data.sleeves ?? [];
   const notes = data.notes ?? [];
   const running = data.savings_plans && data.savings_plans.items.length > 0 ? data.savings_plans : null;
+  const required = actions.filter((a) => a.kind !== "one_off");
+  const optional = actions.filter((a) => a.kind === "one_off");
+  const open = sleeves.filter((s) => s.unlocked);
+  const locked = sleeves.filter((s) => !s.unlocked);
 
   return (
     <div className="space-y-6">
@@ -285,9 +417,15 @@ export function ThisMonthPage() {
             </CardDescription>
           )}
         </CardHeader>
-        {actions.length > 0 && (
+        {required.length > 0 && (
           <CardContent>
-            {actions.map((a, i) => <ActionRow key={`${i}-${a.sleeve}-${a.kind}-${a.isin ?? ""}`} action={a} />)}
+            {required.map((a, i) => <ActionRow key={`${i}-${a.sleeve}-${a.kind}-${a.isin ?? ""}`} action={a} />)}
+          </CardContent>
+        )}
+        {optional.length > 0 && (
+          <CardContent className="pt-0">
+            <div className="text-xs font-medium uppercase tracking-wide text-text-secondary">Optional, from cash above your reserve</div>
+            {optional.map((a, i) => <ActionRow key={`opt-${i}-${a.sleeve}-${a.isin ?? ""}`} action={a} />)}
           </CardContent>
         )}
         {notes.length > 0 && (
@@ -301,18 +439,49 @@ export function ThisMonthPage() {
         )}
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        {sleeves.map((s) => (
-          <SleeveCard key={s.key} sleeve={s} lookThrough={s.key === "core" ? data.core_look_through : null} />
-        ))}
+      <div className="space-y-3">
+        {data.cash && (
+          <Details title="Cash" summary={`${formatCurrency(data.cash.investable_eur, "EUR")} investable`}>
+            <CashBreakdown cash={data.cash} />
+          </Details>
+        )}
+        {running && (
+          <Details title="Savings plans that already run" summary={`${formatCurrency(running.monthly_eur, "EUR")} a month`}>
+            <RunningPlans running={running} contribution={data.contribution_eur} />
+          </Details>
+        )}
+        <Details title="Your three sleeves" summary={`${open.length} active, ${locked.length} locked`}>
+          {open.length > 0 && (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {open.map((s) => (
+                <SleeveCard key={s.key} sleeve={s} lookThrough={s.key === "core" ? data.core_look_through : null} fund={data.suggested_funds?.find((f) => f.sleeve === s.key) ?? null} />
+              ))}
+            </div>
+          )}
+          {locked.length > 0 && (
+            <ul className="divide-y divide-border">
+              {locked.map((s) => <LockedSleeveLine key={s.key} sleeve={s} fund={data.suggested_funds?.find((f) => f.sleeve === s.key) ?? null} />)}
+            </ul>
+          )}
+        </Details>
+        {data.acc_dist_note && (
+          <Details title="Accumulating or distributing?" summary="why accumulating is the default">
+            <p className="text-sm text-text-secondary">{data.acc_dist_note}</p>
+          </Details>
+        )}
+        {data.evidence && (
+          <Details
+            title="Evidence"
+            summary={
+              data.evidence.satellite.gate?.as_of
+                ? `stock picks checked ${formatDate(data.evidence.satellite.gate.as_of)}`
+                : undefined
+            }
+          >
+            <EvidenceBlock evidence={data.evidence} />
+          </Details>
+        )}
       </div>
-
-      {(running || data.cash) && (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {running && <RunningPlansCard running={running} />}
-          {data.cash && <CashCard cash={data.cash} />}
-        </div>
-      )}
 
       <Card>
         <CardHeader>

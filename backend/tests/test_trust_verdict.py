@@ -10,12 +10,15 @@ import json
 from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
+import numpy as np
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.decision.verification.daily_tests import PRIMARY_TEST_START
 from app.decision.verification.trust import build_verdict, list_calls
 from app.foundation.auth import current_user
 from app.foundation.core.db import Base, get_db
@@ -24,6 +27,7 @@ from app.foundation.models.entities import (
     LlmPortfolioDecision,
     PaperPortfolio,
     RegimeLabelHistory,
+    TrustDailyActiveReturn,
     User,
 )
 from app.main import app
@@ -74,7 +78,7 @@ def _pred(
     excess: float | None = None,
     resolve_in_days: int = -1,
 ) -> DiscoveryPrediction:
-    issued = START + timedelta(days=i)
+    issued = START + timedelta(days=i + 2 * (i // 5))  # one issue date per trading day (START is a Monday)
     resolved_on = issued + timedelta(days=30)
     bench = 0.01
     if realised is None:
@@ -114,13 +118,46 @@ def _seed_hit_rate(db, user, n: int, hit_pct: int, **kw) -> None:
     db.commit()
 
 
+def _seed_excess(db, user, n: int, hit_pct: int, win: float, loss: float, **kw) -> None:
+    """Like ``_seed_hit_rate`` but with explicit excess returns: the skill/harm tests bet on their size."""
+    for i in range(n):
+        hit = ((i + 1) * hit_pct) // 100 - (i * hit_pct) // 100 == 1
+        _pred(db, user, i, hit=hit, excess=win if hit else loss, **kw)
+    db.commit()
+
+
+# +12 % on a winning date and -2 % on a losing one (clipped at +-20 %): a record the excess-return test can see.
+SKILL = dict(hit_pct=90, win=0.12, loss=-0.02)
+HARM = dict(hit_pct=10, win=0.02, loss=-0.12)
+
+
 def _type(verdict: dict, key: str) -> dict:
     return next(t for t in verdict["types"] if t["type"] == key)
 
 
 # ---------------------------------------------------------------------------
-# Verdict: states
+# Verdict: states (from the pre-registered calendar-time tests, ADR 0018)
 # ---------------------------------------------------------------------------
+
+
+def _seed_daily(db, user, series: str, values: list[float | None], *, first: date = PRIMARY_TEST_START) -> None:
+    """Frozen daily-ledger rows on consecutive business days from *first*."""
+    days = pd.bdate_range(first, periods=len(values))
+    for day, value in zip(days, values, strict=True):
+        db.add(TrustDailyActiveReturn(
+            user_id=user.id, series=series, day=day.date(), n_open=0 if value is None else 15, n_stale=0,
+            value=value, benchmark="EUNL.DE", detail_json={},
+        ))
+    db.commit()
+
+
+def _daily(values_mean: float, n: int, sd: float = 0.004, seed: int = 7) -> list[float]:
+    rng = np.random.default_rng(seed)
+    return list(rng.normal(values_mean, sd, n))
+
+
+def _family(verdict: dict, key: str) -> dict:
+    return next(f for f in verdict["daily_tests"]["families"] if f["family"] == key)
 
 
 def test_empty_ledgers_are_too_early_everywhere_with_a_plain_headline():
@@ -130,7 +167,9 @@ def test_empty_ledgers_are_too_early_everywhere_with_a_plain_headline():
     verdict = build_verdict(db, user.id, now=NOW)
 
     assert verdict["state"] == "too_early"
-    assert verdict["headline"] == "Too early to tell: nothing has resolved yet."
+    assert verdict["headline"] == (
+        "Too early to tell: the pre-registered test starts on 2026-10-12; no trading day with open picks recorded yet."
+    )
     assert verdict["resolved_calls"] == 0
     assert verdict["skill"] is None
     assert verdict["frozen_at_issue"] is True
@@ -140,118 +179,161 @@ def test_empty_ledgers_are_too_early_everywhere_with_a_plain_headline():
         assert t["n"] == 0 and t["hits"] == 0
         assert t["hit_rate"] is None and t["hit_ci"] is None
         assert t["mean_excess"] is None and t["mean_excess_ci"] is None
-    assert _type(verdict, "ideas")["n_needed"] == 617  # 55 % vs a coin flip
-    assert verdict["n_needed"] == 617 and verdict["resolved_units"] == 0
+    # Legacy (secondary) per-date test: simulated median issue days to e >= 40 (K=2, h=21).
+    assert _type(verdict, "ideas")["n_needed"] == 3503  # +1 % per date edge, 5 % noise
+    assert verdict["n_needed"] == 3503 and verdict["resolved_units"] == 0
+    assert verdict["n_tests"] == 2 and verdict["ebh_threshold"] == pytest.approx(40.0)
+    assert verdict["horizon_days"] == 21 and verdict["min_calls_for_state"] == 20
+    assert verdict["n_unscored"] == 0
     assert _type(verdict, "regime")["n_needed"] is None
+    assert _type(verdict, "mandates")["n_needed"] is None  # not benchmarked, no family
     assert "No daily regime calls recorded yet" in _type(verdict, "regime")["note"]
-    assert "617" in verdict["method_note"]
+    assert "ADR 0018" in verdict["method_note"] and "about 3,500" in verdict["legacy_method_note"]
+
+    tests = verdict["daily_tests"]
+    assert tests["start"] == "2026-10-12" and tests["threshold"] == pytest.approx(40.0)
+    assert [(f["family"], f["series"], f["role"]) for f in tests["families"]] == [
+        ("F1", "ideas", "primary"), ("F2", "ranking", "primary"), ("F3", "advisor", "secondary"),
+    ]
+    for f in tests["families"]:
+        assert f["n_days"] == 0 and f["state"] == "too_early" and f["posterior"] is None
+        assert f["e_skill"] == 1.0 and f["e_harm"] == 1.0 and f["path"] == []
+    f1 = _family(verdict, "F1")
+    # +1 % per 21 days with 5 % basket noise: the median is many years away, and stated as a range.
+    ttk = f1["time_to_know"]
+    assert ttk["assumption_unit"] == "excess_per_21d" and ttk["assumption"] == 0.01
+    assert ttk["q10_days"] < ttk["q50_days"] < (ttk["q90_days"] or 10**9)
+    assert 12 < ttk["q50_years"] < 25
+    assert [w["years"] for w in ttk["p_within"]] == [5, 10, 20]
+    f2 = _family(verdict, "F2")["time_to_know"]
+    assert f2["assumption_unit"] == "rank_ic" and f2["assumption"] == 0.07 and f2["q50_years"] < 4
 
 
-def test_headline_names_the_first_due_resolution_when_only_pending_calls_exist():
+def test_headline_counts_trading_days_and_states_the_time_to_know_range():
     db = _memory_db()
     user = _user(db)
-    for i, days in enumerate([14, 6, 20]):
-        _pred(db, user, i, hit=None, status="pending", resolve_in_days=days)
-    db.commit()
+    _seed_daily(db, user, "ideas", _daily(0.0, 12))
 
     verdict = build_verdict(db, user.id, now=NOW)
+    f1 = _family(verdict, "F1")
 
-    due = (NOW + timedelta(days=6)).date().isoformat()
-    assert verdict["headline"] == f"Too early to tell: nothing has resolved yet. First resolutions due {due}."
-    assert _type(verdict, "ideas")["next_resolution_at"].startswith(due)
-    assert _type(verdict, "advisor")["next_resolution_at"] is None
-
-
-def test_a_dozen_calls_is_too_early_with_a_wide_interval():
-    db = _memory_db()
-    user = _user(db)
-    for i in range(12):
-        _pred(db, user, i, hit=i % 4 != 3)  # 9 of 12, interleaved with the misses
-    db.commit()
-
-    verdict = build_verdict(db, user.id, now=NOW)
-    ideas = _type(verdict, "ideas")
-
-    assert verdict["state"] == "too_early"
-    assert verdict["headline"] == (
-        "Too early to tell: 12 of ~600 independent rebalance dates needed to tell a 55 % hit rate from a coin flip."
+    assert verdict["state"] == "too_early" and f1["n_days"] == 12
+    assert verdict["headline"].startswith(
+        "Too early to tell: 12 trading days so far; an edge of +1 % per 21 days would most likely show after about"
     )
-    assert (ideas["n"], ideas["hits"], ideas["hit_rate"]) == (12, 9, 0.75)
-    lo, hi = ideas["hit_ci"]
-    assert lo < 0.75 < hi and (hi - lo) > 0.3
-    lo, hi = ideas["mean_excess_ci"]  # Newey-West from 8 dates on
-    assert lo < ideas["mean_excess"] < hi
-    assert ideas["state"] == "too_early"
+    assert "10-90 % range" in verdict["headline"]
+    assert f1["posterior"]["n"] == 12 and 0.0 < f1["posterior"]["p_positive"] < 1.0
+    assert _type(verdict, "ideas")["state"] == "too_early" and _type(verdict, "ideas")["family"] == "F1"
 
 
-def test_two_hundred_calls_at_seventy_percent_show_evidence_of_skill():
+def test_days_before_the_start_are_shown_but_never_bet_on():
     db = _memory_db()
     user = _user(db)
-    _seed_hit_rate(db, user, 200, 70)
+    _seed_daily(db, user, "ideas", [0.01] * 30, first=date(2026, 8, 3))
+
+    f1 = _family(build_verdict(db, user.id, now=NOW), "F1")
+
+    assert f1["n_days"] == 0 and f1["e_skill"] == 1.0
+    assert f1["pre_registration"]["n_days"] == 30
+    assert f1["pre_registration"]["mean_21d"] == pytest.approx(0.21)
+
+
+def test_days_with_nothing_open_carry_no_bet():
+    db = _memory_db()
+    user = _user(db)
+    _seed_daily(db, user, "ideas", [None, None, 0.002, None])
+
+    f1 = _family(build_verdict(db, user.id, now=NOW), "F1")
+
+    assert f1["n_days"] == 1 and f1["n_empty_days"] == 3
+
+
+def test_a_strong_daily_record_shows_evidence_of_skill():
+    db = _memory_db()
+    user = _user(db)
+    _seed_daily(db, user, "ideas", _daily(0.003, 300))
+
+    verdict = build_verdict(db, user.id, now=NOW)
+    f1 = _family(verdict, "F1")
+
+    assert f1["state"] == "skill" and f1["e_skill"] >= 40
+    assert verdict["state"] == "skill" and _type(verdict, "ideas")["state"] == "skill"
+    assert verdict["headline"].startswith("Evidence that Discover's picks beat your ETF: e = ")
+    assert "over 300 trading days" in verdict["headline"]
+    assert f1["posterior"]["p_positive"] > 0.95  # shown, but it is the e-value that decided
+    assert f1["time_to_know"]["sd_measured"] is True
+    assert len(f1["path"]) <= 261 and f1["path"][-1]["e_skill"] == pytest.approx(f1["e_skill"])
+    assert f1["rho1"] is not None
+
+
+def test_a_losing_daily_record_shows_evidence_of_harm():
+    db = _memory_db()
+    user = _user(db)
+    _seed_daily(db, user, "ideas", _daily(-0.003, 300))
+
+    verdict = build_verdict(db, user.id, now=NOW)
+
+    assert _family(verdict, "F1")["state"] == "harm"
+    assert verdict["state"] == "harm" and verdict["headline"].startswith("Evidence of harm")
+
+
+def test_a_flat_daily_record_after_three_months_is_no_evidence():
+    db = _memory_db()
+    user = _user(db)
+    _seed_daily(db, user, "ideas", _daily(0.0, 80, sd=0.01))
+
+    verdict = build_verdict(db, user.id, now=NOW)
+
+    assert _family(verdict, "F1")["state"] == "no_evidence"
+    assert verdict["headline"].startswith("No evidence yet that the picks beat your ETF: 80 trading days so far")
+
+
+def test_each_family_is_tested_on_its_own_and_only_the_picks_set_the_headline():
+    db = _memory_db()
+    user = _user(db)
+    _seed_daily(db, user, "advisor", _daily(-0.003, 300))
+    _seed_daily(db, user, "ranking", _daily(0.003, 300))
+
+    verdict = build_verdict(db, user.id, now=NOW)
+
+    assert _family(verdict, "F3")["state"] == "harm" and _type(verdict, "advisor")["state"] == "harm"
+    assert _family(verdict, "F2")["state"] == "skill"
+    # F2 and F3 never set the headline: the picks have no record yet.
+    assert verdict["state"] == "too_early" and _type(verdict, "ideas")["state"] == "too_early"
+
+
+def test_the_legacy_per_date_test_is_secondary_and_bounded_by_the_calls_in_flight():
+    db = _memory_db()
+    user = _user(db)
+    _seed_excess(db, user, 500, **SKILL)
+    for i in range(500, 520):
+        _pred(db, user, i, hit=None, status="pending", resolve_in_days=10)
+    db.commit()
 
     verdict = build_verdict(db, user.id, now=NOW)
     ideas = _type(verdict, "ideas")
 
-    assert verdict["state"] == "skill"
-    assert verdict["headline"] == "Evidence of skill vs your ETF over 200 rebalance dates (after correcting for every look)."
-    assert ideas["state"] == "skill"
-    assert (ideas["n"], ideas["hits"]) == (200, 140)
-    assert ideas["hit_rate"] == pytest.approx(0.7)
-    lo, hi = ideas["hit_ci"]
-    assert lo < 0.7 < hi and lo > 0.5
-    assert ideas["e_skill"] >= 20 and ideas["e_skill_crossed_strong"] is True
-    assert ideas["e_harm"] < 20
-    assert ideas["n_issue_days"] == 200
-    assert verdict["resolved_calls"] == 200
+    assert ideas["e_skill"] >= 40 and ideas["e_skill_crossed_strong"] is True
+    # Twenty pending dates at their worst pull the bound below the current value.
+    assert ideas["e_skill_lower"] < ideas["e_skill"]
+    assert ideas["e_harm_lower"] >= ideas["e_harm"]
+    # It sets no state: the calendar-time ledger is empty.
+    assert ideas["state"] == "too_early" and verdict["state"] == "too_early"
     skill = verdict["skill"]
-    assert skill["metric"] == "mean_excess_return_per_date" and skill["n"] == 200
-    assert skill["value"] == pytest.approx(0.7 * 0.02 + 0.3 * -0.05)
-    assert skill["ci_low"] is not None and skill["ci_low"] <= skill["value"] <= skill["ci_high"]
+    assert skill["metric"] == "mean_excess_return_per_date" and skill["n"] == 500
+    assert skill["value"] == pytest.approx(0.9 * 0.12 + 0.1 * -0.02)
     assert "EUNL.DE" in skill["benchmark_label"]
-    # Other types stay untouched.
-    assert _type(verdict, "advisor")["state"] == "too_early"
 
 
-def test_two_hundred_calls_at_thirty_percent_show_evidence_of_harm():
+def test_without_calls_in_flight_the_legacy_bound_is_the_current_value():
     db = _memory_db()
     user = _user(db)
-    _seed_hit_rate(db, user, 200, 30)
+    _seed_excess(db, user, 60, **HARM)
 
-    verdict = build_verdict(db, user.id, now=NOW)
+    ideas = _type(build_verdict(db, user.id, now=NOW), "ideas")
 
-    assert verdict["state"] == "harm"
-    assert _type(verdict, "ideas")["state"] == "harm"
-    assert _type(verdict, "ideas")["e_harm"] >= 20
-    assert verdict["headline"].startswith("Evidence of harm")
-    assert verdict["skill"]["value"] < 0
-
-
-def test_a_coin_flip_record_is_no_evidence_not_skill_or_harm():
-    db = _memory_db()
-    user = _user(db)
-    for i in range(60):
-        _pred(db, user, i, hit=i % 2 == 0)
-    db.commit()
-
-    verdict = build_verdict(db, user.id, now=NOW)
-
-    assert verdict["state"] == "no_evidence"
-    assert _type(verdict, "ideas")["state"] == "no_evidence"
-    assert verdict["headline"].startswith("No evidence yet that the calls beat your ETF")
-
-
-def test_harm_in_one_type_outranks_skill_in_another():
-    db = _memory_db()
-    user = _user(db)
-    sleeve = _sleeve(db, user)
-    _seed_hit_rate(db, user, 200, 70)
-    _seed_hit_rate(db, user, 200, 30, sleeve=sleeve)
-
-    verdict = build_verdict(db, user.id, now=NOW)
-
-    assert _type(verdict, "ideas")["state"] == "skill"
-    assert _type(verdict, "advisor")["state"] == "harm"
-    assert verdict["state"] == "harm"
+    assert ideas["e_skill_lower"] == pytest.approx(ideas["e_skill"])
+    assert ideas["e_harm_lower"] == pytest.approx(ideas["e_harm"])
 
 
 # ---------------------------------------------------------------------------
@@ -348,19 +430,6 @@ def test_a_pick_that_stopped_trading_counts_at_its_last_close():
     assert ideas["benchmark_label"] == "your passive core ETF (EUNL.DE)"
 
 
-def test_one_crossing_among_several_looks_is_not_yet_evidence():
-    """e-BH: with four tests, the strongest needs 4 / 0.05 = 80, not 20."""
-    from app.decision.verification.trust import _apply_e_bh
-
-    base = {"n": 40, "n_needed": 617, "benchmarked": True}
-    stats = [{**base, "e_skill": 30.0, "e_harm": 0.5}, {**base, "e_skill": 1.0, "e_harm": 1.0}]
-    assert _apply_e_bh(stats) == 4
-    assert stats[0]["state"] == "no_evidence"
-    stats[0]["e_skill"] = 90.0
-    _apply_e_bh(stats)
-    assert stats[0]["state"] == "skill" and stats[1]["state"] == "no_evidence"
-
-
 def test_a_sell_call_is_a_hit_when_it_beat_the_benchmark_in_its_own_direction():
     db = _memory_db()
     user = _user(db)
@@ -395,7 +464,14 @@ def test_brier_skill_calibration_caption_and_reliability_from_stated_probabiliti
     lo, hi = ideas["bss_ci"]
     assert lo <= ideas["bss"] <= hi
     assert ideas["calibration_caption"] == "When we said 80 %, it happened 40 of 50 times."
-    assert len(ideas["reliability"]) == 5 and sum(b["n"] for b in ideas["reliability"]) == 100
+    # CORP: one PAV block per stated level here, each exactly as reliable as stated.
+    assert [(b["p_mean"], b["hit_rate"], b["n"]) for b in ideas["reliability"]] == [
+        (pytest.approx(0.3), pytest.approx(0.3), 50), (pytest.approx(0.8), pytest.approx(0.8), 50),
+    ]
+    corp = ideas["corp"]
+    assert corp["mcb"] == pytest.approx(0.0, abs=1e-12) and corp["dsc"] > 0
+    assert ideas["brier"] == pytest.approx(corp["mcb"] - corp["dsc"] + corp["unc"])
+    assert ideas["n_eff_stated"] == 100  # one call per date here
     assert ideas["spiegelhalter_z"] is not None
 
 
@@ -451,6 +527,11 @@ def test_range_coverage_counts_stock_returns_inside_the_stated_range():
     assert (ideas_cov["k"], ideas_cov["n"], ideas_cov["nominal"]) == (16, 20, 0.8)
     assert ideas_cov["rate"] == 0.8 and ideas_cov["ci_low"] < 0.8 < ideas_cov["ci_high"]
     assert (advisor_cov["k"], advisor_cov["n"], advisor_cov["nominal"]) == (1, 2, 0.9)
+    # Far fewer than 30 matured weeks: the conformal correction has not started.
+    aci = ideas_cov["aci"]
+    assert aci["active"] is False and aci["widen_now"] is None and aci["corrected"] is None
+    assert aci["weeks_needed"] == 30 and 0 < aci["matured_weeks"] < 30
+    assert sum(d["n"] for d in aci["per_date"]) == 20
 
 
 def test_rows_without_ranges_have_no_coverage():
@@ -655,15 +736,19 @@ def test_verdict_endpoint_empty_ledger_shape(client):
 
 def test_verdict_endpoint_reports_skill_for_a_seeded_record(client):
     http, db, user = client
-    _seed_hit_rate(db, user, 200, 70, p=0.7)
+    _seed_excess(db, user, 500, **SKILL, p=0.9)
+    _seed_daily(db, user, "ideas", _daily(0.003, 300))
 
     body = http.get("/api/trust/verdict").json()
 
     assert body["state"] == "skill"
     ideas = body["types"][0]
-    assert ideas["n"] == 200 and ideas["hit_ci"][0] < 0.7 < ideas["hit_ci"][1]
-    assert ideas["calibration_caption"] == "When we said 70 %, it happened 140 of 200 times."
-    assert body["skill"]["n"] == 200
+    assert ideas["n"] == 500 and ideas["hit_ci"][0] < 0.9 < ideas["hit_ci"][1]
+    assert ideas["calibration_caption"] == "When we said 90 %, it happened 450 of 500 times."
+    assert body["skill"]["n"] == 500
+    assert body["ebh_threshold"] == pytest.approx(40.0) and body["min_calls_for_state"] == 20
+    f1 = body["daily_tests"]["families"][0]
+    assert f1["state"] == "skill" and f1["posterior"]["sensitivity"][0]["tau_21d"] == 0.0025
 
 
 def test_calls_endpoint_validates_and_serves_pages(client):
@@ -688,3 +773,46 @@ def test_trust_endpoints_require_a_signed_in_user():
     http = TestClient(app)
     assert http.get("/api/trust/verdict").status_code in (401, 403)
     assert http.get("/api/trust/calls").status_code in (401, 403)
+
+
+def test_resolved_calls_without_a_benchmark_price_are_counted_not_dropped():
+    db = _memory_db()
+    user = _user(db)
+    for i in range(3):
+        _pred(db, user, i, hit=True)
+    row = _pred(db, user, 3, hit=True)
+    row.excess_return = None  # resolved, but the benchmark had no price
+    hold = _pred(db, user, 4, hit=True, direction="neutral")
+    assert hold is not None
+    db.commit()
+
+    verdict = build_verdict(db, user.id, now=NOW)
+    ideas = _type(verdict, "ideas")
+
+    assert ideas["n_unscored"] == 1 and verdict["n_unscored"] == 1
+    assert ideas["n_holds"] == 1
+    assert ideas["n_calls"] == 3
+
+
+def test_time_to_know_follows_the_issue_cadence_weekly_ideas_daily_advisor():
+    db = _memory_db()
+    user = _user(db)
+    sleeve = _sleeve(db, user)
+    for i in range(12):  # ideas: one date per week
+        row = _pred(db, user, i, hit=True)
+        row.predicted_at = START + timedelta(weeks=i)
+    for i in range(12):  # advisor: one date per trading day
+        _pred(db, user, i, hit=True, sleeve=sleeve)
+    db.commit()
+
+    verdict = build_verdict(db, user.id, now=NOW)
+    ideas, advisor = _type(verdict, "ideas"), _type(verdict, "advisor")
+
+    assert ideas["cadence_days"] == 5.0 and ideas["h_eff"] == 5
+    assert ideas["n_needed"] == 868
+    assert ideas["years_needed"] == pytest.approx(868 * 5 / 252)
+    assert ideas["lag_h"] == 5  # chains the actual weekly schedule needs
+    assert advisor["cadence_days"] == 1.0 and advisor["h_eff"] == 21
+    assert advisor["n_needed"] == 3503 and advisor["lag_h"] == 12  # 12 dates need 12 chains so far
+    assert advisor["years_needed"] == pytest.approx(3503 / 252)
+    assert verdict["n_needed"] == 868 and verdict["years_needed"] > 0  # the picks' own schedule

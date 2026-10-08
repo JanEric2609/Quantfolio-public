@@ -1,17 +1,26 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { formatCurrency, formatPercent } from "../../../lib/format";
 import { FanChart } from "../../../components/charts/FanChart";
 import { Skeleton } from "../../../components/ui/skeleton";
 import { SummaryStrip } from "../components/SummaryStrip";
 import type { MetricItem } from "../components/SummaryStrip";
 import { useProjection } from "../hooks/useProjection";
+import { useGoals } from "../hooks/useGoals";
+import type { Goal } from "../../../lib/api";
 
 const eur = (v?: number | null) => (v == null ? "-" : formatCurrency(v, "EUR", { digits: 0 }));
 const pct = (v?: number | null, digits = 1) => formatPercent(v, { digits });
 const num = (v: string): number | undefined => {
   const n = Number.parseFloat(v.replace(/\./g, "").replace(",", "."));
   return v.trim() === "" || !Number.isFinite(n) ? undefined : n;
+};
+
+/** Whole years from today to a goal's target date, at least 1 (undefined without a date). */
+const yearsUntil = (date?: string | null): number | undefined => {
+  if (!date) return undefined;
+  const ms = Date.parse(date) - Date.now();
+  return Number.isFinite(ms) ? Math.max(1, Math.round(ms / (365.25 * 24 * 3600 * 1000))) : undefined;
 };
 
 /**
@@ -26,6 +35,30 @@ export function ScenariosView() {
   const [goal, setGoal] = useState("");
   const [contribution, setContribution] = useState("");
   const [realReturn, setRealReturn] = useState("");
+  const [params, setParams] = useSearchParams();
+  const goals = useGoals().data ?? [];
+  const selectedGoal = params.get("goal");
+  const pickGoal = (g: Goal | null) => {
+    setParams((old) => {
+      if (g) old.set("goal", g.id);
+      else old.delete("goal");
+      return old;
+    });
+    if (!g) return;
+    if (g.target_amount) setGoal(String(g.target_amount));
+    const y = yearsUntil(g.target_date);
+    if (y) setYears(y);
+    if (g.monthly_contribution) setContribution(String(g.monthly_contribution));
+  };
+  // A link such as /quantlab/scenarios?goal=<id> applies that goal once the list has loaded.
+  const [applied, setApplied] = useState<string | null>(null);
+  useEffect(() => {
+    if (!selectedGoal || applied === selectedGoal || goals.length === 0) return;
+    setApplied(selectedGoal);
+    const g = goals.find((x) => x.id === selectedGoal);
+    if (g) pickGoal(g);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedGoal, applied, goals]);
   const rr = num(realReturn);
   const proj = useProjection({
     years,
@@ -58,7 +91,7 @@ export function ScenariosView() {
           <label className="flex flex-col gap-1">
             <span className="text-text-muted">Years</span>
             <select className="rounded border border-line bg-surface px-2 py-1" value={years} onChange={(e) => setYears(Number(e.target.value))}>
-              {[5, 10, 15, 20, 25, 30, 40].map((y) => (
+              {[...new Set([5, 10, 15, 20, 25, 30, 40, years])].sort((a, b) => a - b).map((y) => (
                 <option key={y} value={y}>{y}</option>
               ))}
             </select>
@@ -80,6 +113,28 @@ export function ScenariosView() {
           </label>
           <span className="text-text-muted">Empty fields use your book and your settings.</span>
         </section>
+
+        {goals.length > 0 && (
+          <section className="rounded-md p-3 text-xs bg-surface" data-testid="goal-presets">
+            <h2 className="mb-1 text-sm font-semibold text-text-primary">Your goals</h2>
+            <p className="mb-2 text-text-muted">Pick one to fill in the goal amount, the years and the monthly amount below.</p>
+            <div className="flex flex-wrap gap-2">
+              {goals.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  aria-pressed={selectedGoal === g.id}
+                  onClick={() => pickGoal(selectedGoal === g.id ? null : g)}
+                  className={`rounded border px-2 py-1 text-left ${selectedGoal === g.id ? "border-accent text-accent" : "border-line"}`}
+                >
+                  <span className="font-medium">{g.title}</span>
+                  {g.target_amount ? <span className="ml-2 text-text-muted">{eur(Number(g.target_amount))}</span> : null}
+                  {g.target_date ? <span className="ml-2 text-text-muted">by {g.target_date}</span> : null}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="rounded-md p-3 bg-surface">
           <h2 className="mb-1 text-sm font-semibold text-text-primary">Your book in today's euros</h2>

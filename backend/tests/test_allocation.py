@@ -120,3 +120,143 @@ def test_real_book_rebalance_buys_underweights_and_shows_the_taxable_gain(monkey
     out = generate_rebalancing_suggestions(db, user.id, target="equal", contribution_eur=1000.0, band_pp=5.0)
     assert not out["sells"]
     assert next(r for r in out["lines"] if r["ticker"] == "EIMI.L")["buy_eur"] == pytest.approx(1000.0)
+
+
+# ---- new-money allocator ---------------------------------------------------
+
+from app.foundation.allocation import history_span, new_money_plan, project_book  # noqa: E402
+
+
+def test_new_money_plan_buys_the_underweight_line_and_sells_nothing():
+    plan = new_money_plan(_returns(), {"A": 9000.0, "B": 0.0, "C": 0.0}, 300.0)
+    assert plan["available"] and set(plan["plans"]) == {"min_variance", "erc", "hrp", "equal"}
+    eq = plan["plans"]["equal"]
+    assert all(v >= 0 for v in eq["eur_this_month"].values())
+    assert sum(eq["eur_this_month"].values()) == pytest.approx(300.0)
+    assert eq["eur_this_month"]["A"] == pytest.approx(0.0)  # already far above 1/3
+    assert sum(eq["weights_after"].values()) == pytest.approx(1.0)
+    assert eq["weights_after"]["A"] < plan["weights_current"]["A"]
+    assert "months" in eq["summary"]
+
+
+def test_project_book_converges_without_selling():
+    book = project_book({"A": 100.0, "B": 0.0}, {"A": 50.0, "B": 50.0}, 100.0, 12)
+    assert book["A"] == pytest.approx(100.0) or book["A"] > 99.9  # A never loses money
+    assert sum(book.values()) == pytest.approx(1300.0)
+    assert book["B"] > 500
+
+
+def test_new_money_plan_with_empty_book_follows_the_target():
+    plan = new_money_plan(_returns(), {}, 100.0, max_weight=0.5)
+    erc = plan["plans"]["erc"]
+    for a, w in erc["target_weights"].items():
+        assert erc["eur_this_month"][a] == pytest.approx(100.0 * w)
+
+
+def test_history_span_names_the_young_line():
+    old = {f"2024-01-{d:02d}": 1.0 for d in range(1, 29)}
+    young = {f"2024-01-{d:02d}": 1.0 for d in range(20, 29)}
+    span = history_span({"OLD": old, "NEW": young})
+    assert span["limited_by"] == "NEW" and span["days"] == 9
+    assert history_span({"OLD": old})["limited_by"] is None
+
+
+def test_real_book_rebalance_defaults_to_plan_sleeves_and_never_sells_core_into_a_stock():
+    """97 % world core + EM core + a tiny stock: the core ETFs are one sleeve,
+    the locked satellite (target 0 %) is neither bought nor sold."""
+    from decimal import Decimal
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.decision.monthly_plan import sleeve_plan
+    from app.foundation.core.db import Base
+    from app.foundation.models.entities import DkbAccount, DkbPosition, User
+    from app.foundation.portfolio.metrics_wrappers import generate_rebalancing_suggestions
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    acct = DkbAccount(user_id=user.id, type="depot", iban="DE01", balance=Decimal("0"), currency="EUR")
+    db.add(acct)
+    db.commit()
+    for isin, ticker, value in (("IE00B4L5Y983", "EUNL.DE", "9700"), ("IE00BKM4GZ66", "EIMI.L", "100"), ("US67066G1040", "NVDA", "200")):
+        db.add(DkbPosition(account_id=acct.id, isin=isin, ticker=ticker, name=ticker, quantity=Decimal("1"),
+                           avg_buy_price=Decimal(value), current_price=Decimal(value), current_value=Decimal(value)))
+    db.commit()
+    plan = sleeve_plan(db, user.id)
+    assert plan["classify"]("IE00BKM4GZ66") == "core" and plan["classify"]("US67066G1040") == "satellite"
+    out = generate_rebalancing_suggestions(db, user.id, contribution_eur=100.0, sleeve_plan=plan)
+    assert out["available"] and out["target_method"] == "sleeves" and "sleeves" in out["methods"]
+    assert out["estimate"] is True and out["not_tax_advice"] is True
+    assert not out["sells"] and all(r["sell_eur"] == 0 for r in out["lines"])
+    nvda = next(r for r in out["lines"] if r["ticker"] == "NVDA")
+    assert nvda["buy_eur"] == 0 and nvda["sleeve"] == "satellite"
+    core = next(s for s in out["sleeves"] if s["key"] == "core")
+    assert core["target_pct"] == 100.0
+
+
+def _sleeve_book():
+    from decimal import Decimal
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.foundation.core.db import Base
+    from app.foundation.models.entities import DkbAccount, DkbPosition, User
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    acct = DkbAccount(user_id=user.id, type="depot", iban="DE01", balance=Decimal("0"), currency="EUR")
+    db.add(acct)
+    db.commit()
+    for isin, ticker, value in (("IE00B4L5Y983", "EUNL.DE", "9400"), ("US67066G1040", "NVDA", "600")):
+        db.add(DkbPosition(account_id=acct.id, isin=isin, ticker=ticker, name=ticker, quantity=Decimal("1"),
+                           avg_buy_price=Decimal(value), current_price=Decimal(value), current_value=Decimal(value)))
+    db.commit()
+    return db, user
+
+
+def test_sleeve_rebalance_takes_running_pick_plans_out_of_the_contribution(monkeypatch):
+    from app.decision import monthly_plan
+    from app.foundation.portfolio.metrics_wrappers import generate_rebalancing_suggestions
+    from app.foundation.settings import upsert_public_settings
+
+    db, user = _sleeve_book()
+    upsert_public_settings(db, {"monthly_contribution_eur": 500})
+    monkeypatch.setattr(monthly_plan, "running_savings_plans", lambda *a, **k: [
+        {"running": True, "monthly_eur": 100.0, "sleeve": "satellite"}])
+    plan = monthly_plan.sleeve_plan(db, user.id)
+    assert plan["other_budget_eur"] == pytest.approx(100.0)
+    out = generate_rebalancing_suggestions(db, user.id, sleeve_plan=plan)
+    assert out["contribution_eur"] == pytest.approx(400.0)
+    core = next(s for s in out["sleeves"] if s["key"] == "core")
+    assert core["buy_eur"] == pytest.approx(400.0)
+    # The locked satellite (6 % vs 0 %) is never sold, so it is not shown as out of band.
+    nvda = next(r for r in out["lines"] if r["ticker"] == "NVDA")
+    assert nvda["in_band"] is True and nvda["sell_eur"] == 0
+    assert "tax_complete" in out
+
+
+def test_sleeve_rebalance_keeps_an_unheld_unlocked_sleeve_visible(monkeypatch):
+    from app.decision import monthly_plan
+    from app.foundation.portfolio.metrics_wrappers import generate_rebalancing_suggestions
+
+    db, user = _sleeve_book()
+    plan = monthly_plan.sleeve_plan(db, user.id)
+    plan["targets"] = {"core": 85.0, "tilt": 15.0, "satellite": 0.0}
+    plan["unlocked"] = {"core": True, "tilt": True, "satellite": False}
+    out = generate_rebalancing_suggestions(db, user.id, contribution_eur=1000.0, sleeve_plan=plan)
+    row = next(s for s in out["suggestions"] if s["sleeve"] == "tilt")
+    assert row["action"] == "buy" and row["estimated_amount"] > 0 and "no fund chosen" in row["ticker"]
+    empty = generate_rebalancing_suggestions(_sleeve_book()[0], "nobody", sleeve_plan=plan)
+    assert empty["estimate"] is True and empty["not_tax_advice"] is True

@@ -43,7 +43,7 @@ class DatabentoProvider(MarketDataProvider):
         if not is_us_listing(symbol):
             # XNAS.ITCH is Nasdaq-only; a stripped EU symbol can collide with
             # an unrelated US ticker and return the wrong price.
-            return self.unavailable("quote", f"Databento covers US listings only; skipping {symbol}.")
+            return self.unavailable("quote", f"Databento covers US listings only; skipping {symbol}.", reason="not_applicable")
         try:
             normalized = strip_exchange_suffix(symbol)
             data = self._get(
@@ -57,14 +57,14 @@ class DatabentoProvider(MarketDataProvider):
             )
             records = data if isinstance(data, list) else []
             if not records:
-                return self.unavailable("quote", f"Databento returned no data for {normalized}.")
+                return self.unavailable("quote", f"Databento returned no data for {normalized}.", reason="no_data")
             latest = records[-1]
             close = _float(latest.get("close"))
             high = _float(latest.get("high"))
             low = _float(latest.get("low"))
             open_ = _float(latest.get("open"))
             if close is None:
-                return self.unavailable("quote", f"Databento returned no close price for {normalized}.")
+                return self.unavailable("quote", f"Databento returned no close price for {normalized}.", reason="no_data")
             as_of = _parse_ts(latest.get("ts_event")) or datetime.now(UTC)
             return provider_result(
                 self.name,
@@ -96,7 +96,7 @@ class DatabentoProvider(MarketDataProvider):
         if not self.api_key:
             return self.unavailable("history", "Databento API key is not configured.")
         if not is_us_listing(symbol):
-            return self.unavailable("history", f"Databento covers US listings only; skipping {symbol}.")
+            return self.unavailable("history", f"Databento covers US listings only; skipping {symbol}.", reason="not_applicable")
         try:
             normalized = strip_exchange_suffix(symbol)
             params: dict[str, Any] = {"dataset": "XNAS.ITCH", "symbols": normalized, "schema": "ohlcv-1d"}
@@ -109,7 +109,7 @@ class DatabentoProvider(MarketDataProvider):
             data = self._get("/timeseries.get_range", params=params)
             records = data if isinstance(data, list) else []
             if not records:
-                return self.unavailable("history", f"Databento returned no bars for {normalized}.")
+                return self.unavailable("history", f"Databento returned no bars for {normalized}.", reason="no_data")
             rows: list[dict[str, Any]] = []
             for r in records:
                 close = _float(r.get("close"))

@@ -91,8 +91,24 @@ class TestInferAction:
     def test_sell_verdict_maps_to_reduce_holding(self):
         assert _infer_action_from_rec(self._rec("SELL")) == "reduce_holding"
 
-    def test_hold_verdict_maps_to_hold_cash(self):
-        assert _infer_action_from_rec(self._rec("HOLD")) == "hold_cash"
+    def test_hold_verdict_keeps_the_position(self):
+        assert _infer_action_from_rec(self._rec("HOLD")) == "hold_position"
+
+    def test_cash_verdict_maps_to_hold_cash(self):
+        assert _infer_action_from_rec(self._rec("RAISE_CASH")) == "hold_cash"
+
+    def test_buy_on_a_bond_horizon_is_buy_bond(self):
+        rec = self._rec("BUY")
+        rec.horizon = "BOND ladder"
+        assert _infer_action_from_rec(rec) == "buy_bond"
+        assert _infer_action_from_rec(self._rec("BOND_BUY")) == "buy_bond"
+
+    def test_every_action_is_reachable(self):
+        reached = {
+            _infer_action_from_rec(self._rec(v))
+            for v in ("BUY", "SELL", "HOLD", "CASH", "ROTATE", "BOND_BUY")
+        }
+        assert reached == set(MWU_ACTIONS)
 
     def test_unknown_verdict_defaults_to_buy_equity(self):
         assert _infer_action_from_rec(self._rec("UNKNOWN_VERDICT")) == "buy_equity"
@@ -219,3 +235,56 @@ class TestUpdateWeightsForOutcome:
         outcome = _make_outcome(db, rec.id, label="pending")
         result = update_weights_for_outcome(db, outcome, rec)
         assert result is None
+
+
+class TestExp3Update:
+    def test_zero_loss_leaves_weights_unchanged(self):
+        from app.decision.regime_advisor import exp3_update
+
+        w = {a: 1.0 / len(MWU_ACTIONS) for a in MWU_ACTIONS}
+        out = exp3_update(w, "buy_equity", 0.0)
+        assert all(abs(out[a] - w[a]) < 1e-12 for a in w)
+
+    def test_loss_is_importance_weighted_and_sums_to_one(self):
+        import math
+
+        from app.decision.regime_advisor import EXPLORATION, LEARNING_RATE, exp3_update
+
+        k = len(MWU_ACTIONS)
+        w = {a: 1.0 / k for a in MWU_ACTIONS}
+        out = exp3_update(w, "buy_equity", 1.0)
+        shrunk = (1 / k) * math.exp(-LEARNING_RATE * 1.0 / (1 / k))
+        expected = shrunk / (shrunk + (k - 1) / k)
+        assert abs(out["buy_equity"] - expected) < 1e-12
+        assert abs(sum(out.values()) - 1.0) < 1e-12
+        assert out["buy_equity"] < 1 / k < out["buy_bond"]
+        assert EXPLORATION > 0
+
+    def test_a_rarely_trusted_action_is_not_blown_up_by_a_loss(self):
+        from app.decision.regime_advisor import MIN_WEIGHT, exp3_update
+
+        w = {a: 1e-9 for a in MWU_ACTIONS}
+        w["buy_equity"] = 1.0
+        out = exp3_update(w, "buy_bond", 1.0)  # taken action has a ~0 probability
+        assert all(v >= MIN_WEIGHT * 0.99 / 2 for v in out.values())
+        assert abs(sum(out.values()) - 1.0) < 1e-9
+        assert out["buy_bond"] > 0
+
+    def test_weights_stay_valid_after_many_losses(self):
+        from app.decision.regime_advisor import exp3_update
+
+        w = {a: 1.0 / len(MWU_ACTIONS) for a in MWU_ACTIONS}
+        for _ in range(5000):
+            w = exp3_update(w, "buy_equity", 1.0)
+        assert abs(sum(w.values()) - 1.0) < 1e-9 and w["buy_equity"] > 0
+
+    def test_new_action_is_added_to_a_learned_regime_without_breaking_the_sum(self):
+        db = _memory_db()
+        db.add_all([
+            RegimeRecommendationWeight(regime_label="bull", action=a, weight=0.2, n_obs=3)
+            for a in MWU_ACTIONS if a != "hold_position"
+        ])
+        db.commit()
+        weights = get_or_init_weights(db, "bull")
+        assert set(weights) == set(MWU_ACTIONS)
+        assert abs(sum(weights.values()) - 1.0) < 1e-9

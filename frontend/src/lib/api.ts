@@ -991,6 +991,8 @@ export type QuantPortfolioSummary = {
 export type QuantPortfolioRisk = {
   available: boolean;
   benchmark?: string | null;
+  /** Share (0-100) of the book that is the benchmark fund itself. */
+  benchmark_overlap_pct?: number | null;
   risk?: QuantRiskMetrics &
     QuantRiskSeries & {
       historical_var: number;
@@ -1175,6 +1177,9 @@ export interface RealRebalanceSuggestion {
   target_weight: number;
   diff: number;
   estimated_amount: number;
+  isin?: string | null;
+  /** Sleeve mode: the plan sleeve the row belongs to. */
+  sleeve?: string;
 }
 
 /** One line of the band rebalance (foundation/portfolio/metrics_wrappers.py). */
@@ -1195,6 +1200,37 @@ export interface RebalanceLine {
   taxable_gain_eur: number | null;
   /** Flat-rate tax on it before any allowance or NV certificate. */
   tax_eur: number | null;
+  /** Where the cost came from: FIFO lots, lots with estimated unit counts, the broker average, or mixed. */
+  gain_basis?: "fifo" | "fifo_estimated" | "average" | "mixed" | null;
+  /** False when a depot of this line has no cost: taxable_gain_eur then only covers the other depots. */
+  gain_complete?: boolean;
+  cost_unknown_depots?: string[];
+  depots?: RebalanceDepot[];
+}
+
+export interface RebalanceSleeve {
+  key: string;
+  label: string;
+  current_pct: number;
+  target_pct: number;
+  after_pct: number | null;
+  buy_eur: number;
+  sell_eur: number;
+  /** A locked sleeve is never bought or sold here. */
+  unlocked: boolean;
+}
+
+export interface RebalanceDepot {
+  source: string;
+  broker: string;
+  account_id: string;
+  position_id: string;
+  quantity: number;
+  value_eur: number;
+  cost_eur: number | null;
+  cost_source: string | null;
+  /** A DKB position without a cost: the Einstandswert can be entered by hand. */
+  can_enter_cost: boolean;
 }
 
 export interface RealRebalanceResponse {
@@ -1212,6 +1248,13 @@ export interface RealRebalanceResponse {
   sells?: boolean;
   tax_eur?: number;
   tax_rate?: number;
+  estimate?: boolean;
+  not_tax_advice?: boolean;
+  tax_note?: string;
+  /** False when a sold line has a depot without a cost: tax_eur then understates the tax. */
+  tax_complete?: boolean;
+  /** Sleeve mode (the plan's core / tilt / stock picks): one row per sleeve. */
+  sleeves?: RebalanceSleeve[];
   unpriced?: string[];
   optimization_status?: string | null;
   optimization_method?: string | null;
@@ -1251,6 +1294,43 @@ export type QuantOptimisation = {
   optimizations?: { methods?: Record<string, AllocationMethod> };
   diagnostics?: Record<string, any>;
 };
+
+/** One candidate method of GET /api/quant/portfolio/allocator (foundation/allocation.py new_money_plan). */
+export interface NewMoneyPlan {
+  label: string;
+  target_weights: Record<string, number>;
+  volatility: number;
+  risk_contributions: Record<string, number>;
+  eur_this_month: Record<string, number>;
+  weights_after: Record<string, number>;
+  months: number;
+  summary: string;
+}
+
+export interface QuantAllocator {
+  available: boolean;
+  reason?: string;
+  assets?: string[];
+  contribution_eur?: number;
+  weights_current?: Record<string, number>;
+  values_current_eur?: Record<string, number>;
+  plans?: Record<string, NewMoneyPlan>;
+  errors?: Record<string, string>;
+  max_weight?: number | null;
+  universe?: Array<{ isin: string; ticker: string | null; name: string | null; held_value_eur: number }>;
+  universe_is_default?: boolean;
+  unresolved?: string[];
+  overlap_note?: string;
+  missing_history?: string[];
+  history?: {
+    days: number;
+    start: string | null;
+    end: string | null;
+    limited_by: string | null;
+    first_dates: Record<string, string>;
+  };
+  covariance?: { estimator: string; shrinkage: number; samples: number; start: string; end: string };
+}
 
 export type QuantFanData = {
   steps: number;
@@ -1355,6 +1435,25 @@ export interface TrustRangeCoverage {
   nominal: number;
 }
 
+/** Online conformal correction of the stated ranges (ADR 0018 §6). */
+export interface TrustAci {
+  active: boolean;
+  matured_weeks: number;
+  weeks_needed: number;
+  alpha_target: number;
+  alpha_now: number;
+  gamma: number;
+  /** Share of a band's width added on each side (negative narrows); null while inactive. */
+  widen_now: number | null;
+  per_date: { date: string; inside: number; n: number }[];
+  corrected: TrustRangeCoverage | null;
+  raw_same_dates: TrustRangeCoverage | null;
+}
+
+export interface TrustTypeRangeCoverage extends TrustRangeCoverage {
+  aci?: TrustAci | null;
+}
+
 export interface TrustReliabilityBin {
   p_mean: number;
   hit_rate: number;
@@ -1367,6 +1466,20 @@ export interface TrustTypeVerdict {
   /** Rebalance dates: the picks of one date form one equal-weight basket. */
   n: number;
   n_needed: number | null;
+  /** True when the simulation did not reach the verdict within its cap: "more than n_needed". */
+  n_needed_is_lower_bound?: boolean;
+  /** Chains of non-overlapping windows the observed issue cadence needs per horizon window. */
+  h_eff?: number | null;
+  /** Median trading days between rebalance dates (1 = daily). */
+  cadence_days?: number | null;
+  /** n_needed dates at this cadence, in years. */
+  years_needed?: number | null;
+  /** Holding period in trading days; also the lag-h of the overlap-robust e-process. */
+  horizon_days?: number;
+  lag_h?: number;
+  /** Resolved calls that could not be scored (no benchmark price). */
+  n_unscored?: number;
+  n_holds?: number;
   n_issue_days: number;
   n_calls?: number;
   n_delisted?: number;
@@ -1384,6 +1497,11 @@ export interface TrustTypeVerdict {
   e_skill_peak?: number;
   e_harm_peak?: number;
   n_tests?: number;
+  /** Legacy per-date e-values if every call still in flight resolved at its worst; only these may cross. */
+  e_skill_lower?: number | null;
+  e_harm_lower?: number | null;
+  /** The calendar-time family whose test sets this type's state (F1 ideas, F3 advisor). */
+  family?: string | null;
   e_skill_crossed_strong: boolean;
   state: TrustState;
   benchmarked: boolean;
@@ -1392,9 +1510,14 @@ export interface TrustTypeVerdict {
   bss: number | null;
   bss_ci: [number, number] | null;
   n_stated_p: number;
+  /** Issue dates behind the stated probabilities (the effective labels). */
+  n_eff_stated?: number;
   spiegelhalter_z: number | null;
+  /** CORP (PAV) reliability points. */
   reliability: TrustReliabilityBin[];
-  range_coverage: TrustRangeCoverage | null;
+  /** Brier decomposition: miscalibration, discrimination, uncertainty. */
+  corp?: { mcb: number; dsc: number; unc: number } | null;
+  range_coverage: TrustTypeRangeCoverage | null;
   calibration_caption: string | null;
   next_resolution_at: string | null;
   note: string | null;
@@ -1406,14 +1529,270 @@ export interface TrustVerdict {
   /** Rebalance dates of the benchmarked types: the "n" of "n of ~600". */
   resolved_units?: number;
   n_needed?: number | null;
+  n_needed_is_lower_bound?: boolean;
+  h_eff?: number | null;
+  cadence_days?: number | null;
+  years_needed?: number | null;
   target_hit_rate?: number;
   n_tests?: number;
   fdr_level?: number;
+  /** e-value one rejection needs under e-BH (K / alpha). */
+  ebh_threshold?: number | null;
+  horizon_days?: number | null;
+  min_calls_for_state?: number | null;
+  n_unscored?: number;
+  /** Assumed true mean excess return per 21-day date behind the time-to-know number. */
+  assumed_edge?: number | null;
+  /** Assumed standard deviation of one date's basket excess return. */
+  assumed_sd?: number | null;
+  /** Excess returns are clipped to +-this before betting. */
+  excess_clip?: number | null;
+  min_calls_for_reliability?: number | null;
+  /** Issue dates before any probability is stated (ADR 0018 §6). */
+  min_n_eff_for_probability?: number | null;
+  min_units_for_interval?: number | null;
+  min_calls_for_interval?: number | null;
   skill: TrustSkill | null;
   state: TrustState;
   types: TrustTypeVerdict[];
   frozen_at_issue: boolean;
   method_note: string;
+  legacy_method_note?: string | null;
+  first_resolution_due?: string | null;
+  /** The pre-registered calendar-time tests (ADR 0018). */
+  daily_tests?: TrustDailyTests | null;
+}
+
+export type TrustFamilyKey = "F1" | "F2" | "F3";
+
+export interface TrustPosterior {
+  /** Prior standard deviation of the edge, per 21 trading days. */
+  tau_21d: number;
+  n: number;
+  sample_mean_21d: number;
+  sample_se_21d: number;
+  shrinkage: number;
+  mean_21d: number;
+  ci_low_21d: number;
+  ci_high_21d: number;
+  /** Posterior chance the edge is positive. Never a verdict. */
+  p_positive: number;
+  sensitivity: { tau_21d: number; p_positive: number; mean_21d: number }[];
+}
+
+export interface TrustTimeToKnow {
+  assumption_unit: "excess_per_21d" | "rank_ic";
+  assumption: number;
+  ic_sd?: number | null;
+  basket_sd_21d?: number | null;
+  sd_daily: number;
+  sd_measured?: boolean;
+  q10_days: number | null;
+  q50_days: number | null;
+  q90_days: number | null;
+  q10_years: number | null;
+  q50_years: number | null;
+  q90_years: number | null;
+  max_days: number;
+  p_within: { years: number; p: number }[];
+  grid: { assumption: number; q50_days: number | null; q50_years: number | null }[];
+}
+
+export interface TrustFamilyTest {
+  family: TrustFamilyKey;
+  series: "ideas" | "ranking" | "advisor";
+  role: "primary" | "secondary";
+  question: string;
+  start: string;
+  n_days: number;
+  n_empty_days?: number;
+  n_stale_days?: number;
+  n_clipped?: number;
+  first_day: string | null;
+  last_day: string | null;
+  mean_open?: number | null;
+  mean_21d: number | null;
+  mean_ci_21d: [number, number] | null;
+  sd_daily?: number | null;
+  e_skill: number;
+  e_harm: number;
+  e_skill_peak?: number;
+  e_harm_peak?: number;
+  threshold: number;
+  n_tests: number;
+  state: TrustState;
+  rho1?: number | null;
+  rho1_flag?: boolean;
+  pre_registration: { n_days: number; mean_21d: number | null };
+  path: { day: string; e_skill: number; e_harm: number }[];
+  posterior: TrustPosterior | null;
+  time_to_know: TrustTimeToKnow;
+}
+
+export interface TrustDailyTests {
+  start: string;
+  clip: number;
+  sigma_ref: number;
+  prior_var: number;
+  bet_cap: number;
+  fdr_level: number;
+  threshold: number;
+  min_days_for_state: number;
+  horizon_days: number;
+  families: TrustFamilyTest[];
+  paired?: TrustPairedComparison | null;
+  factor_neutral?: TrustFactorNeutral | null;
+}
+
+/** Advisor minus Discover picks on the days both had open calls; descriptive only. */
+export interface TrustPairedComparison {
+  question: string;
+  start: string;
+  n_days: number;
+  n_days_pre_registration: number;
+  n_days_advisor_only: number;
+  n_days_ideas_only: number;
+  mean_21d: number | null;
+  mean_ci_21d: number[] | null;
+  share_advisor_ahead: number | null;
+  enough_days: boolean;
+  path: { day: string; cumulative: number }[];
+}
+
+/** ADR 0018 §8: the factor study (recorded once) and the gated secondary row. */
+export interface TrustFactorNeutral {
+  study: {
+    status: "waiting" | "decided";
+    spec_version: number;
+    n_backfilled_picks?: number | null;
+    spec?: Record<string, unknown> | null;
+    decision?: "build" | "drop" | "neither" | null;
+    oos_r2?: number | null;
+    n_days?: number | null;
+    n_oos_days?: number | null;
+    betas?: Record<string, number> | null;
+    computed_at?: string | null;
+  };
+  row: {
+    n_days: number;
+    first_day: string | null;
+    last_day: string | null;
+    mean_21d: number | null;
+    mean_ci_21d: number[] | null;
+  } | null;
+  gate: { build: number; drop: number; min_oos_days: number; min_fit_days: number };
+}
+
+export interface TrustIcSummary {
+  n_runs: number;
+  mean: number | null;
+  t_nw: number | null;
+  icir: number | null;
+  share_positive: number | null;
+}
+
+export interface TrustPairedGap {
+  n_runs: number;
+  mean_gap: number | null;
+  ci: [number, number] | null;
+}
+
+export interface TrustTierRate {
+  n_runs: number;
+  hit_rate: number | null;
+  range: [number, number] | null;
+}
+
+export interface TrustRankingSection {
+  n_runs: number;
+  n_cohort_runs: number;
+  n_snapshots: number;
+  n_outcomes: number;
+  outcome_status: Record<string, number>;
+  first_issue: string | null;
+  last_issue: string | null;
+  ic: TrustIcSummary;
+  ic_decay: { horizon_days: number; n_runs: number; mean_ic: number | null }[];
+  sector_neutral_ic: TrustIcSummary;
+  quintiles: { quintile: number; n_runs: number; mean_excess: number | null }[];
+  picked_vs_rest: TrustPairedGap;
+  gate_check: (TrustPairedGap & { reject_stage: string; n_names: number })[];
+  tiers?: { n_eff: number; base: TrustTierRate; tiers: (TrustTierRate & { tier: "top" | "middle" | "bottom" })[] } | null;
+  etf_ic: TrustIcSummary;
+}
+
+export interface TrustRanking {
+  horizon_days: number;
+  min_stocks: number;
+  ic_hac_lag: number;
+  live: TrustRankingSection;
+  exploratory: TrustRankingSection | null;
+  verdict_note: string;
+}
+
+export interface TrustTiltCard {
+  strategy: string | null;
+  label: string | null;
+  region: string | null;
+  gates_tilt: boolean;
+  citation: string | null;
+  passed: boolean;
+  long_short_t: number | null;
+  t_bar: number;
+  months: number | null;
+  start: string | null;
+  end: string | null;
+  stale: boolean;
+  decay: { full_period: number | null; last_10_years: number | null; after_haircut: number | null };
+  tracking_error_annual: number | null;
+  worst_5y_excess: number | null;
+  checks: { name: string; label: string; value: number | null; passed: boolean }[];
+  fan: { years: number; percentiles: { p: number; cumulative_excess: number }[]; share_beat: number } | null;
+  computed_at: string | null;
+}
+
+export interface TrustRankingModelRow {
+  model: string | null;
+  months: number | null;
+  first_month: string | null;
+  last_month: string | null;
+  ic_mean: number | null;
+  ic_t: number | null;
+  long_short_annual: number | null;
+  long_only_annual: number | null;
+  recent_months: number | null;
+  recent_ic_mean: number | null;
+  recent_long_short_annual: number | null;
+  dsr: number | null;
+}
+
+export interface TrustHistory {
+  title: string;
+  tilt_cards: TrustTiltCard[];
+  ranking_model: {
+    available: boolean;
+    status: string;
+    models: TrustRankingModelRow[];
+    pbo: number | null;
+    data_to: string | null;
+    stale: boolean;
+    computed_at: string | null;
+  };
+  satellite: {
+    available: boolean;
+    unlocked: boolean;
+    reason: string | null;
+    dsr_bar: number;
+    best: { name: string | null; sharpe_annual: number | null; mean_annual: number | null; dsr: number | null; months: number | null } | null;
+    n_candidates: number;
+    pbo: number | null;
+    computed_at: string | null;
+  };
+  tilt_review: { status: "not_live" | "too_early" | "inside" | "under_review"; note: string };
+  n_trials: number | null;
+  haircut: { publication_decay: number; implementation_cost: number; after_tax_factor: number };
+  not_covered: string;
+  disclosures: string[];
 }
 
 export interface TrustCall {
@@ -1441,6 +1820,8 @@ export interface TrustCalls {
   items: TrustCall[];
   worst_misses: TrustCall[];
   frozen_at_issue: boolean;
+  /** Longest holding period (trading days) of the benchmarked calls. */
+  horizon_days?: number | null;
 }
 
 export type ChatConversation = {
@@ -1756,6 +2137,12 @@ export interface DriftWithTargetsResponse {
   current: Record<string, number>;
   targets: TargetAllocationItem[];
   drift: Record<string, number>;
+  sleeves?: {
+    targets: Record<string, number>;
+    unlocked: Record<string, boolean>;
+    labels: Record<string, string>;
+    band_pp: number;
+  };
 }
 
 export interface TargetAllocationItem {
@@ -1792,9 +2179,11 @@ export interface PaperPortfolioSummary {
   /** Start of the current run (a reset moves it). */
   inception_at?: string;
   baseline_value?: number;
-  /** Gross dividends credited to cash since inception, EUR. */
+  /** Dividends credited to cash since inception, EUR, net of source withholding tax. */
   dividends_eur?: number;
   benchmark?: PaperBenchmark;
+  /** Holdings valued at a quote too old to trade on (still counted at that price). */
+  stale_quotes?: string[];
 }
 
 /** The same starting value in MSCI World EUR from the paper run's inception. */
@@ -1806,6 +2195,8 @@ export interface PaperBenchmark {
   total_return_pct?: number;
   value?: number;
   excess_return_pct?: number;
+  /** "seed_quote": the index price taken when the run was seeded; "close": the close on or before inception (older runs). */
+  base_source?: string;
 }
 
 /** GET /api/paper-portfolio/{id}/performance */
@@ -2269,6 +2660,10 @@ export interface DiscoverCandidate {
   // rather than auto-approved. Withheld candidates stay visible with this
   // badge; never silently hidden.
   withheld?: boolean;
+  // Rank by composite among the run's evaluable stocks (shadow ledger);
+  // null for ETFs, rejected names and runs before the ledger existed.
+  pool_rank?: number | null;
+  pool_size?: number | null;
 }
 
 /**
@@ -2590,6 +2985,42 @@ export interface RunningSavingsPlan {
   /** Null for a schedule the plan does not know (left out of the totals). */
   monthly_eur: number | null;
   next_execution_date: string | null;
+  /** The plan's yearly increase in percent (sc: dynamizationRate), when it has one. */
+  dynamization_rate?: number | null;
+  /** False for a paused plan or one whose next run is overdue; it is listed but not counted. */
+  running?: boolean;
+  not_running_reason?: "paused" | "overdue" | null;
+}
+
+export interface PlanSavingsPlans {
+  items: RunningSavingsPlan[];
+  monthly_eur: number;
+  by_sleeve: Record<string, number>;
+  stopped?: RunningSavingsPlan[];
+  /** When the plans were last really fetched from the broker, and whether the latest fetch failed. */
+  synced_at?: string | null;
+  last_fetch_failed?: boolean;
+  /** Running plans into locked sleeves (e.g. stock picks) are taken out of the contribution. */
+  other_budget_eur?: number;
+  other_budget_pct?: number;
+  core_needed_eur?: number;
+}
+
+export interface PlanEvidence {
+  tilt: { passed: boolean; unlocked: boolean; reason: string };
+  satellite: {
+    unlocked: boolean;
+    reason: string;
+    gate: { computed_at: string | null; as_of: string | null; n_trials: number; stale: boolean } | null;
+  };
+}
+
+export interface SuggestedFund {
+  sleeve: PlanSleeveKey;
+  isin: string | null;
+  name: string;
+  why: string;
+  overridden: boolean;
 }
 
 export interface PlanCash {
@@ -2620,7 +3051,8 @@ export interface MonthlyPlan {
   brokers_connected?: string[];
   sleeves: PlanSleeve[];
   actions: PlanAction[];
-  savings_plans?: { items: RunningSavingsPlan[]; monthly_eur: number; by_sleeve: Record<string, number> } | null;
+  savings_plans?: PlanSavingsPlans | null;
+  evidence?: PlanEvidence | null;
   cash?: PlanCash | null;
   /** Emerging-markets share of the core, looking through the funds. */
   /** em_pct is null when no core fund has a known emerging-markets split. */
@@ -2628,6 +3060,8 @@ export interface MonthlyPlan {
   notes?: string[];
   never_sells: boolean;
   not_investment_advice: boolean;
+  suggested_funds?: SuggestedFund[];
+  acc_dist_note?: string;
 }
 
 export async function getMonthlyPlan(): Promise<MonthlyPlan> {
@@ -2948,6 +3382,27 @@ export interface FactorEvidenceCard {
 
 export const getFactorPremia = () => api<FactorEvidenceCard[]>("/api/evidence/factor-premia");
 
+export interface IngredientAttributionRow {
+  signal: string;
+  n_runs: number;
+  mean_ic: number | null;
+  t_stat: number | null;
+  p_value: number | null;
+  p_holm: number | null;
+}
+
+export interface IngredientAttribution {
+  horizon_days: number;
+  n_runs: number;
+  n_stocks: number;
+  rho_bar: number | null;
+  effective_n_stocks: number | null;
+  ingredients: IngredientAttributionRow[];
+}
+
+export const getIngredientAttribution = () =>
+  api<IngredientAttribution>("/api/evidence/ingredient-attribution");
+
 export async function getNTrialsSummary(): Promise<NTrialsSummaryResponse> {
   return api<NTrialsSummaryResponse>("/api/evidence/n-trials");
 }
@@ -3050,6 +3505,8 @@ export interface PendingRecommendationsResponse {
   items: PendingRecommendation[];
   /** Every pending item, not just the ones in `items`. */
   total: number;
+  /** Ideas held back because their evidence is not proven yet (research, not decisions). */
+  research_count?: number;
 }
 
 // --- Admin: DKB data repair (T1.5) ----------------------------------------

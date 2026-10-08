@@ -86,3 +86,52 @@ def test_two_brokers_sum_per_isin():
     perf = _run(db, user, {_day(0): 100.0, _day(1): 90.0}, bench={})
     assert perf["value_start_eur"] == pytest.approx(1500.0)
     assert perf["twr"] == pytest.approx(-0.10)
+
+
+def _dividend(db, user, i, amount, isin="IE00B4L5Y983"):
+    from app.foundation.models.entities import TaxLedgerEvent
+    d = D0 + timedelta(days=i)
+    db.add(TaxLedgerEvent(user_id=user.id, tax_year=d.year, event_date=d, event_type="dividend", isin=isin,
+                          gross_eur=Decimal(str(amount))))
+
+
+def test_dividend_counts_once_in_twr_and_once_in_irr():
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    _snap(db, user, 0, 10)
+    _dividend(db, user, 1, 50)
+    _dividend(db, user, 1, 999, isin="US0000000000")  # a fund this book never held
+    db.commit()
+    perf = _run(db, user, {_day(0): 100.0, _day(1): 100.0}, bench={})
+    assert perf["twr"] == pytest.approx(0.05)  # 50 on 1,000
+    # The dividend leaves the book as cash: a -50 flow, so contributions are -50, once.
+    assert perf["net_contributions_eur"] == pytest.approx(-50.0)
+
+
+def test_weekend_dividend_lands_on_the_next_priced_day():
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    _snap(db, user, 0, 10)
+    _snap(db, user, 3, 10)
+    _dividend(db, user, 1, 30)  # day 1 has no price and no snapshot
+    db.commit()
+    perf = _run(db, user, {_day(0): 100.0, _day(3): 100.0}, bench={})
+    assert perf["twr"] == pytest.approx(0.03)
+
+
+def test_a_broker_appearing_later_is_a_flow_not_return():
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    _snap(db, user, 0, 10, source="dkb")
+    _snap(db, user, 1, 10, source="dkb")
+    _snap(db, user, 1, 5, source="scalable")
+    db.commit()
+    perf = _run(db, user, {_day(0): 100.0, _day(1): 100.0}, bench={})
+    assert perf["twr"] == pytest.approx(0.0)
+    assert perf["net_contributions_eur"] == pytest.approx(500.0)

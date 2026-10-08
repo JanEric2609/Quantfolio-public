@@ -20,7 +20,8 @@ const FILTERS: { key: TrustTypeKey | null; label: string }[] = [
 
 function statedText(call: TrustCall): string {
   const parts: string[] = [];
-  if (call.stated_p != null) parts.push(fmtPct(call.stated_p));
+  // A mandate's confidence is the model's own number, not a calibrated probability.
+  if (call.stated_p != null) parts.push(call.type === "mandates" ? `${fmtPct(call.stated_p)} (model's own)` : fmtPct(call.stated_p));
   if (call.stated_range) parts.push(`${fmtPp(call.stated_range[0], 0)} to ${fmtPp(call.stated_range[1], 0)}`);
   return parts.length ? parts.join(" · ") : "—";
 }
@@ -197,7 +198,10 @@ export function CallsTab() {
         <EmptyState
           icon={ListChecks}
           title="No resolved calls yet"
-          description="Calls appear here once their horizon has passed and they have been scored against your ETF. Discover ideas and advisor trades resolve after 21 trading days."
+          description={
+            "Calls appear here once their horizon has passed and they have been scored against your ETF. " +
+            `Discover ideas and advisor trades resolve after ${data?.horizon_days ? `${data.horizon_days} trading days` : "their horizon"}.`
+          }
         />
       ) : (
         <>

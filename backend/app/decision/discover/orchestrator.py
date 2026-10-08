@@ -32,6 +32,7 @@ from app.decision.discover.dossier_writer import (
 from app.decision.discover.calibrator import calibrate_prediction
 from app.decision.discover.ledger import DEFAULT_HORIZON_DAYS
 from app.decision.discover.predictor import store_prediction
+from app.decision.discover.shadow_ledger import capture_snapshot, discover_stamp
 from app.decision.discover.pipeline import (
     LLM_MAX_CANDIDATES,
     attach_earnings_calendar,
@@ -576,6 +577,34 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
         shortlisted = tradeable_shortlisted
         db.commit()
 
+        # Resolve active configs for the pipeline run so the dossier writer and
+        # prediction ledger use the same version throughout.
+        signal_cfg = get_or_seed_active_config(db, "signal_weights")
+        prompt_cfg = get_or_seed_active_config(db, "prompt_template")
+        prompt_json = prompt_cfg.config_json if isinstance(prompt_cfg.config_json, dict) else {}
+
+        # ------------------------------------------------------------------
+        # 3c. Shadow ledger (ADR 0018 §5): freeze every scored candidate as
+        #     issued, before dossiers rewrite any working row. Best-effort:
+        #     evidence capture must never fail the run.
+        # ------------------------------------------------------------------
+        stamp = _run_stamp(db, run_id, signal_cfg, prompt_json)
+        try:
+            capture_snapshot(
+                db,
+                run_id=run_id,
+                user_id=user_id,
+                issued_at=datetime.now(UTC),
+                pipeline_results=pipeline_results,
+                shortlisted_symbols=top_symbols,
+                picked_symbols={c.symbol for c in shortlisted},
+                stamp=stamp,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Shadow-ledger snapshot failed for run %s", run_id)
+
         # ------------------------------------------------------------------
         # 4. Dossier generation for shortlisted candidates
         # ------------------------------------------------------------------
@@ -587,14 +616,9 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
             message="Generating dossiers...",
         ))
 
-        # Resolve active configs for the pipeline run so the dossier writer and
-        # prediction ledger use the same version throughout.
-        signal_cfg = get_or_seed_active_config(db, "signal_weights")
-        prompt_cfg = get_or_seed_active_config(db, "prompt_template")
-
         dossier_count, ledger_fields_by_symbol = _generate_dossiers(
             db, run, shortlisted, profile,
-            prompt_config=prompt_cfg.config_json if isinstance(prompt_cfg.config_json, dict) else {},
+            prompt_config=prompt_json,
             cancel_token=cancel_token,
             started_at=started_at,
             config_id=signal_cfg.id,
@@ -639,6 +663,8 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
                     "concerns": result.get("concerns", []),
                 }
                 composite = result.get("composite_score", 0.0)
+                ledger_fields = dict(ledger_fields_by_symbol.get(c.symbol, {}))
+                generated_by = ledger_fields.pop("dossier_generated_by", None)
                 pred = store_prediction(
                     db,
                     symbol=c.symbol,
@@ -650,7 +676,8 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
                     isin=c.isin,
                     config_id=signal_cfg.id,
                     horizon_days=DEFAULT_HORIZON_DAYS,
-                    **ledger_fields_by_symbol.get(c.symbol, {}),
+                    provenance_json=_prediction_stamp(stamp, generated_by),
+                    **ledger_fields,
                 )
                 created_predictions.append(pred)
 
@@ -665,7 +692,7 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
             # that failed calibration attempt, not earlier ones in this loop.
             for pred in created_predictions:
                 try:
-                    calibrate_prediction(db, pred.id, user_id=user_id, min_rows=20)
+                    calibrate_prediction(db, pred.id, user_id=user_id)
                     db.commit()
                 except Exception:
                     logger.exception("Calibration failed for prediction %s", pred.id)
@@ -689,6 +716,38 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
         logger.info("Discover run %s cancelled (late stage)", run_id)
         _finalise_run(db, run, "cancelled", started_at=started_at)
         return
+
+
+def _run_stamp(db: Session, run_id: str, signal_cfg: Any, prompt_json: dict[str, Any]) -> dict[str, Any]:
+    """The run's provenance stamp (ADR 0018 §10); a failure degrades it, never the run."""
+    config_json = signal_cfg.config_json if isinstance(signal_cfg.config_json, dict) else {}
+    try:
+        return discover_stamp(
+            db,
+            run_id=run_id,
+            signal_config=config_json,
+            signal_config_id=signal_cfg.id,
+            prompt_config=prompt_json,
+            horizon_days=DEFAULT_HORIZON_DAYS,
+        )
+    except Exception as exc:
+        logger.exception("Provenance stamp failed for run %s", run_id)
+        return {
+            "provenance_schema_version": 0,
+            "source": "discover",
+            "run_id": run_id,
+            "degradation_flags": ["stamp_failed"],
+            "error": str(exc)[:200],
+        }
+
+
+def _prediction_stamp(stamp: dict[str, Any], dossier_generated_by: str | None) -> dict[str, Any]:
+    """The run stamp plus how this pick's dossier was written (LLM or template)."""
+    out = dict(stamp)
+    out["dossier_generated_by"] = dossier_generated_by
+    if dossier_generated_by not in (None, "llm"):
+        out["degradation_flags"] = sorted({*stamp.get("degradation_flags", []), "dossier_not_llm"})
+    return out
 
 
 def _generate_dossiers(
@@ -774,6 +833,8 @@ def _generate_dossiers(
                 "expected_return_low": range_low,
                 "expected_return_high": range_high,
                 "thesis": thesis if isinstance(thesis, str) and thesis.strip() else None,
+                # Provenance only (popped before store_prediction).
+                "dossier_generated_by": dossier.get("generated_by") or "unknown",
             }
             if dossier.get("dossier_id"):
                 cand.dossier_id = dossier["dossier_id"]

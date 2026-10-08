@@ -1,8 +1,8 @@
 """Factor premia on the JKP panel (report Phase 3): the evidence behind the tilt.
 
-Builds value, momentum, profitability, investment and value+momentum
-portfolios from the JKP characteristics panel and grades each against a
-pre-registered, prior-informed test. See ``CONTEXT.md``.
+Builds value, momentum, profitability, investment, value+momentum, low
+volatility and size portfolios from the JKP characteristics panel and grades
+each against a pre-registered, prior-informed test. See ``CONTEXT.md``.
 """
 
 from app.lab.factor_premia.evidence import EvidenceCard, evaluate

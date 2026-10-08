@@ -1208,3 +1208,23 @@ def compute_bucketed_rps(
         rps = ((0.05 - below) ** 2 + (0.95 - at_or_below_high) ** 2) / 2.0
         scores.append(rps)
     return float(sum(scores) / len(scores))
+
+
+def holm_bonferroni(p_values: Sequence[float]) -> list[float]:
+    """Holm step-down adjusted p-values for testing many hypotheses at once.
+
+    Sorts the raw p-values ascending and multiplies the i-th smallest by the
+    number of hypotheses not yet rejected (``m - i``), carrying the running
+    maximum so the adjusted values stay monotone, capped at 1. Controls the
+    family-wise error rate without assuming independence — the replay's
+    per-ingredient ("more voices") analysis and the live ingredient table
+    both correct across ingredients this way (ADR 0019 §§4-5).
+    """
+    raw = [min(1.0, max(0.0, float(p))) for p in p_values]
+    order = sorted(range(len(raw)), key=lambda i: raw[i])
+    adjusted = [0.0] * len(raw)
+    running = 0.0
+    for rank, idx in enumerate(order):
+        running = max(running, min(1.0, (len(raw) - rank) * raw[idx]))
+        adjusted[idx] = running
+    return adjusted

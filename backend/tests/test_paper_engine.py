@@ -143,7 +143,7 @@ def test_dividends_are_credited_once_for_the_units_held_at_the_ex_date():
     db = _memory_db()
     p = _portfolio(db, _user(db).id, cash="1000")
     _listing(db, "DIST.DE", "EUR")
-    db.add(PaperHolding(portfolio_id=p.id, ticker="DIST.DE", name="Dist", quantity=Decimal("10"),
+    db.add(PaperHolding(portfolio_id=p.id, ticker="DIST.DE", isin="IE00B4L5Y983", name="iShares Dist UCITS ETF", quantity=Decimal("10"),
                         avg_buy_price=Decimal("20"), currency="EUR"))
     db.commit()
     ex = date.today() - timedelta(days=5)
@@ -175,7 +175,8 @@ def test_passive_benchmark_is_the_same_start_in_msci_world_eur():
     closes = {(start - timedelta(days=1)).isoformat(): 100.0, start.isoformat(): 100.0,
               date.today().isoformat(): 110.0}
     with patch("app.foundation.eur_prices.eur_closes", return_value=closes), \
-            patch("app.foundation.eur_prices.benchmark_ticker", return_value="EUNL.DE"):
+            patch("app.foundation.eur_prices.benchmark_ticker", return_value="EUNL.DE"), \
+            patch("app.decision.paper_portfolio.paper_quote_eur", return_value={"price": None}):
         bench = passive_benchmark(db, p, Decimal("1000"), series=True)
     assert bench["available"] and bench["symbol"] == "EUNL.DE"
     assert abs(bench["total_return_pct"] - 0.10) < 1e-12 and abs(bench["value"] - 1100.0) < 1e-9

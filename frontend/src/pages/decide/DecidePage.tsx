@@ -151,7 +151,7 @@ export function DecidePage() {
       toast.success(`${DONE_TEXT[action]}: ${label}`);
       // Drop the card now; the refetch below settles the real list and the badge count.
       queryClient.setQueryData<PendingRecommendationsResponse>(PENDING_RECOMMENDATIONS_KEY, (old) =>
-        old ? { items: old.items.filter((item) => item.id !== id), total: Math.max(0, old.total - 1) } : old,
+        old ? { ...old, items: old.items.filter((item) => item.id !== id), total: Math.max(0, old.total - 1) } : old,
       );
       queryClient.invalidateQueries({ queryKey: PENDING_RECOMMENDATIONS_KEY });
       queryClient.invalidateQueries({ queryKey: ACCEPTED_KEY });
@@ -170,6 +170,7 @@ export function DecidePage() {
 
   const recs = pending.data?.items ?? [];
   const total = pending.data?.total ?? 0;
+  const researchCount = pending.data?.research_count ?? 0;
   const notes = (notifications.data?.items ?? []).slice(0, NOTIFICATIONS_SHOWN);
   const unread = notifications.data?.unread_count ?? 0;
 
@@ -193,7 +194,13 @@ export function DecidePage() {
         ) : recs.length === 0 ? (
           <div className="flex items-center gap-3 rounded-lg border border-border bg-surface p-4 text-sm">
             <CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" />
-            <span>Nothing is waiting for a decision.</span>
+            <span>
+              No decision waiting.
+              {researchCount > 0 &&
+                (researchCount === 1
+                  ? " 1 idea is in Discover as research. It has not passed the evidence test yet."
+                  : ` ${researchCount} ideas are in Discover as research. None has passed the evidence test yet.`)}
+            </span>
           </div>
         ) : (
           <>

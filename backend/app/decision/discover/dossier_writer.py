@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
@@ -45,6 +46,8 @@ from app.foundation.text_safety import ascii_safe
 logger = logging.getLogger(__name__)
 
 _MAX_JSON_RETRIES = 2
+# How long a proven Discover idea waits for a decision before it lapses.
+DISCOVER_DECISION_DAYS = 14
 
 # Bounds the two unbounded fields in the schema. A grammar constrains
 # *structure*, not *termination* — inside an unbounded `"thesis": "…"` every
@@ -829,14 +832,15 @@ def write_dossier(
             data_quality_score=__import__("decimal").Decimal(str(_as_dict(scores.get("history_ingest")).get("coverage", 0.0))),
             risk_score=__import__("decimal").Decimal(str(_as_dict(scores.get("momentum_quality")).get("volatility_6m", 0.5))),
             portfolio_fit_score=__import__("decimal").Decimal(str(_as_dict(scores.get("portfolio_fit")).get("fit_score", 0.0))),
-            # Track B2: auto-withhold. "unproven" (enough resolved history to
-            # judge, and it doesn't show a significant edge) is the only
-            # status that withholds — it stays "draft" instead of the default
-            # "approved_candidate" fast path every other status takes,
-            # including cold-start ("insufficient_data"), which fails open.
+            # Only a proven track record puts a Discover idea in front of the
+            # owner as a decision. Anything else (unproven, insufficient_data,
+            # missing gate) stays as a "draft": the row is kept and Discover
+            # shows it as research, but it never reaches the review inbox.
             approval_state=(
-                "draft" if _as_dict(track_record_gate).get("status") == "unproven" else "approved_candidate"
+                "approved_candidate" if _as_dict(track_record_gate).get("status") == "proven" else "draft"
             ),
+            # An undecided idea goes stale; the inbox stops counting it then.
+            recommendation_expiry=datetime.now(UTC) + timedelta(days=DISCOVER_DECISION_DAYS),
         )
         db.add(rec_row)
         db.commit()
@@ -885,7 +889,7 @@ DEFAULT_SHRINKAGE = 0.10
 # dynamic MZ-slope fit takes over from the hardcoded constant above. The
 # cash-attractor audit's simulation found the standard error unacceptably
 # wide even at n=22 pooled across all types — a per-class fit needs its own
-# bar, kept equal to the pooled calibrator's min_rows=20 only until real
+# bar, kept equal to the former pooled calibrator's min_rows=20 only until real
 # per-class volume data justifies raising it independently per class.
 MZ_MIN_ROWS_BY_TYPE: dict[str, int] = {
     "money_market": 20,

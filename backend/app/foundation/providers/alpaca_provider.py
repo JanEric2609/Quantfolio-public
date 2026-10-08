@@ -45,7 +45,7 @@ class AlpacaProvider(MarketDataProvider):
         if not is_us_listing(symbol):
             # Stripping the suffix risks matching an unrelated US ticker
             # (SHEL.AS → SHEL) and returning the wrong price.
-            return self.unavailable("quote", f"Alpaca covers US listings only; skipping {symbol}.")
+            return self.unavailable("quote", f"Alpaca covers US listings only; skipping {symbol}.", reason="not_applicable")
         try:
             normalized = strip_exchange_suffix(symbol)
             data = self._get(f"/stocks/{normalized}/quotes/latest")
@@ -91,7 +91,7 @@ class AlpacaProvider(MarketDataProvider):
         if not self.enabled or not self.api_key or not self.api_secret:
             return self.unavailable("history", "Alpaca API key/secret is not configured.")
         if not is_us_listing(symbol):
-            return self.unavailable("history", f"Alpaca covers US listings only; skipping {symbol}.")
+            return self.unavailable("history", f"Alpaca covers US listings only; skipping {symbol}.", reason="not_applicable")
         try:
             normalized = strip_exchange_suffix(symbol)
             params: dict[str, Any] = {"timeframe": "1Day"}

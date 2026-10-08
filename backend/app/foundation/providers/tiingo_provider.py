@@ -67,7 +67,7 @@ class TiingoProvider(MarketDataProvider):
             data = self._get("/iex/", {"tickers": symbol})
             records = data if isinstance(data, list) else []
             if not records:
-                return self.unavailable("quote", f"Tiingo IEX returned no data for {symbol}.")
+                return self.unavailable("quote", f"Tiingo IEX returned no data for {symbol}.", reason="no_data")
             latest = records[0]
             last = _float(latest.get("tngoLast"))
             bid = _float(latest.get("bidPrice"))
@@ -76,7 +76,7 @@ class TiingoProvider(MarketDataProvider):
             if close is None and bid is not None and ask is not None:
                 close = (bid + ask) / 2
             if close is None or close <= 0:
-                return self.unavailable("quote", f"Tiingo returned no usable price for {symbol}.")
+                return self.unavailable("quote", f"Tiingo returned no usable price for {symbol}.", reason="no_data")
             as_of = _parse_ts(latest.get("timestamp")) or datetime.now(UTC)
             return provider_result(
                 self.name,
@@ -129,7 +129,7 @@ class TiingoProvider(MarketDataProvider):
             data = self._get(f"/tiingo/daily/{symbol}/prices", params)
             records = data if isinstance(data, list) else []
             if not records:
-                return self.unavailable("history", f"Tiingo returned no prices for {symbol}.")
+                return self.unavailable("history", f"Tiingo returned no prices for {symbol}.", reason="no_data")
             rows: list[dict[str, Any]] = []
             for r in records:
                 close = _float(r.get("adjClose")) or _float(r.get("close"))

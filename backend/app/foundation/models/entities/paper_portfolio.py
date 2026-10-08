@@ -48,6 +48,11 @@ class PaperPortfolio(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=now_utc, onupdate=now_utc
     )
+    # EUR price of the benchmark at the moment the run was seeded, so the
+    # passive benchmark starts at the same instant and price source as the
+    # sleeve. NULL on older rows (the close on/before inception is used).
+    benchmark_base_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    benchmark_base_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     holdings: Mapped[list["PaperHolding"]] = relationship(
         back_populates="portfolio", lazy="selectin"
@@ -175,7 +180,7 @@ class LlmAdviceCard(Base):
 
 
 class PaperCashFlow(Base):
-    """Cash a paper portfolio receives without trading: dividends (gross, in EUR)."""
+    """Cash a paper portfolio receives without trading: dividends (net of source withholding tax, in EUR)."""
 
     __tablename__ = "paper_cash_flows"
     __table_args__ = (UniqueConstraint("portfolio_id", "kind", "ticker", "date", name="uq_paper_cash_flow"),)

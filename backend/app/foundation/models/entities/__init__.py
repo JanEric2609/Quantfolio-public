@@ -147,8 +147,15 @@ from .security import (
     SecurityListing as SecurityListing,
 )
 from .settings import ApiKey as ApiKey, AppSetting as AppSetting
+from .plan_action import MonthlyPlanAction as MonthlyPlanAction
 from .target_allocation import TargetAllocation as TargetAllocation
 from .trial_ledger import TrialLedgerEntry as TrialLedgerEntry
+from .trust_ledger import (
+    CandidateOutcome as CandidateOutcome,
+    DiscoverCandidateSnapshot as DiscoverCandidateSnapshot,
+    TrustDailyActiveReturn as TrustDailyActiveReturn,
+    TrustFactorStudy as TrustFactorStudy,
+)
 from .factor_evidence import EvidenceGateRun as EvidenceGateRun, FactorEvidenceCard as FactorEvidenceCard
 from .tax import (
     TaxLedgerEvent as TaxLedgerEvent,

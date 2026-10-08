@@ -35,7 +35,7 @@ class FinnhubProvider(MarketDataProvider):
         if not is_us_listing(symbol):
             # Stripping the suffix risks matching an unrelated US ticker
             # (SHEL.AS → SHEL) and returning the wrong price.
-            return self.unavailable("quote", f"Finnhub covers US listings only; skipping {symbol}.")
+            return self.unavailable("quote", f"Finnhub covers US listings only; skipping {symbol}.", reason="not_applicable")
         try:
             normalized = strip_exchange_suffix(symbol)
             data = self._get("/quote", {"symbol": normalized})
@@ -65,7 +65,7 @@ class FinnhubProvider(MarketDataProvider):
         if not self.api_key:
             return self.unavailable("fundamentals", "Finnhub API key is not configured.")
         if not is_us_listing(symbol):
-            return self.unavailable("fundamentals", f"Finnhub covers US listings only; skipping {symbol}.")
+            return self.unavailable("fundamentals", f"Finnhub covers US listings only; skipping {symbol}.", reason="not_applicable")
         try:
             normalized = strip_exchange_suffix(symbol)
             metric = self._get("/stock/metric", {"symbol": normalized, "metric": "all"}).get("metric", {})
@@ -124,7 +124,7 @@ class FinnhubProvider(MarketDataProvider):
         if not self.api_key:
             return self.unavailable("news", "Finnhub API key is not configured.")
         if symbol and not is_us_listing(symbol):
-            return self.unavailable("news", f"Finnhub covers US listings only; skipping {symbol}.")
+            return self.unavailable("news", f"Finnhub covers US listings only; skipping {symbol}.", reason="not_applicable")
         try:
             if symbol:
                 # Finnhub does not understand yfinance-style exchange suffixes
@@ -250,7 +250,7 @@ class FinnhubProvider(MarketDataProvider):
         if not self.api_key:
             return self.unavailable("earnings calendar", "Finnhub API key is not configured.")
         if not is_us_listing(symbol):
-            return self.unavailable("earnings calendar", "Finnhub's free earnings calendar covers US listings only.")
+            return self.unavailable("earnings calendar", "Finnhub's free earnings calendar covers US listings only.", reason="not_applicable")
         try:
             today = datetime.now(UTC).date()
             payload = self._get(

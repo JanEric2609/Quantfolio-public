@@ -7,6 +7,7 @@ import { Input } from "../components/ui/input";
 import { GaugeChart } from "../components/charts/GaugeChart";
 import { LineChart } from "../components/charts/LineChart";
 import { FactorPremiaCard } from "../components/evidence/FactorPremiaCard";
+import { IngredientAttributionCard } from "../components/evidence/IngredientAttributionCard";
 import { EvidenceConsequences } from "../components/evidence/EvidenceConsequences";
 import { toast } from "sonner";
 import {
@@ -102,6 +103,8 @@ export function EvidencePage() {
       <EvidenceConsequences />
 
       <FactorPremiaCard />
+
+      <IngredientAttributionCard />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>

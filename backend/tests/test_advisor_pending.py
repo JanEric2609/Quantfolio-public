@@ -35,13 +35,16 @@ def _client(db, user):
     return TestClient(app)
 
 
+PROVEN = {"track_record_gate": {"status": "proven"}}
+
+
 def _rec(db, user, ticker, state="approved_candidate", *, age_days=1, payload=None, **fields):
     row = Recommendation(
         user_id=user.id,
         ticker=ticker,
         verdict=fields.pop("verdict", "WATCH"),
         confidence=fields.pop("confidence", 0.5),
-        payload_json=json.dumps(payload or {}),
+        payload_json=json.dumps(PROVEN if payload is None else payload),
         approval_state=state,
         mode=fields.pop("mode", "discover"),
         created_at=datetime.now(UTC) - timedelta(days=age_days),
@@ -134,9 +137,9 @@ def test_item_carries_summary_name_and_a_normalised_confidence():
     db.commit()
     _rec(
         db, me, "DISC", confidence=0.6, verdict="WATCH",
-        payload={"dossier_id": dossier.id, "candidate": {"name": "Discover Corp"}},
+        payload={**PROVEN, "dossier_id": dossier.id, "candidate": {"name": "Discover Corp"}},
     )
-    _rec(db, me, "V2", "needs_review", confidence=72, mode="long_term", payload={"thesis": "Direct thesis."})
+    _rec(db, me, "V2", "needs_review", confidence=72, mode="long_term", payload={"thesis": "Direct thesis.", "evidence_proven": True})
 
     items = {i["ticker"]: i for i in _client(db, me).get("/api/portfolio/advisor/pending").json()["items"]}
 
@@ -154,4 +157,54 @@ def test_feedback_moves_an_item_out_of_the_pending_list():
 
     assert client.get("/api/portfolio/advisor/pending").json()["total"] == 1
     assert client.post(f"/api/portfolio/advisor/feedback/{rec.id}?action=accepted").status_code == 200
-    assert client.get("/api/portfolio/advisor/pending").json() == {"items": [], "total": 0}
+    assert client.get("/api/portfolio/advisor/pending").json() == {"items": [], "total": 0, "research_count": 0}
+
+
+def test_unproven_rows_are_research_not_decisions():
+    db, me, _ = _setup()
+    _rec(db, me, "PROVEN")
+    _rec(db, me, "COLD", payload={"track_record_gate": {"status": "insufficient_data"}}, verdict="BUY")
+    _rec(db, me, "NOGATE", payload={})
+    _rec(db, me, "V2", "needs_review", mode="long_term", payload={})
+    _rec(db, me, "NEWDRAFT", "draft", payload={"track_record_gate": {"status": "unproven"}})
+
+    body = _client(db, me).get("/api/portfolio/advisor/pending").json()
+
+    assert [i["ticker"] for i in body["items"]] == ["PROVEN"]
+    assert body["total"] == 1
+    assert body["research_count"] == 4
+
+
+def test_one_card_per_ticker_newest_wins():
+    db, me, _ = _setup()
+    _rec(db, me, "DUP", age_days=5)
+    newest = _rec(db, me, "DUP", age_days=1)
+    _rec(db, me, "DUP", age_days=9)
+
+    body = _client(db, me).get("/api/portfolio/advisor/pending").json()
+
+    assert [i["id"] for i in body["items"]] == [newest.id]
+    assert body["total"] == 1
+    assert body["research_count"] == 0
+
+
+def test_other_generator_counts_with_an_evidence_flag():
+    db, me, _ = _setup()
+    _rec(db, me, "LT", "needs_review", mode="long_term", payload={"evidence_proven": True})
+
+    body = _client(db, me).get("/api/portfolio/advisor/pending").json()
+
+    assert body["total"] == 1
+
+
+def test_a_newer_unproven_run_supersedes_an_older_proven_card():
+    db, me, _ = _setup()
+    _rec(db, me, "FLIP", age_days=6)  # proven a week ago
+    _rec(db, me, "FLIP", "draft", age_days=1, payload={"track_record_gate": {"status": "unproven"}})
+    _rec(db, me, "KEEP", age_days=3)
+
+    body = _client(db, me).get("/api/portfolio/advisor/pending").json()
+
+    assert [i["ticker"] for i in body["items"]] == ["KEEP"]
+    assert body["total"] == 1
+    assert body["research_count"] == 1

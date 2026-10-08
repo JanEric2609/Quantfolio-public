@@ -10,6 +10,7 @@ Only reads state other code already records; never probes a network service.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -130,6 +131,55 @@ def _worker_items(db: Session, heartbeat: dict[str, Any] | None, now: datetime, 
         ))
 
 
+# Optional market-data providers: the app runs on yfinance without them, so a
+# problem here is information unless the key itself is refused.
+_OPTIONAL_DATA_PROVIDERS = {
+    "alphavantage", "finnhub", "eod", "twelvedata", "databento", "tiingo", "alpaca", "massive", "fred",
+}
+# Providers whose connection probe changed (it used to ask every one for the
+# XETRA ETF EUNL.DE). A stored result without a probe symbol is from the old
+# probe and says nothing about the key.
+_PROBE_CHANGED = {"alphavantage", "finnhub", "eod", "twelvedata", "databento", "tiingo"}
+# Reason codes (see providers.base.PROBE_REASONS) that are not a broken connection.
+_HARMLESS_REASONS = {"not_applicable", "rate_limited"}
+# Legacy fallback, ONLY for stored results with no reason code from a service
+# whose probe never changed.
+_LEGACY_BENIGN_MARKERS = ("rate limit", "429", "us listings only", "skipping")
+_LEGACY_AUTH_MARKERS = ("401", "403", "unauthor", "forbidden", "invalid api key")
+
+
+def _failure_reason(service: str, result: dict[str, Any]) -> str:
+    """The structured reason of a failed test, or ``legacy`` / a best guess for old results."""
+    code = result.get("reason")
+    if isinstance(code, str) and code:
+        return code
+    if service in _PROBE_CHANGED and not result.get("probe_symbol"):
+        return "legacy"
+    lowered = str(result.get("message") or "").lower()
+    if any(marker in lowered for marker in _LEGACY_BENIGN_MARKERS):
+        return "not_applicable"
+    if any(marker in lowered for marker in _LEGACY_AUTH_MARKERS):
+        return "auth"
+    return "unknown"
+
+
+def _failure_severity(service: str, reason: str) -> Severity:
+    """Warning only for a refused key, or a real failure of a non-optional service."""
+    if reason == "auth":
+        return "warning"
+    if reason in ("legacy", "no_data") or service in _OPTIONAL_DATA_PROVIDERS:
+        return "info"
+    return "warning"
+
+
+def _loads_meta(raw: str | None) -> dict[str, Any]:
+    try:
+        value = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def _connection_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
     tests = get_connection_tests(db)
     configured = {row.service for row in db.query(ApiKey.service).all()}
@@ -140,10 +190,16 @@ def _connection_items(db: Session, now: datetime, items: list[AttentionItem]) ->
             continue
         if connection.secret and connection.secret not in configured:
             continue  # tested, then the credential was removed
+        reason = _failure_reason(service, result)
+        if reason in _HARMLESS_REASONS:
+            continue  # a throttle or a coverage gap, not a broken connection
         flagged.add(service)
+        legacy = reason == "legacy"
         items.append(AttentionItem(
-            f"connection-{service}", "warning", f"{connection.label}: last test failed",
-            str(result.get("message") or "The connection test failed."),
+            f"connection-{service}", _failure_severity(service, reason),
+            f"{connection.label}: not tested yet" if legacy else f"{connection.label}: last test failed",
+            "The saved result is from an older test. Run the test again." if legacy
+            else str(result.get("message") or "The connection test failed."),
             _page(connection.group, service), "Fix",
         ))
     cutoff = now - PROVIDER_HEALTH_MAX_AGE
@@ -158,8 +214,15 @@ def _connection_items(db: Session, now: datetime, items: list[AttentionItem]) ->
         connection = CONNECTIONS.get(row.provider)
         if connection is None or row.provider in flagged or updated is None or updated < cutoff:
             continue
+        meta = _loads_meta(row.meta_json)
+        stored = meta.get("reason")
+        reason = stored if isinstance(stored, str) else _failure_reason(
+            row.provider, {"message": row.message, "probe_symbol": "n/a"}
+        )
+        if reason in _HARMLESS_REASONS:
+            continue
         items.append(AttentionItem(
-            f"provider-{row.provider}", "warning", f"{connection.label} is unavailable",
+            f"provider-{row.provider}", _failure_severity(row.provider, reason), f"{connection.label} is unavailable",
             row.message or "The nightly provider probe failed.",
             _page(connection.group, row.provider), "Fix",
         ))

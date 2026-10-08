@@ -1107,6 +1107,7 @@ def test_savings_plans_survive_a_failed_read(fake):
     user = _user(db)
     _enabled(db)
     scalable.sync(db, user.id)
+    first_stamp = json.loads(broker_status.depot_account(db, user.id).raw_json)["plans_synced_at"]
     fake.override[("broker", "savings-plans")] = (
         30, {"ok": False, "command": "x", "error": {"code": "upstream_unavailable", "message": "later"}}, "",
     )
@@ -1114,6 +1115,9 @@ def test_savings_plans_survive_a_failed_read(fake):
     assert log["counts"]["savings_plans"] == 1
     depot = broker_status.depot_account(db, user.id)
     assert json.loads(depot.raw_json)["savings_plans"][0]["isin"] == EUNL
+    # The old time stays and the log says the fetch failed, so the page can warn.
+    assert json.loads(depot.raw_json)["plans_synced_at"] == first_stamp
+    assert log["counts"]["plans_unavailable"] is True
 
 
 def test_sync_refreshes_the_cached_wealth_summary(fake):
@@ -1906,3 +1910,16 @@ def test_lot_cost_adds_a_fee_the_booked_amount_leaves_out(fake):
     fake.responses[("broker", "transaction", "details")]["data"]["result"]["security_trade"]["total_amount"] = "800.00"
     scalable.sync(db, user.id)
     assert db.query(TaxLot).one().cost_basis_eur == Decimal("800.99")
+
+
+def test_savings_plan_mapping_keeps_dynamization_and_a_paused_flag():
+    plans = mapping.map_savings_plans({"items": [
+        {"isin": EUNL, "name": "A", "amount": "20.00", "frequency": "MONTHLY",
+         "configuration": {"dynamizationRate": "2", "paymentMethod": "SEPA"}},
+        {"isin": AAPL, "name": "B", "amount": "5", "frequency": "MONTHLY", "status": "paused"},
+        {"isin": AAPL, "name": "C", "amount": "5", "frequency": "MONTHLY", "paused": True},
+        {"isin": AAPL, "name": "D", "amount": "5", "frequency": "MONTHLY", "state": "ACTIVE"},
+    ]})
+    assert plans[0].dynamization_rate == Decimal("2") and plans[0].payment_method == "SEPA"
+    assert [p.paused for p in plans] == [False, True, True, False]
+    assert plans[1].dynamization_rate is None

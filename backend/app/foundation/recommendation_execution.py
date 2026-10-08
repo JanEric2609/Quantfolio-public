@@ -143,7 +143,13 @@ def detect_executions(db: Session, user_id: str, *, now: datetime | None = None)
                 continue
             label = BROKER_LABELS.get(source, source.title())
             note = f"Detected after the {label} sync: {'+' if delta > 0 else ''}{delta.normalize():f} units."
+            plan_action_id = _fulfil_plan_action(
+                db, user_id, recommendation_isin(rec), rec.ticker, note,
+                broker=source, sell=direction < 0, now=now,
+            )
             info.update({"executed_at": now.isoformat(), "broker": source, "units": str(delta)})
+            if plan_action_id is not None:
+                info["plan_action_id"] = plan_action_id
             payload = _payload(rec)
             payload["execution"] = info
             rec.payload_json = json.dumps(payload)
@@ -156,6 +162,45 @@ def detect_executions(db: Session, user_id: str, *, now: datetime | None = None)
     if found:
         db.commit()
     return found
+
+
+def _fulfil_plan_action(
+    db: Session, user_id: str, isin: str | None, ticker: str | None,
+    note: str, *, broker: str, sell: bool, now: datetime,
+) -> str | None:
+    """Mark the newest open plan action for this trade fulfilled (ADR 0019 §3).
+
+    Same user, same ISIN (or ticker when there is none), same direction (a sell
+    only fulfils a ``sale``, a buy anything else) and a compatible broker (the
+    one that moved, or an action with no fixed broker). Queries the
+    foundation-tier ``MonthlyPlanAction`` entity directly, so this module
+    grows no edge into the decision layer that owns the snapshot writer.
+    """
+    from app.foundation.models.entities import MonthlyPlanAction
+
+    query = db.query(MonthlyPlanAction).filter(
+        MonthlyPlanAction.user_id == user_id,
+        MonthlyPlanAction.status == "open",
+    )
+    if isin:
+        query = query.filter(MonthlyPlanAction.isin == isin.upper())
+    elif ticker:
+        query = query.filter(MonthlyPlanAction.ticker == ticker.upper())
+    else:
+        return None
+    query = query.filter(
+        (MonthlyPlanAction.kind == "sale") if sell else (MonthlyPlanAction.kind != "sale"),
+        MonthlyPlanAction.broker.in_((broker, "", "auto")),
+    )
+    action = query.order_by(MonthlyPlanAction.month.desc()).first()
+    if action is None:
+        return None
+    action.status = "fulfilled"
+    action.fulfilled_at = now
+    detail = dict(action.detail_json or {})
+    detail["fulfilled_note"] = note
+    action.detail_json = detail
+    return action.id
 
 
 def accepted_and_executed(db: Session, user_id: str, *, now: datetime | None = None) -> dict[str, Any]:
@@ -192,6 +237,7 @@ def accepted_and_executed(db: Session, user_id: str, *, now: datetime | None = N
                 "broker": info.get("broker"),
                 "broker_label": BROKER_LABELS.get(str(info.get("broker")), str(info.get("broker") or "").title()),
                 "units": float(info["units"]) if info.get("units") else None,
+                "plan_action_id": info.get("plan_action_id"),
             })
             done.append(item)
         else:

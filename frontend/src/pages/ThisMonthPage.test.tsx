@@ -119,13 +119,13 @@ describe("ThisMonthPage", () => {
   it("names the broker of each buy and shows running savings plans, cash and notes", async () => {
     loadPlan = async () => ({
       ...plan,
-      headline: "Raise your core savings plans to 1.000 € a month (now 35 €).",
+      headline: "Raise your core savings plans to 1.000 € a month (now 30 €).",
       no_change: false,
       broker: "scalable",
       broker_label: "Scalable Capital",
       broker_choice: "auto",
       actions: [
-        { ...plan.actions[0], broker: "scalable", broker_label: "Scalable Capital", note: "Your core savings plans run 35 € a month." },
+        { ...plan.actions[0], broker: "scalable", broker_label: "Scalable Capital", note: "Your core savings plans run 30 € a month." },
         {
           sleeve: "core", kind: "one_off", amount_eur: 319.50, instrument: "iShares Core MSCI World (Acc)",
           ticker: "EUNL.DE", isin: "IE00B4L5Y983", note: "Optional one-off from cash above your 500 € reserve.",
@@ -136,17 +136,17 @@ describe("ThisMonthPage", () => {
         items: [
           {
             broker: "scalable", broker_label: "Scalable Capital", name: "NVIDIA", isin: "US67066G1040",
-            sleeve: "satellite", amount_eur: 35, frequency: "MONTHLY", monthly_eur: 35, next_execution_date: "2026-11-04",
+            sleeve: "satellite", amount_eur: 30, frequency: "MONTHLY", monthly_eur: 30, next_execution_date: "2026-11-04",
           },
         ],
-        monthly_eur: 35,
-        by_sleeve: { core: 0, tilt: 0, satellite: 35 },
+        monthly_eur: 30,
+        by_sleeve: { core: 0, tilt: 0, satellite: 30 },
       },
       cash: {
         savings_eur: 812.40, broker_cash_eur: 7.10, emergency_reserve_eur: 500, reserve_set: true, investable_eur: 319.50,
       },
       core_look_through: { em_eur: 400, em_pct: 1.3, world_em_pct: 10, unknown_eur: 0 },
-      notes: ["NVIDIA: 35 € a month goes into stock picks, which no strategy has unlocked yet (target 0 %)."],
+      notes: ["NVIDIA: 30 € a month goes into stock picks, which no strategy has unlocked yet (target 0 %)."],
     });
     renderPage();
 
@@ -158,6 +158,49 @@ describe("ThisMonthPage", () => {
     expect(screen.getByText("Investable")).toBeInTheDocument();
     expect(screen.getByText(/goes into stock picks/)).toBeInTheDocument();
     expect(screen.getByText(/of the core is emerging markets/)).toBeInTheDocument();
+  });
+
+  it("shows stock-pick plans as a budget, stopped plans apart, the plan fetch time and the gate date", async () => {
+    const item = (name: string, sleeve: "core" | "satellite", amount: number, extra = {}) => ({
+      broker: "scalable", broker_label: "Scalable Capital", name, isin: name, sleeve, amount_eur: amount,
+      frequency: "MONTHLY", monthly_eur: amount, next_execution_date: "2026-11-04", running: true, ...extra,
+    });
+    loadPlan = async () => ({
+      ...plan,
+      headline: "Raise your core savings plans by 120 € to 140 € a month (now 20 €).",
+      no_change: false,
+      contribution_eur: 200,
+      savings_plans: {
+        items: [
+          item("VWRA", "core", 20, { dynamization_rate: 2 }),
+          item("NVDA", "satellite", 30),
+          item("SAP", "satellite", 20, { running: false, not_running_reason: "overdue" }),
+        ],
+        monthly_eur: 50,
+        by_sleeve: { core: 20, tilt: 0, satellite: 30 },
+        synced_at: "2026-10-03T08:00:00Z",
+        last_fetch_failed: true,
+        other_budget_eur: 60,
+        other_budget_pct: 30,
+        core_needed_eur: 140,
+      },
+      evidence: {
+        tilt: { passed: true, unlocked: false, reason: "" },
+        satellite: {
+          unlocked: false, reason: "",
+          gate: { computed_at: "2026-09-26T05:30:00Z", as_of: "2026-09-26", n_trials: 500, stale: true },
+        },
+      },
+    });
+    renderPage();
+
+    expect(await screen.findByText(/grows 2 %\/yr/)).toBeInTheDocument();
+    expect(screen.getByText("Not running (not counted)")).toBeInTheDocument();
+    expect(screen.getByText(/may be out of date/)).toBeInTheDocument();
+    expect(screen.getByText(/the core plans need 140/)).toBeInTheDocument();
+    expect(screen.getByText(/against 500 trials/)).toBeInTheDocument();
+    expect(screen.getByText("out of date")).toBeInTheDocument();
+    expect(screen.getByText(/evidence passed, but no tilt fund is chosen/)).toBeInTheDocument();
   });
 
   it("says when the emerging-markets split of the core is not known", async () => {

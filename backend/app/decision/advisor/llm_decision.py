@@ -318,6 +318,7 @@ def _build_user_prompt(
     rl_signal: dict[str, float] | None = None,
     max_sell_pct_of_position: float | None = None,
     max_sellable_eur_by_ticker: dict[str, float] | None = None,
+    instrument_names: dict[str, str] | None = None,
 ) -> str:
     from app.decision.advisor.costs import describe_fee_schedule, trade_fee
 
@@ -362,7 +363,9 @@ def _build_user_prompt(
                 else None
             ),
             "instrument_type": mc.instrument_type if mc is not None else "equity",
-            "estimated_fee_eur": trade_fee(abs(delta), fee_schedule),
+            "estimated_fee_eur": trade_fee(
+                abs(delta), fee_schedule, (instrument_names or {}).get(sym), side="buy" if delta > 0 else "sell"
+            ),
         }
         if rl_signal is not None and sym in rl_signal:
             entry["rl_suggested_weight"] = round(float(rl_signal[sym]), 4)
@@ -392,7 +395,9 @@ def _build_user_prompt(
                 "current_weight": round(current_weight, 4),
                 "suggested_weight": round(suggested, 4),
                 "excess_eur": round(excess, 2),
-                "frees_cash_eur": round(excess - trade_fee(excess, fee_schedule), 2),
+                "frees_cash_eur": round(
+                    excess - trade_fee(excess, fee_schedule, (instrument_names or {}).get(sym), side="sell"), 2
+                ),
                 "sell_only": sym in sell_only,
             }
             if max_sellable_eur_by_ticker is not None and sym in max_sellable_eur_by_ticker:
@@ -644,6 +649,7 @@ def decide_trades(
     rl_signal: dict[str, float] | None = None,
     max_sell_pct_of_position: float | None = None,
     max_sellable_eur_by_ticker: dict[str, float] | None = None,
+    instrument_names: dict[str, str] | None = None,
 ) -> tuple[list[TradeDecision], list[str]]:
     """Ask the LLM for structured trade decisions within the risk envelope.
 
@@ -744,6 +750,7 @@ def decide_trades(
                 rl_signal=rl_signal,
                 max_sell_pct_of_position=max_sell_pct_of_position,
                 max_sellable_eur_by_ticker=max_sellable_eur_by_ticker,
+                instrument_names=instrument_names,
             ),
         },
     ]

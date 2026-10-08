@@ -87,3 +87,62 @@ def test_read_settings_shows_resolved_llm(monkeypatch):
     monkeypatch.setenv("LLM_LOCAL_URL", "http://envllm:8080")
     payload = settings_api.read_settings(_db(), None)
     assert payload.settings["llm_base_url"] == "http://envllm:8080/v1"
+
+
+def test_quote_probe_uses_a_covered_symbol_and_forgives_throttling(monkeypatch):
+    seen = []
+
+    class FakeProv:
+        def __init__(self, api_key): pass
+
+        def get_quote(self, sym):
+            seen.append(sym)
+            return {"ok": False, "error": "Finnhub covers US listings only; skipping EUNL.DE.", "quality": {}, "reason": "not_applicable"}
+
+    monkeypatch.setitem(settings_api.QUOTE_PROVIDERS, "twelvedata", FakeProv)
+    r = run_integration_probe(IntegrationTestRequest(service="twelvedata", value="k"), _db(), None)
+    assert seen == ["AAPL"]
+    assert r.ok is True  # a coverage gap is not a failed connection
+    assert r.probe_symbol == "AAPL"
+
+    class Throttled(FakeProv):
+        def get_quote(self, sym): return {"ok": False, "error": "slow down", "quality": {}, "reason": "rate_limited"}
+
+    monkeypatch.setitem(settings_api.QUOTE_PROVIDERS, "tiingo", Throttled)
+    assert run_integration_probe(IntegrationTestRequest(service="tiingo", value="k"), _db(), None).ok is True
+
+
+def test_quote_probe_still_fails_on_a_real_error(monkeypatch):
+    class Bad:
+        def __init__(self, api_key): pass
+
+        def get_quote(self, sym): return {"ok": False, "error": "HTTP 401 invalid api key", "quality": {}}
+
+    monkeypatch.setitem(settings_api.QUOTE_PROVIDERS, "finnhub", Bad)
+    r = run_integration_probe(IntegrationTestRequest(service="finnhub", value="k"), _db(), None)
+    assert r.ok is False and "401" in r.message and r.reason == "auth"
+
+
+def test_eod_probe_never_calls_the_provider(monkeypatch):
+    class Boom:
+        def __init__(self, api_key): raise AssertionError("must not construct EodProvider")
+
+    monkeypatch.setitem(settings_api.QUOTE_PROVIDERS, "eod", Boom)
+    assert run_integration_probe(IntegrationTestRequest(service="eod", value="k"), _db(), None).ok is True
+    assert run_integration_probe(IntegrationTestRequest(service="eod"), _db(), None).ok is False
+
+
+def test_probe_result_is_stored_with_reason_and_probe_symbol(monkeypatch):
+    from app.foundation.settings import get_connection_tests
+
+    class Throttled:
+        def __init__(self, api_key): pass
+
+        def get_quote(self, sym): return {"ok": False, "error": "x", "quality": {}, "reason": "rate_limited"}
+
+    monkeypatch.setitem(settings_api.QUOTE_PROVIDERS, "tiingo", Throttled)
+    db = _db()
+    set_secret(db, "tiingo", "k")
+    run_integration_probe(IntegrationTestRequest(service="tiingo", value=None), db, None)
+    stored = get_connection_tests(db)["tiingo"]
+    assert stored["reason"] == "rate_limited" and stored["probe_symbol"] == "AAPL" and stored["ok"] is True

@@ -66,3 +66,26 @@ def latest_evidence_gate(db: Session, region: str = TILT_EVIDENCE_REGION) -> dic
         "n_trials": row.n_trials,
         "computed_at": row.computed_at.isoformat() if row.computed_at else None,
     }
+
+
+def latest_evidence_gate_record(db: Session, region: str = TILT_EVIDENCE_REGION) -> dict[str, Any] | None:
+    """The full stored result of the most recent evidence-gate run for *region*.
+
+    Families with their candidates (DSR, t, Sharpe), PBO, and step 2's model
+    cards when the run stored them. None if never run.
+    """
+    row = (
+        db.query(EvidenceGateRun)
+        .filter(EvidenceGateRun.region == region)
+        .order_by(EvidenceGateRun.computed_at.desc())
+        .first()
+    )
+    if row is None:
+        return None
+    return {
+        **(row.result_json or {}),
+        "satellite_unlocked": bool(row.satellite_unlocked),
+        "reason": row.reason,
+        "n_trials": row.n_trials,
+        "computed_at": row.computed_at.isoformat() if row.computed_at else None,
+    }

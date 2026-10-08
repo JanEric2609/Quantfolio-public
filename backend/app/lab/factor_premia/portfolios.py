@@ -60,7 +60,7 @@ def _sql() -> str:
     )
     return f"""
 WITH scan AS (
-    SELECT gvkey, eom, excntry, size_grp, me, be_me, mom_12_1, gp_at, at_gr1,
+    SELECT gvkey, eom, excntry, size_grp, me, be_me, mom_12_1, gp_at, at_gr1, rvol_21d,
            ret_exc_lead1m AS r, ingested_at
     FROM read_parquet(?, union_by_name = true)
     WHERE excntry IN (SELECT unnest(?))

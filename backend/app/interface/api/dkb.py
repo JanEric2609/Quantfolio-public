@@ -1,9 +1,11 @@
 import json
 import logging
+from decimal import Decimal
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.foundation.core.db import get_db
@@ -244,6 +246,42 @@ def positions(db: Session = Depends(get_db), user: User = Depends(current_user))
     if not account_ids:
         return []
     return db.query(DkbPosition).filter(DkbPosition.account_id.in_(account_ids)).all()
+
+
+class PositionCostIn(BaseModel):
+    einstandswert_eur: Decimal = Field(gt=0, description="Total cost of the units held now, as the DKB app shows it.")
+
+
+@router.put("/positions/{position_id}/cost", response_model=None)
+def set_position_cost(
+    position_id: str,
+    payload: PositionCostIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """Store the DKB-app Einstandswert of a position as an opening FIFO lot (FinTS may not deliver one)."""
+    from app.foundation.portfolio.cost_basis import set_manual_cost
+
+    try:
+        result = set_manual_cost(db, user.id, position_id, payload.einstandswert_eur)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Unknown DKB position")
+    return {**result, "estimate": True, "not_tax_advice": True}
+
+
+@router.delete("/positions/{position_id}/cost", response_model=None)
+def clear_position_cost(
+    position_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    from app.foundation.portfolio.cost_basis import clear_manual_cost
+
+    if not clear_manual_cost(db, user.id, position_id):
+        raise HTTPException(status_code=404, detail="Unknown DKB position")
+    return {"cleared": True}
 
 
 def _diagnostic_to_dict(row: DkbDiagnosticRun) -> dict[str, Any]:

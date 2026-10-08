@@ -417,3 +417,271 @@ def test_e_bh_needs_more_than_one_over_alpha_when_there_are_several_tests():
     assert fv.e_bh([25.0], 0.05) == [True]
     assert fv.e_bh([25.0, 1.0, 1.0, 1.0], 0.05) == [False, False, False, False]
     assert fv.e_bh([90.0, 45.0, 1.0, 1.0], 0.05) == [True, True, False, False]
+
+
+# ---------------------------------------------------------------------------
+# Lag-h e-process (overlapping outcome windows) and the simulated time to know
+# ---------------------------------------------------------------------------
+
+
+def test_lag_h_with_h_one_is_the_plain_e_process():
+    x = np.array([1, 1, 0, 1, 1, 0, 1, 1, 1, 0], dtype=float)
+    plain = fv.e_process_bernoulli(x, 0.5)
+    lag1 = fv.e_process_lag_h(x, 0.5, 1)
+    assert np.allclose(plain.path, lag1.path)
+    assert fv.e_process_lag_h(np.array([]), 0.5, 5).n == 0
+
+
+def test_lag_h_path_is_the_average_of_the_interleaved_subsequence_e_processes():
+    rng = np.random.default_rng(3)
+    x = (rng.random(40) < 0.6).astype(float)
+    h = 4
+    lag = fv.e_process_lag_h(x, 0.5, h)
+    subs = [fv.e_process_bernoulli(x[k::h], 0.5).path for k in range(h)]
+    for t in (0, 5, 17, 39):
+        expected = np.mean([subs[k][(t - k) // h] if t >= k else 1.0 for k in range(h)])
+        assert lag.path[t] == pytest.approx(expected)
+    # Harm direction mirrors it.
+    assert fv.e_process_lag_h_harm(x, 0.5, h).final == pytest.approx(fv.e_process_lag_h(1 - x, 0.5, h).final)
+
+
+def test_vectorised_simulation_core_matches_the_scalar_e_process():
+    x = (np.random.default_rng(1).random(120) < 0.6).astype(float)
+    assert np.allclose(fv._agrapa_paths(x[:, None], 0.5)[:, 0], fv.e_process_bernoulli(x, 0.5).path)
+
+
+def test_lag_h_e_process_is_valid_under_the_null_with_overlapping_windows():
+    """Hit flags built from overlapping h-day sums (each flag shares h-1 shocks with its
+    neighbour) have P(hit) = 0.5 but are strongly serially dependent. The lag-h average
+    must cross 1/alpha in at most alpha of runs (plus Monte-Carlo tolerance)."""
+    h, n, runs, alpha = 5, 150, 800, 0.05
+    rng = np.random.default_rng(11)
+    shocks = rng.standard_normal((runs, n + h - 1))
+    csum = np.cumsum(shocks, axis=1)
+    window = csum[:, h - 1:] - np.concatenate([np.zeros((runs, 1)), csum[:, :-h]], axis=1)
+    flags = (window > 0).astype(float)
+    assert flags.shape == (runs, n)
+    crossed = sum(fv.e_process_lag_h(row, 0.5, h).crossed(1.0 / alpha) for row in flags)
+    assert crossed / runs <= alpha + 0.025
+
+
+def test_issue_days_needed_reference_values_and_speed():
+    import time
+
+    fv.issue_days_needed.cache_clear()
+    start = time.perf_counter()
+    default = fv.issue_days_needed(0.55, 0.5, 4, 0.05, 21)
+    assert time.perf_counter() - start < 0.2
+    assert default == 9783  # seeded: median issue days to e >= K/alpha = 80
+    assert fv.issue_days_needed(0.55, 0.5, 4, 0.05, 21) == default  # cached, deterministic
+    assert fv.issue_days_needed(0.60, 0.5, 4, 0.05, 21) == 2105
+    assert fv.issue_days_needed(0.55, 0.5, 4, 0.05, 1) == 1206  # no overlap: a plain e-process
+    # A stronger edge and a smaller family both need fewer days.
+    assert fv.issue_days_needed(0.60, 0.5, 4, 0.05, 21) < default
+    assert fv.issue_days_needed(0.55, 0.5, 2, 0.05, 21) < default
+    # Not reachable within the cap: reported as None, never a made-up number.
+    assert fv.issue_days_needed(0.505, 0.5, 4, 0.05, 21, n_max=500) is None
+
+
+def test_mean_e_process_is_valid_under_the_null_with_overlapping_windows():
+    """Per-date excess returns that are overlapping h-day sums of zero-mean shocks (so each
+    value shares h-1 shocks with its neighbour) have mean 0 and are strongly dependent.
+    Both directions of the lag-h excess-return e-process must cross 1/alpha in at most
+    alpha of runs (plus Monte-Carlo tolerance)."""
+    h, n, runs, alpha, clip, sd = 5, 200, 600, 0.05, 0.20, 0.05
+    rng = np.random.default_rng(5)
+    shocks = rng.standard_normal((runs, n + h - 1)) * sd / math.sqrt(h)
+    csum = np.cumsum(shocks, axis=1)
+    x = csum[:, h - 1:] - np.concatenate([np.zeros((runs, 1)), csum[:, :-h]], axis=1)
+    for harm in (False, True):
+        crossed = sum(fv.e_process_mean(row, h, clip, sd, harm=harm).crossed(1.0 / alpha) for row in x)
+        assert crossed / runs <= alpha + 0.025
+
+
+def test_mean_e_process_moves_in_the_right_direction_and_clips_before_betting():
+    up = np.full(120, 0.03)
+    assert fv.e_process_mean(up, 1, 0.2, 0.05).final > 20
+    assert fv.e_process_mean(up, 1, 0.2, 0.05, harm=True).final <= 1.0
+    assert fv.e_process_mean(-up, 1, 0.2, 0.05, harm=True).final > 20
+    # A freak +500 % date counts as +clip, no more: same path as the clipped series.
+    freak = np.array([0.01, 5.0, 0.02, -0.01])
+    clipped = np.array([0.01, 0.2, 0.02, -0.01])
+    assert np.allclose(fv.e_process_mean(freak, 2, 0.2, 0.05).path, fv.e_process_mean(clipped, 2, 0.2, 0.05).path)
+    with pytest.raises(ValueError):
+        fv.e_process_mean(up, 1, 0.0, 0.05)
+
+
+def test_issue_days_needed_mean_reference_values():
+    import time
+
+    fv.issue_days_needed_mean.cache_clear()
+    start = time.perf_counter()
+    default = fv.issue_days_needed_mean(0.01, 0.05, 0.20, 4, 0.05, 21)
+    assert time.perf_counter() - start < 0.3
+    assert default == 4132  # +1 % per date, 5 % noise, K=4 -> e >= 80, h=21
+    assert fv.issue_days_needed_mean(0.01, 0.05, 0.20, 4, 0.05, 1) == 262
+    assert fv.issue_days_needed_mean(0.02, 0.05, 0.20, 4, 0.05, 21) == 1991
+    assert fv.issue_days_needed_mean(0.01, 0.05, 0.20, 2, 0.05, 21) < default
+    assert fv.issue_days_needed_mean(0.0005, 0.05, 0.20, 4, 0.05, 21, n_max=500) is None
+    with pytest.raises(ValueError):
+        fv.issue_days_needed_mean(0.0, 0.05, 0.20)
+
+
+# ---------------------------------------------------------------------------
+# Schedule-aware chains (uneven issue dates)
+# ---------------------------------------------------------------------------
+
+
+def _trading_days(n: int):
+    from datetime import date, timedelta
+
+    out, d = [], date(2026, 3, 2)  # a Monday
+    while len(out) < n:
+        if d.weekday() < 5:
+            out.append(d)
+        d += timedelta(days=1)
+    return out
+
+
+def _n_chains(days, h=21) -> int:
+    return max(fv.chain_partition(days, h)) + 1
+
+
+def test_chain_partition_daily_weekly_and_a_burst():
+    from datetime import date, timedelta
+
+    daily = _trading_days(120)
+    assert _n_chains(daily) == 21
+    # Daily issuing is exactly the index-mod-h interleaving.
+    assert fv.chain_partition(daily, 21) == [i % 21 for i in range(120)]
+    weekly = [date(2026, 3, 2) + timedelta(weeks=i) for i in range(40)]
+    assert _n_chains(weekly) == 5
+    assert _n_chains(daily[:1]) == 1
+    # A burst: 10 dates on consecutive days, then a quiet stretch of weekly dates.
+    burst = daily[:10] + [date(2026, 5, 4) + timedelta(weeks=i) for i in range(10)]
+    chains = fv.chain_partition(burst, 21)
+    assert len(set(chains[:10])) == 10  # every date of the burst needs its own chain
+    assert max(chains) + 1 <= 10 + 1
+    # Inside a chain, windows never overlap.
+    import numpy as np
+
+    for c in set(chains):
+        ds = [d for d, k in zip(burst, chains, strict=True) if k == c]
+        for a, b in zip(ds, ds[1:], strict=False):
+            assert np.busday_count(a, b) >= 21
+
+
+def test_effective_lag_follows_the_cadence_and_defaults_to_daily():
+    from datetime import date, timedelta
+
+    weekly = [date(2026, 3, 2) + timedelta(weeks=i) for i in range(10)]
+    assert fv.effective_lag(weekly, 21) == (5, 5.0)
+    assert fv.effective_lag(_trading_days(30), 21) == (21, 1.0)
+    assert fv.effective_lag(weekly[:4], 21) == (21, 1.0)  # fewer than 5 dates: assume daily
+
+
+def test_chain_e_process_equals_lag_h_for_daily_issuing_and_checks_shapes():
+    x = (np.random.default_rng(2).random(60) < 0.6).astype(float)
+    daily = _trading_days(60)
+    a = fv.e_process_chains(x, fv.chain_partition(daily, 7), 0.5, n_chains=7)
+    assert np.allclose(a.path, fv.e_process_lag_h(x, 0.5, 7).path)
+    with pytest.raises(ValueError):
+        fv.e_process_chains(x, [0, 1], 0.5)
+
+
+def test_mean_e_process_is_valid_on_an_irregular_overlapping_schedule():
+    """Issue dates in bursts and gaps; the value on each date is the mean of the daily
+    shocks over the next h trading days (so overlapping dates share shocks). Zero-mean
+    shocks: the chain-averaged e-process must cross 1/alpha in <= alpha of runs, both ways."""
+    from datetime import date, timedelta
+
+    h, runs, alpha, clip, sd = 6, 500, 0.05, 0.20, 0.05
+    # trading-day offsets of the issue dates: a daily burst, a gap, then every third day
+    offsets = list(range(0, 12)) + list(range(30, 90, 3)) + list(range(100, 106))
+    days = [date(2026, 3, 2) + timedelta(days=0)]
+    base = _trading_days(offsets[-1] + 1)
+    days = [base[o] for o in offsets]
+    chains = fv.chain_partition(days, h)
+    rng = np.random.default_rng(9)
+    shocks = rng.standard_normal((runs, offsets[-1] + h + 1)) * sd / math.sqrt(h)
+    csum = np.concatenate([np.zeros((runs, 1)), np.cumsum(shocks, axis=1)], axis=1)
+    x = np.stack([csum[:, o + h] - csum[:, o] for o in offsets], axis=1)
+    for harm in (False, True):
+        crossed = sum(
+            fv.e_process_mean(row, h, clip, sd, harm=harm, chains=chains).crossed(1.0 / alpha) for row in x
+        )
+        assert crossed / runs <= alpha + 0.025
+
+
+def test_issue_days_needed_mean_reference_values_for_the_weekly_cadence():
+    assert fv.issue_days_needed_mean(0.01, 0.05, 0.20, 4, 0.05, 5) == 1042
+
+
+# ---------------------------------------------------------------------------
+# Adaptive conformal correction of stated ranges (ADR 0018 §6)
+# ---------------------------------------------------------------------------
+
+
+def _weekly_ranges(n_weeks: int, per_date: int, spread: float, seed: int = 7) -> list:
+    from datetime import date, timedelta
+
+    rng = np.random.default_rng(seed)
+    out = []
+    start = date(2025, 1, 6)
+    for w in range(n_weeks):
+        issued = start + timedelta(days=7 * w)
+        matured = issued + timedelta(days=30)
+        for x in rng.normal(0.0, spread, per_date):
+            out.append(fv.RangeOutcome(issued=issued, matured=matured, low=-0.05, high=0.05, outcome=float(x)))
+    return out
+
+
+def test_aci_inactive_before_thirty_matured_weeks():
+    aci = fv.aci_coverage(_weekly_ranges(20, 5, 0.04), 0.8)
+    assert not aci.active and aci.widen_now is None and aci.corrected is None
+    assert aci.matured_weeks == 20 and aci.alpha_now == pytest.approx(0.2)
+    assert len(aci.per_date) == 20
+
+
+def test_aci_widens_a_band_that_is_too_narrow():
+    # The stated band is [-5 %, +5 %] but the outcomes have sd 8 %: raw
+    # coverage is about 47 %, far below the nominal 80 %.
+    aci = fv.aci_coverage(_weekly_ranges(120, 10, 0.08), 0.8)
+    assert aci.active and aci.widen_now is not None and aci.widen_now > 0
+    assert aci.raw_same_dates is not None and aci.corrected is not None
+    assert aci.raw_same_dates.rate < 0.6
+    assert aci.corrected.rate > aci.raw_same_dates.rate
+    assert abs(aci.corrected.rate - 0.8) < 0.08
+
+
+def test_aci_narrows_a_band_that_is_too_wide():
+    aci = fv.aci_coverage(_weekly_ranges(120, 10, 0.01), 0.8)
+    assert aci.active and aci.widen_now is not None and aci.widen_now < 0
+    assert aci.corrected is not None and aci.corrected.rate < 0.95
+
+
+def test_aci_never_reads_an_outcome_that_matured_after_the_issue_date():
+    from datetime import date
+
+    # Thirty early weeks matured long before; one late date whose own outcome
+    # is wildly outside. Its correction must not depend on its own outcome.
+    base = _weekly_ranges(40, 5, 0.04)
+    late = date(2026, 6, 1)
+    a = fv.aci_coverage([*base, fv.RangeOutcome(late, date(2026, 7, 1), -0.05, 0.05, 0.0)], 0.8)
+    b = fv.aci_coverage([*base, fv.RangeOutcome(late, date(2026, 7, 1), -0.05, 0.05, 5.0)], 0.8)
+    assert a.corrected is not None and b.corrected is not None
+    assert a.corrected.n == b.corrected.n
+    assert a.raw_same_dates is not None and b.raw_same_dates is not None
+    assert a.corrected.k - b.corrected.k == a.raw_same_dates.k - b.raw_same_dates.k == 1
+
+
+def test_aci_point_ranges_and_a_historical_cutoff():
+    from datetime import date
+
+    point = fv.RangeOutcome(date(2025, 1, 6), date(2025, 2, 6), 0.01, 0.01, 0.01)
+    assert fv.aci_coverage([point], 0.8).per_date == [(date(2025, 1, 6), 1, 1)]
+
+    ranges = _weekly_ranges(60, 5, 0.08)
+    early = fv.aci_coverage(ranges, 0.8, today=date(2025, 6, 1))
+    assert all(d < date(2025, 6, 1) for d, _, _ in early.per_date)
+    assert early.matured_weeks < fv.aci_coverage(ranges, 0.8).matured_weeks

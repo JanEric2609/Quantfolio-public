@@ -9,6 +9,8 @@ caller (DkbSyncService) persists.
 """
 
 import logging
+import re
+import threading
 import time
 import warnings
 from contextlib import contextmanager
@@ -159,6 +161,51 @@ def _parse_statement(statement: Any, iban: str | None) -> dict[str, Any]:
         "currency": tx_currency,
         "reference": reference,
     }
+
+# python-fints reads the acquisition price of a depot position from one MT535
+# clause, ':70E::HOLD//<n>STK|2<int>,<frac>+<CCY>'. Several German banks send
+# extra qualifiers between STK and the line break (':70E::HOLD//1STK++++20231231+'
+# then '2123,45+EUR', i.e. '1STK++++20231231+|2123,45+EUR' once python-fints
+# joins the lines), which the library regex rejects, so ``acquisitionprice`` came
+# back None. This regex accepts the original form and anything between STK and '|2'.
+_TOLERANT_ACQUISITION_RE = re.compile(r"^:70E::HOLD\/\/\d*STK.*?\|2(\d*?),{1}(\d*?)\+([A-Z]{3})$")
+_MT535_PATCH_LOCK = threading.RLock()
+
+
+@contextmanager
+def _tolerant_mt535_acquisition_price() -> Generator[None, None, None]:
+    """Swap python-fints' acquisition-price regex for the tolerant one, then restore it.
+
+    python-fints builds ``MT535_Miniparser()`` inside ``get_holdings`` and the
+    raw MT535 text is not reachable from outside, so the only seam is the
+    class attribute. The swap is scoped to one get_holdings call, guarded by a
+    lock and always undone, so nothing else in the process sees it. ':70E::HOLD'
+    clauses that still match neither shape are logged at DEBUG (clause text only:
+    it holds no credentials or IBAN).
+    """
+    try:
+        from fints.utils import MT535_Miniparser
+    except Exception:  # pragma: no cover - library layout changed; keep the sync working
+        yield
+        return
+    with _MT535_PATCH_LOCK:
+        orig_re = MT535_Miniparser.re_acquisitionprice
+        orig_collapse = MT535_Miniparser.collapse_multilines
+
+        def _collapse(self: Any, lines: Any) -> Any:
+            clauses = orig_collapse(self, lines)
+            for clause in clauses:
+                if clause.startswith(":70E::HOLD") and not _TOLERANT_ACQUISITION_RE.match(clause):
+                    logger.debug("DKB MT535: unmatched acquisition clause %r", clause[:120])
+            return clauses
+
+        MT535_Miniparser.re_acquisitionprice = _TOLERANT_ACQUISITION_RE  # type: ignore[assignment]
+        MT535_Miniparser.collapse_multilines = _collapse  # type: ignore[method-assign]
+        try:
+            yield
+        finally:
+            MT535_Miniparser.re_acquisitionprice = orig_re  # type: ignore[assignment]
+            MT535_Miniparser.collapse_multilines = orig_collapse  # type: ignore[method-assign]
 
 
 class _NullClientContext:
@@ -423,9 +470,10 @@ class DkbFinTSAdapter:
                             if holdings_method and account_type == "depot":
                                 t0 = time.monotonic()
                                 try:
-                                    holdings = self._resolve_response(
-                                        active_client, holdings_method(account), state_callback,
-                                    )
+                                    with _tolerant_mt535_acquisition_price():
+                                        holdings = self._resolve_response(
+                                            active_client, holdings_method(account), state_callback,
+                                        )
                                     positions.extend(self._positions_from_holdings(account, holdings or []))
                                     elapsed_ms = (time.monotonic() - t0) * 1000
                                     pos_count = len(list(holdings or []))
@@ -494,9 +542,10 @@ class DkbFinTSAdapter:
                                 continue
                             t0 = time.monotonic()
                             try:
-                                holdings = self._resolve_response(
-                                    active_client, holdings_method(depot_sepa), state_callback,
-                                )
+                                with _tolerant_mt535_acquisition_price():
+                                    holdings = self._resolve_response(
+                                        active_client, holdings_method(depot_sepa), state_callback,
+                                    )
                                 positions.extend(self._positions_from_holdings(depot_sepa, holdings or []))
                                 elapsed_ms = (time.monotonic() - t0) * 1000
                                 pos_count = len(list(holdings or []))

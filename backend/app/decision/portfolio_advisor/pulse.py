@@ -4,7 +4,7 @@ from __future__ import annotations
 from .analyzer import compute_gap_analysis
 
 
-def run_pulse_check(holdings: list[dict], regime: dict | None, regime_weights: dict | None = None, lookthrough: dict | None = None) -> dict:
+def run_pulse_check(holdings: list[dict], regime: dict | None, regime_weights: dict | None = None, lookthrough: dict | None = None, *, target: dict[str, float] | None = None) -> dict:
     """Quick health check combining gap analysis and regime awareness.
 
     Args:
@@ -12,8 +12,9 @@ def run_pulse_check(holdings: list[dict], regime: dict | None, regime_weights: d
         regime: Regime snapshot dict.
         regime_weights: MWU weights (action → weight) for adjusting check severity.
         lookthrough: Optional ETF lookthrough dict from portfolio_lookthrough().
+        target: Optional asset-type → fraction target for drift detection (ADR 0019 §1).
     """
-    gap = compute_gap_analysis(holdings, lookthrough)
+    gap = compute_gap_analysis(holdings, lookthrough, target=target)
     checks: list[dict] = []
 
     # Regime check — severity adjusted by MWU weights
@@ -24,8 +25,11 @@ def run_pulse_check(holdings: list[dict], regime: dict | None, regime_weights: d
         # Check if regime signal is trusted based on MWU weights
         regime_weight = 1.0
         if regime_weights:
-            equity_w = regime_weights.get("buy_equity", 0.2) + regime_weights.get("hold_cash", 0.2)
-            regime_weight = min(1.0, equity_w * 2.5)  # scale to [0, 1]
+            # Uniform weights (nothing learned yet) map to 0.5, a plain warning;
+            # only weight the update has moved onto these two actions raises it.
+            uniform = 1.0 / max(1, len(regime_weights))
+            equity_w = regime_weights.get("buy_equity", uniform) + regime_weights.get("hold_cash", uniform)
+            regime_weight = min(1.0, equity_w / (4 * uniform))  # scale to [0, 1]
 
         if reg_label in ("bear", "high_vol") and reg_confidence > 0.5:
             severity = "warning"

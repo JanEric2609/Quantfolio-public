@@ -727,9 +727,10 @@ def run_mandate_review(db: Session, user_id: str, mandate: str) -> dict[str, Any
         from app.decision.paper_portfolio import paper_quote_eur
 
         # The book is in EUR: a quote without an exchange rate is no price.
-        eur = paper_quote_eur(db, ticker)["price"]
+        pq = paper_quote_eur(db, ticker)
+        eur = None if pq.get("stale") else pq["price"]
         if not eur or eur <= 0:
-            logger.warning("No EUR price for %s; skipping buy gates.", ticker)
+            logger.warning("No current EUR price for %s; skipping buy gates.", ticker)
             gate_result = {
                 "passed": False,
                 "checks": [],
@@ -752,53 +753,42 @@ def run_mandate_review(db: Session, user_id: str, mandate: str) -> dict[str, Any
             )
 
         if gate_result["passed"]:
-            # Create PaperTrade
-            value = quantity_dec * price
-            trade = PaperTrade(
-                portfolio_id=portfolio_id,
-                holding_id=holding.id if holding else None,
-                ticker=ticker,
-                side="buy",
-                quantity=quantity_dec,
-                price=price,
-                value=value,
-                confidence=confidence,
-                rationale=thesis,
-                date=datetime.now(UTC),
-                ai_decision_id=None,  # filled after decision row is created
-            )
-            db.add(trade)
-            db.flush()
-            trade_created = True
+            # Same path as every other paper sleeve: execute_trade checks cash
+            # (trades, fees, dividends), books the Scalable order fee and
+            # upserts the holding.
+            from app.decision.paper_portfolio import execute_trade, paper_order_fee
 
-            # Upsert PaperHolding
-            if holding:
-                # Weighted average price update
-                old_qty = holding.quantity or Decimal("0")
-                old_avg = holding.avg_buy_price or Decimal("0")
-                new_qty = old_qty + quantity_dec
-                if new_qty > 0:
-                    holding.avg_buy_price = (old_qty * old_avg + quantity_dec * price) / new_qty
-                holding.quantity = new_qty
-                holding.updated_at = datetime.now(UTC)
+            fee = paper_order_fee(db, ticker, float(quantity_dec * price), isin=isin)
+            try:
+                booked = execute_trade(
+                    db,
+                    portfolio_id,
+                    ticker,
+                    "buy",
+                    float(quantity_dec),
+                    float(price),
+                    confidence=confidence,
+                    rationale=thesis,
+                    fee=fee,
+                )
+            except ValueError as exc:
+                gate_result = {
+                    "passed": False,
+                    "checks": gate_result.get("checks", []),
+                    "reason": f"Buy of {ticker} not executed: {exc}",
+                }
+                logger.info("Buy of %s rejected by the book: %s", ticker, exc)
             else:
-                from app.decision.paper_portfolio import (
-                    resolve_instrument_name,
-                    resolve_paper_asset_type,
-                )
-
-                new_holding = PaperHolding(
-                    portfolio_id=portfolio_id,
-                    isin=isin,
-                    ticker=ticker,
-                    name=resolve_instrument_name(db, ticker, isin),
-                    asset_type=resolve_paper_asset_type(db, ticker, isin),
-                    quantity=quantity_dec,
-                    avg_buy_price=price,
-                )
-                db.add(new_holding)
-                db.flush()
-                trade.holding_id = new_holding.id
+                trade = db.get(PaperTrade, booked["id"])
+                trade_created = True
+                if isin:
+                    new_holding = (
+                        db.query(PaperHolding)
+                        .filter(PaperHolding.portfolio_id == portfolio_id, PaperHolding.ticker == ticker)
+                        .one_or_none()
+                    )
+                    if new_holding is not None and not new_holding.isin:
+                        new_holding.isin = isin
         else:
             logger.info("Buy rejected by gates for %s: %s", ticker, gate_result["reason"])
 
@@ -822,46 +812,51 @@ def run_mandate_review(db: Session, user_id: str, mandate: str) -> dict[str, Any
                 quantity_dec,
             )
         else:
-            # Resolve a price for the sell (quote, else fall back to avg buy price).
-            price = Decimal("0")
-            from app.decision.paper_portfolio import paper_quote_eur
+            # A sell is booked at the current EUR quote only. Falling back to
+            # the average buy price would book a fill at a price nobody quoted.
+            from app.decision.paper_portfolio import (
+                execute_trade,
+                paper_order_fee,
+                paper_quote_eur,
+            )
 
-            eur = paper_quote_eur(db, ticker)["price"]
-            if eur and eur > 0:
-                price = Decimal(str(eur))
-            if price <= 0:
-                price = holding.avg_buy_price or Decimal("0")
-
-            if price <= 0:
+            pq = paper_quote_eur(db, ticker)
+            eur = None if pq.get("stale") else pq["price"]
+            if not eur or eur <= 0:
                 gate_result = {
                     "passed": False,
                     "checks": [],
-                    "reason": f"No price available to value sell of {ticker}",
+                    "reason": f"Sell of {ticker} skipped: no current EUR price",
                 }
+                logger.info("Sell of %s skipped: no current EUR price", ticker)
             else:
-                value = quantity_dec * price
-                holding.quantity = held_qty - quantity_dec
-                holding.updated_at = datetime.now(UTC)
-                trade = PaperTrade(
-                    portfolio_id=portfolio_id,
-                    holding_id=holding.id,
-                    ticker=ticker,
-                    side="sell",
-                    quantity=quantity_dec,
-                    price=price,
-                    value=value,
-                    confidence=confidence,
-                    rationale=thesis,
-                    date=datetime.now(UTC),
-                    ai_decision_id=None,  # filled after decision row is created
+                price = Decimal(str(eur))
+                fee = paper_order_fee(
+                    db, ticker, float(quantity_dec * price), isin=holding.isin, name=holding.name, side="sell"
                 )
-                db.add(trade)
-                db.flush()
-                trade_created = True
-                if holding.quantity <= 0:
-                    trade.holding_id = None
-                    db.delete(holding)
-                gate_result = {"passed": True, "checks": [], "reason": "Sell executed"}
+                try:
+                    booked = execute_trade(
+                        db,
+                        portfolio_id,
+                        ticker,
+                        "sell",
+                        float(quantity_dec),
+                        float(price),
+                        confidence=confidence,
+                        rationale=thesis,
+                        fee=fee,
+                    )
+                except ValueError as exc:
+                    gate_result = {
+                        "passed": False,
+                        "checks": [],
+                        "reason": f"Sell of {ticker} not executed: {exc}",
+                    }
+                    logger.info("Sell of %s rejected by the book: %s", ticker, exc)
+                else:
+                    trade = db.get(PaperTrade, booked["id"])
+                    trade_created = True
+                    gate_result = {"passed": True, "checks": [], "reason": "Sell executed"}
 
     # Overwrite whatever the LLM echoed for `assessment` with the authoritative
     # Python-computed facts, so stored facts can never be model-fabricated.

@@ -27,6 +27,7 @@
       "app.lab.performance_ledger",
       "app.lab.pooled_model",
       "app.lab.quant_lab",
+      "app.lab.ranking_replay",
       "app.lab.regime",
       "app.lab.satellite"
     ],

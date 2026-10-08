@@ -1,3 +1,4 @@
+import re
 from typing import Any, Literal
 
 import httpx
@@ -68,6 +69,58 @@ QUOTE_PROVIDERS = {
     "databento": DatabentoProvider,
     "tiingo": TiingoProvider,
 }
+
+# Each provider is probed with a symbol it actually covers: the free tiers of
+# the US-focused providers know no XETRA listing, and a "not covered" answer
+# says nothing about the key. EODHD is not probed at all: its free plan is 20
+# calls a day, shared with ingestion, so a test would only burn quota.
+QUOTE_PROBE_SYMBOLS = {
+    "alphavantage": "AAPL",
+    "finnhub": "AAPL",
+    "twelvedata": "AAPL",
+    "databento": "AAPL",
+    "tiingo": "AAPL",
+}
+_HTTP_STATUS = re.compile(r"HTTP (\d{3})")
+# Failures that say nothing against the connection itself.
+_HARMLESS_REASONS = ("not_applicable", "rate_limited")
+
+
+def _reason_from_text(text: str) -> str:
+    """Last resort for a provider failure that carries no reason code: its HTTP status."""
+    match = _HTTP_STATUS.search(text)
+    if match:
+        status = int(match.group(1))
+        if status in (401, 403):
+            return "auth"
+        if status == 429:
+            return "rate_limited"
+        return "http_error"
+    return "no_data"
+
+
+def _quote_probe_outcome(result: dict[str, Any]) -> tuple[bool, str, str | None]:
+    """Turn a provider quote answer into (connection ok, message, reason code).
+
+    Only a real failure (auth, network, HTTP error) is a failed connection. A
+    throttle or a coverage gap means the key reached the provider.
+    """
+    if result.get("ok"):
+        return True, "Provider quote available.", None
+    text = str(result.get("error") or "; ".join(result.get("quality", {}).get("warnings", [])) or "No quote returned.")
+    reason = result.get("reason") or _reason_from_text(text)
+    if reason == "rate_limited":
+        return True, "Key accepted; the provider is rate-limiting requests right now.", reason
+    if reason == "not_applicable":
+        return True, "Key accepted; this provider does not cover the test symbol.", reason
+    return False, text, reason
+
+
+def _reason_from_exception(exc: Exception) -> str:
+    if isinstance(exc, (httpx.TransportError, TimeoutError, ConnectionError)):
+        return "network"
+    return _reason_from_text(str(exc)) if "HTTP" in str(exc) else "network"
+
 
 # Providers whose self-test needs no key/secret — just import + status().
 NO_KEY_STATUS_PROVIDERS = {
@@ -245,7 +298,9 @@ def test_integration(
         require_connection_owner(db, user)
     result = _probe_integration(payload, db)
     if payload.value is None or payload.service == "smtp":
-        result.tested_at = record_connection_test(db, result.service, result.ok, result.message)
+        result.tested_at = record_connection_test(
+            db, result.service, result.ok, result.message, reason=result.reason, probe_symbol=result.probe_symbol,
+        )
     return result
 
 
@@ -383,19 +438,31 @@ def _probe_integration(payload: IntegrationTestRequest, db: Session) -> Integrat
             return IntegrationTestResponse(service="openai", ok=False, message=str(exc))
 
     if payload.service in QUOTE_PROVIDERS:
+        probe_symbol = QUOTE_PROBE_SYMBOLS.get(payload.service)
         try:
             saved_secret = get_secret(db, payload.service)
             key = payload.value if payload.value is not None else (saved_secret[0] if saved_secret else None)
+            if payload.service == "eod":
+                # Configured status only: a real call would spend the 20/day quota.
+                if key:
+                    return IntegrationTestResponse(
+                        service="eod", ok=True, message="API key saved (not tested, to keep the daily quota).",
+                        reason="not_applicable", probe_symbol="configured",
+                    )
+                return IntegrationTestResponse(
+                    service="eod", ok=False, message="No API key saved.", reason="auth", probe_symbol="configured",
+                )
             prov = QUOTE_PROVIDERS[payload.service](key)
-            result = prov.get_quote("EUNL.DE")
-            ok = bool(result.get("ok"))
-            message = (
-                "Provider quote available." if ok
-                else result.get("error") or "; ".join(result.get("quality", {}).get("warnings", []))
+            result = prov.get_quote(probe_symbol or "AAPL")
+            ok, message, reason = _quote_probe_outcome(result)
+            return IntegrationTestResponse(
+                service=payload.service, ok=ok, message=message, reason=reason, probe_symbol=probe_symbol,
             )
-            return IntegrationTestResponse(service=payload.service, ok=ok, message=message)
         except Exception as exc:
-            return IntegrationTestResponse(service=payload.service, ok=False, message=str(exc))
+            return IntegrationTestResponse(
+                service=payload.service, ok=False, message=str(exc), reason=_reason_from_exception(exc),
+                probe_symbol=probe_symbol,
+            )
 
     if payload.service == "fred":
         try:

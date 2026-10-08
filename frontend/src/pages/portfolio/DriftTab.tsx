@@ -260,6 +260,7 @@ export function DriftTab() {
 
   // Values from drift endpoint are already mapped to target taxonomy as percentages
   const byType = drift.data?.current ?? {};
+  const sleeves = drift.data?.sleeves;
   const targetMap: Record<string, TargetAllocationItem> = {};
   for (const t of targets.data?.allocations ?? []) {
     targetMap[t.asset_type] = t;
@@ -337,12 +338,38 @@ export function DriftTab() {
         </CardContent>
       </Card>
 
+      {/* Plan sleeve targets: the single source of targets (ADR 0019) */}
+      {sleeves && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg">Plan sleeves (targets)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {Object.entries(sleeves.targets).map(([key, value]) => (
+                <div key={key} className="flex justify-between items-center text-sm">
+                  <span className="text-text-secondary">
+                    {sleeves.labels[key] ?? key}
+                    {!sleeves.unlocked[key] && " (locked)"}
+                  </span>
+                  <span className="font-mono font-semibold">
+                    {formatPercentPoints(Number(value), { digits: 1 })}
+                  </span>
+                </div>
+              ))}
+              <p className="text-xs text-text-muted">
+                From this month's plan (±{sleeves.band_pp} points drift band), not hand-typed numbers.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Current Allocation Summary */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-lg">Current Allocation</CardTitle>
-        </CardHeader>
-        <CardContent>
+        </CardHeader>        <CardContent>
           {Object.keys(byType).length > 0 ? (
             <div className="space-y-2">
               {Object.entries(byType).map(([type, value]) => (

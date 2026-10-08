@@ -42,7 +42,7 @@ BROKERS = (
     # EUR 10 per order up to EUR 5,000 (decision/advisor/costs.py; not
     # importable from the lab layer, so restated here): about 83 bps each way.
     Broker("dkb", positions=3, order_fee_eur=10.0),
-    # The per-order fee of Scalable's free plan on gettex: about 28 bps each
+    # The per-order fee of Scalable's free plan on EIX: about 28 bps each
     # way. A flat-fee plan costs a fixed amount per month instead.
     Broker("scalable", positions=10, order_fee_eur=0.99),
 )

@@ -34,6 +34,7 @@ from app.decision.discover.framings import STYLE_FRAMINGS
 from app.decision.discover.ledger import DEFAULT_HORIZON_DAYS
 from app.decision.discover.calibrator import calibrate_prediction
 from app.decision.discover.predictor import store_prediction
+from app.decision.discover.shadow_ledger import backfill_snapshots
 from app.decision.discover.skill_snapshot import skill_summary
 from app.decision.discover.state import DiscoveryState
 from app.decision.discover.tradeability import assess as assess_tradeability
@@ -51,6 +52,7 @@ from app.decision.discover.jobs import (
 )
 
 __all__ = [
+    "backfill_snapshots",
     "skill_summary",
     "DEFAULT_HORIZON_DAYS",
     "DEFAULT_PROMPT_TEMPLATE",

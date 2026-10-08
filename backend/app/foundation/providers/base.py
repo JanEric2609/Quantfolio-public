@@ -5,6 +5,10 @@ from datetime import datetime
 from typing import Any
 
 
+# Failure reasons a provider (or the connection probe) can report.
+PROBE_REASONS = ("not_applicable", "rate_limited", "auth", "network", "http_error", "no_data")
+
+
 def provider_result(
     provider: str,
     *,
@@ -16,6 +20,7 @@ def provider_result(
     confidence: float = 0.0,
     warnings: list[str] | None = None,
     error: str | None = None,
+    reason: str | None = None,
 ) -> dict[str, Any]:
     return {
         "ok": ok,
@@ -29,6 +34,8 @@ def provider_result(
             "warnings": warnings or [],
         },
         "error": error,
+        # Machine-readable outcome code of a failure (see PROBE_REASONS), None when unclassified.
+        "reason": reason,
     }
 
 
@@ -50,12 +57,13 @@ class MarketDataProvider(ABC):
             "message": "Provider is enabled.",
         }
 
-    def unavailable(self, capability: str, message: str | None = None) -> dict[str, Any]:
+    def unavailable(self, capability: str, message: str | None = None, *, reason: str | None = None) -> dict[str, Any]:
         return provider_result(
             self.name,
             ok=False,
             warnings=[message or f"{self.name} does not support {capability}."],
             error=message or f"{capability} unavailable",
+            reason=reason,
         )
 
     def get_quote(self, symbol: str) -> dict[str, Any]:

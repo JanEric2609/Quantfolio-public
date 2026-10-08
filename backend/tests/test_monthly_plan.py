@@ -462,7 +462,8 @@ def test_manual_orders_at_scalable_cost_99_cents():
 
     [action] = plan["actions"]
     assert plan["broker_label"] == "Scalable Capital"
-    assert action["note"] == "This month's contribution: one order at Scalable Capital; the 0,99 € fee is 0.1 % of it."
+    # The default core (an iShares ETF) is a Prime ETF: free from 250 € at Scalable.
+    assert action["note"] == "This month's contribution: one order at Scalable Capital, free of charge for this ETF."
 
 
 def test_a_savings_plan_at_scalable_is_free():
@@ -526,3 +527,16 @@ def test_positions_entered_by_hand_count_toward_the_sleeves():
     assert _sleeve(plan, "core")["current_eur"] == 31_100.0
     assert _sleeve(plan, "satellite")["current_eur"] == 1_000.0
     assert plan["book_eur"] == 32_100.0
+
+
+def test_satellite_text_shows_the_gate_date_trials_and_goes_stale_after_14_days():
+    db = _memory_db()
+    _gate_run(db, False, [], "no mined score passed", n_trials=500)  # computed 2026-09-25
+
+    fresh = monthly_plan.evidence_state(db, datetime(2026, 10, 5, tzinfo=UTC))
+    assert "500 trials" in fresh["satellite_reason"] and "as of 2026-09-25" in fresh["satellite_reason"]
+    assert fresh["satellite_gate"]["stale"] is False
+
+    stale = monthly_plan.evidence_state(db, datetime(2026, 10, 20, tzinfo=UTC))
+    assert stale["satellite_gate"]["stale"] is True
+    assert "out of date" in stale["satellite_reason"]

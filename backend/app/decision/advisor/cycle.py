@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
 
@@ -26,15 +27,26 @@ from app.foundation.models.entities import (
 from app.foundation.models.entities._core import now_utc
 from app.decision.advisor.costs import affordable_notional, resolve_fee_schedule, trade_fee
 from app.decision.advisor.decision import build_trade_proposal
-from app.decision.advisor.llm_decision import TradeDecision, decide_trades
+from app.decision.advisor.llm_decision import (
+    _SYSTEM_PROMPT,
+    TradeDecision,
+    build_decision_schema,
+    decide_trades,
+)
+from app.foundation import provenance
+from app.foundation.llm.sampling import QWEN_SAMPLING
+from app.foundation.paper_cash import MAX_QUOTE_AGE_TRADING_DAYS
 from app.decision.advisor.risk_gate import check_risk_gate
 from app.decision.advisor.rl_signal import latest_rl_portfolio_signal
+from app.decision.discover.calibrator import CALIBRATOR_VERSION
 from app.decision.discover.ledger import DEFAULT_HORIZON_DAYS
 from app.decision.discover.predictor import store_prediction
 from app.foundation.quant_proposal import TradeProposal
 from app.decision.paper_portfolio import (
     execute_trade,
     get_summary,
+    paper_quote_eur,
+    resolve_instrument_name,
     seed_paper_portfolio_from_real,
     snapshot_paper_portfolio,
 )
@@ -42,6 +54,9 @@ from app.decision.paper_portfolio import (
 logger = logging.getLogger(__name__)
 
 ADVISOR_MANDATE = "advisor"
+# Fields of llama-server's identity that change what the model writes; the
+# advisor's cohort includes them (ADR 0018 §10).
+_LLM_COHORT_KEYS = ("model_path", "build_info", "chat_template_sha256", "server_sampling")
 # Reuse a completed discover run up to this many days old before flagging it stale.
 _DISCOVER_STALE_DAYS = 7
 
@@ -235,6 +250,77 @@ def _effective_sell_cap(
     return cap
 
 
+# A cached bar older than this many trading days is no basis for a fill.
+MAX_FALLBACK_BAR_AGE_TRADING_DAYS = MAX_QUOTE_AGE_TRADING_DAYS
+
+
+def _bar_age_trading_days(proposal: TradeProposal, ticker: str) -> int | None:
+    """Trading days between the last bar behind ``mc.spot`` and today, or ``None`` if unknown."""
+    import numpy as np
+
+    series = proposal.price_series.get(ticker)
+    if series is None or len(series) == 0:
+        return None
+    try:
+        last = series.index[-1].date()
+    except AttributeError:
+        return None
+    today = now_utc().date()
+    if last >= today:
+        return 0
+    return int(np.busday_count(last, today))
+
+
+def _resolve_execution_prices(
+    db: Session, proposal: TradeProposal, tickers: set[str]
+) -> dict[str, float | None]:
+    """EUR fill price per ticker: the quote holdings are valued at.
+
+    Fills used to take ``mc.spot`` (the last cached history close, possibly
+    days old) while the book is valued at :func:`paper_quote_eur`, so every
+    trade booked an instant gain or loss against its own valuation. Now the
+    fill uses the valuation quote; only when there is none does it fall back
+    to ``mc.spot``, and then only if that bar is at most
+    :data:`MAX_FALLBACK_BAR_AGE_TRADING_DAYS` trading days old. ``None`` means
+    no current price (the order is skipped).
+    """
+    prices: dict[str, float | None] = {}
+    rate_cache: dict[str, dict[str, float] | None] = {}
+    for ticker in sorted(tickers):
+        q = paper_quote_eur(db, ticker, rate_cache=rate_cache)
+        quote = None if q.get("stale") else q.get("price")
+        if quote and quote > 0:
+            prices[ticker] = float(quote)
+            continue
+        mc = proposal.mc_summaries.get(ticker)
+        age = _bar_age_trading_days(proposal, ticker)
+        if mc is not None and mc.spot and mc.spot > 0 and age is not None and (
+            age <= MAX_FALLBACK_BAR_AGE_TRADING_DAYS
+        ):
+            prices[ticker] = float(mc.spot)
+        else:
+            prices[ticker] = None
+    return prices
+
+
+def _record_sale(
+    proposal: TradeProposal, sell_caps: dict[str, float] | None, ticker: str, value: float
+) -> None:
+    """Take an executed sell off the book and off the ticker's remaining sell cap.
+
+    ``sell_caps`` and ``proposal.current_book`` are computed once per cycle;
+    without this a name the model already sold could be sold again as a
+    funding sell, and each funding raise could trim the same name again, so a
+    cycle's total sells of one position could exceed the per-cycle,
+    cumulative-window and ETF-floor caps. Both guardrails measure what is
+    still sellable, so the same decrement serves all three.
+    """
+    if sell_caps is not None and ticker in sell_caps:
+        sell_caps[ticker] = max(0.0, sell_caps[ticker] - value)
+    if ticker in proposal.current_book:
+        proposal.current_book[ticker] = max(0.0, proposal.current_book[ticker] - value)
+
+
 def _plan_decision(
     decision: TradeDecision,
     proposal: TradeProposal,
@@ -242,16 +328,25 @@ def _plan_decision(
     min_ticket: float,
     max_sell_pct_of_position: float = DEFAULT_MAX_SELL_PCT_OF_POSITION,
     sell_caps: dict[str, float] | None = None,
+    prices: dict[str, float | None] | None = None,
 ) -> tuple[PlannedTrade | None, str | None]:
     """Size one target-weight decision into an order, or explain the skip.
 
     Returns ``(planned, skip_reason)`` — exactly one is non-None.
     """
-    mc = proposal.mc_summaries.get(decision.ticker)
-    price = mc.spot if mc is not None else None
-    if not price or price <= 0:
-        logger.warning("advisor cycle: no price for %s — trade skipped", decision.ticker)
-        return None, "no market price available"
+    if prices is not None:
+        # Execution prices resolved by the cycle (valuation quote, see
+        # _resolve_execution_prices).
+        price = prices.get(decision.ticker)
+        if not price or price <= 0:
+            logger.warning("advisor cycle: no current price for %s — trade skipped", decision.ticker)
+            return None, "no current price"
+    else:
+        mc = proposal.mc_summaries.get(decision.ticker)
+        price = mc.spot if mc is not None else None
+        if not price or price <= 0:
+            logger.warning("advisor cycle: no price for %s — trade skipped", decision.ticker)
+            return None, "no market price available"
 
     current_value = proposal.current_book.get(decision.ticker, 0.0)
     target_value = decision.target_weight * total_value
@@ -329,6 +424,8 @@ def _raise_cash(
     fee_schedule: dict[str, Any],
     max_sell_pct_of_position: float = DEFAULT_MAX_SELL_PCT_OF_POSITION,
     sell_caps: dict[str, float] | None = None,
+    prices: dict[str, float | None] | None = None,
+    names: dict[str, str] | None = None,
 ) -> tuple[float, float, list[dict[str, Any]]]:
     """Trim overweight positions to fund a buy the sleeve cannot afford.
 
@@ -371,12 +468,16 @@ def _raise_cash(
     for excess, sym in overweights:
         if remaining <= 0 or budget < min_ticket:
             break
-        mc = proposal.mc_summaries.get(sym)
-        price = mc.spot if mc is not None else None
+        if prices is not None:
+            price = prices.get(sym)
+        else:
+            mc = proposal.mc_summaries.get(sym)
+            price = mc.spot if mc is not None else None
         if not price or price <= 0:
             continue
+        name = (names or {}).get(sym)
         # Gross the ask up so the commission does not eat into the shortfall.
-        wanted = remaining + trade_fee(remaining, fee_schedule)
+        wanted = remaining + trade_fee(remaining, fee_schedule, name, side="sell")
         held_value = proposal.current_book.get(sym, 0.0)
         sell_cap = (
             sell_caps.get(sym, held_value * max_sell_pct_of_position)
@@ -386,7 +487,7 @@ def _raise_cash(
         notional = min(wanted, excess, budget, sell_cap)
         if notional < min_ticket:
             continue
-        fee = trade_fee(notional, fee_schedule)
+        fee = trade_fee(notional, fee_schedule, name, side="sell")
         if fee >= notional:
             continue
         try:
@@ -407,6 +508,7 @@ def _raise_cash(
             logger.warning("advisor cycle: funding sell %s rejected: %s", sym, exc)
             continue
         net = notional - fee
+        _record_sale(proposal, sell_caps, sym, float(trade.get("value") or notional))
         proceeds += net
         notional_used += notional
         remaining -= net
@@ -417,6 +519,67 @@ def _raise_cash(
         records.append(trade)
 
     return proceeds, notional_used, records
+
+
+def _advisor_stamp(
+    db: Session,
+    *,
+    run_id: str | None,
+    portfolio_id: str,
+    system_suffix: str | None,
+    decisions: list[TradeDecision],
+    attempts: list[dict[str, Any]],
+    injected_llm: bool,
+) -> dict[str, Any]:
+    """Provenance for this cycle's ledger rows (ADR 0018 §10).
+
+    The advisor's conviction is the LLM's own confidence, so — unlike
+    Discover — the served model, its sampling and the prompt are part of the
+    cohort. Never raises: a failure is a degradation flag on the stamp.
+    """
+    flags: list[str] = []
+    try:
+        llm = {"available": False, "error": "injected llm_call"} if injected_llm else provenance.llm_server_identity(db)
+        if not llm.get("available"):
+            flags.append("llm_identity_unavailable")
+        last = attempts[-1] if attempts else {}
+        parsed_as = last.get("parsed_as") if isinstance(last, dict) else None
+        if parsed_as not in (None, "strict"):
+            flags.append(f"llm_output_{parsed_as}")
+        if len(attempts) > 1:
+            flags.append("llm_retried")
+        if not decisions:
+            flags.append("llm_no_decisions")
+        prompt = _SYSTEM_PROMPT if not system_suffix else f"{_SYSTEM_PROMPT}\n{system_suffix}"
+        return provenance.stamp(
+            source="advisor",
+            cohort_spec={
+                "prompt_template_hash": provenance.canonical_hash(prompt),
+                "decision_schema_hash": provenance.canonical_hash(build_decision_schema(None)),
+                "client_sampling": dict(QWEN_SAMPLING),
+                "llm": {k: llm.get(k) for k in _LLM_COHORT_KEYS},
+                "calibrator_version": CALIBRATOR_VERSION,
+                "horizon_days": DEFAULT_HORIZON_DAYS,
+            },
+            details={
+                "run_id": run_id,
+                "portfolio_id": portfolio_id,
+                "llm_server": llm,
+                "llm_parse_status": parsed_as,
+                "llm_attempts": len(attempts),
+                "output_sha256": provenance.canonical_hash([asdict(d) for d in decisions]),
+            },
+            degradation_flags=flags,
+        )
+    except Exception as exc:  # noqa: BLE001 - provenance must never fail the cycle
+        logger.exception("advisor provenance stamp failed")
+        return {
+            "provenance_schema_version": 0,
+            "source": "advisor",
+            "run_id": run_id,
+            "degradation_flags": ["stamp_failed"],
+            "error": str(exc)[:200],
+        }
 
 
 def _open_prediction_intents(db: Session, portfolio_id: str) -> set[tuple[str, str]]:
@@ -620,6 +783,12 @@ def run_advisor_cycle(
     cash_balance = float(summary.get("cash_balance") or 0.0)
 
     fee_schedule = resolve_fee_schedule(config)
+    # Instrument names drive the Prime-ETF fee exemption; fills use the same
+    # EUR quote the book is valued at.
+    names = {
+        t: resolve_instrument_name(db, t)
+        for t in set(proposal.mc_summaries) | set(proposal.current_book)
+    }
     max_turnover_pct = float((config or {}).get("max_turnover_pct", DEFAULT_MAX_TURNOVER_PCT))
     min_ticket_pct = float((config or {}).get("min_ticket_pct", DEFAULT_MIN_TICKET_PCT))
     max_sell_pct_of_position = float(
@@ -680,6 +849,7 @@ def run_advisor_cycle(
         rl_signal=rl_signal,
         max_sell_pct_of_position=max_sell_pct_of_position,
         max_sellable_eur_by_ticker=sell_caps,
+        instrument_names=names,
     )
     result["errors"].extend(errors)
     if not decisions:
@@ -695,6 +865,12 @@ def run_advisor_cycle(
     executed: list[tuple[TradeDecision, dict[str, Any]]] = []
     skipped: list[dict[str, str]] = []
     ordered = _ordered_decisions(decisions)
+    exec_prices = _resolve_execution_prices(
+        db,
+        proposal,
+        {d.ticker for d in ordered}
+        | {t for t, v in proposal.current_book.items() if v > 0},
+    )
     remaining_budget = turnover_budget
     # A rotation spends the cap twice — once selling, once buying. Left
     # unchecked the sells run first and can exhaust the budget on their own,
@@ -711,7 +887,8 @@ def run_advisor_cycle(
     total_fees = 0.0
     for decision in ordered:
         planned, skip_reason = _plan_decision(
-            decision, proposal, total_value, min_ticket, max_sell_pct_of_position, sell_caps
+            decision, proposal, total_value, min_ticket, max_sell_pct_of_position, sell_caps,
+            exec_prices,
         )
         if planned is None:
             if skip_reason is not None:
@@ -740,7 +917,8 @@ def run_advisor_cycle(
                 continue
             planned.notional = allowance
 
-        fee = trade_fee(planned.notional, fee_schedule)
+        name = names.get(decision.ticker)
+        fee = trade_fee(planned.notional, fee_schedule, name, side=planned.side)
 
         if planned.side == "buy" and planned.notional + fee > available_cash:
             # The model proposed a buy it cannot pay for and did not offer a
@@ -759,6 +937,8 @@ def run_advisor_cycle(
                 fee_schedule=fee_schedule,
                 max_sell_pct_of_position=max_sell_pct_of_position,
                 sell_caps=sell_caps,
+                prices=exec_prices,
+                names=names,
             )
             if records:
                 funding_sells.extend(records)
@@ -775,7 +955,7 @@ def run_advisor_cycle(
                 # the cash now covers instead of letting the order be rejected —
                 # selling into cash and not buying is worse than not trading.
                 affordable = min(
-                    affordable_notional(available_cash, fee_schedule), remaining_budget
+                    affordable_notional(available_cash, fee_schedule, name), remaining_budget
                 )
                 if affordable < min_ticket:
                     skipped.append({
@@ -788,7 +968,7 @@ def run_advisor_cycle(
                     })
                     continue
                 planned.notional = affordable
-                fee = trade_fee(planned.notional, fee_schedule)
+                fee = trade_fee(planned.notional, fee_schedule, name, side=planned.side)
 
         trade, skip_reason = _execute_planned(db, portfolio, planned, fee)
         if trade is not None:
@@ -797,6 +977,9 @@ def run_advisor_cycle(
             remaining_budget -= planned.notional
             if planned.side == "sell":
                 remaining_sell_budget -= planned.notional
+                _record_sale(
+                    proposal, sell_caps, decision.ticker, float(trade.get("value") or planned.notional)
+                )
                 available_cash += planned.notional - fee
             else:
                 available_cash -= planned.notional + fee
@@ -869,6 +1052,15 @@ def run_advisor_cycle(
         ledger_entries.append((decision, price))
     result["predictions_deduped"] = deduped
 
+    stamp = _advisor_stamp(
+        db,
+        run_id=run_id,
+        portfolio_id=portfolio.id,
+        system_suffix=(config or {}).get("prompt_framing"),
+        decisions=decisions,
+        attempts=llm_attempts,
+        injected_llm=llm_call is not None,
+    )
     calibrated_by_ticker: dict[str, float | None] = {}
     for decision, price in ledger_entries:
         mc = proposal.mc_summaries.get(decision.ticker)
@@ -898,6 +1090,11 @@ def run_advisor_cycle(
             mc_prob_positive=mc.prob_positive if mc else None,
             price_at_prediction=price,
             portfolio_id=portfolio.id,
+            provenance_json={
+                **stamp,
+                "decision_sha256": provenance.canonical_hash(asdict(decision)),
+                "traded": decision.ticker in executed_tickers,
+            },
         )
         pred = calibrate_prediction(db, pred.id, user_id=user_id) or pred
         calibrated_by_ticker[decision.ticker] = pred.conviction_calibrated

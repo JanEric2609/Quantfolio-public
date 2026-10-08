@@ -42,20 +42,23 @@ Advisory only. Nothing here places orders.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.foundation.allocation import allocate_contribution, drift_sales
+from app.foundation.broker_fees import SAVINGS_PLAN_FEE_EUR, order_fee_eur
 from app.foundation.broker_status import load_raw
 from app.foundation.factor_evidence import TILT_EVIDENCE_REGION, latest_evidence_gate, latest_factor_evidence_cards
 from app.foundation.fx_rates import convert as fx_convert
 from app.foundation.live_positions import BROKER_SOURCES, live_positions, manual_holdings_filter
-from app.foundation.models.entities import ConnectedAccount, DkbAccount, Holding, Portfolio
+from app.foundation.models.entities import BrokerSyncLog, ConnectedAccount, DkbAccount, Holding, Portfolio
 from app.foundation.portfolio_utils import holding_market_value
 from app.foundation.settings import get_public_settings
+from app.decision.monthly_plan_funds import ACC_DIST_NOTE, suggest_all
 
 # Broad, market-cap-weighted global equity ETFs, and the emerging-markets funds
 # that complete a world ETF (MSCI World + EM is the ACWI). Any of these counts
@@ -89,9 +92,6 @@ WORLD_EM_SHARE_PCT = 10.0
 SLEEVES = ("core", "tilt", "satellite")
 SLEEVE_LABELS = {"core": "Core", "tilt": "Factor tilt", "satellite": "Stock picks"}
 
-# DKB's flat fee per order up to EUR 5,000 (see decision/advisor/costs.py).
-DKB_ORDER_FEE_EUR = 10.0
-
 # Where and how the monthly contribution is invested (plan settings).
 CONTRIBUTION_MODES = ("savings_plan", "manual_orders")
 BROKERS = ("dkb", "scalable")
@@ -113,34 +113,12 @@ FREQUENCY_PER_MONTH = {
     "ANNUALLY": 1 / 12,
 }
 
-# Price lists, checked 2026-09-28 (dkb.de/privatkunden/broker,
-# de.scalable.capital/trading-gebuehren):
-# * DKB: an order costs 10 EUR up to 5,000 EUR, 15 EUR up to 20,000 EUR and
-#   30 EUR above, on Tradegate/gettex/Quotrix (Xetra adds 2.50 EUR). A
-#   savings plan costs 1.50 EUR per execution, nothing for the roughly 500
-#   ETFs DKB runs as promotional ("Aktions-") ETFs.
-# * Scalable Capital (FREE broker): 0.99 EUR per order on the European
-#   Investor Exchange, nothing for iShares/Vanguard/Xtrackers/Amundi ETFs
-#   from 250 EUR there; gettex and Xetra 1.99 EUR. Savings plans are free.
-SAVINGS_PLAN_FEE_EUR = {"dkb": 1.5, "scalable": 0.0}
-SCALABLE_ORDER_FEE_EUR = 0.99
-
-
-def order_fee_eur(broker: str, amount: float) -> float:
-    """One order's fee at *broker* on its default venue (see the price lists above)."""
-    if broker == "scalable":
-        return SCALABLE_ORDER_FEE_EUR
-    if amount <= 5_000:
-        return DKB_ORDER_FEE_EUR
-    if amount <= 20_000:
-        return 15.0
-    return 30.0
-
-# Per-order fee of each broker the satellite was simulated at
-# (lab/satellite/spec.py BROKERS; restated so the web process does not
-# import the lab's DuckDB/LightGBM stack).
-SATELLITE_ORDER_FEE_EUR = {"dkb": DKB_ORDER_FEE_EUR, "scalable": 0.99}
+# Fees live in foundation/broker_fees.py (SAVINGS_PLAN_FEE_EUR, order_fee_eur).
 SATELLITE_BROKER_LABELS = {"dkb": "DKB", "scalable": "Scalable Capital"}
+
+# A plan whose next execution lies further back than this is treated as not
+# running (sc sends no paused flag): listed, but left out of the totals.
+OVERDUE_PLAN_DAYS = 3
 
 
 @dataclass
@@ -223,10 +201,11 @@ def _pct(value: float) -> str:
     return f"{value * 100:+.1f} %"
 
 
-def _tilt_evidence(db: Session, cfg: dict[str, Any]) -> tuple[bool, str]:
+def _tilt_evidence(db: Session, cfg: dict[str, Any]) -> tuple[bool, str, bool]:
     """Whether the tilt may receive money, from the latest world factor-premia run.
 
-    Needs both a passing evidence card and a factor ETF the owner chose
+    Returns (unlocked, reason, evidence_passed): a pass without a chosen fund is
+    "passed but not unlocked". Needs both a passing evidence card and a factor ETF the owner chose
     (``plan_tilt_isins``): the evidence says a premium exists, not which fund
     to buy, and no money moves into an instrument nobody picked.
     """
@@ -236,7 +215,7 @@ def _tilt_evidence(db: Session, cfg: dict[str, Any]) -> tuple[bool, str]:
             f"No factor tilt has been tested on {TILT_EVIDENCE_REGION} data yet. Run the "
             "factor-premia study on the JKP data (python -m app.lab.factor_premia) to grade "
             "value, momentum and the rest."
-        )
+        ), False
     passing = sorted(
         (c for c in cards if c.get("passed")),
         key=lambda c: c.get("net_expected_annual") or 0.0,
@@ -246,18 +225,18 @@ def _tilt_evidence(db: Session, cfg: dict[str, Any]) -> tuple[bool, str]:
         return False, (
             f"None of the {len(cards)} pre-registered factor strategies passed on "
             f"{cards[0].get('region', 'the JKP')} data, so the tilt stays at 0 %."
-        )
+        ), False
     best = passing[0]
     names = ", ".join(c.get("label", c.get("strategy", "?")) for c in passing)
     net = best.get("net_expected_annual")
     expected = f" (expected {_pct(net)} a year over the core after decay, costs and tax)" if net is not None else ""
     if not cfg["tilt_isins"]:
         return False, (
-            f"{names} passed the evidence check{expected}. To start the tilt, choose "
-            f"{best.get('etf_hint', 'a factor ETF')} and add the ISIN under Plan settings "
+            f"{names} passed the evidence check{expected}, but no tilt fund is chosen, so the target "
+            f"stays at 0 %. Set one in Plan settings to use it: add the ISIN of {best.get('etf_hint', 'a factor ETF')} "
             "(comma-separated for more than one; the tilt money is shared equally)."
-        )
-    return True, f"Unlocked: {names} passed the evidence check{expected}."
+        ), True
+    return True, f"Unlocked: {names} passed the evidence check{expected}.", True
 
 
 def _tilt_instrument(held: list[dict[str, Any]], isin: str | None) -> str:
@@ -288,10 +267,31 @@ def _split_tilt(
     return [(isin, split[isin]) for isin in sorted(split) if split[isin] > 0]
 
 
-def _satellite_evidence(db: Session) -> tuple[bool, str, str | None]:
+EVIDENCE_STALE_DAYS = 14
+
+
+def gate_freshness(gate: dict[str, Any] | None, now: datetime) -> dict[str, Any] | None:
+    """When the evidence gate last ran, over how many trials, and whether that is stale."""
+    if gate is None:
+        return None
+    computed = gate.get("computed_at")
+    stale = False
+    day: str | None = None
+    if computed:
+        try:
+            ts = datetime.fromisoformat(str(computed))
+            ts = ts if ts.tzinfo else ts.replace(tzinfo=UTC)
+            stale = (now - ts).days > EVIDENCE_STALE_DAYS
+            day = ts.date().isoformat()
+        except ValueError:
+            pass
+    return {"computed_at": computed, "as_of": day, "n_trials": gate["n_trials"], "stale": stale}
+
+
+def _satellite_evidence(db: Session, now: datetime) -> tuple[bool, str, str | None, dict[str, Any] | None]:
     """Whether the satellite may receive money, from the latest evidence-gate run.
 
-    Returns (unlocked, reason, broker). The gate (``app.lab.evidence_gate``)
+    Returns (unlocked, reason, broker, freshness). The gate (``app.lab.evidence_gate``)
     grades every mined score's after-tax satellite by Deflated Sharpe and PBO;
     only a passing mined score unlocks it, and its broker variant sets the fee.
     """
@@ -301,18 +301,21 @@ def _satellite_evidence(db: Session) -> tuple[bool, str, str | None]:
             "No stock-picking strategy has been through the evidence gate yet. Run the "
             "pooled model, the satellite simulation and the gate on the JKP data "
             "(python -m app.lab.pooled_model, app.lab.satellite, app.lab.evidence_gate)."
-        ), None
+        ), None, None
+    fresh = gate_freshness(gate, now)
+    assert fresh is not None
+    when = f" (as of {fresh['as_of']}{', out of date: it is re-checked weekly' if fresh['stale'] else ''})" if fresh["as_of"] else ""
     if not gate["satellite_unlocked"] or not gate["unlocked_by"]:
         return False, (
             "No stock-picking strategy passed the evidence gate (Deflated Sharpe against "
-            f"{gate['n_trials']} trials, then the backtest-overfitting test): {gate['reason']}"
-        ), None
+            f"{gate['n_trials']} trials, then the backtest-overfitting test){when}: {gate['reason']}"
+        ), None, fresh
     best = str(gate["unlocked_by"][0])
     broker = best.split(":", 1)[0]
-    return True, f"Unlocked: {gate['reason']}", broker
+    return True, f"Unlocked{when}: {gate['reason']}", broker, fresh
 
 
-def evidence_state(db: Session) -> dict[str, Any]:
+def evidence_state(db: Session, now: datetime | None = None) -> dict[str, Any]:
     """Which sleeves may receive money, and why.
 
     The tilt reads the latest factor-premia evidence cards (Phase 3), the
@@ -320,14 +323,16 @@ def evidence_state(db: Session) -> dict[str, Any]:
     evidence is wired into: nothing else may set a target weight for the
     real book.
     """
-    tilt_unlocked, tilt_reason = _tilt_evidence(db, plan_settings(db))
-    satellite_unlocked, satellite_reason, satellite_broker = _satellite_evidence(db)
+    tilt_unlocked, tilt_reason, tilt_passed = _tilt_evidence(db, plan_settings(db))
+    satellite_unlocked, satellite_reason, satellite_broker, gate = _satellite_evidence(db, now or datetime.now(UTC))
     return {
         "tilt_unlocked": tilt_unlocked,
         "tilt_reason": tilt_reason,
+        "tilt_evidence_passed": tilt_passed,
         "satellite_unlocked": satellite_unlocked,
         "satellite_reason": satellite_reason,
         "satellite_broker": satellite_broker,
+        "satellite_gate": gate,
     }
 
 
@@ -418,24 +423,39 @@ def depot_label(db: Session, broker: str, account_id: str) -> str:
     return account.name if account is not None and account.name else BROKER_LABELS.get(broker, broker)
 
 
-def buy_broker(cfg: dict[str, Any], connected: list[str], kind: str, amount: float) -> str:
+def buy_broker(
+    cfg: dict[str, Any], connected: list[str], kind: str, amount: float, name: str | None = None,
+) -> str:
     """The broker a buy goes to: the owner's choice, or the cheapest synced depot."""
     if cfg["broker"] in BROKERS:
         return cfg["broker"]
     candidates = connected or ["dkb"]
 
     def fee(broker: str) -> float:
-        return SAVINGS_PLAN_FEE_EUR[broker] if kind == "savings_plan" else order_fee_eur(broker, amount)
+        return SAVINGS_PLAN_FEE_EUR[broker] if kind == "savings_plan" else order_fee_eur(broker, amount, name)
 
     return min(candidates, key=lambda b: (fee(b), BROKERS.index(b)))
 
 
-def running_savings_plans(db: Session, user_id: str, cfg: dict[str, Any]) -> list[dict[str, Any]]:
+def _plan_date(value: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(value)[:10]) if value else None
+    except ValueError:
+        return None
+
+
+def running_savings_plans(
+    db: Session, user_id: str, cfg: dict[str, Any], *, today: date | None = None,
+) -> list[dict[str, Any]]:
     """The savings plans each synced broker runs, with their sleeve and monthly amount.
 
     ``monthly_eur`` is None for a frequency the plan does not know; such a plan
-    is listed but left out of the totals.
+    is listed but left out of the totals. A plan is ``running`` unless sc marks
+    it paused or its next execution date is more than ``OVERDUE_PLAN_DAYS`` in
+    the past; a plan that is not running is listed with its reason but also
+    left out of the totals.
     """
+    today = today or datetime.now(UTC).date()
     out: list[dict[str, Any]] = []
     for account in _broker_depots(db, user_id):
         for item in load_raw(account).get("savings_plans") or []:
@@ -447,6 +467,13 @@ def running_savings_plans(db: Session, user_id: str, cfg: dict[str, Any]) -> lis
             frequency = str(item.get("frequency") or "MONTHLY").upper()
             per_month = FREQUENCY_PER_MONTH.get(frequency)
             isin = str(item.get("isin") or "").upper()
+            next_date = _plan_date(item.get("next_execution_date"))
+            not_running: str | None = None
+            if item.get("paused") is True:
+                not_running = "paused"
+            elif next_date is not None and (today - next_date).days > OVERDUE_PLAN_DAYS:
+                not_running = "overdue"
+            rate = _decimal_or_none(item.get("dynamization_rate"))
             out.append({
                 "broker": account.source,
                 "broker_label": BROKER_LABELS.get(account.source, account.institution or account.source),
@@ -457,8 +484,36 @@ def running_savings_plans(db: Session, user_id: str, cfg: dict[str, Any]) -> lis
                 "frequency": frequency,
                 "monthly_eur": _round_eur(amount * per_month) if per_month is not None else None,
                 "next_execution_date": item.get("next_execution_date"),
+                "dynamization_rate": rate if rate else None,
+                "running": not_running is None,
+                "not_running_reason": not_running,
             })
     return out
+
+
+def plans_freshness(db: Session, user_id: str) -> dict[str, Any]:
+    """When the savings plans were last really fetched, and whether the latest fetch failed.
+
+    A failed fetch keeps the old plans silently, so the page needs both facts to
+    say how far to trust the list.
+    """
+    stamps = [load_raw(a).get("plans_synced_at") for a in _broker_depots(db, user_id)]
+    stamps = [s for s in stamps if isinstance(s, str) and s]
+    last = (
+        db.query(BrokerSyncLog)
+        .filter(
+            BrokerSyncLog.user_id == user_id, BrokerSyncLog.source.in_(BROKER_SOURCES), BrokerSyncLog.state.in_(("success", "warning")),
+        )
+        .order_by(BrokerSyncLog.started_at.desc())
+        .first()
+    )
+    failed = False
+    if last is not None:
+        try:
+            failed = bool(json.loads(last.counts_json or "{}").get("plans_unavailable"))
+        except ValueError:
+            failed = False
+    return {"synced_at": min(stamps) if stamps else None, "last_fetch_failed": failed}
 
 
 def _decimal_or_none(value: Any) -> float | None:
@@ -608,6 +663,57 @@ def _round_eur(x: float) -> float:
     return round(x, 2)
 
 
+def sleeve_targets_from(cfg: dict[str, Any], evidence: dict[str, Any]) -> tuple[dict[str, float], dict[str, bool]]:
+    """Target percent and unlocked flag per sleeve: a sleeve without passing evidence is held at 0 %."""
+    unlocked = {
+        "core": True,
+        "tilt": bool(evidence["tilt_unlocked"]),
+        "satellite": bool(evidence["satellite_unlocked"]),
+    }
+    targets = {
+        "tilt": cfg["tilt_max_pct"] if unlocked["tilt"] else 0.0,
+        "satellite": cfg["satellite_max_pct"] if unlocked["satellite"] else 0.0,
+    }
+    targets["core"] = max(0.0, 100.0 - targets["tilt"] - targets["satellite"])
+    return targets, unlocked
+
+
+def sleeve_plan(db: Session, user_id: str) -> dict[str, Any]:
+    """The plan's sleeve targets for the rebalance view.
+
+    Targets, unlocked flags, band, an ISIN classifier, the chosen tilt ISINs
+    and ``other_budget_eur``: running savings plans into a locked sleeve (stock
+    picks) are the owner's own budget and come out of the monthly contribution
+    before the core is planned, exactly as in ``build_monthly_plan``.
+    """
+    cfg = plan_settings(db)
+    targets, unlocked = sleeve_targets_from(cfg, evidence_state(db))
+    other_budget = 0.0
+    if cfg["contribution_mode"] != "manual_orders":
+        holdings, _ = _holdings(db, user_id, cfg)
+        current = {k: 0.0 for k in SLEEVES}
+        for h in holdings:
+            current[classify(h["isin"], cfg)] += h["value_eur"]
+        split = allocate_contribution(current, targets, cfg["contribution_eur"])
+        if 0 < split["satellite"] < cfg["min_order_eur"]:
+            split["core"] += split["satellite"]
+        locked = sum(
+            p["monthly_eur"] for p in running_savings_plans(db, user_id, cfg)
+            if p["running"] and p["monthly_eur"] is not None
+            and p["sleeve"] in ("tilt", "satellite") and not unlocked[p["sleeve"]]
+        )
+        other_budget = min(locked, split["core"])
+    return {
+        "targets": targets,
+        "unlocked": unlocked,
+        "labels": dict(SLEEVE_LABELS),
+        "band_pp": cfg["drift_band_pp"],
+        "tilt_isins": sorted(cfg["tilt_isins"]),
+        "other_budget_eur": other_budget,
+        "classify": lambda isin: classify((isin or "").upper(), cfg),
+    }
+
+
 def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None) -> dict[str, Any]:
     """Compute this month's plan for *user_id*. Read-only."""
     now = now or datetime.now(UTC)
@@ -623,16 +729,7 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
         positions[sleeve].append(h)
     book = sum(current.values())
 
-    unlocked = {
-        "core": True,
-        "tilt": bool(evidence["tilt_unlocked"]),
-        "satellite": bool(evidence["satellite_unlocked"]),
-    }
-    targets = {
-        "tilt": cfg["tilt_max_pct"] if unlocked["tilt"] else 0.0,
-        "satellite": cfg["satellite_max_pct"] if unlocked["satellite"] else 0.0,
-    }
-    targets["core"] = max(0.0, 100.0 - targets["tilt"] - targets["satellite"])
+    targets, unlocked = sleeve_targets_from(cfg, evidence)
 
     contribution = cfg["contribution_eur"]
     split = allocate_contribution(current, targets, contribution)
@@ -672,8 +769,11 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
     broker = buy_broker(cfg, connected, contribution_kind, contribution)
     broker_label = BROKER_LABELS[broker]
 
-    # What already runs: the brokers' savings plans, per sleeve.
-    plans = running_savings_plans(db, user_id, cfg)
+    # What already runs: the brokers' savings plans, per sleeve. A plan that is
+    # not running (paused, or overdue) is listed but never counted.
+    all_plans = running_savings_plans(db, user_id, cfg, today=now.date())
+    plans = [p for p in all_plans if p["running"]]
+    stopped_plans = [p for p in all_plans if not p["running"]]
     plans_by_sleeve = {k: 0.0 for k in SLEEVES}
     for plan in plans:
         if plan["monthly_eur"] is not None:
@@ -681,6 +781,16 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
     plans_total = sum(plans_by_sleeve.values())
     plan_brokers = " and ".join(sorted({p["broker_label"] for p in plans}))
     locked_plans = {k: plans_by_sleeve[k] for k in ("tilt", "satellite") if plans_by_sleeve[k] > 0 and not unlocked[k]}
+    # Running plans into a sleeve that has no target are the owner's own budget
+    # (e.g. stock picks): they are taken out of the monthly contribution and the
+    # core plans only need the rest. The sleeve caps are unchanged.
+    other_budget = 0.0 if manual_mode else min(sum(locked_plans.values()), split["core"])
+    split["core"] = max(0.0, split["core"] - other_budget)
+    split_shown = dict(split)
+    if other_budget > 0:
+        scale = other_budget / sum(locked_plans.values())
+        for k, v in locked_plans.items():
+            split_shown[k] = v * scale
     core_covered = bool(plans) and plans_by_sleeve["core"] >= split["core"] - 0.5
 
     statuses = {
@@ -696,7 +806,7 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
     }
     sleeves: list[SleeveState] = []
     for k in SLEEVES:
-        after = current[k] + split[k] + reinvest[k] - sales.get(k, 0.0)
+        after = current[k] + split_shown[k] + reinvest[k] - sales.get(k, 0.0)
         status = statuses[k]
         if k != "core" and current[k] > 0 and not unlocked[k]:
             status += " Existing positions stay as they are; selling would be a taxable event."
@@ -714,7 +824,7 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
             max_pct=100.0 if k == "core" else (cfg["tilt_max_pct"] if k == "tilt" else cfg["satellite_max_pct"]),
             unlocked=unlocked[k],
             status=status,
-            contribution_eur=_round_eur(split[k]),
+            contribution_eur=_round_eur(split_shown[k]),
             after_eur=_round_eur(after),
             after_pct=round(100.0 * after / total_after, 2) if total_after else 0.0,
             positions=sorted(positions[k], key=lambda p: -p["value_eur"]),
@@ -723,7 +833,9 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
         ))
 
     satellite_broker = evidence.get("satellite_broker") or "dkb"
-    satellite_fee = SATELLITE_ORDER_FEE_EUR.get(satellite_broker, DKB_ORDER_FEE_EUR)
+
+    def satellite_fee(amount: float) -> float:
+        return order_fee_eur(satellite_broker, amount)
 
     def satellite_order(amount: float, source: str, kind: str = "order") -> PlanAction:
         return PlanAction(
@@ -731,13 +843,15 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
             instrument="Stock pick", ticker=None, isin=None,
             note=(
                 f"{source} At {SATELLITE_BROKER_LABELS.get(satellite_broker, satellite_broker)}, as tested; the "
-                f"{_fee_eur(satellite_fee)} fee is {100.0 * satellite_fee / amount:.1f} % of it."
+                f"{_fee_eur(satellite_fee(amount))} fee is {100.0 * satellite_fee(amount) / amount:.1f} % of it."
             ),
             broker=satellite_broker, broker_label=SATELLITE_BROKER_LABELS.get(satellite_broker),
         )
 
-    def order_note(source: str, amount: float, at: str) -> str:
-        fee = order_fee_eur(at, amount)
+    def order_note(source: str, amount: float, at: str, name: str | None = None) -> str:
+        fee = order_fee_eur(at, amount, name)
+        if fee == 0:
+            return f"{source} at {BROKER_LABELS[at]}, free of charge for this ETF."
         return f"{source} at {BROKER_LABELS[at]}; the {_fee_eur(fee)} fee is {100.0 * fee / amount:.1f} % of it."
 
     def savings_plan_note(what: str, amount: float) -> str:
@@ -756,14 +870,14 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
             ticker=ticker, isin=isin, note=note, broker=at, broker_label=BROKER_LABELS[at],
         )
 
-    def order_at(amount: float) -> str:
-        return buy_broker(cfg, connected, "order", amount)
-
     core_instrument = CORE_ETF_ISINS.get(cfg["core_isin"], "Passive core ETF")
+
+    def order_at(amount: float, name: str | None = None) -> str:
+        return buy_broker(cfg, connected, "order", amount, name)
 
     def core_contribution_note(amount: float) -> str:
         if manual_mode:
-            return order_note("This month's contribution: one order", amount, broker)
+            return order_note("This month's contribution: one order", amount, broker, core_instrument)
         running = plans_by_sleeve["core"]
         if core_covered:
             return f"Already covered: your savings plans at {plan_brokers} put {eur(running)} a month into the core."
@@ -806,10 +920,10 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
             core_contribution_note(split["core"]), broker,
         ))
     if reinvest["core"] > 0:
-        at = order_at(reinvest["core"])
+        at = order_at(reinvest["core"], core_instrument)
         actions.append(buy(
             "core", "order", reinvest["core"], core_instrument, cfg["core_ticker"], cfg["core_isin"],
-            order_note("One order from the sale proceeds", reinvest["core"], at), at,
+            order_note("One order from the sale proceeds", reinvest["core"], at, core_instrument), at,
         ))
     if split["tilt"] > 0:
         for tilt_isin, amount in _split_tilt(positions["tilt"], cfg["tilt_isins"], split["tilt"]):
@@ -839,8 +953,8 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
     one_off = {k: 0.0 for k in SLEEVES}
     notes: list[str] = []
     if investable > 0:
-        at = order_at(investable)
-        after_plan = {k: current[k] + split[k] + reinvest[k] - sales.get(k, 0.0) for k in SLEEVES}
+        at = order_at(investable, core_instrument)
+        after_plan = {k: current[k] + split_shown[k] + reinvest[k] - sales.get(k, 0.0) for k in SLEEVES}
         planned = allocate_contribution(after_plan, targets, investable)
         if 0 < planned["satellite"] < cfg["min_order_eur"]:
             planned["core"] += planned["satellite"]
@@ -856,11 +970,11 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
                 else:
                     core_amount += amount
         if planned["satellite"] > 0:
-            if satellite_fee <= 0.01 * planned["satellite"]:
+            if satellite_fee(planned["satellite"]) <= 0.01 * planned["satellite"]:
                 orders.append(("satellite", None, planned["satellite"], satellite_broker))
             else:
                 core_amount += planned["satellite"]
-        if core_amount > 0 and order_fee_eur(at, core_amount) <= 0.01 * core_amount:
+        if core_amount > 0 and order_fee_eur(at, core_amount, core_instrument) <= 0.01 * core_amount:
             orders.insert(0, ("core", cfg["core_isin"], core_amount, at))
         if orders:
             source = f"Optional one-off from cash above your {eur(cash['emergency_reserve_eur'])} reserve: one order"
@@ -873,7 +987,7 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
                 elif sleeve == "core":
                     actions.append(buy(
                         "core", "one_off", amount, core_instrument, cfg["core_ticker"], isin,
-                        order_note(source, amount, broker_at), broker_at,
+                        order_note(source, amount, broker_at, core_instrument), broker_at,
                     ))
                 else:
                     actions.append(buy(
@@ -911,31 +1025,51 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
                 f"contribution is set to {eur(contribution)}. The plan uses the setting; change it under "
                 "Plan settings if the savings plans are what you invest."
             )
-        for k, amount in locked_plans.items():
-            names = ", ".join(p["name"] for p in plans if p["sleeve"] == k)
+        if locked_plans and other_budget > 0:
+            names = ", ".join(p["name"] for p in plans if p["sleeve"] in locked_plans)
+            picks = sum(locked_plans.values())
             notes.append(
-                f"{names}: {eur(amount)} a month goes into {SLEEVE_LABELS[k].lower()}, which no strategy has "
-                "unlocked yet (target 0 %). The plan would put that money into the core."
+                f"{eur(picks)} of your {eur(contribution)} a month ({100.0 * picks / contribution:.0f} %) goes "
+                f"into your own savings plans ({names}); the core gets the other {eur(split['core'])}."
             )
+        else:
+            for k, amount in locked_plans.items():
+                names = ", ".join(p["name"] for p in plans if p["sleeve"] == k)
+                notes.append(
+                    f"{names}: {eur(amount)} a month goes into {SLEEVE_LABELS[k].lower()}, which no strategy has "
+                    "unlocked yet (target 0 %). The plan would put that money into the core."
+                )
         for p in plans:
             if p["monthly_eur"] is None:
                 notes.append(
                     f"The {p['name']} savings plan runs {p['frequency'].lower()}, a schedule the plan does not "
                     "know, so it is left out of the totals."
                 )
+    for p in stopped_plans:
+        why = (
+            "is paused" if p["not_running_reason"] == "paused"
+            else f"was due on {p['next_execution_date']} and has not run"
+        )
+        notes.append(f"The {p['name']} savings plan {why}, so it is not counted.")
 
     contribution_actions = [(a.sleeve, a.kind) for a in actions if a.kind != "one_off"]
-    only_core = contribution_actions == [("core", contribution_kind)]
-    no_change = only_core and not locked_plans and (manual_mode or not plans or core_covered)
+    # Plans of your own that take the whole contribution leave nothing for the core to buy.
+    plans_take_all = not contribution_actions and other_budget > 0 and core_covered
+    only_core = contribution_actions == [("core", contribution_kind)] or plans_take_all
+    locked_blocks = bool(locked_plans) and other_budget == 0
+    no_change = only_core and not locked_blocks and (manual_mode or not plans or core_covered)
+    picks_text = (
+        f" and {eur(sum(locked_plans.values()))} into your own picks" if other_budget > 0 else ""
+    )
     sold = sum(sales.values())
     if only_core and manual_mode:
         headline = f"Buy {eur(contribution)} of {cfg['core_ticker']} at {broker_label}." + (
             f" {eur(sum(locked_plans.values()))} a month of your savings plans goes into a sleeve that is "
             "still locked." if locked_plans else " Nothing else to do this month."
         )
-    elif only_core and plans and core_covered and not locked_plans:
+    elif only_core and plans and core_covered and not locked_blocks:
         headline = (
-            f"Let your savings plans run: {eur(plans_by_sleeve['core'])} a month into the core. "
+            f"Let your savings plans run: {eur(plans_by_sleeve['core'])} a month into the core{picks_text}. "
             "Nothing else to do this month."
         )
     elif only_core and plans and core_covered:
@@ -945,8 +1079,8 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
         )
     elif only_core and plans:
         headline = (
-            f"Raise your core savings plans to {eur(split['core'])} a month "
-            f"(now {eur(plans_by_sleeve['core'])})."
+            f"Raise your core savings plans by {eur(split['core'] - plans_by_sleeve['core'])} to "
+            f"{eur(split['core'])} a month (now {eur(plans_by_sleeve['core'])})."
         )
     elif only_core:
         headline = (
@@ -988,9 +1122,26 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
         "broker_choice": cfg["broker"],
         "brokers_connected": connected,
         "sleeves": [asdict(s) for s in sleeves],
+        "evidence": {
+            "tilt": {
+                "passed": bool(evidence.get("tilt_evidence_passed", unlocked["tilt"])),
+                "unlocked": unlocked["tilt"],
+                "reason": evidence["tilt_reason"],
+            },
+            "satellite": {
+                "unlocked": unlocked["satellite"],
+                "reason": evidence["satellite_reason"],
+                "gate": evidence.get("satellite_gate"),
+            },
+        },
         "actions": [asdict(a) for a in actions],
         "savings_plans": {
-            "items": plans,
+            "items": all_plans,
+            "stopped": [p for p in all_plans if not p["running"]],
+            **plans_freshness(db, user_id),
+            "other_budget_eur": _round_eur(other_budget),
+            "other_budget_pct": round(100.0 * other_budget / contribution, 1) if contribution > 0 else 0.0,
+            "core_needed_eur": _round_eur(split["core"]),
             "monthly_eur": _round_eur(plans_total),
             "by_sleeve": {k: _round_eur(v) for k, v in plans_by_sleeve.items()},
         },
@@ -999,4 +1150,6 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
         "notes": notes,
         "never_sells": not sales,
         "not_investment_advice": True,
+        "suggested_funds": suggest_all(cfg["tilt_isins"]),
+        "acc_dist_note": ACC_DIST_NOTE,
     }

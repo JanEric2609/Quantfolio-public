@@ -94,7 +94,7 @@ describe("CallsTab", () => {
   });
 
   it("an empty ledger says when calls start to appear", async () => {
-    renderCalls(page({ items: [], total: 0 }));
+    renderCalls(page({ items: [], total: 0, horizon_days: 21 }));
     expect(await screen.findByText("No resolved calls yet")).toBeInTheDocument();
     expect(screen.getByText(/21 trading days/)).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();

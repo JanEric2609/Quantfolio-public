@@ -333,7 +333,9 @@ class DkbSyncService:
                     .one_or_none()
                 )
             except MultipleResultsFound:
-                logger.error("DKB sync: multiple DkbAccount rows for user_id=%s iban=%s", user_id, iban_val)
+                logger.error(
+                    "DKB sync: multiple DkbAccount rows for user_id=%s iban=...%s", user_id, str(iban_val)[-4:],
+                )
                 raise
             if account is None:
                 account = DkbAccount(user_id=user_id, type=item["type"], iban=iban_val)
@@ -515,6 +517,14 @@ class DkbSyncService:
         except Exception as exc:
             db.rollback()
             logger.warning("Book position snapshot after DKB sync failed: %s", exc)
+        try:
+            # New savings-plan buys since a manually entered Einstandswert become FIFO lots.
+            from app.foundation.portfolio.cost_basis import seed_dkb_debit_lots
+
+            seed_dkb_debit_lots(db, user_id)
+        except Exception as exc:
+            db.rollback()
+            logger.warning("DKB debit lots after sync failed: %s", exc)
         try:
             # An accepted recommendation whose trade now shows in the depot.
             from app.foundation.recommendation_execution import detect_executions

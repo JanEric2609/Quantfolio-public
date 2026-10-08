@@ -171,13 +171,26 @@ def _proposal(book: dict[str, float], spot: float = 100.0) -> TradeProposal:
 # ---------------------------------------------------------------------------
 
 
-def test_fee_tiers_match_the_dkb_schedule():
-    # DKB Broker domestic: €10 up to €5k, €15 to €20k, €30 above.
-    assert trade_fee(1_000.0) == 10.0
-    assert trade_fee(5_000.0) == 10.0
-    assert trade_fee(5_000.01) == 15.0
-    assert trade_fee(20_000.0) == 15.0
-    assert trade_fee(20_000.01) == 30.0
+DKB_TIERS = {"fee_schedule": {"tiers": [[5_000.0, 10.0], [20_000.0, 15.0]], "above": 30.0}}
+
+
+def test_default_fee_is_the_scalable_schedule():
+    # 0.99 EUR per order; Prime ETFs are free from 250 EUR.
+    assert trade_fee(1_000.0) == 0.99
+    assert trade_fee(1_000.0, name="Some Stock AG") == 0.99
+    assert trade_fee(1_000.0, name="iShares Core MSCI World") == 0.0
+    assert trade_fee(249.99, name="iShares Core MSCI World") == 0.99
+    assert trade_fee(250.0, name="Vanguard FTSE All-World") == 0.0
+    assert trade_fee(1_000.0, name="iShares Core MSCI World", side="sell") == 0.99  # sales always pay
+
+
+def test_a_strategy_can_still_select_the_dkb_tiers():
+    schedule = resolve_fee_schedule(DKB_TIERS)
+    assert trade_fee(1_000.0, schedule) == 10.0
+    assert trade_fee(5_000.0, schedule) == 10.0
+    assert trade_fee(5_000.01, schedule) == 15.0
+    assert trade_fee(20_000.01, schedule) == 30.0
+    assert resolve_fee_schedule({"fee_schedule": {"broker": "dkb"}})["tiers"]
 
 
 def test_zero_notional_is_never_charged():
@@ -187,7 +200,7 @@ def test_zero_notional_is_never_charged():
 
 def test_venue_fee_is_added_when_configured():
     schedule = resolve_fee_schedule({"fee_schedule": {"venue_fee": 2.5}})
-    assert trade_fee(1_000.0, schedule) == 12.5
+    assert trade_fee(1_000.0, schedule) == 3.49
 
 
 def test_strategy_can_override_the_whole_schedule():
@@ -201,13 +214,14 @@ def test_strategy_can_override_the_whole_schedule():
 def test_malformed_override_falls_back_to_defaults():
     """A bad config must not silently make trading free."""
     schedule = resolve_fee_schedule({"fee_schedule": {"tiers": "nonsense"}})
-    assert schedule["tiers"] == list(DEFAULT_FEE_SCHEDULE["tiers"])
-    assert trade_fee(1_000.0, schedule) == 10.0
+    assert "tiers" not in schedule
+    assert trade_fee(1_000.0, schedule) == 0.99
 
 
 def test_fee_schedule_description_is_human_readable():
     text = describe_fee_schedule()
-    assert "€10.00" in text and "€30.00" in text
+    assert "€0.99" in text and "Amundi" in text
+    assert "€30.00" in describe_fee_schedule(resolve_fee_schedule(DKB_TIERS))
 
 
 # ---------------------------------------------------------------------------
@@ -958,20 +972,30 @@ def test_affordable_notional_always_leaves_room_for_the_commission():
 
 
 def test_affordable_notional_picks_the_best_tier():
+    schedule = resolve_fee_schedule(DKB_TIERS)
     # €5,010 buys exactly the top of the €10 tier; paying the €15 tier's fee
     # would leave less, so the cheaper tier must win.
-    assert affordable_notional(5_010.0) == 5_000.0
+    assert affordable_notional(5_010.0, schedule) == 5_000.0
     # Below the smallest fee nothing is affordable at all.
-    assert affordable_notional(10.0) == 0.0
+    assert affordable_notional(10.0, schedule) == 0.0
     assert affordable_notional(0.0) == 0.0
     assert affordable_notional(-5.0) == 0.0
+
+
+def test_affordable_notional_uses_the_prime_exemption():
+    prime = "iShares Core MSCI World"
+    assert affordable_notional(500.0, name=prime) == 500.0
+    # Just under the threshold the fee still applies.
+    assert affordable_notional(249.5, name=prime) == 248.51
+    assert affordable_notional(500.0) == 499.01
+    assert affordable_notional(0.5) == 0.0
 
 
 def test_affordable_notional_respects_a_custom_schedule():
     schedule = resolve_fee_schedule({"fee_schedule": {"venue_fee": 2.5}})
     notional = affordable_notional(1_000.0, schedule)
     assert notional + trade_fee(notional, schedule) <= 1_000.0
-    assert notional == 987.5
+    assert notional == 996.51
 
 
 def test_a_short_funding_raise_downsizes_the_buy_rather_than_stranding_cash():

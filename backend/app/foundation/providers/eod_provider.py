@@ -91,7 +91,7 @@ class EodProvider(MarketDataProvider):
             return self.unavailable("history", "EOD Historical Data API key not configured")
         rate_error = self._check_rate_limit()
         if rate_error:
-            return self.unavailable("history", rate_error)
+            return self.unavailable("history", rate_error, reason="rate_limited")
 
         try:
             params = {"api_token": self.api_key, "fmt": "json"}
@@ -154,7 +154,7 @@ class EodProvider(MarketDataProvider):
             )
         rate_error = self._check_rate_limit()
         if rate_error:
-            return self.unavailable("fundamentals", rate_error)
+            return self.unavailable("fundamentals", rate_error, reason="rate_limited")
 
         try:
             params = {"api_token": self.api_key}
@@ -184,7 +184,7 @@ class EodProvider(MarketDataProvider):
             )
         rate_error = self._check_rate_limit()
         if rate_error:
-            return self.unavailable("quote", rate_error)
+            return self.unavailable("quote", rate_error, reason="rate_limited")
 
         try:
             params = {"api_token": self.api_key, "fmt": "json"}

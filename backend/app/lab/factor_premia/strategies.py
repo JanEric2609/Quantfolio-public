@@ -65,6 +65,19 @@ STRATEGIES: tuple[Strategy, ...] = (
         "Asness, Moskowitz & Pedersen (2013)",
         "a value ETF and a momentum ETF, half each",
     ),
+    # ADR 0019 §6: calmer stocks first (higher is better, so the negative).
+    Strategy(
+        "low_vol", "Low volatility", "-rvol_21d", 2006,
+        "Ang, Hodrick, Xing & Zhang (2006); Blitz & van Vliet (2007)",
+        "a world minimum-volatility UCITS ETF",
+    ),
+    # ADR 0019 §6: smaller firms first, over the same ex-micro/nano
+    # universe as every other strategy.
+    Strategy(
+        "size", "Size", "-me", 1981,
+        "Banz (1981); Fama & French (1993)",
+        "a world small-cap UCITS ETF",
+    ),
 )
 STRATEGY_BY_KEY = {s.key: s for s in STRATEGIES}
 

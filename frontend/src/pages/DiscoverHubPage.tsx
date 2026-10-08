@@ -12,6 +12,7 @@ import { Button } from "../components/ui/button";
 import { RunTrigger } from "../components/discover/RunTrigger";
 import { StageProgress } from "../components/discover/StageProgress";
 import { ShortlistCards } from "../components/discover/ShortlistCards";
+import { useTrustRanking } from "./trust/useTrust";
 import { RejectedTable } from "../components/discover/RejectedTable";
 import { DossierDrawer } from "../components/discover/DossierDrawer";
 import { SkillTrendPanel } from "../components/discover/SkillTrendPanel";
@@ -34,6 +35,9 @@ const DISCOVER_TABS = [
 
 export function DiscoverHubPage() {
   const queryClient = useQueryClient();
+  // Measured hit rates per score tier, for the shortlist cards (ADR 0018 §6).
+  const rankingQuery = useTrustRanking();
+  const tiers = rankingQuery.data?.live.tiers ?? null;
   const [searchParams] = useSearchParams();
   const tab = searchParams.get("tab") ?? "funnel";
 
@@ -251,7 +255,7 @@ export function DiscoverHubPage() {
             )}
             {hasResults && (
               <div className="space-y-4">
-                <ShortlistCards candidates={allCandidates} onOpenDossier={handleOpenDossier} />
+                <ShortlistCards candidates={allCandidates} onOpenDossier={handleOpenDossier} tiers={tiers} />
                 <RejectedTable candidates={allCandidates} />
               </div>
             )}
@@ -268,7 +272,7 @@ export function DiscoverHubPage() {
 
         <TabsContent value="shortlist">
           {hasResults ? (
-            <ShortlistCards candidates={allCandidates} onOpenDossier={handleOpenDossier} />
+            <ShortlistCards candidates={allCandidates} onOpenDossier={handleOpenDossier} tiers={tiers} />
           ) : (
             <Card className="flex flex-col items-center justify-center py-16 px-6 text-center space-y-3">
               <div className="rounded-full bg-surface-2 p-3">

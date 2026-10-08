@@ -36,17 +36,18 @@ def _user(db, name="jan") -> User:
 def _seed_resolved_history(
     db, user: User, *, conviction: float, n: int, hits: int, portfolio_id: str | None = None
 ) -> None:
-    """Seed *n* resolved predictions at *conviction*, of which *hits* were right."""
+    """Seed *n* matured predictions at *conviction*, one issue date each, *hits* of them beat the ETF."""
     now = datetime.now(UTC)
     for i in range(n):
-        realised = 0.04 if i < hits else -0.03
+        excess = 0.04 if i < hits else -0.03
+        issued = now - timedelta(days=60 + i + int(conviction * 1000))  # each bucket on its own dates
         db.add(
             DiscoveryPrediction(
                 id=uuid4().hex, user_id=user.id, run_id="hist",
-                symbol=f"H{conviction:.0%}{i}", predicted_at=now - timedelta(days=30),
-                horizon_days=21, resolve_at=now - timedelta(days=2),
+                symbol=f"H{conviction:.0%}{i}", predicted_at=issued,
+                horizon_days=21, resolve_at=issued + timedelta(days=30),
                 direction="buy", conviction=conviction,
-                realised_return=realised, outcome_status="resolved",
+                realised_return=excess + 0.01, excess_return=excess, outcome_status="resolved",
                 portfolio_id=portfolio_id,
             )
         )
@@ -56,9 +57,10 @@ def _seed_resolved_history(
 def test_overconfident_bucket_is_calibrated_down():
     db = _memory_db()
     user = _user(db)
-    # 70%-confidence bucket historically hit 55%; 30% bucket hit 20%.
-    _seed_resolved_history(db, user, conviction=0.7, n=20, hits=11)
-    _seed_resolved_history(db, user, conviction=0.3, n=20, hits=4)
+    # 70%-confidence bucket historically hit 55%; 30% bucket hit 20% (60 issue dates each:
+    # 120 effective labels, past the 100 below which no probability is stated).
+    _seed_resolved_history(db, user, conviction=0.7, n=60, hits=33)
+    _seed_resolved_history(db, user, conviction=0.3, n=60, hits=12)
 
     pred = store_prediction(
         db, symbol="NEW", composite_score=0.7, signal_breakdown={},
@@ -77,8 +79,8 @@ def test_another_sources_history_does_not_calibrate():
     db = _memory_db()
     user = _user(db)
     # Plenty of history, but all of it an advisor sleeve's LLM confidence.
-    _seed_resolved_history(db, user, conviction=0.7, n=20, hits=11, portfolio_id="sleeve-1")
-    _seed_resolved_history(db, user, conviction=0.3, n=20, hits=4, portfolio_id="sleeve-1")
+    _seed_resolved_history(db, user, conviction=0.7, n=60, hits=33, portfolio_id="sleeve-1")
+    _seed_resolved_history(db, user, conviction=0.3, n=60, hits=12, portfolio_id="sleeve-1")
 
     pred = store_prediction(
         db, symbol="NEW", composite_score=0.7, signal_breakdown={},
@@ -93,7 +95,7 @@ def test_another_sources_history_does_not_calibrate():
 def test_thin_history_stays_uncalibrated():
     db = _memory_db()
     user = _user(db)
-    _seed_resolved_history(db, user, conviction=0.7, n=3, hits=1)  # < min_rows
+    _seed_resolved_history(db, user, conviction=0.7, n=3, hits=1)  # 3 issue dates: far below 100
     pred = store_prediction(
         db, symbol="NEW", composite_score=0.6, signal_breakdown={},
         user_id=user.id, run_id="new",
@@ -178,6 +180,13 @@ def test_cycle_stores_calibrated_confidence_and_attribution():
     assert pred.conviction == 0.65
     assert pred.conviction_calibrated is None  # no history, no calibration
     assert pred.portfolio_id == result["portfolio_id"]  # sleeve attribution
+    # ADR 0018 §10: the advisor's cohort includes its prompt and model.
+    stamp = pred.provenance_json
+    assert stamp["source"] == "advisor" and stamp["cohort_id"].startswith("c1-")
+    assert stamp["cohort_spec"]["prompt_template_hash"]
+    assert stamp["llm_attempts"] == 1 and stamp["llm_parse_status"] == "strict"
+    assert stamp["decision_sha256"] and stamp["traded"] in (True, False)
+    assert "llm_identity_unavailable" in stamp["degradation_flags"]  # injected llm_call
 
     record = db.query(LlmPortfolioDecision).one()
     payload = json.loads(record.decision_json)

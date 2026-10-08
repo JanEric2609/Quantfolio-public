@@ -18,7 +18,7 @@ from sqlalchemy.pool import StaticPool
 from app.decision import monthly_plan
 from app.decision.monthly_plan import build_monthly_plan
 from app.foundation.core.db import Base
-from app.foundation.models.entities import BrokerPosition, ConnectedAccount, DkbAccount, DkbPosition, User
+from app.foundation.models.entities import BrokerPosition, BrokerSyncLog, ConnectedAccount, DkbAccount, DkbPosition, User
 from app.foundation.settings import upsert_public_settings
 
 NOW = datetime(2026, 10, 3, 9, 0, tzinfo=UTC)
@@ -29,13 +29,13 @@ MOMENTUM = "IE00BP3QZ825"
 
 # Scalable savings plans as the sync stores them.
 OWNER_PLANS = [
-    {"isin": ALL_WORLD, "name": "Vanguard FTSE All-World (Acc)", "amount": "25.04", "frequency": "MONTHLY",
+    {"isin": ALL_WORLD, "name": "Vanguard FTSE All-World (Acc)", "amount": "20.00", "frequency": "MONTHLY",
      "day_of_month": 1, "next_execution_date": "2026-11-02", "kind": "security"},
-    {"isin": EM_IMI, "name": "iShares Core MSCI Emerging Markets IMI (Acc)", "amount": "10.01",
+    {"isin": EM_IMI, "name": "iShares Core MSCI Emerging Markets IMI (Acc)", "amount": "12.00",
      "frequency": "MONTHLY", "day_of_month": 1, "next_execution_date": "2026-11-02", "kind": "security"},
-    {"isin": "NL0010273215", "name": "ASML Holding", "amount": "5", "frequency": "MONTHLY",
+    {"isin": "NL0010273215", "name": "ASML Holding", "amount": "10", "frequency": "MONTHLY",
      "day_of_month": 7, "next_execution_date": "2026-11-09", "kind": "security"},
-    {"isin": "US67066G1040", "name": "NVIDIA", "amount": "35", "frequency": "MONTHLY",
+    {"isin": "US67066G1040", "name": "NVIDIA", "amount": "30", "frequency": "MONTHLY",
      "day_of_month": 4, "next_execution_date": "2026-11-04", "kind": "security"},
 ]
 
@@ -138,17 +138,18 @@ def test_running_plans_are_sorted_into_sleeves_and_em_counts_as_core():
     plan = build_monthly_plan(db, user_id, now=NOW)
 
     running = plan["savings_plans"]
-    assert running["monthly_eur"] == 75.05
-    assert running["by_sleeve"] == {"core": 35.05, "tilt": 0.0, "satellite": 40.0}
+    assert running["monthly_eur"] == 72.0
+    assert running["by_sleeve"] == {"core": 32.0, "tilt": 0.0, "satellite": 40.0}
     assert {p["name"]: p["sleeve"] for p in running["items"]}["iShares Core MSCI Emerging Markets IMI (Acc)"] == "core"
     # The default 1,000 € contribution is not what runs: say so, and ask for
     # the missing core money instead of a second plan.
     assert plan["no_change"] is False
-    assert plan["headline"] == "Raise your core savings plans to 1.000 € a month (now 35 €)."
-    assert "raise them by 965 €" in _core_buy(plan)["note"]
+    # The 40 € of stock-pick plans are the owner's own budget: the core needs the rest.
+    assert plan["headline"] == "Raise your core savings plans by 928 € to 960 € a month (now 32 €)."
+    assert "raise them by 928 €" in _core_buy(plan)["note"]
     notes = " ".join(plan["notes"])
-    assert "total 75 € a month" in notes and "set to 1.000 €" in notes
-    assert "ASML Holding, NVIDIA: 40 € a month goes into stock picks" in notes
+    assert "total 72 € a month" in notes and "set to 1.000 €" in notes
+    assert "40 € of your 1.000 € a month (4 %) goes into your own savings plans (ASML Holding, NVIDIA)" in notes
 
 
 def test_plans_that_cover_the_core_are_left_alone():
@@ -156,12 +157,12 @@ def test_plans_that_cover_the_core_are_left_alone():
     user_id = _user(db)
     _dkb(db, user_id)
     _scalable(db, user_id, plans=OWNER_PLANS[:2])
-    upsert_public_settings(db, {"monthly_contribution_eur": 35.05})
+    upsert_public_settings(db, {"monthly_contribution_eur": 32})
 
     plan = build_monthly_plan(db, user_id, now=NOW)
 
     assert plan["no_change"] is True
-    assert plan["headline"] == "Let your savings plans run: 35 € a month into the core. Nothing else to do this month."
+    assert plan["headline"] == "Let your savings plans run: 32 € a month into the core. Nothing else to do this month."
     assert _core_buy(plan)["note"].startswith("Already covered: your savings plans at Scalable Capital")
     # Only the reminder to set a reserve: nothing about the plans themselves.
     assert [n for n in plan["notes"] if "Set your emergency reserve" not in n] == []
@@ -172,12 +173,115 @@ def test_plans_into_a_locked_sleeve_are_not_a_no_change_month():
     user_id = _user(db)
     _dkb(db, user_id)
     _scalable(db, user_id)
-    upsert_public_settings(db, {"monthly_contribution_eur": 35.05})
+    upsert_public_settings(db, {"monthly_contribution_eur": 32})
 
     plan = build_monthly_plan(db, user_id, now=NOW)
 
-    assert plan["no_change"] is False
-    assert "40 € a month of them goes into a sleeve that is still locked" in plan["headline"]
+    # The picks (40 €) already exceed the 32 € contribution: nothing is left for the core to buy.
+    assert plan["no_change"] is True
+    assert plan["headline"] == (
+        "Let your savings plans run: 32 € a month into the core and 40 € into your own picks. "
+        "Nothing else to do this month."
+    )
+    assert "total 72 € a month" in " ".join(plan["notes"])
+
+
+PICK_PLANS = [
+    {"isin": "DE0007164600", "name": "SAP", "amount": "20", "frequency": "MONTHLY",
+     "day_of_month": 4, "next_execution_date": "2026-11-04", "kind": "security", "dynamization_rate": None},
+    OWNER_PLANS[2], OWNER_PLANS[3],
+]
+
+
+def test_stock_pick_plans_are_a_budget_the_core_plans_get_the_rest():
+    db = _memory_db()
+    user_id = _user(db)
+    _dkb(db, user_id)
+    _scalable(db, user_id, plans=[*OWNER_PLANS[:2], *PICK_PLANS])
+    upsert_public_settings(db, {"monthly_contribution_eur": 200})
+
+    plan = build_monthly_plan(db, user_id, now=NOW)
+
+    assert plan["headline"].startswith("Raise your core savings plans by 108 € to 140 € a month (now 32 €).")
+    assert _core_buy(plan)["amount_eur"] == 140.0
+    sp = plan["savings_plans"]
+    assert sp["other_budget_pct"] == 30.0 and sp["core_needed_eur"] == 140.0
+    assert sum(1 for n in plan["notes"] if "30 %" in n) == 1
+    by_key = {s["key"]: s for s in plan["sleeves"]}
+    assert by_key["satellite"]["contribution_eur"] == 60.0
+    assert by_key["core"]["contribution_eur"] == 140.0
+
+
+def test_picks_plus_core_plans_covering_the_budget_leave_nothing_to_do():
+    db = _memory_db()
+    user_id = _user(db)
+    _dkb(db, user_id)
+    core = [{**OWNER_PLANS[0], "amount": "128"}, OWNER_PLANS[1]]
+    _scalable(db, user_id, plans=[*core, *PICK_PLANS])
+    upsert_public_settings(db, {"monthly_contribution_eur": 200})
+
+    plan = build_monthly_plan(db, user_id, now=NOW)
+
+    assert plan["no_change"] is True
+    assert plan["headline"].startswith("Let your savings plans run: 140 € a month into the core and 60 € into your own picks")
+
+
+def test_a_removed_plan_leaves_the_position_and_the_sleeve_values_alone():
+    stock = ("US67066G1040", "NVIDIA", 800.0, 600.0)
+    results = []
+    for plans in ([*OWNER_PLANS[:2], *PICK_PLANS], [*OWNER_PLANS[:2], *PICK_PLANS[:2]]):
+        db = _memory_db()
+        user_id = _user(db)
+        _dkb(db, user_id)
+        _scalable(db, user_id, plans=plans, positions=[stock])
+        results.append(build_monthly_plan(db, user_id, now=NOW))
+    with_plan, without_plan = results
+    assert len(without_plan["savings_plans"]["items"]) == len(with_plan["savings_plans"]["items"]) - 1
+    assert [(s["key"], s["current_eur"]) for s in with_plan["sleeves"]] == [
+        (s["key"], s["current_eur"]) for s in without_plan["sleeves"]
+    ]
+    assert next(s for s in without_plan["sleeves"] if s["key"] == "satellite")["current_eur"] == 800.0
+
+
+def test_paused_and_overdue_plans_are_listed_but_not_counted():
+    db = _memory_db()
+    user_id = _user(db)
+    _dkb(db, user_id)
+    paused = {**PICK_PLANS[0], "paused": True}
+    overdue = {**OWNER_PLANS[3], "next_execution_date": "2026-09-20"}
+    just_late = {**OWNER_PLANS[2], "next_execution_date": "2026-09-30"}  # 3 days: still running
+    _scalable(db, user_id, plans=[*OWNER_PLANS[:2], paused, overdue, just_late])
+    upsert_public_settings(db, {"monthly_contribution_eur": 200})
+
+    plan = build_monthly_plan(db, user_id, now=NOW)
+
+    sp = plan["savings_plans"]
+    assert {p["name"]: p["not_running_reason"] for p in sp["stopped"]} == {"SAP": "paused", "NVIDIA": "overdue"}
+    assert sp["by_sleeve"]["satellite"] == 10.0
+    assert sp["monthly_eur"] == 42.0
+    notes = " ".join(plan["notes"])
+    assert "SAP savings plan is paused" in notes and "NVIDIA savings plan was due on 2026-09-20" in notes
+
+
+def test_dynamization_and_plan_freshness_are_reported():
+    db = _memory_db()
+    user_id = _user(db)
+    _dkb(db, user_id)
+    plans = [{**OWNER_PLANS[0], "dynamization_rate": "2"}]
+    _scalable(db, user_id, plans=plans)
+    depot = db.query(ConnectedAccount).filter_by(account_type="depot").one()
+    raw = json.loads(depot.raw_json)
+    raw["plans_synced_at"] = "2026-10-03T08:00:00+00:00"
+    depot.raw_json = json.dumps(raw)
+    db.add(BrokerSyncLog(user_id=user_id, source="scalable", trigger="manual", state="warning",
+                         started_at=NOW, counts_json=json.dumps({"plans_unavailable": True})))
+    db.commit()
+
+    sp = build_monthly_plan(db, user_id, now=NOW)["savings_plans"]
+
+    assert sp["items"][0]["dynamization_rate"] == 2.0
+    assert sp["synced_at"] == "2026-10-03T08:00:00+00:00"
+    assert sp["last_fetch_failed"] is True
 
 
 def test_manual_orders_mention_the_plans_that_buy_on_their_own():
@@ -189,7 +293,7 @@ def test_manual_orders_mention_the_plans_that_buy_on_their_own():
     plan = build_monthly_plan(db, user_id, now=NOW)
 
     assert plan["no_change"] is True
-    assert any("also buy 35 € a month on their own" in n for n in plan["notes"])
+    assert any("also buy 32 € a month on their own" in n for n in plan["notes"])
 
 
 def test_a_plan_with_an_unknown_schedule_is_listed_but_not_counted():
@@ -200,8 +304,8 @@ def test_a_plan_with_an_unknown_schedule_is_listed_but_not_counted():
 
     plan = build_monthly_plan(db, user_id, now=NOW)
 
-    assert plan["savings_plans"]["monthly_eur"] == 10.01
-    assert [p["monthly_eur"] for p in plan["savings_plans"]["items"]] == [None, 10.01]
+    assert plan["savings_plans"]["monthly_eur"] == 12.0
+    assert [p["monthly_eur"] for p in plan["savings_plans"]["items"]] == [None, 12.0]
     assert any("runs lunar" in n for n in plan["notes"])
 
 
@@ -223,7 +327,7 @@ def test_cash_above_the_reserve_is_an_optional_one_off_and_giro_never_counts():
     user_id = _user(db)
     _dkb(db, user_id, giro=4_000.0)
     _scalable(db, user_id, plans=OWNER_PLANS[:2])
-    upsert_public_settings(db, {"monthly_contribution_eur": 35.05, "emergency_reserve_eur": 500})
+    upsert_public_settings(db, {"monthly_contribution_eur": 32, "emergency_reserve_eur": 500})
 
     plan = build_monthly_plan(db, user_id, now=NOW)
 
@@ -243,7 +347,7 @@ def test_cash_above_the_reserve_is_an_optional_one_off_and_giro_never_counts():
     ]
     # Optional money does not move the sleeves.
     core = next(s for s in plan["sleeves"] if s["key"] == "core")
-    assert core["contribution_eur"] == 35.05
+    assert core["contribution_eur"] == 32.0
 
 
 def test_without_a_reserve_the_plan_suggests_nothing_from_cash():
@@ -351,11 +455,14 @@ def test_month_endpoint_carries_the_new_fields():
     finally:
         app.dependency_overrides.clear()
 
-    assert body["savings_plans"]["monthly_eur"] == 75.05
+    assert body["savings_plans"]["monthly_eur"] == 72.0
     assert body["cash"]["investable_eur"] == 319.50
     assert body["core_look_through"]["world_em_pct"] == 10.0
     assert {a["kind"] for a in body["actions"]} >= {"savings_plan", "one_off"}
     assert all(a["broker"] for a in body["actions"])
+    assert body["savings_plans"]["items"][0]["running"] is True
+    assert body["savings_plans"]["core_needed_eur"] is not None
+    assert body["evidence"]["tilt"]["passed"] is False
 
 
 def _tagesgeld(db, user_id: str, balance: float) -> None:

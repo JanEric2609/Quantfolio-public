@@ -60,6 +60,24 @@ horizons (docs/archive/audits/2026-09-24-why-it-does-not-work §9 A). Migrations
 advisor→discover-family edges were sanctioned in Wave A pending exactly this
 facade extraction.
 
+**Shadow ledger and provenance (ADR 0018, 2026-10-07).** After the
+tradeability gate, `shadow_ledger.capture_snapshot` freezes every universe
+member of the run in `discover_candidate_snapshot` (composite, rank among
+evaluable stocks, shortlisted/picked, entry close), built from the pipeline's
+in-memory results because later stages rewrite `DiscoverCandidate`. Every
+prediction (both writers) carries `provenance_json`: Discover's stamp from
+`shadow_ledger.discover_stamp`, the advisor's from `advisor.cycle._advisor_stamp`.
+`calibrator.py` is staged by effective (date-level) labels (ADR 0018 §6): no
+probability below 100 issue dates, a monotone logistic with a slope prior up to
+1,000, isotonic above, and none when the P10-P90 spread is under 1 pp.
+`shadow_ledger.backfill_snapshots` rebuilds past runs as exploratory rows
+(`backfilled`, cohort `legacy_unstamped`; `scripts/backfill_shadow_ledger.py`).
+Bump `shadow_ledger.COMPOSITE_FORMULA_VERSION` / `UNIVERSE_RULE_VERSION`, or
+`calibrator.CALIBRATOR_VERSION["rule"]`, whenever the ranking, the universe or
+the calibration rule changes meaning: each bump starts a new cohort. Issue-time
+columns of `discovery_prediction` are append-only on Postgres (migration 0130);
+a data repair has to drop the trigger deliberately.
+
 **Track B (2026-08-27 onboarding audit remediation) — OOS gating.**
 `stage_alpha_miner`'s validity filter (`pipeline.py`) had hardcoded
 `min_ic=0.0, min_icir=0.0` — an almost-always-true no-op unlike every other

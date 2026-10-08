@@ -16,5 +16,5 @@ export function TypeNumbers({ type }: { type: TrustTypeKey }) {
       </Card>
     );
   }
-  return <TypeSummary type={row} />;
+  return <TypeSummary type={row} verdict={query.data} />;
 }

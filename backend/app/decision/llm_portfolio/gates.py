@@ -8,10 +8,10 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.foundation.models.entities import Asset, PaperPortfolio, PaperTrade
+from app.foundation.models.entities import Asset, PaperPortfolio
 from app.foundation.data_backbone.ingest import DataIngester
 from app.foundation.settings import get_public_settings
 
@@ -190,24 +190,25 @@ def check_buy_gates(
     portfolio = portfolio_query.order_by(PaperPortfolio.created_at.desc()).first()
     cash_pass = False
     cash_available = Decimal("0")
+    needed = quantity * price
     if portfolio:
-        total_bought = db.query(func.sum(PaperTrade.quantity * PaperTrade.price)).filter(
-            PaperTrade.portfolio_id == portfolio.id,
-            PaperTrade.side == "buy",
-        ).scalar() or Decimal("0")
-        total_sold = db.query(func.sum(PaperTrade.quantity * PaperTrade.price)).filter(
-            PaperTrade.portfolio_id == portfolio.id,
-            PaperTrade.side == "sell",
-        ).scalar() or Decimal("0")
-        cash_available = portfolio.initial_cash - Decimal(str(total_bought)) + Decimal(str(total_sold))
-        needed = quantity * price * Decimal("1.01")
+        # The same cash figure execute_trade checks (trades, fees and
+        # dividends), plus the Scalable order fee this buy will pay.
+        from app.foundation.broker_fees import scalable_order_fee
+        from app.foundation.instrument_names import resolve_instrument_name
+        from app.foundation.paper_cash import paper_cash_balance
+
+        cash_available = paper_cash_balance(portfolio, db)
+        name = resolve_instrument_name(db, ticker.upper(), isin)
+        fee = Decimal(str(scalable_order_fee(float(needed), name)))
+        needed = needed + fee
         cash_pass = cash_available >= needed
     checks.append({
         "name": "CASH_SUFFICIENCY",
         "passed": cash_pass,
         "detail": {
             "cash_available": str(cash_available),
-            "needed": str(quantity * price * Decimal("1.01")),
+            "needed": str(needed),
         },
     })
 

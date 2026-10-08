@@ -246,3 +246,151 @@ def _cap_weights(w: np.ndarray, cap: float) -> np.ndarray:
             break
         w[free] += excess * w[free] / w[free].sum()
     return w
+
+
+# ---------------------------------------------------------------------------
+# New-money allocator: steer the book toward a covariance-only target with
+# the next contributions only, no sales
+# ---------------------------------------------------------------------------
+
+NEW_MONEY_METHODS = ("min_variance", "erc", "hrp", "equal")
+MIN_NEW_MONEY_DAYS = 60
+
+
+def history_span(prices: dict[str, dict[str, float]]) -> dict[str, Any]:
+    """Which candidate limits the common history, and how long it is.
+
+    ``price_matrix_to_returns`` keeps only dates on which every line has a
+    price, so one young fund silently shortens the sample for all of them.
+    """
+    firsts = {t: min(p) for t, p in prices.items() if p}
+    if not firsts:
+        return {"days": 0, "start": None, "end": None, "limited_by": None, "first_dates": {}}
+    start = max(firsts.values())
+    limiter = max(firsts, key=lambda t: firsts[t])
+    earliest = pd.Timestamp(min(firsts.values()))
+    limited = (pd.Timestamp(start) - earliest).days > 5
+    common = sorted(d for d in set.intersection(*(set(p) for p in prices.values() if p)))
+    return {
+        "days": len(common),
+        "start": common[0] if common else None,
+        "end": common[-1] if common else None,
+        "limited_by": limiter if limited else None,
+        "first_dates": firsts,
+    }
+
+
+def project_book(
+    current: dict[str, float], targets_pct: dict[str, float], contribution: float, months: int,
+) -> dict[str, float]:
+    """The book after *months* of contributions, each split by ``allocate_contribution``.
+
+    Returns are ignored on purpose: this shows what the money alone does to
+    the mix, nothing is sold.
+    """
+    book = {k: float(current.get(k, 0.0)) for k in targets_pct}
+    for _ in range(max(0, months)):
+        add = allocate_contribution(book, targets_pct, contribution)
+        for k, v in add.items():
+            book[k] += v
+    return book
+
+
+def _new_money_summary(
+    label: str, eur: dict[str, float], now: dict[str, float], after: dict[str, float],
+    target: dict[str, float], months: int,
+) -> str:
+    funded = sorted((k for k, v in eur.items() if v >= 0.5), key=lambda k: -eur[k])
+    if not funded:
+        return f"{label}: nothing to buy this month."
+    gap_now = max(abs(now[k] - target[k]) for k in target) * 100
+    gap_after = max(abs(after[k] - target[k]) for k in target) * 100
+    where = ", ".join(f"{k} {eur[k]:.0f} €" for k in funded)
+    return (
+        f"{label}: this month's money goes to {where}. Largest gap to target "
+        f"{gap_now:.0f} pp now, {gap_after:.0f} pp after {months} months."
+    )
+
+
+def new_money_plan(
+    returns: pd.DataFrame,
+    current_values: dict[str, float],
+    contribution: float,
+    *,
+    max_weight: float | None = None,
+    months: int = DRIFT_HORIZON_MONTHS,
+) -> dict[str, Any]:
+    """Split the next contribution across the candidates in *returns*, per method.
+
+    ``current_values`` are EUR values of what the book holds in each candidate
+    (0 for a candidate not yet held). Targets come from ``allocation_candidates``
+    (Ledoit-Wolf covariance, no expected returns); the money is then spread by
+    ``allocate_contribution`` (most underweight first, nothing sold). Only the
+    candidate part of the book is considered; a holding outside the universe
+    is not counted.
+    """
+    base = allocation_candidates(returns, {}, max_weight=max_weight)
+    if not base.get("available"):
+        return {**base, "plans": {}}
+    assets = base["assets"]
+    contribution = max(0.0, float(contribution))
+    values = {a: max(0.0, float(current_values.get(a, 0.0))) for a in assets}
+    total = sum(values.values())
+    now = {a: (values[a] / total if total > 0 else 0.0) for a in assets}
+    plans: dict[str, Any] = {}
+    for kind in NEW_MONEY_METHODS:
+        m = base["methods"].get(kind)
+        if m is None:
+            continue
+        target = {a: float(m["weights"][a]) for a in assets}
+        pct = {a: 100.0 * w for a, w in target.items()}
+        eur = allocate_contribution(values, pct, contribution)
+        after_values = project_book(values, pct, contribution, months)
+        after_total = sum(after_values.values())
+        after = {a: (v / after_total if after_total > 0 else 0.0) for a, v in after_values.items()}
+        plans[kind] = {
+            "label": m["label"],
+            "target_weights": target,
+            "volatility": m["volatility"],
+            "risk_contributions": m["risk_contributions"],
+            "eur_this_month": eur,
+            "weights_after": after,
+            "months": months,
+            "summary": _new_money_summary(m["label"], eur, now, after, target, months),
+        }
+    return {
+        "available": True,
+        "assets": assets,
+        "contribution_eur": contribution,
+        "weights_current": now,
+        "values_current_eur": values,
+        "plans": plans,
+        "errors": base["errors"],
+        "max_weight": base["max_weight"],
+        "covariance": base["covariance"],
+    }
+
+
+def candidate_prices(db: Any, tickers: list[str]) -> tuple[dict[str, dict[str, float]], list[str]]:
+    """EUR closes per ticker (about two years); tickers without history are returned apart."""
+    from app.foundation import market as market_service
+    from app.foundation.eur_prices import to_eur
+
+    out: dict[str, dict[str, float]] = {}
+    missing: list[str] = []
+    cache: dict[str, dict[str, float] | None] = {}
+    for t in tickers:
+        try:
+            bars = market_service.history(db, t, days=730)
+            closes = {
+                str(r["date"])[:10]: float(r["close"])
+                for r in bars or [] if r.get("close") is not None and float(r["close"]) > 0
+            }
+            converted, _ccy = to_eur(db, t, closes, rate_cache=cache)
+        except Exception:  # noqa: BLE001 - one unreachable provider must not hide the others
+            converted = {}
+        if converted:
+            out[t] = converted
+        else:
+            missing.append(t)
+    return out, missing

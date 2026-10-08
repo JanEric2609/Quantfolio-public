@@ -28,13 +28,14 @@ const fieldClass = "rounded border border-border bg-surface px-2 py-1 text-sm";
  */
 export function TaxStatusCard() {
   const qc = useQueryClient();
+  // Same key and shape as TaxCockpitLayout: the cache holds the unwrapped settings.
   const settings = useQuery({
     queryKey: ["tax", "settings"],
-    queryFn: () => api<{ settings: TaxSettings }>("/api/tax/settings"),
+    queryFn: () => api<{ settings: TaxSettings }>("/api/tax/settings").then((r) => r.settings),
   });
   const [draft, setDraft] = useState<TaxSettings>({});
   useEffect(() => {
-    if (settings.data) setDraft(settings.data.settings);
+    if (settings.data) setDraft(settings.data);
   }, [settings.data]);
 
   const save = useMutation({

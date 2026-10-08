@@ -261,7 +261,8 @@ nothing from the chosen broker shows everything instead of an empty list.
 
 - **Broker per action.** Each buy names its broker and that broker's fee.
   The default, *Automatic*, picks the cheapest synced depot: Scalable as soon
-  as its depot is synced (orders 0,99 €, savings plans free), DKB otherwise.
+  as its depot is synced (orders 0,99 € on EIX, Prime-ETF buys from 250 € free,
+  gettex/Xetra 1,99 €; savings plans free), DKB otherwise.
   A fixed choice in Plan settings wins. A sale is made at the depot that
   holds the position, and starts with the position with the smallest gain
   per euro: the same ETF at DKB and at Scalable is two FIFO chains, and the

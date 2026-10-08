@@ -42,10 +42,10 @@ def _duckdb(monkeypatch, tmp_path):
     _pit_duckdb.reset_connection()
 
 
-def _row(gvkey, eom, country, *, be_me=1.0, mom=0.0, r=0.0, me=100.0, size="large", ingested="2026-09-01"):
+def _row(gvkey, eom, country, *, be_me=1.0, mom=0.0, r=0.0, me=100.0, size="large", rvol=0.02, ingested="2026-09-01"):
     return {
         "gvkey": gvkey, "permno": None, "eom": pd.Timestamp(eom), "excntry": country, "size_grp": size,
-        "me": me, "mom_12_1": mom, "be_me": be_me, "gp_at": 0.1, "at_gr1": 0.05,
+        "me": me, "mom_12_1": mom, "be_me": be_me, "gp_at": 0.1, "at_gr1": 0.05, "rvol_21d": rvol,
         "ret_exc_lead1m": r, "source": "wrds_factor_characteristics", "ingested_at": pd.Timestamp(ingested),
     }
 
@@ -346,6 +346,34 @@ def test_only_the_latest_run_counts():
 
 
 # --- API ------------------------------------------------------------------------
+
+
+def test_low_vol_and_size_are_pre_registered():
+    """ADR 0019 §6: min-vol and size join the fixed strategy set."""
+    assert S.STRATEGY_BY_KEY["low_vol"].signal == "-rvol_21d"
+    assert S.STRATEGY_BY_KEY["low_vol"].published == 2006
+    assert S.STRATEGY_BY_KEY["size"].signal == "-me"
+    assert S.STRATEGY_BY_KEY["size"].published == 1981
+    assert len(S.STRATEGIES) == 7
+
+
+def test_low_vol_and_size_rank_calm_small_stocks_first(tmp_path):
+    """Calm stocks and small caps land in the top third when they earn more."""
+    rows = []
+    for m in range(2):
+        eom = pd.Timestamp("2020-01-31") + pd.DateOffset(months=m)
+        for i in range(15):
+            # S0 is the calmest and smallest and earns the most; S14 the
+            # most volatile and largest and earns the least.
+            rows.append(_row(
+                f"S{i}", eom, "DEU",
+                r=0.08 - 0.005 * i, me=50.0 + 10.0 * i, rvol=0.01 + 0.001 * i,
+            ))
+    panel = _write_panel(tmp_path, rows)
+    frame = factor_series(panel, ("DEU",))
+    by_key = {s: g.set_index("month") for s, g in frame.groupby("strategy")}
+    assert by_key["low_vol"]["long_short"].mean() > 0
+    assert by_key["size"]["long_short"].mean() > 0
 
 
 def test_factor_premia_endpoint(tmp_path):

@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.foundation.core.db import Base
-from app.foundation.factor_evidence import latest_evidence_gate
+from app.foundation.factor_evidence import latest_evidence_gate, latest_evidence_gate_record
 from app.foundation.models.entities import TrialLedgerEntry
 from app.foundation.quant_metrics import DEFAULT_N_TRIALS_FLOOR, record_trial
 from app.lab import pooled_model, satellite
@@ -43,7 +43,10 @@ def _write(panel: Path, *, pooled_edge: float = 0.0, satellite_edge: float = 0.0
         {"model": m, "month": month, "long_short": v + (pooled_edge if m == "ridge" else 0.0)}
         for i, m in enumerate(MODELS) for month, v in zip(MONTHS, _noise(i), strict=True)
     ]
-    pooled_model.results_path(panel, "world").write_text(json.dumps({"series": pooled}))
+    pooled_model.results_path(panel, "world").write_text(json.dumps({
+        "series": pooled, "computed_at": "2026-09-30T00:00:00+00:00",
+        "cards": [{"model": "ridge", "months": len(MONTHS), "ic_mean": 0.07}],
+    }))
     series, cards = [], []
     for j, b in enumerate(BROKERS):
         for i, m in enumerate(MODELS):
@@ -96,6 +99,10 @@ def test_a_real_after_tax_edge_unlocks_and_is_stored(tmp_path):
     assert stored is not None and stored["satellite_unlocked"] is True
     assert sorted(stored["unlocked_by"]) == ["dkb:ridge", "scalable:ridge"]
     assert stored["n_trials"] == result.n_trials
+    # Step 2's model cards ride along, descriptive only, for the trust page's historical panel.
+    record = latest_evidence_gate_record(db, "world")
+    assert record["pooled_cards"] == [{"model": "ridge", "months": len(MONTHS), "ic_mean": 0.07}]
+    assert record["pooled_computed_at"] == "2026-09-30T00:00:00+00:00"
 
 
 def test_a_dry_run_stores_nothing(tmp_path):

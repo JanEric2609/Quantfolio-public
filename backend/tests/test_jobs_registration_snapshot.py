@@ -40,6 +40,11 @@ from app.decision.llm_portfolio.jobs import (
     register_llm_portfolio_review_jobs,
     register_llm_review_scoring_job,
 )
+from app.lab.evidence_gate.jobs import register_evidence_gate_job
+from app.decision.verification.jobs import (
+    register_trust_daily_ledger_job,
+    register_trust_weekly_ledger_job,
+)
 from app.lab.regime.jobs import (
     register_regime_daily_job,
     register_regime_refit_job,
@@ -121,6 +126,7 @@ EXPECTED_REGISTRATIONS = {
     },
     "macro_refresh": {"trigger": "cron", "hour": 7, "minute": 0},
     "risk_free_rate_refresh": {"trigger": "cron", "hour": 6, "minute": 30},
+    "evidence_gate": {"trigger": "cron", "day_of_week": "sun", "hour": 5, "minute": 30},
     "regime_daily": {"trigger": "cron", "hour": 7, "minute": 15},
     "envelope_rollover": {"trigger": "cron", "day": "1", "hour": 0, "minute": 0},
     "index_currency_weights": {"trigger": "cron", "day": "3", "hour": 5, "minute": 15},
@@ -154,6 +160,13 @@ EXPECTED_REGISTRATIONS = {
         "minute": 0,
     },
     "discovery_resolution": {"trigger": "cron", "hour": 2, "minute": 0},
+    "trust_daily_ledger": {"trigger": "cron", "hour": 2, "minute": 40},
+    "trust_weekly_ledger": {
+        "trigger": "cron",
+        "day_of_week": "sat",
+        "hour": 3,
+        "minute": 40,
+    },
     "discover_refresh": {
         "trigger": "cron",
         "day_of_week": "mon",
@@ -198,6 +211,7 @@ def _drive_all_registrations(sched):
     returns["evolution_round"] = register_evolution_job(sched)
     returns["macro_refresh"] = register_macro_refresh_job(sched)
     returns["risk_free_rate_refresh"] = register_risk_free_rate_refresh_job(sched)
+    returns["evidence_gate"] = register_evidence_gate_job(sched)
     returns["regime_daily"] = register_regime_daily_job(sched)
     returns["envelope_rollover"] = register_monthly_envelope_rollover_job(sched)
     returns["telegram_daily_reminder"] = register_telegram_daily_reminder_job(sched)
@@ -212,6 +226,8 @@ def _drive_all_registrations(sched):
     returns["llm_portfolio_review_jobs"] = register_llm_portfolio_review_jobs(sched)
     returns["llm_review_scoring"] = register_llm_review_scoring_job(sched)
     returns["discovery_resolution"] = register_discovery_resolution_job(sched)
+    returns["trust_daily_ledger"] = register_trust_daily_ledger_job(sched)
+    returns["trust_weekly_ledger"] = register_trust_weekly_ledger_job(sched)
     returns["discover_refresh"] = register_discover_refresh_job(sched)
     returns["discovery_config_review"] = register_discovery_review_job(sched)
     returns["discover_ml_training"] = register_discover_ml_training_job(sched)

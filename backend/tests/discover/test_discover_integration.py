@@ -304,6 +304,31 @@ class TestApiGetRun:
         assert cand.expected_return == 12.5
 
 
+    def test_get_run_carries_the_frozen_pool_rank(self):
+        """The shadow ledger's rank among the run's evaluable stocks rides on the candidate (ADR 0018 §6)."""
+        from app.foundation.models.entities import DiscoverCandidateSnapshot
+
+        db = _memory_db()
+        user = _user(db)
+        run = _seed_run(db, user.id, candidates=[
+            {"symbol": "AAPL", "source": "screen_index", "status": "shortlisted", "scores": {"composite": 0.85}},
+            {"symbol": "IWDA", "source": "screen_etf", "status": "shortlisted", "scores": {"composite": 0.8}},
+        ])
+        for symbol, rank in (("AAPL", 3), ("IWDA", None)):
+            db.add(DiscoverCandidateSnapshot(
+                user_id=user.id, run_id=run.id, issued_at=datetime.now(UTC), issue_date=datetime.now(UTC).date(),
+                symbol=symbol, instrument_group="stock" if rank else "etf", evaluable=True, composite=0.8,
+                components_json={}, stock_rank=rank, n_evaluable_stocks=187, shortlisted=True,
+                sector_capped=False, picked=True, cohort_id="c1-x", provenance_json={},
+            ))
+        db.commit()
+
+        by_symbol = {c.symbol: c for c in get_run(run.id, db=db, user=user).candidates}
+
+        assert (by_symbol["AAPL"].pool_rank, by_symbol["AAPL"].pool_size) == (3, 187)
+        assert by_symbol["IWDA"].pool_rank is None and by_symbol["IWDA"].pool_size is None
+
+
 class TestApiListRuns:
     """Integration: GET /api/discover/runs filters by owner."""
 

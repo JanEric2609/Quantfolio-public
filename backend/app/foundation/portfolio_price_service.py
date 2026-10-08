@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import pandas as pd
@@ -33,6 +34,9 @@ from app.foundation.fx_rates import convert as fx_convert
 from app.foundation.quant import price_matrix_to_returns
 
 logger = logging.getLogger(__name__)
+
+# A line missing on a day (holiday in its market) keeps its last close for at most this many calendar days.
+MAX_FILL_DAYS = 3
 
 # Default ETF proxy tickers for the four classic factor-mimicking portfolios.
 # Injectable via the constructor for unit tests.
@@ -272,30 +276,54 @@ class PortfolioPriceService:
         """
         if not matrix or not weights:
             return [], []
-        common_dates: set[str] | None = None
-        for ticker, prices in matrix.items():
-            keys = set(prices.keys())
-            common_dates = keys if common_dates is None else (common_dates & keys)
-        if not common_dates:
-            return [], []
-        sorted_dates = sorted(common_dates)
         total_weight = sum(max(0.0, w) for w in weights.values())
         if total_weight <= 0:
             return [], []
         normalised = {t: max(0.0, weights.get(t, 0.0)) / total_weight for t in matrix}
+        # Every line is carried forward over the union of all trading days (at
+        # most MAX_FILL_DAYS calendar days), not cut down to the dates all of
+        # them share: a holiday in one market would otherwise turn the next
+        # portfolio "daily" return into a multi-day return while the
+        # benchmark's return on that date stays a single day. Only dates that
+        # another line trades on are filled, so this is a holiday carry, not a
+        # gap filler. Trade-off: the filled day shows a 0 % return for that
+        # line (stale-price bias, Fisher 1966), which slightly lowers measured
+        # volatility; quant.price_matrix_to_returns refuses to fill at all
+        # and drops such dates, which is right for covariance but not for a
+        # series that must be paired date by date with a benchmark.
+        grid = sorted({d for prices in matrix.values() for d in prices})
+        if not grid:
+            return [], []
+        first_all = max(min(prices) for prices in matrix.values() if prices)
+        grid = [d for d in grid if d >= first_all]
+        filled: dict[str, dict[str, float]] = {}
+        for ticker, prices in matrix.items():
+            last_date: date | None = None
+            last_px: float | None = None
+            out: dict[str, float] = {}
+            for d in grid:
+                px = prices.get(d)
+                if px:
+                    last_date, last_px = date.fromisoformat(d[:10]), px
+                    out[d] = px
+                elif last_px is not None and last_date is not None and (date.fromisoformat(d[:10]) - last_date).days <= MAX_FILL_DAYS:
+                    out[d] = last_px
+            filled[ticker] = out
         series: list[float] = []
-        for i in range(1, len(sorted_dates)):
-            prev = sorted_dates[i - 1]
-            cur = sorted_dates[i]
+        dates: list[str] = []
+        for prev, cur in zip(grid, grid[1:]):
             period_return = 0.0
-            for ticker, prices in matrix.items():
-                p0 = prices.get(prev)
-                p1 = prices.get(cur)
+            ok = True
+            for ticker, px in filled.items():
+                p0, p1 = px.get(prev), px.get(cur)
                 if not p0 or not p1:
-                    continue
+                    ok = False
+                    break
                 period_return += normalised[ticker] * (p1 / p0 - 1)
-            series.append(period_return)
-        return series, sorted_dates[1:]
+            if ok:
+                series.append(period_return)
+                dates.append(cur)
+        return series, dates
 
     def returns_list(
         self,

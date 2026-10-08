@@ -71,12 +71,67 @@ def test_failed_connection_test_links_to_its_drawer(monkeypatch):
     monkeypatch.setattr("app.foundation.control_center._extract_items", lambda clock, items: None)
     db = _memory_db()
     set_secret(db, "finnhub", "key")
-    record_connection_test(db, "finnhub", False, "401 Unauthorized")
+    record_connection_test(db, "finnhub", False, "401 Unauthorized", reason="auth", probe_symbol="AAPL")
 
     item = next(i for i in attention_items(db) if i["id"] == "connection-finnhub")
 
     assert item["href"] == "/settings/market-data?connection=finnhub"
     assert "401" in item["detail"]
+
+
+PROD_LEGACY = {
+    "tiingo": "Tiingo IEX returned no data for EUNL.DE.",
+    "twelvedata": "HTTP 404 for /quote (symbol=EUNL, mic_code=XETR)",
+    "finnhub": "Finnhub covers US listings only; skipping EUNL.DE.",
+    "databento": "Databento covers US listings only; skipping EUNL.DE.",
+    "eod": "EODHD daily rate limit exceeded (20/day).",
+}
+
+
+def test_legacy_prod_results_are_not_tested_yet_info_never_warnings(monkeypatch):
+    monkeypatch.setattr("app.foundation.control_center._extract_items", lambda clock, items: None)
+    db = _memory_db()
+    for service, message in PROD_LEGACY.items():
+        set_secret(db, service, "key")
+        record_connection_test(db, service, False, message)  # old format: no reason, no probe symbol
+
+    items = [i for i in attention_items(db) if i["id"].startswith("connection-")]
+
+    assert len(items) == len(PROD_LEGACY)
+    assert {i["severity"] for i in items} == {"info"}
+    assert all("not tested yet" in i["title"] for i in items)
+
+
+def test_coded_harmless_outcomes_are_never_surfaced(monkeypatch):
+    monkeypatch.setattr("app.foundation.control_center._extract_items", lambda clock, items: None)
+    db = _memory_db()
+    for service, reason in (("finnhub", "not_applicable"), ("eod", "rate_limited")):
+        set_secret(db, service, "key")
+        record_connection_test(db, service, False, "whatever text", reason=reason, probe_symbol="AAPL")
+
+    assert not [i for i in attention_items(db) if i["id"].startswith("connection-")]
+
+
+def test_optional_provider_failure_severity_follows_the_code(monkeypatch):
+    monkeypatch.setattr("app.foundation.control_center._extract_items", lambda clock, items: None)
+    db = _memory_db()
+    for service, reason in (("finnhub", "http_error"), ("tiingo", "auth"), ("twelvedata", "no_data")):
+        set_secret(db, service, "key")
+        record_connection_test(db, service, False, "x", reason=reason, probe_symbol="AAPL")
+
+    by_id = {i["id"]: i for i in attention_items(db)}
+
+    assert by_id["connection-finnhub"]["severity"] == "info"
+    assert by_id["connection-tiingo"]["severity"] == "warning"
+    assert by_id["connection-twelvedata"]["severity"] == "info"
+
+
+def test_unconfigured_provider_with_old_failed_test_is_ignored(monkeypatch):
+    monkeypatch.setattr("app.foundation.control_center._extract_items", lambda clock, items: None)
+    db = _memory_db()
+    record_connection_test(db, "finnhub", False, "401 Unauthorized", reason="auth", probe_symbol="AAPL")
+
+    assert "connection-finnhub" not in {i["id"] for i in attention_items(db)}
 
 
 def test_old_provider_health_rows_are_not_current_problems(monkeypatch):

@@ -16,8 +16,9 @@ vi.mock("../../../lib/api", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-function renderCard() {
+function renderCard(seed?: Record<string, unknown>) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  if (seed) client.setQueryData(["tax", "settings"], seed);
   return render(
     <QueryClientProvider client={client}>
       <TaxStatusCard />
@@ -26,6 +27,12 @@ function renderCard() {
 }
 
 describe("TaxStatusCard", () => {
+  it("reads the unwrapped settings TaxCockpitLayout caches under the same key", async () => {
+    settings = { tax_spouse_allowance: true };
+    renderCard({ tax_spouse_allowance: true });
+    expect(await screen.findByText(/may not exceed 2.000 €/)).toBeInTheDocument();
+  });
+
   it("shows NV copies per bank as yes / no / not answered and saves them", async () => {
     settings = { tax_nv_certificate: true, tax_nv_valid_until: "2027-12-31", tax_nv_filed_dkb: true, tax_nv_filed_scalable: null };
     calls.length = 0;

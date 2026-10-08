@@ -93,6 +93,11 @@ class GateResult:
     reason: str
     # The mined "<broker>:<model>" candidates that unlocked the satellite.
     unlocked_by: list[str] = field(default_factory=list)
+    # Step 2's model cards (IC, long-short, recent years), copied as written:
+    # descriptive, for the trust page's historical panel (ADR 0018). They
+    # play no part in the verdict.
+    pooled_cards: list[dict[str, Any]] = field(default_factory=list)
+    pooled_computed_at: str | None = None
     artifact: Path | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -235,7 +240,11 @@ def run_evidence_gate(
             families.append(grade_family(name, wide, mined, n_trials, gates_money=name == GATING_FAMILY))
 
     unlocked, reason, unlocked_by = _verdict(families)
-    result = GateResult(region, n_trials, families, unlocked, reason, unlocked_by)
+    result = GateResult(
+        region, n_trials, families, unlocked, reason, unlocked_by,
+        pooled_cards=list((pooled or {}).get("cards") or []),
+        pooled_computed_at=(pooled or {}).get("computed_at"),
+    )
     if persist:
         computed_at = now_utc()
         record = _finite(result.as_dict())

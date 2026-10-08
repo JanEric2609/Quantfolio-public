@@ -36,7 +36,7 @@ class AlphaVantageProvider(MarketDataProvider):
             return self.unavailable("quote", "Alpha Vantage API key is not configured.")
         rate_error = self._check_rate_limit()
         if rate_error:
-            return self.unavailable("quote", rate_error)
+            return self.unavailable("quote", rate_error, reason="rate_limited")
         try:
             payload = self._get({"function": "GLOBAL_QUOTE", "symbol": symbol})
             data = payload.get("Global Quote", {})
@@ -75,7 +75,7 @@ class AlphaVantageProvider(MarketDataProvider):
             return self.unavailable("history", "Alpha Vantage API key is not configured.")
         rate_error = self._check_rate_limit()
         if rate_error:
-            return self.unavailable("history", rate_error)
+            return self.unavailable("history", rate_error, reason="rate_limited")
         try:
             payload = self._get({"function": "TIME_SERIES_DAILY_ADJUSTED", "symbol": symbol, "outputsize": "compact"})
             series = payload.get("Time Series (Daily)", {})
@@ -119,7 +119,7 @@ class AlphaVantageProvider(MarketDataProvider):
             return self.unavailable("fundamentals", "Alpha Vantage API key is not configured.")
         rate_error = self._check_rate_limit()
         if rate_error:
-            return self.unavailable("fundamentals", rate_error)
+            return self.unavailable("fundamentals", rate_error, reason="rate_limited")
         try:
             overview = self._get({"function": "OVERVIEW", "symbol": symbol})
             if not overview or "Symbol" not in overview:
@@ -155,11 +155,11 @@ class AlphaVantageProvider(MarketDataProvider):
             return self.unavailable("news", "Alpha Vantage API key is not configured.")
         rate_error = self._check_rate_limit()
         if rate_error:
-            return self.unavailable("news", rate_error)
+            return self.unavailable("news", rate_error, reason="rate_limited")
         if symbol and not is_us_listing(symbol):
             # Stripping the suffix risks matching an unrelated US ticker
             # (SHEL.AS → SHEL) and returning the wrong company's news.
-            return self.unavailable("news", f"Alpha Vantage covers US listings only; skipping {symbol}.")
+            return self.unavailable("news", f"Alpha Vantage covers US listings only; skipping {symbol}.", reason="not_applicable")
         try:
             params = {"function": "NEWS_SENTIMENT", "limit": str(limit)}
             if symbol:

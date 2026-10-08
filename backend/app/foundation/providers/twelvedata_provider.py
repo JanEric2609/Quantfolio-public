@@ -48,7 +48,7 @@ class TwelveDataProvider(MarketDataProvider):
                 return self.unavailable("quote", f"Twelve Data returned unexpected response for {symbol}.")
             close = _float(data.get("close"))
             if close is None or close <= 0:
-                return self.unavailable("quote", f"Twelve Data returned no close price for {symbol}.")
+                return self.unavailable("quote", f"Twelve Data returned no close price for {symbol}.", reason="no_data")
             return provider_result(
                 self.name,
                 ok=True,
@@ -98,7 +98,7 @@ class TwelveDataProvider(MarketDataProvider):
             data = self._get("/time_series", params=params)
             values = data.get("values") if isinstance(data, dict) else None
             if not isinstance(values, list):
-                return self.unavailable("history", f"Twelve Data returned no values for {symbol}.")
+                return self.unavailable("history", f"Twelve Data returned no values for {symbol}.", reason="no_data")
             rows: list[dict[str, Any]] = []
             for v in values:
                 close = _float(v.get("close"))

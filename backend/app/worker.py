@@ -24,6 +24,10 @@ from app.decision.discover.jobs import (
     register_discovery_review_job,
 )
 from app.decision.discover.orchestrator import reap_stale_discover_runs
+from app.decision.verification.jobs import (
+    register_trust_daily_ledger_job,
+    register_trust_weekly_ledger_job,
+)
 from app.foundation.etf_lookthrough import portfolio_lookthrough
 from app.foundation.jobs import (
     HEARTBEAT_INTERVAL_MINUTES,
@@ -44,6 +48,7 @@ from app.lab.regime.jobs import (
     register_regime_refit_job,
 )
 from app.foundation.scalable.jobs import register_scalable_sync_job
+from app.lab.evidence_gate.jobs import register_evidence_gate_job
 from app.foundation.settings import get_public_settings
 
 logger = logging.getLogger(__name__)
@@ -773,10 +778,14 @@ def register_snapshot_paper_portfolios_job(scheduler: Any | None = None) -> str:
         try:
             from app.decision.paper_portfolio import compute_metrics, snapshot_paper_portfolio
 
+            from app.foundation.models.entities._core import now_utc
+
+            yesterday = now_utc().date() - timedelta(days=1)
             portfolios = db.query(PaperPortfolio).all()
             for p in portfolios:
                 try:
-                    snapshot_paper_portfolio(db, p.id)
+                    # 00:00 UTC: the date that just ended, valued at its close.
+                    snapshot_paper_portfolio(db, p.id, as_of=yesterday)
                     compute_metrics(db, p.id)
                     succeeded += 1
                 except Exception as exc:
@@ -995,6 +1004,7 @@ def build_scheduler() -> Any:
     register_price_backfill_daily_job(scheduler)
     # Read-only and TAN-free, unlike DKB; wakes hourly, syncs per scalable_sync_hours.
     register_scalable_sync_job(scheduler)
+    register_evidence_gate_job(scheduler)
     register_regime_daily_job(scheduler)
     register_regime_refit_job(scheduler)
     register_watchlist_price_checker_job(scheduler)
@@ -1008,6 +1018,8 @@ def build_scheduler() -> Any:
     register_advisor_cycle_job(scheduler)
     register_evolution_job(scheduler)
     register_discovery_resolution_job(scheduler)
+    register_trust_daily_ledger_job(scheduler)
+    register_trust_weekly_ledger_job(scheduler)
     register_discovery_review_job(scheduler)
     register_discover_ml_training_job(scheduler)
     register_analyst_estimates_snapshot_job(scheduler)

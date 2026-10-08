@@ -59,7 +59,7 @@ def test_proven_cohort_approves_recommendation(monkeypatch):
     assert rec.approval_state == "approved_candidate"
 
 
-def test_insufficient_data_fails_open_and_approves(monkeypatch):
+def test_insufficient_data_is_research_not_a_decision(monkeypatch):
     db = _memory_db()
     result = _write(
         db, monkeypatch,
@@ -67,7 +67,20 @@ def test_insufficient_data_fails_open_and_approves(monkeypatch):
     )
 
     rec = db.get(Recommendation, result["recommendation_id"])
-    assert rec.approval_state == "approved_candidate"
+    assert rec.approval_state == "draft"
+
+
+def test_proven_recommendation_expires_after_14_days(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    db = _memory_db()
+    result = _write(db, monkeypatch, {"status": "proven", "n": 40, "t_stat": 4.2, "hit_rate": 0.7})
+
+    rec = db.get(Recommendation, result["recommendation_id"])
+    expiry = rec.recommendation_expiry
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=UTC)
+    assert abs((expiry - datetime.now(UTC)) - timedelta(days=14)) < timedelta(minutes=5)
 
 
 def test_verdict_follows_the_track_record_not_the_score(monkeypatch):

@@ -1,18 +1,28 @@
-"""Regime-aware advisor with Multiplicative Weights Update (MWU) for closed-loop refinement.
+"""Regime-aware advisor with an EXP3-style exponential-weights update for closed-loop refinement.
 
 Actions tracked per regime label:
   - buy_equity        — recommendation to increase equity exposure
   - buy_bond          — recommendation to increase bond/fixed-income exposure
   - reduce_holding    — recommendation to reduce/trim a position
-  - hold_cash         — recommendation to hold cash / reduce risk
+  - hold_position     — recommendation to keep the position as it is
+  - hold_cash         — recommendation to raise cash / reduce risk
   - sector_rotate     — recommendation to rotate sectors
 
-The MWU algorithm:
-  1. Initialize all actions with equal weight (1.0 / num_actions)
-  2. On each outcome evaluation, compute loss per action:
-       loss = 0.0 on correct, 0.5 on neutral, 1.0 on incorrect
-  3. New weight = old_weight * (1 - eta * loss)
-  4. Normalize weights so they sum to 1.0
+The update is a bandit one, not a full-information MWU: a recommendation is
+one action and its outcome tells us how THAT action fared; there is no
+counterfactual loss for the actions that were not recommended. So, as in
+EXP3, only the taken action is updated, with its loss divided by the
+probability the weights assign to it (importance weighting, which keeps the
+estimate of every action's loss unbiased):
+
+  1. Weights start uniform at 1/K and always sum to 1 (they are the
+     probabilities).
+  2. loss = 0.0 on correct, 0.5 on neutral, 1.0 on incorrect.
+  3. p = max(weight_taken, gamma / K); estimated loss = loss / p (0 for the
+     other actions). The floor bounds the estimate by K / gamma.
+  4. weight_a *= exp(-eta * estimated_loss_a), eta = gamma / K, so one step
+     shrinks a weight by at most exp(-1).
+  5. Renormalise, with a tiny floor so no weight underflows to zero.
 """
 from __future__ import annotations
 
@@ -35,11 +45,14 @@ MWU_ACTIONS = [
     "buy_equity",
     "buy_bond",
     "reduce_holding",
+    "hold_position",
     "hold_cash",
     "sector_rotate",
 ]
 
-LEARNING_RATE = 0.1  # eta — how quickly weights adapt
+EXPLORATION = 0.1  # gamma: floor on the probability used to importance-weight a loss
+LEARNING_RATE = EXPLORATION / len(MWU_ACTIONS)  # eta = gamma / K
+MIN_WEIGHT = 1e-6
 REGIME_LABELS = ["bull", "bear", "high_vol", "low_vol", "transition"]
 
 
@@ -63,16 +76,28 @@ def _loss_for_label(label: str) -> float:
 
 
 def _infer_action_from_rec(rec: Recommendation) -> str:
-    """Map a recommendation verdict/ticker to an MWU action."""
-    verdict = (rec.verdict or "").upper()
+    """Map a recommendation verdict/horizon to an MWU action.
 
+    Every action is reachable: a buy-type verdict on a bond is ``buy_bond``
+    (checked before the equity buy), HOLD means keep the position
+    (``hold_position``, not cash), and cash comes from explicit
+    defensive/cash verdicts.
+    """
+    verdict = (rec.verdict or "").upper()
+    is_bond = "BOND" in verdict or "BOND" in (rec.horizon or "").upper()
+    buy_like = verdict in ("BUY", "STRONG_BUY", "BULLISH", "OUTPERFORM") or "BOND" in verdict
+
+    if is_bond and buy_like:
+        return "buy_bond"
     if verdict in ("BUY", "STRONG_BUY", "BULLISH", "OUTPERFORM"):
         return "buy_equity"
     if verdict in ("SELL", "STRONG_SELL", "BEARISH", "UNDERPERFORM"):
         return "reduce_holding"
     if verdict in ("HOLD", "NEUTRAL", "MARKET_WEIGHT", "WATCH"):
+        return "hold_position"
+    if verdict in ("CASH", "RAISE_CASH", "DEFENSIVE", "RISK_OFF"):
         return "hold_cash"
-    if "BOND" in verdict or "BOND" in (rec.horizon or "").upper():
+    if is_bond:
         return "buy_bond"
     if verdict in ("ROTATE", "SECTOR_ROTATE", "OVERWEIGHT"):
         return "sector_rotate"
@@ -109,6 +134,25 @@ def _infer_regime_from_rec(rec: Recommendation, default_regime: str = "unknown")
         return default_regime
 
 
+def exp3_update(weights: dict[str, float], action: str, loss: float) -> dict[str, float]:
+    """One EXP3 step: importance-weighted exponential update of the taken action.
+
+    ``weights`` are probabilities (sum ~1). Returns new weights that sum to 1,
+    each at least :data:`MIN_WEIGHT`. A zero loss leaves the distribution
+    unchanged (after normalisation).
+    """
+    k = len(weights)
+    total = sum(weights.values())
+    probs = {a: (w / total if total > 0 else 1.0 / k) for a, w in weights.items()}
+    p_taken = max(probs[action], EXPLORATION / k)
+    estimated_loss = loss / p_taken
+    out = dict(probs)
+    out[action] = probs[action] * math.exp(-LEARNING_RATE * estimated_loss)
+    out = {a: max(w, MIN_WEIGHT) for a, w in out.items()}
+    norm = sum(out.values())
+    return {a: w / norm for a, w in out.items()}
+
+
 def get_or_init_weights(db: Session, regime_label: str) -> dict[str, float]:
     """Return current weights for a regime, initializing if missing."""
     rows: list[RegimeRecommendationWeight] = (
@@ -119,16 +163,20 @@ def get_or_init_weights(db: Session, regime_label: str) -> dict[str, float]:
     existing = {r.action: r.weight for r in rows}
 
     # Ensure all actions exist
-    for action in MWU_ACTIONS:
-        if action not in existing:
-            w = RegimeRecommendationWeight(
-                regime_label=regime_label,
-                action=action,
-                weight=1.0 / len(MWU_ACTIONS),
-                n_obs=0,
-            )
-            db.add(w)
-            existing[action] = 1.0 / len(MWU_ACTIONS)
+    missing = [a for a in MWU_ACTIONS if a not in existing]
+    for action in missing:
+        db.add(RegimeRecommendationWeight(
+            regime_label=regime_label, action=action, weight=1.0 / len(MWU_ACTIONS), n_obs=0,
+        ))
+        existing[action] = 1.0 / len(MWU_ACTIONS)
+    old_total = sum(r.weight for r in rows)
+    if missing and rows and old_total > 0:
+        # An action added to a regime that already learned: the old rows share
+        # what the new ones leave, so the weights still sum to 1.
+        factor = (1.0 - len(missing) / len(MWU_ACTIONS)) / old_total
+        for r in rows:
+            r.weight = r.weight * factor
+            existing[r.action] = r.weight
     db.commit()
 
     return existing
@@ -174,20 +222,16 @@ def update_weights_for_outcome(
     row.n_obs = (row.n_obs or 0) + 1
     row.cum_accuracy = (old_cum * (row.n_obs - 1) + accuracy) / row.n_obs
 
-    # MWU update: weight *= (1 - eta * loss)
-    row.weight = row.weight * (1.0 - LEARNING_RATE * loss)
-    row.updated_at = datetime.now(UTC)
-
-    # Normalize all weights for this regime
+    # Load all weights for this regime, update the taken action, renormalise.
     all_rows: list[RegimeRecommendationWeight] = (
         db.query(RegimeRecommendationWeight)
         .filter(RegimeRecommendationWeight.regime_label == regime_label)
         .all()
     )
-    total_w = sum(r.weight for r in all_rows)
-    if total_w > 0:
-        for r in all_rows:
-            r.weight = r.weight / total_w
+    new_weights = exp3_update({r.action: r.weight for r in all_rows}, action, loss)
+    for r in all_rows:
+        r.weight = new_weights[r.action]
+    row.updated_at = datetime.now(UTC)
 
     db.commit()
     return {r.action: r.weight for r in all_rows}

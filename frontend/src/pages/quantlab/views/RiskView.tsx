@@ -36,6 +36,10 @@ export function RiskView() {
   const noBench = riskQuery.data?.available && diag.benchmark_available === false;
   const alphaT = risk.alpha_t_stat;
 
+  const overlapPct = riskQuery.data?.benchmark_overlap_pct ?? null;
+  const overlapCaveat = riskQuery.data?.available === true
+    && ((overlapPct != null && overlapPct >= 80) || (risk.r_squared != null && risk.r_squared >= 0.95));
+
   const set = (key: string, value: string) =>
     setParams((old) => {
       if (value) old.set(key, value);
@@ -67,6 +71,13 @@ export function RiskView() {
       <SummaryStrip metrics={metrics} />
 
       <div className="space-y-4 pt-4">
+        {overlapCaveat && (
+          <div className="rounded-md border border-warn/30 bg-warn/10 p-3 text-xs text-warn" data-testid="benchmark-caveat">
+            {overlapPct != null ? `${overlapPct.toFixed(0)} %` : "Most"} of your book is the benchmark fund itself, so beta ≈ 1,
+            R² ≈ 1 and tracking error ≈ 0 by construction; they say nothing about skill. The useful numbers here are
+            volatility, drawdown and VaR.
+          </div>
+        )}
         {riskQuery.data?.available && diag.partial_data && (
           <div className="rounded-md border border-warn/30 bg-warn/10 p-3 text-xs text-warn">
             Partial portfolio data: some holdings have no price history. Risk uses{" "}
@@ -117,8 +128,9 @@ export function RiskView() {
             />
           </label>
           <span className="text-text-muted">
-            All returns in EUR, paired by date{benchDays ? ` (${benchDays} common days)` : ""}. Empty fields use the
-            configured benchmark and the ECB deposit rate.
+            All returns in EUR, paired by date{benchDays ? ` (${benchDays} common days)` : ""}. The history holds today's
+            weights constant, as if you had always owned this mix. Empty fields use the configured benchmark and the ECB
+            deposit rate.
           </span>
         </section>
 

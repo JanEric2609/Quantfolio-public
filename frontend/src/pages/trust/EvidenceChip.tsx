@@ -11,7 +11,11 @@ const ICON = {
 } as const;
 
 /** The evidence state as a chip: colour plus icon plus words, never colour alone. */
-export function EvidenceChip({ type }: { type: Pick<TrustTypeVerdict, "state" | "n" | "n_needed" | "benchmarked" | "type"> }) {
+export function EvidenceChip({
+  type,
+}: {
+  type: Pick<TrustTypeVerdict, "state" | "n" | "n_needed" | "benchmarked" | "type"> & { n_needed_is_lower_bound?: boolean };
+}) {
   const Icon = ICON[type.state];
   const meta = STATE_META[type.state];
   return (

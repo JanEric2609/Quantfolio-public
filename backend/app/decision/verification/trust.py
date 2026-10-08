@@ -30,9 +30,27 @@ neighbouring dates overlap. Picks that stopped trading before their horizon
 stay in, scored at their last close (or as a miss when there was no price at
 all): dropping them is survivorship bias.
 
-Several types tested in two directions are several looks, so the state comes
-from e-BH across all of them (false-discovery rate 5 %), on the e-values as
-they stand now. A single e-process crossing 20 is not enough on its own.
+**The verdict comes from the pre-registered calendar-time tests (ADR 0018,
+``daily_tests.py``)**: ideas (F1, primary, sets the headline), ranking (F2,
+primary, its own row) and advisor (F3, secondary), each its own e-BH family of
+skill and harm (K = 2, so one rejection needs e >= 40). The per-date basket
+statistics below stay on the page as descriptive numbers and a secondary,
+legacy test:
+
+* **Overlap.** A call's outcome covers ``horizon`` issue days, so the hit flags
+  of consecutive dates overlap. The e-process is therefore the lag-h average of
+  Henzi & Ziegel (arXiv:2103.08402), ``h`` = the longest horizon in issue days
+  (21 trading days by default).
+* **Excess return, not hit/miss.** The skill and harm tests bet on each date's
+  basket excess return (clipped to +-``EXCESS_CLIP``), which uses the size of the
+  win as well as its sign; the hit rate stays a descriptive number.
+* **Legacy e-values are bounded below.** Stopping the lag-h average at a
+  crossing is only safe when the calls still in flight are counted at their
+  worst (Henzi & Ziegel, App. A.2), so the row also reports ``e_skill_lower``
+  / ``e_harm_lower``: the value if every pending call resolved at the clip
+  against it. It sets no state.
+* **Mandates** have no naive benchmark, so the "hit" is the system's own
+  grading; they show their numbers but never get a skill or harm verdict.
 """
 from __future__ import annotations
 
@@ -45,6 +63,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.decision.verification import daily_tests, factor_study
 from app.decision.verification.benchmark import passive_core_symbol
 from app.foundation import forecast_verification as fv
 from app.foundation.models.entities import (
@@ -59,8 +78,22 @@ logger = logging.getLogger(__name__)
 #: Hit rate the page asks "can we tell this from a coin flip?" about. A
 #: realistic edge for picks against a world ETF is a few points, so 55 %.
 TARGET_HIT_RATE = 0.55
-#: Null hypothesis of every e-process: a coin flip.
+#: Null hypothesis of the hit-rate e-process used for the types that have no
+#: excess return (mandates): a coin flip.
 NULL_HIT_RATE = 0.5
+#: The skill / harm tests bet on each date's basket excess return. It is clipped
+#: to +-20 % before betting: over 21 trading days a +-20 % excess against a
+#: world ETF is already an extreme day for an equal-weight basket, so clipping
+#: rarely bites, but it bounds the bet. Validity then holds for the *clipped*
+#: mean: H0 is "the mean clipped excess return is <= 0" (skill) or ">= 0" (harm).
+EXCESS_CLIP = 0.20
+#: Assumed true edge for the "time to know" number: +1 % excess per 21-day window
+#: (about 12 % a year before noise) ...
+ASSUMED_EDGE = 0.01
+#: ... with 5 % noise (standard deviation of one date's basket excess return).
+#: Not measured: there is no live data to estimate it from. It also sets the
+#: regulariser of the first bets.
+ASSUMED_SD = 0.05
 #: Nominal coverage of the stated ranges: Discover's P10-P90 band and the
 #: advisor's Monte Carlo P5-P95 band.
 IDEAS_RANGE_LEVEL = 0.8
@@ -71,6 +104,21 @@ CI_LEVEL = 0.9
 MIN_CALLS_FOR_STATE = 20
 #: False-discovery rate of the e-BH procedure across every type and direction.
 FDR_LEVEL = 0.05
+#: Types measured against the ETF (each its own family, ADR 0018 §2).
+TESTED_KEYS = ("ideas", "advisor")
+#: Hypotheses per family: skill and harm.
+N_TESTS = daily_tests.FAMILY_K
+#: e-value a single rejection needs under e-BH: K / alpha.
+EBH_THRESHOLD = N_TESTS / FDR_LEVEL
+#: Which calendar-time family sets each type's state.
+_FAMILY_OF = {"ideas": "F1", "advisor": "F3"}
+#: Brier-skill bootstrap blocks: issue dates within this many weeks resample together.
+CALIBRATION_BLOCK_WEEKS = 5
+#: Effective (date-level) labels before any probability is stated (ADR 0018 §6).
+MIN_N_EFF_FOR_PROBABILITY = 100
+#: Holding period (trading days) assumed when a call carries none.
+DEFAULT_HORIZON_DAYS = 21
+TRADING_DAYS_PER_YEAR = 252
 
 TYPE_KEYS = ("ideas", "advisor", "mandates", "regime")
 TYPE_LABELS = {
@@ -80,17 +128,41 @@ TYPE_LABELS = {
     "regime": "Regime",
 }
 
-METHOD_NOTE = (
-    "The unit is the rebalance date: the picks issued on one day form an equal-weight basket, and "
-    "the date is a hit when the basket beat your passive core ETF over the horizon (mandates: when "
-    "the stated expectation held). Picks that stopped trading count, at their last close. Every "
-    "number is frozen when the call was resolved. Intervals are 90 %: exact (Clopper-Pearson) for "
-    "hit rates, Newey-West for the mean excess because holding windows overlap, block bootstrap for "
-    "Brier skill. Evidence is an anytime-valid e-process against a 50 % coin flip per type and "
-    "direction, and the e-BH procedure keeps the false-discovery rate at 5 % across all of them. "
-    f"Telling a {round(TARGET_HIT_RATE * 100)} % hit rate from a coin flip takes about "
-    f"{fv.calls_needed(TARGET_HIT_RATE)} independent dates."
-)
+def _method_note() -> str:
+    start = daily_tests.PRIMARY_TEST_START.isoformat()
+    clip = round(daily_tests.CLIP * 100)
+    return (
+        "The verdict comes from tests fixed in advance (ADR 0018) before the results they judge. Each "
+        "trading day, the open calls of a type form one portfolio held as issued, and its return against "
+        "your passive core ETF that day is one observation (a calendar-time portfolio, so overlapping "
+        "holding windows are not a problem). Each day is recorded once and never rewritten. An "
+        f"anytime-valid e-process bets on these daily returns (clipped to +-{clip} %) from {start} on; "
+        "skill and harm are tested together with e-BH at a 5 % false-discovery rate, so one verdict needs "
+        f"an e-value of {round(daily_tests.THRESHOLD)}. The picks against the ETF set the headline. "
+        "Discover's ranking of every scored stock is its own test, and the advisor's is secondary. The "
+        "chance the edge is positive is a Bayesian summary with a sceptical prior, shown next to the "
+        "test and never used as a verdict. Below, the per-date basket numbers are descriptive."
+    )
+
+
+def _legacy_method_note() -> str:
+    needed = _needed_text(*_issue_days_needed(DEFAULT_HORIZON_DAYS))  # daily-issuing reference
+    edge, sd = round(ASSUMED_EDGE * 100, 1), round(ASSUMED_SD * 100, 1)
+    return (
+        "The unit is the rebalance date: the picks issued on one day form an equal-weight basket, and "
+        "the date is a hit when the basket beat your passive core ETF over the horizon (mandates: when "
+        "the stated expectation held). Picks that stopped trading count, at their last close. Every "
+        "number is frozen when the call was resolved. Intervals are 90 %: exact (Clopper-Pearson) for "
+        "hit rates, Newey-West for the mean excess because holding windows overlap, block bootstrap for "
+        "Brier skill. Evidence is an anytime-valid e-process that bets on each date's average excess "
+        f"return (clipped to +-{round(EXCESS_CLIP * 100)} %) against zero, per type and direction; "
+        "because holding windows overlap it is averaged over interleaved dates (Henzi & "
+        "Ziegel), with the calls still in flight counted at their worst before it may cross. Mandates have "
+        "no benchmark and get no verdict. "
+        f"Assuming an edge of +{edge} % per 21 days with {sd} % noise, seeing it this way takes {needed} "
+        "rebalance dates if one is issued every trading day, fewer for a weekly cadence (each page row "
+        "states its own)."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -144,14 +216,47 @@ class _TypeData:
 
     key: str
     calls: list[Call] = field(default_factory=list)
-    # (low, high, stock-return) for every resolved row that stated a range.
-    ranges: list[tuple[float, float, float]] = field(default_factory=list)
+    # Every resolved row that stated a range, with its issue and exit dates.
+    ranges: list[fv.RangeOutcome] = field(default_factory=list)
     range_level: float | None = None
     next_resolution_at: datetime | None = None
     benchmark_label: str = ""
     benchmarked: bool = True
     note: str | None = None
     n_delisted: int = 0
+    #: Resolved calls that could not be scored (no return or no benchmark price).
+    n_unscored: int = 0
+    #: Logged holds: resolved but not a directional bet, left out by design.
+    n_holds: int = 0
+    #: Issue dates of directional calls still in flight (for the legacy lower bound).
+    pending_days: list[date] = field(default_factory=list)
+
+
+def _coverage_dict(cov: fv.Coverage) -> dict[str, Any]:
+    return {
+        "k": cov.k,
+        "n": cov.n,
+        "rate": cov.rate,
+        "ci_low": cov.ci_low,
+        "ci_high": cov.ci_high,
+        "nominal": cov.nominal,
+    }
+
+
+def _aci_dict(aci: fv.AciCoverage) -> dict[str, Any]:
+    """The online conformal correction of the stated ranges (ADR 0018 §6)."""
+    return {
+        "active": aci.active,
+        "matured_weeks": aci.matured_weeks,
+        "weeks_needed": aci.weeks_needed,
+        "alpha_target": aci.alpha_target,
+        "alpha_now": aci.alpha_now,
+        "gamma": aci.gamma,
+        "widen_now": aci.widen_now,
+        "per_date": [{"date": d.isoformat(), "inside": k, "n": n} for d, k, n in aci.per_date],
+        "corrected": _coverage_dict(aci.corrected) if aci.corrected else None,
+        "raw_same_dates": _coverage_dict(aci.raw_same_dates) if aci.raw_same_dates else None,
+    }
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -177,6 +282,34 @@ def _earliest_future(values: list[datetime | None], now: datetime) -> datetime |
     return min(future) if future else None
 
 
+def _issue_days_needed(h: int) -> tuple[int, bool]:
+    """(issue dates, is_lower_bound) for the assumed edge with *h* chains; simulated, cached."""
+    n = fv.issue_days_needed_mean(ASSUMED_EDGE, ASSUMED_SD, EXCESS_CLIP, N_TESTS, FDR_LEVEL, h)
+    return (fv.SIM_MAX_DAYS, True) if n is None else (n, False)
+
+
+def _cadence(units_days: list[date], horizon: int) -> dict[str, Any]:
+    """Dates needed at the *observed* issue cadence (daily assumed below 5 dates), and in years."""
+    h_eff, gap = fv.effective_lag(units_days, horizon)
+    needed, lower = _issue_days_needed(h_eff)
+    return {
+        "n_needed": needed,
+        "n_needed_is_lower_bound": lower,
+        "h_eff": h_eff,
+        "cadence_days": gap,
+        "years_needed": needed * gap / TRADING_DAYS_PER_YEAR,
+    }
+
+
+def _about(n: int) -> int:
+    """'~9,800', not '~9,783': the count needed is a rough planning number."""
+    return int(round(n, -2)) if n >= 100 else n
+
+
+def _needed_text(n: int, lower_bound: bool) -> str:
+    return f"{'more than' if lower_bound else 'about'} {_about(n):,}"
+
+
 # ---------------------------------------------------------------------------
 # Ledger readers
 # ---------------------------------------------------------------------------
@@ -196,6 +329,8 @@ def _prediction_type(db: Session, user_id: str, key: str, now: datetime, benchma
     for row in rows:
         if row.outcome_status == "pending":
             pending.append(row.resolve_at)
+            if (row.direction or "buy").lower() != "neutral" and row.predicted_at is not None:
+                data.pending_days.append((_utc(row.predicted_at) or now).date())
             continue
         direction = (row.direction or "buy").lower()
         delisted = row.outcome_status == "delisted"
@@ -209,16 +344,32 @@ def _prediction_type(db: Session, user_id: str, key: str, now: datetime, benchma
                     hit=False, horizon_days=row.horizon_days, delisted=True,
                 ))
             continue
-        if row.outcome_status not in ("resolved", "delisted") or row.realised_return is None:
+        if row.outcome_status not in ("resolved", "delisted"):
+            continue
+        if row.realised_return is None:
+            if direction == "neutral":
+                data.n_holds += 1
+            else:
+                data.n_unscored += 1
             continue
         outcome = (row.score_json or {}).get("outcome") if isinstance(row.score_json, dict) else None
         if isinstance(outcome, dict) and outcome.get("benchmark"):
             measured_against.add(str(outcome["benchmark"]))
         stock_return = -float(row.realised_return) if direction in ("sell", "bear") else float(row.realised_return)
         if row.expected_return_low is not None and row.expected_return_high is not None:
-            data.ranges.append((float(row.expected_return_low), float(row.expected_return_high), stock_return))
-        if row.excess_return is None or direction == "neutral":
-            continue  # no benchmark recorded, or a logged hold: not a directional bet against the ETF
+            data.ranges.append(fv.RangeOutcome(
+                issued=(_utc(row.predicted_at) or now).date(),
+                matured=_exit_date(row).date(),
+                low=float(row.expected_return_low),
+                high=float(row.expected_return_high),
+                outcome=stock_return,
+            ))
+        if direction == "neutral":
+            data.n_holds += 1  # a logged hold: not a directional bet against the ETF
+            continue
+        if row.excess_return is None:
+            data.n_unscored += 1  # no benchmark price recorded: counted and shown, never silently dropped
+            continue
         data.calls.append(
             Call(
                 type=key,
@@ -404,48 +555,81 @@ def _type_stats(data: _TypeData) -> dict[str, Any]:
     hits = sum(1 for u in units if u.hit)
     flags = [1.0 if u.hit else 0.0 for u in units]
 
-    skill_proc = fv.e_process_bernoulli(flags, NULL_HIT_RATE)
-    harm_proc = fv.e_process_harm(flags, NULL_HIT_RATE)
+    horizons = [c.horizon_days for c in calls if c.horizon_days]
+    horizon = max(horizons) if horizons else DEFAULT_HORIZON_DAYS
+    unit_days = [u.day for u in units]
+    # Overlapping holding windows: lag-h e-process (Henzi & Ziegel, arXiv:2103.08402).
+    if data.key in TESTED_KEYS:
+        # Bet on the date's basket excess return. A date with no price at all for any pick
+        # carries no information about the size of the move: it enters as 0.
+        obs = [u.excess if u.excess is not None else 0.0 for u in units]
+        # Chains of non-overlapping windows for this issue schedule (treated as exogenous).
+        chains = fv.chain_partition(unit_days, horizon)
+        skill_proc = fv.e_process_mean(obs, horizon, EXCESS_CLIP, ASSUMED_SD, chains=chains)
+        harm_proc = fv.e_process_mean(obs, horizon, EXCESS_CLIP, ASSUMED_SD, harm=True, chains=chains)
+        n_chains = (max(chains) + 1) if chains else 0
+        e_skill_lower, e_harm_lower = _lower_bounds(units, obs, data.pending_days, horizon) or (
+            skill_proc.final, harm_proc.final,
+        )
+    else:
+        n_chains = horizon  # mandates / regime: no excess return, only the descriptive hit-rate evidence
+        skill_proc = fv.e_process_lag_h(flags, NULL_HIT_RATE, horizon)
+        harm_proc = fv.e_process_lag_h_harm(flags, NULL_HIT_RATE, horizon)
+        e_skill_lower, e_harm_lower = skill_proc.final, harm_proc.final
 
     excesses = [u.excess for u in units if u.excess is not None]
     mean_excess = sum(excesses) / len(excesses) if excesses else None
-    horizons = [c.horizon_days for c in calls if c.horizon_days]
     lag = _hac_lag(units, max(horizons) if horizons else None)
 
-    stated = [(c.stated_p, 1.0 if c.hit else 0.0) for c in calls if c.stated_p is not None]
+    # Calibration metrics count issue dates, not calls (ADR 0018 §6): the
+    # bootstrap resamples five-week blocks of dates, Z sums residuals per date,
+    # and the reliability curve is CORP (PAV) with its Brier decomposition.
+    stated = [(c.stated_p, 1.0 if c.hit else 0.0, c.issued_at.date()) for c in calls if c.stated_p is not None]
     brier = bss = None
     bss_ci: tuple[float, float] | None = None
     z = None
     reliability: list[dict[str, float]] = []
+    corp: dict[str, float] | None = None
+    n_eff_stated = len({d for _, _, d in stated})
     if stated:
         p_vals = [s[0] for s in stated]
         y_vals = [s[1] for s in stated]
-        skill = fv.brier_skill(p_vals, y_vals, level=CI_LEVEL)
+        first = min(d for _, _, d in stated)
+        blocks = [(d - first).days // (7 * CALIBRATION_BLOCK_WEEKS) for _, _, d in stated]
+        skill = fv.brier_skill(p_vals, y_vals, level=CI_LEVEL, blocks=blocks)
         brier, bss = skill.brier, skill.skill
         bss_ci = (skill.ci_low, skill.ci_high) if skill.ci_low is not None and skill.ci_high is not None else None
-        z = fv.spiegelhalter_z(p_vals, y_vals)
+        z = fv.spiegelhalter_z_clustered(p_vals, y_vals, [d for _, _, d in stated])
         if len(stated) >= fv.MIN_CALLS_FOR_RELIABILITY:
-            reliability = fv.reliability_bins(p_vals, y_vals, bins=5)
+            fit = fv.corp_reliability(p_vals, y_vals)
+            if fit is not None:
+                reliability = fit.points
+                corp = {"mcb": fit.mcb, "dsc": fit.dsc, "unc": fit.unc}
 
     coverage = None
     if data.ranges and data.range_level is not None:
-        cov = fv.coverage([low <= r <= high for low, high, r in data.ranges], data.range_level, CI_LEVEL)
-        coverage = {
-            "k": cov.k,
-            "n": cov.n,
-            "rate": cov.rate,
-            "ci_low": cov.ci_low,
-            "ci_high": cov.ci_high,
-            "nominal": cov.nominal,
-        }
+        cov = fv.coverage([r.low <= r.outcome <= r.high for r in data.ranges], data.range_level, CI_LEVEL)
+        coverage = {**_coverage_dict(cov), "aci": _aci_dict(fv.aci_coverage(data.ranges, data.range_level, CI_LEVEL))}
 
     call_hits = sum(1 for c in calls if c.hit)
+    tested = data.key in TESTED_KEYS
+    cad = _cadence(unit_days, horizon) if tested else None
+    needed = cad["n_needed"] if cad else None
+    lower_bound = cad["n_needed_is_lower_bound"] if cad else False
     return {
         "type": data.key,
         "label": TYPE_LABELS[data.key],
         # n, hits and the hit rate count rebalance dates, the independent unit.
         "n": n,
-        "n_needed": fv.calls_needed(TARGET_HIT_RATE) if data.key != "regime" else None,
+        "n_needed": needed,
+        "n_needed_is_lower_bound": lower_bound,
+        "horizon_days": horizon,
+        "lag_h": n_chains,
+        "h_eff": cad["h_eff"] if cad else None,
+        "cadence_days": cad["cadence_days"] if cad else None,
+        "years_needed": cad["years_needed"] if cad else None,
+        "n_unscored": data.n_unscored,
+        "n_holds": data.n_holds,
         "n_issue_days": n,
         "n_calls": len(calls),
         "n_delisted": data.n_delisted,
@@ -462,16 +646,20 @@ def _type_stats(data: _TypeData) -> dict[str, Any]:
         "e_harm": harm_proc.final,
         "e_skill_peak": skill_proc.max_value,
         "e_harm_peak": harm_proc.max_value,
+        "e_skill_lower": e_skill_lower,
+        "e_harm_lower": e_harm_lower,
         "e_skill_crossed_strong": skill_proc.crossed(fv.STRONG_EVIDENCE_THRESHOLD),
-        "state": "too_early",  # set across all types by _apply_e_bh
+        "state": "too_early",  # set from the calendar-time families by _apply_states
         "benchmarked": data.benchmarked,
         "benchmark_label": data.benchmark_label,
         "brier": brier,
         "bss": bss,
         "bss_ci": _interval(bss_ci),
         "n_stated_p": len(stated),
+        "n_eff_stated": n_eff_stated,
         "spiegelhalter_z": z,
         "reliability": reliability,
+        "corp": corp,
         "range_coverage": coverage,
         "calibration_caption": _calibration_caption(calls),
         "next_resolution_at": data.next_resolution_at.isoformat() if data.next_resolution_at else None,
@@ -479,22 +667,45 @@ def _type_stats(data: _TypeData) -> dict[str, Any]:
     }
 
 
-def _apply_e_bh(stats: list[dict[str, Any]]) -> int:
-    """Set each type's state from e-BH over every (type, direction) with data; returns the tests run."""
-    tested = [(s, side) for s in stats if s["n"] > 0 and s["n_needed"] is not None for side in ("skill", "harm")]
-    rejected = fv.e_bh([s[f"e_{side}"] for s, side in tested], FDR_LEVEL)
-    found = {(id(s), side) for (s, side), r in zip(tested, rejected, strict=True) if r}
+def _lower_bounds(
+    units: list[_Unit], obs: list[float], pending_days: list[date], horizon: int,
+) -> tuple[float, float] | None:
+    """Legacy e-values if every in-flight date resolved at its worst (Henzi & Ziegel, App. A.2).
+
+    A pending date is appended to its chain at the clip against the
+    hypothesis (-clip for skill, +clip for harm). Only these bounds may be
+    read against a threshold while calls are in flight. ``None`` when nothing
+    is in flight (the bound is then the current value).
+    """
+    resolved_days = {u.day for u in units}
+    extra = sorted({d for d in pending_days if d not in resolved_days})
+    if not extra:
+        return None
+    merged = sorted([(u.day, x, False) for u, x in zip(units, obs, strict=True)] + [(d, 0.0, True) for d in extra])
+    chains = fv.chain_partition([m[0] for m in merged], horizon)
+    worst_skill = [-EXCESS_CLIP if pend else x for _, x, pend in merged]
+    worst_harm = [EXCESS_CLIP if pend else x for _, x, pend in merged]
+    skill = fv.e_process_mean(worst_skill, horizon, EXCESS_CLIP, ASSUMED_SD, chains=chains)
+    harm = fv.e_process_mean(worst_harm, horizon, EXCESS_CLIP, ASSUMED_SD, harm=True, chains=chains)
+    return skill.final, harm.final
+
+
+def _apply_states(stats: list[dict[str, Any]], tests: dict[str, Any]) -> int:
+    """Each tested type takes the state of its calendar-time family (ADR 0018 §2).
+
+    Mandates and regime never get a skill or harm verdict. The legacy per-date
+    e-values sit beside the state and set none of it.
+    """
+    families = {f["family"]: f for f in tests["families"]}
     for s in stats:
-        s["n_tests"] = len(tested)
-        if (id(s), "harm") in found:
-            s["state"] = "harm"
-        elif (id(s), "skill") in found:
-            s["state"] = "skill"
-        elif s["n"] < MIN_CALLS_FOR_STATE:
-            s["state"] = "too_early"
+        s["n_tests"] = N_TESTS
+        family = families.get(_FAMILY_OF.get(s["type"], ""))
+        if family is not None:
+            s["state"] = family["state"]
+            s["family"] = family["family"]
         else:
-            s["state"] = "no_evidence"
-    return len(tested)
+            s["state"] = "too_early" if s["n"] < MIN_CALLS_FOR_STATE else "no_evidence"
+    return N_TESTS
 
 
 # ---------------------------------------------------------------------------
@@ -515,41 +726,56 @@ def _collect(db: Session, user_id: str, now: datetime) -> tuple[dict[str, _TypeD
     )
 
 
-def _overall_state(stats: list[dict[str, Any]]) -> str:
-    """Harm beats skill beats everything else; benchmarked types only."""
-    states = [s["state"] for s in stats if s["benchmarked"]]
-    if "harm" in states:
-        return "harm"
-    if "skill" in states:
-        return "skill"
-    if all(s == "too_early" for s in states):
-        return "too_early"
-    return "no_evidence"
+def _primary(tests: dict[str, Any]) -> dict[str, Any]:
+    """F1, the family that sets the headline (ADR 0018 §2)."""
+    return next(f for f in tests["families"] if f["family"] == "F1")
 
 
-def _about(n: int) -> int:
-    """'~600', not '~617': the count needed is a rough planning number."""
-    return int(round(n, -2)) if n >= 100 else n
+def _days(n: int) -> str:
+    return f"{n:,} trading day{'' if n == 1 else 's'}"
 
 
-def _headline(state: str, n_units: int, needed: int, first_due: datetime | None) -> str:
-    target = round(TARGET_HIT_RATE * 100)
-    if state == "skill":
-        return f"Evidence of skill vs your ETF over {n_units} rebalance dates (after correcting for every look)."
-    if state == "harm":
-        return f"Evidence of harm: the calls have done worse than simply holding your ETF ({n_units} rebalance dates)."
-    if state == "no_evidence":
-        return (
-            f"No evidence yet that the calls beat your ETF: {n_units} of ~{_about(needed)} independent "
-            f"rebalance dates needed to tell a {target} % hit rate from a coin flip."
+def _years_text(years: float) -> str:
+    return f"{years:.1f}" if years < 10 else f"{years:.0f}"
+
+
+def _time_to_know_phrase(f1: dict[str, Any]) -> str:
+    """'most likely after about 19 years (1 in 10 paths: under 6 years; 9 in 10: under 42)'."""
+    t = f1["time_to_know"]
+    edge = round(t["assumption"] * 100, 1)
+    assumption = f"an edge of +{edge:g} % per 21 days"
+    if t["q50_years"] is None:
+        cap = _years_text(t["max_days"] / TRADING_DAYS_PER_YEAR)
+        return f"{assumption} would most likely take more than {cap} years to show"
+    spread = ""
+    if t["q10_years"] is not None:
+        hi = f"{_years_text(t['q90_years'])}" if t["q90_years"] is not None else "more than " + _years_text(
+            t["max_days"] / TRADING_DAYS_PER_YEAR
         )
-    if n_units == 0:
-        due = f" First resolutions due {first_due.date().isoformat()}." if first_due else ""
-        return f"Too early to tell: nothing has resolved yet.{due}"
-    return (
-        f"Too early to tell: {n_units} of ~{_about(needed)} independent rebalance dates needed to tell "
-        f"a {target} % hit rate from a coin flip."
-    )
+        spread = f" (10-90 % range: {_years_text(t['q10_years'])} to {hi} years)"
+    return f"{assumption} would most likely show after about {_years_text(t['q50_years'])} years{spread}"
+
+
+def _headline(f1: dict[str, Any], today: date) -> str:
+    n = f1["n_days"]
+    e = f1["e_skill"] if f1["state"] == "skill" else f1["e_harm"]
+    if f1["state"] == "skill":
+        return (
+            f"Evidence that Discover's picks beat your ETF: e = {e:,.0f} over {_days(n)} "
+            "(pre-registered test, 5 % false-discovery rate)."
+        )
+    if f1["state"] == "harm":
+        return (
+            f"Evidence of harm: Discover's picks have done worse than simply holding your ETF "
+            f"(e = {e:,.0f} over {_days(n)})."
+        )
+    if n == 0:
+        start = date.fromisoformat(f1["start"])
+        when = f"starts on {start.isoformat()}" if today < start else f"started on {start.isoformat()}"
+        return f"Too early to tell: the pre-registered test {when}; no trading day with open picks recorded yet."
+    if f1["state"] == "no_evidence":
+        return f"No evidence yet that the picks beat your ETF: {_days(n)} so far; {_time_to_know_phrase(f1)}."
+    return f"Too early to tell: {_days(n)} so far; {_time_to_know_phrase(f1)}."
 
 
 def build_verdict(db: Session, user_id: str, *, now: datetime | None = None) -> dict[str, Any]:
@@ -557,15 +783,17 @@ def build_verdict(db: Session, user_id: str, *, now: datetime | None = None) -> 
     now = now or datetime.now(UTC)
     by_type, benchmark = _collect(db, user_id, now)
     stats = [_type_stats(by_type[key]) for key in TYPE_KEYS]
-    n_tests = _apply_e_bh(stats)
+    tests = daily_tests.build_daily_tests(db, user_id)
+    tests["factor_neutral"] = factor_study.factor_neutral_summary(db, user_id)
+    n_tests = _apply_states(stats, tests)
+    f1 = _primary(tests)
 
-    # Skill: one basket per rebalance date across the benchmark-relative types
-    # (ideas + advisor; the advisor often re-picks Discover names, so per-pick
-    # pooling would count the same bet twice).
-    pooled = [c for key in ("ideas", "advisor") for c in by_type[key].calls]
+    # Descriptive: one basket per rebalance date of the picks (F1's calls; the
+    # advisor is its own family and never pooled with them).
+    pooled = list(by_type["ideas"].calls)
     units = _units(pooled)
     excess = [u.excess for u in units if u.excess is not None]
-    labels = sorted({by_type[k].benchmark_label for k in ("ideas", "advisor") if by_type[k].calls})
+    labels = sorted({by_type["ideas"].benchmark_label} if pooled else set())
     skill = None
     if excess:
         horizons = [c.horizon_days for c in pooled if c.horizon_days]
@@ -580,23 +808,44 @@ def build_verdict(db: Session, user_id: str, *, now: datetime | None = None) -> 
             "benchmark_label": labels[0] if len(labels) == 1 else f"your passive core ETF ({benchmark})",
         }
 
-    needed = fv.calls_needed(TARGET_HIT_RATE)
-    state = _overall_state(stats)
+    horizons_all = [c.horizon_days for k in TESTED_KEYS for c in by_type[k].calls if c.horizon_days]
+    horizon = max(horizons_all) if horizons_all else DEFAULT_HORIZON_DAYS
+    cad = _cadence([u.day for u in units], horizon)  # legacy: the picks' issue schedule
+    needed, lower_bound = cad["n_needed"], cad["n_needed_is_lower_bound"]
+    state = f1["state"]
     n_units = len(units)
     first_due = _earliest_future([by_type[k].next_resolution_at for k in ("ideas", "advisor")], now)
     return {
-        "headline": _headline(state, n_units, needed, first_due),
+        "headline": _headline(f1, now.date()),
+        "first_resolution_due": first_due.isoformat() if first_due else None,
+        "daily_tests": tests,
         "resolved_calls": sum(s["n_calls"] for s in stats),
         "resolved_units": n_units,
         "n_needed": needed,
+        "n_needed_is_lower_bound": lower_bound,
+        "h_eff": cad["h_eff"],
+        "cadence_days": cad["cadence_days"],
+        "years_needed": cad["years_needed"],
         "target_hit_rate": TARGET_HIT_RATE,
         "n_tests": n_tests,
         "fdr_level": FDR_LEVEL,
+        "ebh_threshold": EBH_THRESHOLD,
+        "assumed_edge": ASSUMED_EDGE,
+        "assumed_sd": ASSUMED_SD,
+        "excess_clip": EXCESS_CLIP,
+        "horizon_days": horizon,
+        "min_calls_for_state": MIN_CALLS_FOR_STATE,
+        "n_unscored": sum(s["n_unscored"] for s in stats),
+        "min_calls_for_reliability": fv.MIN_CALLS_FOR_RELIABILITY,
+        "min_n_eff_for_probability": MIN_N_EFF_FOR_PROBABILITY,
+        "min_units_for_interval": fv.MIN_UNITS_FOR_HAC,
+        "min_calls_for_interval": fv.MIN_CALLS_FOR_CI,
         "skill": skill,
         "state": state,
         "types": stats,
         "frozen_at_issue": True,
-        "method_note": METHOD_NOTE,
+        "method_note": _method_note(),
+        "legacy_method_note": _legacy_method_note(),
     }
 
 
@@ -616,7 +865,9 @@ def list_calls(
     calls = [c for key in keys for c in by_type[key].calls]
     calls.sort(key=lambda c: (c.resolved_at, c.id), reverse=True)
     misses = sorted((c for c in calls if c.excess is not None), key=lambda c: c.excess or 0.0)[:5]
+    horizons = [c.horizon_days for c in calls if c.horizon_days and c.type in TESTED_KEYS]
     return {
+        "horizon_days": max(horizons) if horizons else DEFAULT_HORIZON_DAYS,
         "type": type if type in TYPE_KEYS else None,
         "total": len(calls),
         "limit": limit,

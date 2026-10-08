@@ -76,11 +76,8 @@ export const METRIC_META: Record<string, MetricMeta> = {
     unit: "float",
     decimals: 3,
     glossaryKey: "r_squared",
-    description: "Share of portfolio variance explained by the benchmark (0\u20131).",
-    severity: {
-      good: (v) => v > 0.8,
-      warn: (v) => v > 0.5,
-    },
+    // Neutral on purpose: R\u00b2 says how closely the book follows the benchmark, not how good it is.
+    description: "Share of portfolio variance explained by the benchmark (0\u20131). Not a quality score: a book that is the benchmark scores 1.",
   },
   information_ratio: {
     label: "Information ratio",

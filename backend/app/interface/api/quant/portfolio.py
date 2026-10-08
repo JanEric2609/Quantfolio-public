@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 MIN_RISK_HISTORY = 252
 MIN_BENCHMARK_OVERLAP = 40
 
+# All-World / ACWI funds: World + Emerging Markets in one.
+ALL_WORLD_ISINS = {"IE00BK5BQT80", "IE00B3RBWM25", "IE00B6R52259", "IE00B3YLTY66"}
+
 
 # ---------------------------------------------------------------------------
 # Response schemas for the 3 previously-untyped risk endpoints
@@ -136,6 +139,8 @@ class QuantPortfolioRiskResponse(BaseModel):
 
     available: bool
     benchmark: Optional[str] = None
+    # Share (0-100) of the priced book held in the benchmark fund itself.
+    benchmark_overlap_pct: Optional[float] = None
     risk: Optional[QuantRiskFull] = None
     diagnostics: Optional[dict[str, Any]] = None
 
@@ -257,7 +262,15 @@ def portfolio_quant_risk(
     ))
     risk["insufficient_history"] = len(returns) < MIN_RISK_HISTORY
     risk["risk_free"] = risk_free
-    return {"available": True, "benchmark": symbol, "risk": risk, "diagnostics": diagnostics}
+    total_value = sum(v for v in weights.values() if v > 0)
+    overlap = weights.get(symbol.upper(), 0.0) if symbol else 0.0
+    return {
+        "available": True,
+        "benchmark": symbol,
+        "benchmark_overlap_pct": round(100.0 * overlap / total_value, 2) if total_value > 0 else 0.0,
+        "risk": risk,
+        "diagnostics": diagnostics,
+    }
 
 
 @router.get("/portfolio/optimization")
@@ -292,6 +305,84 @@ def portfolio_optimization(
         "optimizations": {"methods": result.get("methods", {})},
         "diagnostics": diagnostics,
     }
+
+
+@router.get("/portfolio/allocator")
+def portfolio_allocator(
+    contribution_eur: float | None = Query(None, ge=0, description="Amount to split; defaults to monthly_contribution_eur."),
+    max_weight: float | None = Query(None, gt=0, le=1, description="Cap per instrument (fraction)."),
+    isins: str | None = Query(None, description="Comma-separated candidate ISINs; defaults to allocator_universe_isins."),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """How to split the next contribution across a candidate ETF universe.
+
+    Targets are covariance-only (Ledoit-Wolf, EUR returns); the money goes to
+    the most underweight candidates first and nothing is sold. Candidates not
+    held yet count with a value of 0.
+    """
+    from app.foundation.allocation import candidate_prices, history_span, new_money_plan
+    from app.foundation.live_positions import combined_positions
+    from app.foundation.portfolio.isin_resolver import _try_resolve_isin
+    from app.foundation.quant import price_matrix_to_returns
+    from app.foundation.settings import get_public_settings
+
+    s = get_public_settings(db)
+    amount = float(contribution_eur if contribution_eur is not None else (s.get("monthly_contribution_eur") or 0))
+
+    def _split(value: Any) -> list[str]:
+        items = value.replace(";", ",").split(",") if isinstance(value, str) else list(value or [])
+        return [str(i).strip().upper() for i in items if str(i).strip()]
+
+    held = {p.isin.upper(): p for p in combined_positions(db, user.id, include_unreconciled=True) if p.isin}
+    chosen = _split(isins) or _split(s.get("allocator_universe_isins"))
+    default_universe = not chosen
+    if default_universe:
+        # MSCI World + EM IMI: building blocks that do not overlap. FTSE All-World is held but
+        # already contains both, so it is not a default target.
+        chosen = ["IE00B4L5Y983", "IE00BKM4GZ66"]
+    chosen = list(dict.fromkeys(chosen))
+
+    universe: list[dict[str, Any]] = []
+    ticker_of: dict[str, str] = {}
+    for isin in chosen:
+        pos = held.get(isin)
+        ticker = (pos.ticker if pos and pos.ticker else None) or _try_resolve_isin(isin, db)
+        ticker = ticker.upper() if ticker else None
+        universe.append({
+            "isin": isin,
+            "ticker": ticker,
+            "name": pos.name if pos else None,
+            "held_value_eur": float(pos.value) if pos else 0.0,
+        })
+        if ticker:
+            ticker_of[isin] = ticker
+    tickers = list(dict.fromkeys(ticker_of.values()))
+    base: dict[str, Any] = {
+        "universe": universe,
+        "universe_is_default": default_universe,
+        "unresolved": [u["isin"] for u in universe if not u["ticker"]],
+    }
+    if any(i in ALL_WORLD_ISINS for i in chosen):
+        base["overlap_note"] = (
+            "All-World funds already contain World + Emerging Markets, but a covariance-only optimiser "
+            "treats them as separate assets and can double-count the same shares."
+        )
+    prices, missing = candidate_prices(db, tickers)
+    base["missing_history"] = missing
+    if not prices:
+        return {**base, "available": False, "reason": "No price history for any candidate yet."}
+    span = history_span(prices)
+    base["history"] = span
+    if span["days"] < 60:
+        return {**base, "available": False, "reason": f"Only {span['days']} shared trading days; at least 60 are needed."}
+    returns = price_matrix_to_returns(prices).tail(504)
+    values: dict[str, float] = {}
+    for u in universe:
+        if u["ticker"] in prices:
+            values[u["ticker"]] = values.get(u["ticker"], 0.0) + u["held_value_eur"]
+    plan = new_money_plan(returns, values, amount, max_weight=max_weight)
+    return {**base, **plan}
 
 
 @router.get("/portfolio/factors")
@@ -440,16 +531,17 @@ def real_portfolio_risk(
 @router.get("/portfolio/real/rebalance")
 def real_portfolio_rebalance(
     lookback_days: int = Query(365, ge=30, le=1825),
-    target: str = Query("erc", description="equal, inverse_vol, min_variance, erc or hrp"),
+    target: str = Query("sleeves", description="sleeves (your plan, default), or a covariance target: equal, inverse_vol, min_variance, erc, hrp"),
     contribution_eur: float | None = Query(None, ge=0, description="Defaults to the monthly contribution."),
     band_pp: float | None = Query(None, ge=0, le=50, description="Defaults to the plan's drift band."),
     max_weight: float | None = Query(None, gt=0, le=1),
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """Band rebalancing toward a covariance-only target: new money first, sales only on a breach."""
+    """Band rebalancing toward the plan's sleeves (default) or a covariance-only target: new money first, sales only on a breach."""
+    from app.decision.monthly_plan import sleeve_plan
     from app.foundation.portfolio.metrics_wrappers import generate_rebalancing_suggestions
     return generate_rebalancing_suggestions(
         db, user.id, lookback_days=lookback_days, target=target, contribution_eur=contribution_eur,
-        band_pp=band_pp, max_weight=max_weight,
+        band_pp=band_pp, max_weight=max_weight, sleeve_plan=sleeve_plan(db, user.id) if target == "sleeves" else None,
     )

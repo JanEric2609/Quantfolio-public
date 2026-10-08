@@ -144,3 +144,153 @@ def factor_premia_cards(
     """Evidence cards of each region's latest factor-premia run, the gating
     (world) region first; empty if never run."""
     return [FactorEvidenceCardResponse(**card) for card in latest_cards(db)]
+
+
+class IngredientAttributionRow(BaseModel):
+    signal: str
+    n_runs: int
+    mean_ic: float | None
+    t_stat: float | None
+    p_value: float | None
+    p_holm: float | None
+
+
+class IngredientAttributionResponse(BaseModel):
+    """Per-ingredient rank IC on live shadow-ledger data (ADR 0019 §5).
+
+    Information only: it feeds no score and changes no gate. Each run is one
+    cross-section (ingredient scores from ``components_json`` vs resolved
+    forward excess returns); the IC series runs over runs. Stocks in one
+    cohort move together, so ``effective_n_stocks`` (mean-pairwise-correlation
+    adjustment) is fewer than the ~200 names.
+    """
+
+    horizon_days: int
+    n_runs: int
+    n_stocks: int
+    rho_bar: float | None
+    effective_n_stocks: float | None
+    ingredients: list[IngredientAttributionRow]
+
+
+#: Forward window the live attribution scores (about one month).
+INGREDIENT_ATTRIBUTION_HORIZON_DAYS = 21
+
+
+def _ingredient_frames(
+    db: Session, user_id: str, horizon_days: int,
+) -> tuple[dict[str, Any], dict[str, dict[str, float]]]:
+    """Per-ingredient (run, symbol, score, excess) frames plus the excess matrix."""
+    from app.foundation.models.entities import CandidateOutcome, DiscoverCandidateSnapshot
+
+    rows = (
+        db.query(DiscoverCandidateSnapshot, CandidateOutcome)
+        .join(CandidateOutcome, CandidateOutcome.snapshot_id == DiscoverCandidateSnapshot.id)
+        .filter(
+            DiscoverCandidateSnapshot.user_id == user_id,
+            DiscoverCandidateSnapshot.evaluable.is_(True),
+            DiscoverCandidateSnapshot.instrument_group == "stock",
+            DiscoverCandidateSnapshot.backfilled.is_(False),
+            CandidateOutcome.horizon_days == horizon_days,
+            CandidateOutcome.status == "resolved",
+            CandidateOutcome.excess_eur.is_not(None),
+        )
+        .all()
+    )
+    import pandas as pd
+
+    frames: dict[str, list[dict[str, Any]]] = {}
+    excess: dict[str, dict[str, float]] = {}
+    # Newey-West lags must follow time, so each run is keyed by when it was
+    # issued (run_id only breaks ties), not by its UUID.
+    issued: dict[str, Any] = {}
+    for snap, _ in rows:
+        prev = issued.get(snap.run_id)
+        if prev is None or snap.issued_at < prev:
+            issued[snap.run_id] = snap.issued_at
+    for snap, outcome in rows:
+        period = f"{issued[snap.run_id].isoformat()}|{snap.run_id}"
+        inputs = (snap.components_json or {}).get("composite_inputs") or []
+        if not isinstance(inputs, list):
+            continue
+        for entry in inputs:
+            if not isinstance(entry, dict) or entry.get("score") is None:
+                continue
+            try:
+                score = float(entry["score"])
+            except (TypeError, ValueError):
+                continue
+            frames.setdefault(str(entry.get("signal")), []).append({
+                "period": period,
+                "entity": snap.symbol,
+                "score": score,
+                "forward": float(outcome.excess_eur),
+            })
+        excess.setdefault(period, {})[snap.symbol] = float(outcome.excess_eur)
+    return (
+        {signal: pd.DataFrame(rows) for signal, rows in frames.items() if rows},
+        excess,
+    )
+
+
+def _mean_pairwise_correlation(excess: dict[str, dict[str, float]]) -> float | None:
+    """Mean pairwise correlation of forward excess returns (stocks × runs)."""
+    import numpy as np
+    import pandas as pd
+
+    matrix = pd.DataFrame(excess).T.sort_index()
+    matrix = matrix.dropna(axis=1, how="all")
+    if matrix.shape[0] < 3 or matrix.shape[1] < 2:
+        return None
+    corr = matrix.corr(min_periods=3).to_numpy()
+    off_diag = corr[~np.eye(corr.shape[0], dtype=bool)]
+    values = off_diag[~np.isnan(off_diag)]
+    if values.size == 0:
+        return None
+    return float(max(0.0, min(0.95, values.mean())))
+
+
+@router.get("/ingredient-attribution", response_model=IngredientAttributionResponse)
+def ingredient_attribution(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> IngredientAttributionResponse:
+    """Weekly per-ingredient table with Holm-corrected p-values (ADR 0019 §5)."""
+    from app.foundation.quant_metrics import holm_bonferroni
+    from app.lab.ranking_replay import rank_ic_series, summarise
+
+    frames, excess = _ingredient_frames(db, user.id, INGREDIENT_ATTRIBUTION_HORIZON_DAYS)
+    summaries = {signal: summarise(rank_ic_series(frame)) for signal, frame in frames.items()}
+    ordered = sorted(summaries)
+    raw_ps: list[float] = []
+    for s in ordered:
+        p = summaries[s]["p_value"]
+        raw_ps.append(p if p is not None else 1.0)
+    holm_ps = dict(zip(ordered, holm_bonferroni(raw_ps), strict=True))
+
+    rho = _mean_pairwise_correlation(excess)
+    run_sizes = [len(stocks) for stocks in excess.values()]
+    effective: float | None = None
+    if run_sizes and rho is not None:
+        effective = float(
+            sum(n / (1.0 + (n - 1) * rho) for n in run_sizes) / len(run_sizes)
+        )
+
+    return IngredientAttributionResponse(
+        horizon_days=INGREDIENT_ATTRIBUTION_HORIZON_DAYS,
+        n_runs=len(excess),
+        n_stocks=len({s for stocks in excess.values() for s in stocks}),
+        rho_bar=rho,
+        effective_n_stocks=effective,
+        ingredients=[
+            IngredientAttributionRow(
+                signal=signal,
+                n_runs=int(summaries[signal]["n_periods"]),
+                mean_ic=summaries[signal]["mean_ic"],
+                t_stat=summaries[signal]["t_stat"],
+                p_value=summaries[signal]["p_value"],
+                p_holm=holm_ps[signal],
+            )
+            for signal in ordered
+        ],
+    )

@@ -135,6 +135,12 @@ class SavingsPlanRecord:
     day_of_month: int | None
     next_execution_date: str | None
     kind: str
+    # Yearly increase of the amount in percent (sc: configuration.dynamizationRate).
+    dynamization_rate: Decimal | None = None
+    # True when sc marks the plan paused/inactive/suspended; sc sends no such field
+    # today, so this stays False until it does.
+    paused: bool = False
+    payment_method: str | None = None
 
 
 @dataclass(frozen=True)
@@ -234,12 +240,28 @@ def map_context(data: dict[str, Any]) -> str | None:
     return clean_text(value, 128) or None
 
 
+_PAUSED_STATES = {"PAUSED", "INACTIVE", "SUSPENDED"}
+
+
+def _plan_paused(item: dict[str, Any]) -> bool:
+    """Defensive: read a paused flag or status/state field if sc ever sends one."""
+    if item.get("paused") is True:
+        return True
+    for key in ("status", "state"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip().upper() in _PAUSED_STATES:
+            return True
+    return False
+
+
 def map_savings_plans(data: dict[str, Any]) -> list[SavingsPlanRecord]:
     out: list[SavingsPlanRecord] = []
     for item in _require(data, "items", "broker savings-plans", list):
         if not isinstance(item, dict):
             continue
         day = item.get("day_of_month")
+        config = as_dict(item.get("configuration"))
+        dynamization = config.get("dynamizationRate", config.get("dynamization_rate", item.get("dynamization_rate")))
         out.append(
             SavingsPlanRecord(
                 isin=clean_isin(item.get("isin")),
@@ -249,6 +271,9 @@ def map_savings_plans(data: dict[str, Any]) -> list[SavingsPlanRecord]:
                 day_of_month=int(day) if isinstance(day, int) or (isinstance(day, str) and day.isdigit()) else None,
                 next_execution_date=clean_text(item.get("next_execution_date"), 32) or None,
                 kind=clean_text(item.get("kind"), 16) or "security",
+                dynamization_rate=to_decimal(dynamization) if dynamization is not None else None,
+                paused=_plan_paused(item),
+                payment_method=clean_text(item.get("payment_method") or config.get("paymentMethod"), 48) or None,
             )
         )
     return out

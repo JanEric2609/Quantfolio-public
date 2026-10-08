@@ -50,13 +50,13 @@ def test_parse_statement_extracts_real_mt940_fields():
         }
     )
 
-    parsed = _parse_statement(tx, "DE00120300000000007356")
+    parsed = _parse_statement(tx, "DE00120300000000001234")
 
     assert parsed["amount"] == Decimal("-42.50")
     assert parsed["currency"] == "EUR"
     assert parsed["reference"] == "REWE sagt danke"
     assert parsed["date"] == date(2026, 6, 3)
-    assert parsed["iban"] == "DE00120300000000007356"
+    assert parsed["iban"] == "DE00120300000000001234"
 
 
 def test_parse_statement_reference_fallback_chain():

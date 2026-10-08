@@ -73,8 +73,13 @@ export function PaperRunCard({ portfolioId, invalidate = [] }: { portfolioId: st
               <span className="text-text-muted">no MSCI World EUR prices for the start date yet</span>
             )}
           </p>
+          {(s.stale_quotes?.length ?? 0) > 0 && (
+            <p className="text-warn">
+              No current price for {s.stale_quotes!.join(", ")}: valued at the last known price, not traded until it updates.
+            </p>
+          )}
           <p className="text-text-muted">
-            Dividends credited {eur(s.dividends_eur ?? 0)}
+            Dividends credited {eur(s.dividends_eur ?? 0)} (after foreign withholding tax)
             {runs.length > 0 && ` · ${runs.length} earlier run${runs.length === 1 ? "" : "s"} archived`}
           </p>
         </div>

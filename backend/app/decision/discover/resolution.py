@@ -24,8 +24,11 @@ How a prediction is measured:
   benchmark data the raw return stands in and the outcome says so.
 
 A prediction whose horizon close is not in the data yet stays pending and is
-retried the next night, for up to ``RESOLUTION_GRACE_DAYS``. After that it is
-marked ``delisted`` with the reason in ``score_json["outcome"]``.
+retried the next night, for up to ``RESOLUTION_GRACE_DAYS`` (30 calendar days
+past ``resolve_at``: a data outage must not freeze a return at a stale close).
+While it waits, ``score_json["waiting"]`` records why. After the grace period it
+is marked ``delisted`` (scored at its last close when there is one) with the
+reason in ``score_json["outcome"]``.
 """
 from __future__ import annotations
 
@@ -45,8 +48,9 @@ from app.foundation.settings import get_public_settings
 logger = logging.getLogger(__name__)
 
 DEFAULT_BENCHMARK = "EUNL.DE"
-# Keep retrying a missing horizon close this many days past resolve_at.
-RESOLUTION_GRACE_DAYS = 7
+# Keep retrying a missing horizon close this many days past resolve_at. Long on
+# purpose: stale prices are usually a data outage, not a delisting.
+RESOLUTION_GRACE_DAYS = 30
 # An entry close may predate the prediction day by a weekend plus holidays.
 MAX_ENTRY_GAP_DAYS = 7
 # Benchmark and FX closes may trail the stock's date by exchange holidays.
@@ -181,6 +185,7 @@ def resolve_due_predictions(
 
     resolved: list[dict] = []
     waiting = 0
+    noted = False
     for pred in pending:
         try:
             result = _resolve_one(pred, cutoff, series, benchmark)
@@ -191,10 +196,11 @@ def resolve_due_predictions(
             continue
         if result is None:
             waiting += 1
+            noted = noted or "waiting" in (pred.score_json or {})
             continue
         resolved.append(result)
 
-    if resolved:
+    if resolved or noted:
         try:
             db.commit()
         except Exception:
@@ -232,14 +238,15 @@ def _resolve_one(
     status = "resolved"
     exit_basis = "horizon_close"
     if exit_ is None or entry is None:
-        if not past_grace:
-            return None
         reason = "no_price_data" if not closes else (
             "no_close_after_horizon" if exit_ is None else "no_entry_price"
         )
+        if not past_grace:
+            _note_wait(pred, reason, cutoff)
+            return None
         last = _last_after(closes, entry[0]) if entry is not None and exit_ is None else None
         if last is None:
-            return _finish(pred, None, None, None, "delisted", {"reason": reason})
+            return _finish(pred, None, None, None, "delisted", {"reason": reason, "grace_days": RESOLUTION_GRACE_DAYS})
         # Delisted (or stopped trading) before the horizon: score it at its last
         # close, as CRSP does with a delisting return, instead of dropping it.
         # Dropping failed picks is survivorship bias; the Trust page counts them.
@@ -255,6 +262,7 @@ def _resolve_one(
 
     bench_return = _benchmark_return(series, benchmark, entry_on, exit_on)
     if bench_return is None and not past_grace:
+        _note_wait(pred, "no_benchmark_price", cutoff)
         # The benchmark lags (e.g. not refreshed yet): wait rather than score
         # this one on the raw move while its batch-mates get the excess.
         return None
@@ -276,10 +284,19 @@ def _resolve_one(
         "benchmark": benchmark,
         "hit_basis": "excess" if excess is not None else "raw",
         "exit_basis": exit_basis,
+        "grace_days": RESOLUTION_GRACE_DAYS,
     }
     if status == "delisted":
         outcome["reason"] = "no_close_after_horizon"
     return _finish(pred, realised, bench_return, excess, status, outcome)
+
+
+def _note_wait(pred: DiscoveryPrediction, reason: str, cutoff: datetime) -> None:
+    """Record why a due prediction is still pending (retried nightly until the grace ends)."""
+    pred.score_json = {
+        **(pred.score_json or {}),
+        "waiting": {"reason": reason, "last_checked": cutoff.date().isoformat(), "grace_days": RESOLUTION_GRACE_DAYS},
+    }
 
 
 def _last_after(series: Series, after: date) -> tuple[date, float] | None:

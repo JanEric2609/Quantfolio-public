@@ -298,6 +298,20 @@ def _loads(raw: str | None) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _evidence_proven(payload: dict[str, Any]) -> bool:
+    """True when the row carries a proven track record (the evidence test).
+
+    Discover stores ``track_record_gate`` in its payload; any other generator
+    counts only if it carries the same gate or an explicit ``evidence_proven``
+    flag. Everything else is research, not a decision. Old Discover rows said
+    BUY under a score-based rule, so the verdict column cannot be trusted.
+    """
+    gate = payload.get("track_record_gate")
+    if isinstance(gate, dict) and gate.get("status") == "proven":
+        return True
+    return payload.get("evidence_proven") is True
+
+
 def _normalised_confidence(value: Any) -> float:
     confidence = float(value) if value is not None else 0.0
     # Discover stores a 0-1 conviction, the v2 generator a 0-100 score.
@@ -316,18 +330,25 @@ def list_pending_recommendations(
     Pending means approval state ``approved_candidate`` or ``needs_review``, not
     expired, created within ``max_age_days``; plus snoozed ones whose snooze is
     older than ``SNOOZE_DAYS``. ``total`` counts every pending item (for badges),
-    ``items`` is capped at ``limit``. Only the caller's own rows are returned.
+    ``items`` is capped at ``limit``. ``research_count`` is how many tickers were
+    held back because their evidence is not proven yet (research, not decisions). Only the caller's own rows are returned.
     """
     now = datetime.now(UTC)
     window_start = now - timedelta(days=max_age_days)
     live = or_(Recommendation.recommendation_expiry.is_(None), Recommendation.recommendation_expiry > now)
 
     rows = (
-        db.query(Recommendation.id, Recommendation.created_at, Recommendation.approval_state)
+        db.query(
+            Recommendation.id,
+            Recommendation.ticker,
+            Recommendation.created_at,
+            Recommendation.approval_state,
+            Recommendation.payload_json,
+        )
         .filter(
             Recommendation.user_id == user.id,
             Recommendation.created_at >= window_start,
-            Recommendation.approval_state.in_((*PENDING_STATES, "snoozed")),
+            Recommendation.approval_state.in_((*PENDING_STATES, "snoozed", "draft")),
             live,
         )
         .all()
@@ -355,8 +376,38 @@ def list_pending_recommendations(
             if snoozed_at <= snooze_cutoff:
                 resurfaced.add(rec_id)
 
-    pending = [r for r in rows if r.approval_state in PENDING_STATES or r.id in resurfaced]
-    pending.sort(key=lambda r: r.created_at, reverse=True)
+    # Drafts (new Discover rows without proven evidence) are never shown, but
+    # they are the ticker's newest word, so they take part in the dedupe.
+    candidates = [
+        r for r in rows if r.approval_state in (*PENDING_STATES, "draft") or r.id in resurfaced
+    ]
+    # Inbox = gate + dedupe: only proven evidence is a decision (a snoozed one
+    # was shown before, so it comes back regardless), and one card per ticker,
+    # newest row first. The rest is research that Discover still lists.
+    # The newest row of a ticker decides: an older proven row does not
+    # outlive a newer run that no longer finds the evidence.
+    candidates.sort(key=lambda r: r.created_at, reverse=True)
+    pending = []
+    decision_tickers: set[str] = set()
+    seen_tickers: set[str] = set()
+    for r in candidates:
+        key = r.ticker or r.id
+        if key in seen_tickers:
+            continue
+        seen_tickers.add(key)
+        if r.approval_state == "draft" or (
+            r.id not in resurfaced and not _evidence_proven(_loads(r.payload_json))
+        ):
+            continue
+        decision_tickers.add(key)
+        pending.append(r)
+    research_tickers = {
+        r.ticker
+        for r in rows
+        if r.approval_state in (*PENDING_STATES, "draft")
+        and r.ticker not in decision_tickers
+        and not _evidence_proven(_loads(r.payload_json))
+    }
     page_ids = [r.id for r in pending[:limit]]
 
     by_id = {}
@@ -405,7 +456,7 @@ def list_pending_recommendations(
                 "links": broker_links(recommendation_isin(rec)),
             }
         )
-    return {"items": items, "total": len(pending)}
+    return {"items": items, "total": len(pending), "research_count": len(research_tickers)}
 
 
 @router.post("/feedback/{rec_id}")

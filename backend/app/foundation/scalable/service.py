@@ -300,6 +300,7 @@ def sync(db: Session, user_id: str, *, trigger: str = "manual") -> dict[str, Any
             # Unavailable is not "none": the last synced plans stay as they are.
             logger.info("Scalable savings plans unavailable: %s", exc.code)
             plans = None
+            counts["plans_unavailable"] = True
         try:
             overnight = map_overnight(cli.run("overnight"))
         except (ScalableUsageError, ScalableTransient) as exc:
@@ -633,6 +634,9 @@ def _write(db: Session, user_id: str, portfolio_id: str, overview, cash, holding
         raw["savings_plans"] = [
             {k: (str(v) if isinstance(v, Decimal) else v) for k, v in asdict(p).items()} for p in plans
         ]
+        # Only set when the plans were really fetched: a failed fetch keeps the old
+        # plans and the old time, so the page can say how fresh they are.
+        raw["plans_synced_at"] = datetime.now(UTC).isoformat()
     waiting = [t for t in transactions if t.id in deferred]
     if truncated or any(t.occurred_at is None for t in waiting):
         # The history was not read to its end: keep the old watermark so the

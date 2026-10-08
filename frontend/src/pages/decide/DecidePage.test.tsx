@@ -37,6 +37,7 @@ function note(overrides: Partial<NotificationItem> = {}): NotificationItem {
 }
 
 let pending: PendingRecommendation[];
+let researchCount = 0;
 let notifications: NotificationItem[];
 let accepted: { waiting: unknown[]; executed: unknown[] };
 
@@ -52,11 +53,12 @@ function renderPage() {
 describe("DecidePage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    researchCount = 0;
     pending = [rec(), rec({ id: "rec-2", ticker: "BBB", name: null, summary: "" })];
     accepted = { waiting: [], executed: [] };
     notifications = [note(), note({ id: "n2", title: "Old news", read_at: "2026-09-01T00:00:00Z", severity: "info", href: null })];
     mocks.api.mockImplementation(async (path: string, init?: RequestInit) => {
-      if (path === "/api/portfolio/advisor/pending") return { items: pending, total: pending.length };
+      if (path === "/api/portfolio/advisor/pending") return { items: pending, total: pending.length, research_count: researchCount };
       if (path.startsWith("/api/portfolio/advisor/feedback/")) {
         const id = path.split("/").pop()!.split("?")[0];
         pending = pending.filter((item) => item.id !== id);
@@ -126,7 +128,15 @@ describe("DecidePage", () => {
     pending = [];
     renderPage();
 
-    expect(await screen.findByText("Nothing is waiting for a decision.")).toBeInTheDocument();
+    expect(await screen.findByText("No decision waiting.")).toBeInTheDocument();
+  });
+
+  it("tells how many ideas wait in Discover as research", async () => {
+    pending = [];
+    researchCount = 3;
+    renderPage();
+
+    expect(await screen.findByText(/3 ideas are in Discover as research\. None has passed the evidence test yet\./)).toBeInTheDocument();
   });
 
   it("offers a retry when the list cannot be loaded", async () => {

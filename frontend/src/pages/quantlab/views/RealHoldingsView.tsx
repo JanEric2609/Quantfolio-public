@@ -26,7 +26,8 @@ export function RealHoldingsView() {
   const summaryQ = useRealPortfolioSummary();
   const riskQ = useRealPortfolioRisk();
   const [params, setParams] = useSearchParams();
-  const target = params.get("target") ?? "erc";
+  // The plan's own sleeves by default; a covariance target only when picked.
+  const target = params.get("target") ?? "sleeves";
   const rebalanceQ = useRealRebalance(target);
   const qc = useQueryClient();
 
@@ -272,7 +273,7 @@ export function RealHoldingsView() {
           </section>
         )}
 
-        {/* Band rebalance toward a covariance-only target */}
+        {/* Band rebalance toward the plan's sleeves (or a chosen covariance target) */}
         <RebalanceCard
           data={rebalanceQ.data}
           loading={rebalanceQ.isLoading}

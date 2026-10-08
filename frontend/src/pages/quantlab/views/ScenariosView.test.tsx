@@ -9,6 +9,9 @@ vi.mock("../hooks/useProjection", () => ({
     return state.current;
   },
 }));
+vi.mock("../hooks/useGoals", () => ({
+  useGoals: () => ({ data: [{ id: "g1", title: "House", target_amount: 80000, target_date: "2040-01-01", progress: 0 }] }),
+}));
 vi.mock("../../../components/charts/FanChart", () => ({ FanChart: () => null }));
 
 import { ScenariosView } from "./ScenariosView";
@@ -46,5 +49,12 @@ describe("ScenariosView", () => {
     expect(screen.queryByText(/Greeks|Delta|Gamma/)).toBeNull();
     // Empty inputs fall back to the book and the settings.
     expect(state.params.at(-1)).toEqual({ years: 30, goal: undefined, contribution: undefined, realReturn: undefined });
+  });
+
+  it("applies a goal preset from the link and passes it to the projection", () => {
+    state.current = { isLoading: true, data: undefined };
+    render(<MemoryRouter initialEntries={["/quantlab/scenarios?goal=g1"]}><ScenariosView /></MemoryRouter>);
+    expect(screen.getByTestId("goal-presets")).toHaveTextContent("House");
+    expect(state.params.at(-1)).toMatchObject({ goal: 80000 });
   });
 });

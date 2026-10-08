@@ -64,7 +64,7 @@ export function AdvisorLoopTab() {
                       <th className="py-1 pr-3">Ticker</th>
                       <th className="py-1 pr-3">Action</th>
                       <th className="py-1 pr-3">Target wt</th>
-                      <th className="py-1 pr-3">Confidence (raw → calibrated)</th>
+                      <th className="py-1 pr-3" title="The model's own confidence, not a probability. A calibrated probability appears once 100 issue dates have resolved.">Model's own confidence (not a probability) → calibrated</th>
                       <th className="py-1">Thesis</th>
                     </tr>
                   </thead>
@@ -78,7 +78,7 @@ export function AdvisorLoopTab() {
                           {fmt(d.confidence_raw ?? d.confidence, 2)}
                           {" → "}
                           {d.confidence_calibrated === null || d.confidence_calibrated === undefined
-                            ? "uncalibrated"
+                            ? "not yet calibrated"
                             : fmt(d.confidence_calibrated, 2)}
                         </td>
                         <td className="py-1.5 text-text-secondary">{d.thesis || "—"}</td>
