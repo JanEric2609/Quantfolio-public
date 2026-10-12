@@ -291,6 +291,24 @@ _reg(CatalogEntry("plan_core_isins", "profile", "Extra core ETF ISINs",
 _reg(CatalogEntry("plan_tilt_isins", "profile", "Factor tilt ETF ISINs",
     "Factor ETFs held as the tilt sleeve. The monthly tilt money is shared equally across them.",
     placeholder="IE00BP3QZ825", section="Monthly plan", advanced=True))
+_reg(CatalogEntry("plan_bond_target_pct", "profile", "Bond target",
+    "Share of the book in euro bonds. Size it to money you will need within roughly 5-10 years; 0 = none.",
+    input_type="number", unit="pct", min=0, max=100, section="Monthly plan",
+    extended_help="Match the duration to when the money is needed (next setting). Euro government bonds "
+    "or a global aggregate hedged to euros keep the currency risk out."))
+_reg(CatalogEntry("plan_bond_duration_bucket", "profile", "Bond duration",
+    "How long until the bond money is needed: short 1-3 years, mid 3-7 years, long 7 years or more.",
+    input_type="select", options=["short", "mid", "long"],
+    option_labels={"short": "Short (1-3 years)", "mid": "Mid (3-7 years)", "long": "Long (7+ years)"},
+    section="Monthly plan"))
+_reg(CatalogEntry("plan_cash_target_pct", "profile", "Cash target",
+    "Share of the book in a €STR money-market ETF: emergency fund plus spending known for the next 1-2 years.",
+    input_type="number", unit="pct", min=0, max=100, section="Monthly plan"))
+_reg(CatalogEntry("plan_gold_target_pct", "profile", "Gold target",
+    "Share of the book in physical gold, as a diversifier only. Keep it at 5 % or less; 0 = none.",
+    input_type="number", unit="pct", min=0, max=100, section="Monthly plan",
+    extended_help="Gold pays no income and has no expected return of its own; it helps only by moving "
+    "differently from stocks."))
 _reg(CatalogEntry("allocator_universe_isins", "profile", "Allocator candidate ETFs",
     "ETFs the Quant Lab allocator may split new money across (comma-separated ISINs). Empty uses MSCI World + Emerging Markets IMI.",
     placeholder="IE00B4L5Y983, IE00BK5BQT80, IE00BKM4GZ66", section="Monthly plan", advanced=True))

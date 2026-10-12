@@ -37,8 +37,8 @@ def test_core_suggestion_names_a_fund_with_a_reason():
 
 
 def test_manual_tilt_override_wins_and_says_so():
-    up = suggest_fund("tilt", {"IE00BF4RF909"})
-    assert up.isin == "IE00BF4RF909"
+    up = suggest_fund("tilt", {"IE00BF4RFH31"})
+    assert up.isin == "IE00BF4RFH31"
     assert up.overridden is True
     assert "manual override" in up.why
 
@@ -75,8 +75,8 @@ def test_tilt_override_flows_through_the_plan():
     user = User(username="jan", password_hash="x")
     db.add(user)
     db.commit()
-    upsert_public_settings(db, {"plan_tilt_isins": "IE00BF4RF909"})
+    upsert_public_settings(db, {"plan_tilt_isins": "IE00BF4RFH31"})
     plan = build_monthly_plan(db, user.id)
     tilt = next(s for s in plan["suggested_funds"] if s["sleeve"] == "tilt")
-    assert tilt["isin"] == "IE00BF4RF909" and tilt["overridden"] is True
+    assert tilt["isin"] == "IE00BF4RFH31" and tilt["overridden"] is True
     assert len(CANDIDATES) > 0

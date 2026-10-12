@@ -335,9 +335,9 @@ class TestIngestBarPricesValidation:
 
     def test_rejects_nan_close_prices(self, db):
         data = [
-            {"date": "2026-01-01", "open": 100, "high": 105, "low": 95, "close": 100, "volume": 1000},
-            {"date": "2026-01-02", "open": 100, "high": 105, "low": 95, "close": None, "volume": 1000},
-            {"date": "2026-01-03", "open": 100, "high": 105, "low": 95, "close": 102, "volume": 1000},
+            {"date": "2026-01-05", "open": 100, "high": 105, "low": 95, "close": 100, "volume": 1000},
+            {"date": "2026-01-06", "open": 100, "high": 105, "low": 95, "close": None, "volume": 1000},
+            {"date": "2026-01-07", "open": 100, "high": 105, "low": 95, "close": 102, "volume": 1000},
         ]
         ingester = self._make_ingester(db, {"ok": True, "data": data, "provider": "test"})
 
@@ -348,8 +348,8 @@ class TestIngestBarPricesValidation:
 
     def test_rejects_all_nan_returns_failure(self, db):
         data = [
-            {"date": "2026-01-01", "open": 100, "high": 105, "low": 95, "close": None, "volume": 1000},
-            {"date": "2026-01-02", "open": 100, "high": 105, "low": 95, "close": float("nan"), "volume": 1000},
+            {"date": "2026-01-05", "open": 100, "high": 105, "low": 95, "close": None, "volume": 1000},
+            {"date": "2026-01-06", "open": 100, "high": 105, "low": 95, "close": float("nan"), "volume": 1000},
         ]
         ingester = self._make_ingester(db, {"ok": True, "data": data, "provider": "test"})
 
@@ -361,7 +361,7 @@ class TestIngestBarPricesValidation:
     def test_warns_on_negative_prices(self, db, caplog):
         import logging
         data = [
-            {"date": "2026-01-01", "open": -10, "high": 5, "low": -15, "close": 100, "volume": 1000},
+            {"date": "2026-01-05", "open": -10, "high": 5, "low": -15, "close": 100, "volume": 1000},
         ]
         ingester = self._make_ingester(db, {"ok": True, "data": data, "provider": "test"})
 
@@ -373,7 +373,7 @@ class TestIngestBarPricesValidation:
     def test_warns_on_zero_close_prices(self, db, caplog):
         import logging
         data = [
-            {"date": "2026-01-01", "open": 100, "high": 105, "low": 95, "close": 0, "volume": 1000},
+            {"date": "2026-01-05", "open": 100, "high": 105, "low": 95, "close": 0, "volume": 1000},
         ]
         ingester = self._make_ingester(db, {"ok": True, "data": data, "provider": "test"})
 
@@ -382,24 +382,25 @@ class TestIngestBarPricesValidation:
 
         assert any("zero close" in record.message for record in caplog.records)
 
-    def test_warns_on_extreme_daily_change(self, db, caplog):
+    def test_split_signature_triggers_a_repull(self, db, caplog):
+        """A doubling with no reversal is a split signature (plan 2026-10-12, D2)."""
         import logging
         data = [
-            {"date": "2026-01-01", "open": 100, "high": 105, "low": 95, "close": 100, "volume": 1000},
-            {"date": "2026-01-02", "open": 200, "high": 210, "low": 190, "close": 200, "volume": 1000},
+            {"date": "2026-01-05", "open": 100, "high": 105, "low": 95, "close": 100, "volume": 1000},
+            {"date": "2026-01-06", "open": 200, "high": 210, "low": 190, "close": 200, "volume": 1000},
         ]
         ingester = self._make_ingester(db, {"ok": True, "data": data, "provider": "test"})
 
         with caplog.at_level(logging.WARNING):
             ingester.ingest_bar_prices("TEST")
 
-        assert any("extreme daily price change" in record.message for record in caplog.records)
+        assert any("split signature" in record.message for record in caplog.records)
 
     def test_normal_data_passes_through(self, db):
         data = [
-            {"date": "2026-01-01", "open": 100, "high": 105, "low": 95, "close": 100, "volume": 1000},
-            {"date": "2026-01-02", "open": 100, "high": 106, "low": 98, "close": 103, "volume": 1200},
-            {"date": "2026-01-03", "open": 103, "high": 108, "low": 101, "close": 105, "volume": 1100},
+            {"date": "2026-01-05", "open": 100, "high": 105, "low": 95, "close": 100, "volume": 1000},
+            {"date": "2026-01-06", "open": 100, "high": 106, "low": 98, "close": 103, "volume": 1200},
+            {"date": "2026-01-07", "open": 103, "high": 108, "low": 101, "close": 105, "volume": 1100},
         ]
         ingester = self._make_ingester(db, {"ok": True, "data": data, "provider": "test"})
 
@@ -410,10 +411,10 @@ class TestIngestBarPricesValidation:
 
     def test_mixed_valid_invalid_rows(self, db):
         data = [
-            {"date": "2026-01-01", "open": 100, "high": 105, "low": 95, "close": 100, "volume": 1000},
-            {"date": "2026-01-02", "open": 100, "high": 105, "low": 95, "close": None, "volume": 1000},
-            {"date": "2026-01-03", "open": 100, "high": 105, "low": 95, "close": 102, "volume": 1000},
-            {"date": "2026-01-04", "open": 100, "high": 105, "low": 95, "close": float("nan"), "volume": 1000},
+            {"date": "2026-01-05", "open": 100, "high": 105, "low": 95, "close": 100, "volume": 1000},
+            {"date": "2026-01-06", "open": 100, "high": 105, "low": 95, "close": None, "volume": 1000},
+            {"date": "2026-01-07", "open": 100, "high": 105, "low": 95, "close": 102, "volume": 1000},
+            {"date": "2026-01-08", "open": 100, "high": 105, "low": 95, "close": float("nan"), "volume": 1000},
         ]
         ingester = self._make_ingester(db, {"ok": True, "data": data, "provider": "test"})
 
@@ -427,16 +428,16 @@ class TestIngestBarPricesValidation:
         # re-ingests full history; re-ingesting the same (symbol, ts) must update
         # in place, never duplicate (the pre-fix behaviour doubled every row).
         first = [
-            {"date": "2026-01-01", "open": 100, "high": 105, "low": 95, "close": 100, "volume": 1000},
-            {"date": "2026-01-02", "open": 101, "high": 106, "low": 96, "close": 102, "volume": 1100},
+            {"date": "2026-01-05", "open": 100, "high": 105, "low": 95, "close": 100, "volume": 1000},
+            {"date": "2026-01-06", "open": 101, "high": 106, "low": 96, "close": 102, "volume": 1100},
         ]
         ingester = self._make_ingester(db, {"ok": True, "data": first, "provider": "test"})
         ingester.ingest_bar_prices("TEST")
 
-        # Re-ingest the same dates with a corrected close for 2026-01-02.
+        # Re-ingest the same dates with a corrected close for 2026-01-06.
         second = [
-            {"date": "2026-01-01", "open": 100, "high": 105, "low": 95, "close": 100, "volume": 1000},
-            {"date": "2026-01-02", "open": 101, "high": 106, "low": 96, "close": 108, "volume": 1100},
+            {"date": "2026-01-05", "open": 100, "high": 105, "low": 95, "close": 100, "volume": 1000},
+            {"date": "2026-01-06", "open": 101, "high": 106, "low": 96, "close": 108, "volume": 1100},
         ]
         ingester.registry.get_price_history.return_value = {"ok": True, "data": second, "provider": "test"}
         ingester.ingest_bar_prices("TEST")
@@ -444,6 +445,6 @@ class TestIngestBarPricesValidation:
         count = db.execute(text("SELECT COUNT(*) FROM bar_prices WHERE symbol='TEST'")).scalar()
         assert count == 2  # upserted, not 4
         updated_close = db.execute(
-            text("SELECT close FROM bar_prices WHERE symbol='TEST' AND ts='2026-01-02 00:00:00'")
+            text("SELECT close FROM bar_prices WHERE symbol='TEST' AND ts='2026-01-06 00:00:00'")
         ).scalar()
         assert float(updated_close) == 108.0  # DO UPDATE refreshed the bar

@@ -40,7 +40,8 @@ def test_deterministic_template_output():
 
     dossier = deterministic_template(_candidate(scores), scores, signal)
 
-    assert dossier["direction"] == "long"
+    # No expected return to compare with €STR: neutral (D7), whatever the score.
+    assert dossier["direction"] == "neutral"
     assert dossier["conviction"] == 0.72
     assert dossier["horizon_months"] == 6
     assert dossier["expected_return"] is None
@@ -431,7 +432,7 @@ def test_write_dossier_llm_success(monkeypatch):
         "direction": "long",
         "conviction": 0.75,
         "horizon_months": 6,
-        "thesis": "Buy AAPL on AI momentum",
+        "thesis": "Buy AAPL on AI momentum.",
         "key_risks": ["Valuation risk"],
     }
     monkeypatch.setattr(
@@ -456,9 +457,10 @@ def test_write_dossier_llm_success(monkeypatch):
     assert rec.ticker == "AAPL"
     assert rec.mode == "discover"
     stored = json.loads(dossier.dossier_json)
-    assert stored["direction"] == "long"
+    # Deterministic (D7): no expected return here, so neutral whatever the LLM said.
+    assert stored["direction"] == "neutral"
     assert stored["conviction"] == 0.85
-    assert stored["thesis"] == "Buy AAPL on AI momentum"
+    assert stored["thesis"] == "Buy AAPL on AI momentum."
     assert stored["signal_breakdown"]["composite_score"] == 0.85
     assert stored["estimate"] is True
     assert stored["not_financial_advice"] is True
@@ -551,7 +553,7 @@ def test_write_dossier_llm_fallback(monkeypatch):
     dossier = db.get(RecommendationDossier, result["dossier_id"])
     assert dossier is not None
     stored = json.loads(dossier.dossier_json)
-    assert stored["direction"] == "long"
+    assert stored["direction"] == "neutral"  # no expected return (D7)
     assert stored["conviction"] == 0.85
     assert "pipeline scores" in stored["thesis"]
     assert stored["key_risks"]
@@ -608,13 +610,13 @@ def test_write_dossier_expected_return_is_never_taken_from_llm(monkeypatch):
     dossier = db.get(RecommendationDossier, result["dossier_id"])
     stored = json.loads(dossier.dossier_json)
     assert stored["generated_by"] == "llm"
-    # ADR 0017: prior = cash 2.2%/yr over the 3mo horizon (0.55), plus the
-    # money_market weight 0.90 of the momentum_12_1m anchor's gap to it
-    # (3.0 - 2.2), capped at a 1mo horizon: 0.72 / 12 = 0.06 -> 0.6.
-    # The old zero-centred shrink gave 0.2, i.e. 0.9%/yr for a fund bound
-    # to a ~2% policy rate.
+    # ADR 0017: prior = cash 2.2%/yr over the horizon, plus the money_market
+    # weight 0.90 of the momentum_12_1m anchor's gap to it (3.0 - 2.2),
+    # capped at a 1mo horizon: 0.72 / 12 = 0.06. The horizon is the system's
+    # 6 months (D7), not the 3 the LLM sent: 1.1 + 0.06 -> 1.2.
+    assert stored["horizon_months"] == 6
     assert stored["expected_return"] != 2.5
-    assert stored["expected_return"] == pytest.approx(0.6, abs=0.05)
+    assert stored["expected_return"] == pytest.approx(1.2, abs=0.05)
     assert stored["not_financial_advice"] is True
 
 

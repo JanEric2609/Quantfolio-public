@@ -42,9 +42,13 @@ from app.foundation.llm.sampling import QWEN_SAMPLING
 logger = logging.getLogger(__name__)
 
 #: ADR 0017's composite (de-duplicated momentum, analyst ranks within sector,
-#: recency penalty without the strong-conviction exemption).
-COMPOSITE_FORMULA_VERSION = "adr0017.1"
-UNIVERSE_RULE_VERSION = 1
+#: recency penalty without the strong-conviction exemption), plus the
+#: 2026-10-12 release: total-return benchmarks by asset class in EUR (D3),
+#: no momentum rank for bonds/cash/gold (D4), revenue growth dropped for
+#: financials (D8), deterministic dossier direction (D7).
+COMPOSITE_FORMULA_VERSION = "adr0017.2-2026-10-12"
+#: 2: ETFs only for a plan line, one fund per index, held indices skipped (D4).
+UNIVERSE_RULE_VERSION = 2
 
 _ETF_TYPES = frozenset({"etf", "money_market", "bond"})
 

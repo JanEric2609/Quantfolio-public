@@ -167,16 +167,34 @@ class EcbProvider(MarketDataProvider):
             # levels below dataSets[0]: under "series", keyed by series key
             # (e.g. "0:0:0:0:0"), each with its own "observations" map keyed
             # by observation index (e.g. "0", "1", ...) -> [value, status, ...].
+            # The period of each observation sits in
+            # structure.dimensions.observation[0].values[index].id
+            # ("2026-10-09" daily, "2026-08" monthly); without it the values
+            # cannot be dated, so it is attached as "date" (ISO, monthly
+            # periods on their first day) and the list is sorted by it.
+            periods: list[str] = []
+            try:
+                obs_dims = json_data.get("structure", {}).get("dimensions", {}).get("observation", [])
+                if obs_dims:
+                    periods = [str(v.get("id")) for v in obs_dims[0].get("values", [])]
+            except (AttributeError, TypeError):
+                periods = []
             observations = []
             if "dataSets" in json_data and len(json_data["dataSets"]) > 0:
                 dataset = json_data["dataSets"][0]
                 for series in dataset.get("series", {}).values():
                     for obs_key, obs_values in series.get("observations", {}).items():
                         if isinstance(obs_values, list) and len(obs_values) > 0:
-                            observations.append({
-                                "key": obs_key,
-                                "value": obs_values[0],
-                            })
+                            entry: dict[str, Any] = {"key": obs_key, "value": obs_values[0]}
+                            try:
+                                period = periods[int(obs_key)]
+                            except (ValueError, IndexError):
+                                period = None
+                            if period:
+                                entry["period"] = period
+                                entry["date"] = _period_to_iso(period)
+                            observations.append(entry)
+            observations.sort(key=lambda o: (o.get("date") or "", int(o["key"]) if str(o["key"]).isdigit() else 0))
 
             return {
                 "ok": len(observations) > 0,
@@ -188,3 +206,18 @@ class EcbProvider(MarketDataProvider):
                 "ok": False,
                 "error": str(e),
             }
+
+
+def _period_to_iso(period: str) -> str | None:
+    """SDMX time period -> ISO date: daily as is, "2026-08" -> "2026-08-01", "2026-Q3" -> "2026-07-01"."""
+    p = period.strip()
+    if len(p) == 10 and p[4] == "-" and p[7] == "-":
+        return p
+    if len(p) == 7 and p[4] == "-" and p[5:].isdigit():
+        return f"{p}-01"
+    if len(p) == 7 and p[5] == "Q" and p[6].isdigit():
+        month = (int(p[6]) - 1) * 3 + 1
+        return f"{p[:4]}-{month:02d}-01"
+    if len(p) == 4 and p.isdigit():
+        return f"{p}-01-01"
+    return None

@@ -35,6 +35,8 @@ from app.foundation.tax_calc import (
     teilfreistellung_pct_for_fund_class,
     vorabpauschale_estimate,
 )
+from app.foundation.tax_calc.jurisdictions.de import gold_etc
+from app.foundation.tax_calc.jurisdictions.de.gold_etc import is_gold_etc
 from app.foundation.tax_calc.jurisdictions.de.vorabpauschale import vorabpauschale_credit
 from app.foundation.tax_calc.allowances import (
     KEST_RATE,
@@ -267,6 +269,9 @@ def _estimate_holdings_vorabpauschale(
     for h in holdings:
         # Vorabpauschale only applies to investment funds (ETFs / mutual funds).
         if (h.asset_type or "").lower() not in ("etf", "fund"):
+            continue
+        # A gold ETC is a bond with a gold-delivery claim, not a fund (D4).
+        if is_gold_etc(h.isin, h.name):
             continue
         qty = Decimal(str(h.quantity or 0))
         if qty <= 0:
@@ -1257,6 +1262,10 @@ def _harvest_holdings(
         isin = (pos.isin or "").upper()
         qty = Decimal(pos.quantity or 0)
         if qty <= 0:
+            continue
+        if is_gold_etc(isin, pos.name):
+            # § 23 EStG, not § 20: its gains do not use the saver's allowance.
+            skipped.append({"isin": isin, "name": pos.name, "reason": gold_etc.TAX_NOTE})
             continue
         if pos.current_price is None:
             skipped.append({"isin": isin, "name": pos.name, "reason": "no current price from the depot sync"})

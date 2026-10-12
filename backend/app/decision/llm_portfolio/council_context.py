@@ -79,8 +79,17 @@ def build_council_context(
     council's own agents already tolerate thin/missing context per-agent.
     """
     if trade_proposal is None:
+        # Same plan bounds as the advisor cycle (plan 2026-10-12, D5).
+        proposal_config: dict[str, Any] = {}
+        try:
+            from app.decision.monthly_plan import paper_plan_targets
+
+            proposal_config["plan_targets"] = paper_plan_targets(db)
+        except Exception:
+            logger.debug("council context: plan targets unavailable", exc_info=True)
         trade_proposal = build_trade_proposal(
-            db, portfolio.id, candidates if candidates is not None else _default_candidates(db)
+            db, portfolio.id, candidates if candidates is not None else _default_candidates(db),
+            config=proposal_config,
         )
 
     holdings: dict[str, Any] = {

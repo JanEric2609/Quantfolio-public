@@ -665,12 +665,13 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
                 composite = result.get("composite_score", 0.0)
                 ledger_fields = dict(ledger_fields_by_symbol.get(c.symbol, {}))
                 generated_by = ledger_fields.pop("dossier_generated_by", None)
+                direction_hint = ledger_fields.pop("direction_hint", "buy")
                 pred = store_prediction(
                     db,
                     symbol=c.symbol,
                     composite_score=composite,
                     signal_breakdown=signal_breakdown,
-                    direction_hint="buy",
+                    direction_hint=direction_hint,
                     user_id=user_id,
                     run_id=run_id,
                     isin=c.isin,
@@ -835,6 +836,9 @@ def _generate_dossiers(
                 "thesis": thesis if isinstance(thesis, str) and thesis.strip() else None,
                 # Provenance only (popped before store_prediction).
                 "dossier_generated_by": dossier.get("generated_by") or "unknown",
+                # The dossier's deterministic direction (D7): a neutral call is
+                # left out of the live IC's cross-section (scoring.rank_ic_by_date).
+                "direction_hint": "neutral" if dossier.get("direction") == "neutral" else "buy",
             }
             if dossier.get("dossier_id"):
                 cand.dossier_id = dossier["dossier_id"]

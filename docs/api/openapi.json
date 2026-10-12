@@ -2602,6 +2602,229 @@
         "title": "EnvelopesOut",
         "type": "object"
       },
+      "EtfCovered": {
+        "properties": {
+          "held_by": {
+            "title": "Held By",
+            "type": "string"
+          },
+          "index": {
+            "title": "Index",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "held_by"
+        ],
+        "title": "EtfCovered",
+        "type": "object"
+      },
+      "EtfInfoItem": {
+        "properties": {
+          "asset_class": {
+            "title": "Asset Class",
+            "type": "string"
+          },
+          "index": {
+            "title": "Index",
+            "type": "string"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "index",
+          "asset_class",
+          "reason"
+        ],
+        "title": "EtfInfoItem",
+        "type": "object"
+      },
+      "EtfSuggestionFund": {
+        "properties": {
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "why": {
+            "title": "Why",
+            "type": "string"
+          }
+        },
+        "required": [
+          "isin",
+          "name",
+          "why"
+        ],
+        "title": "EtfSuggestionFund",
+        "type": "object"
+      },
+      "EtfSuggestionLine": {
+        "properties": {
+          "amount_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Eur"
+          },
+          "current_pct": {
+            "title": "Current Pct",
+            "type": "number"
+          },
+          "duration_bucket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Bucket"
+          },
+          "fund": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EtfSuggestionFund"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gap_pp": {
+            "title": "Gap Pp",
+            "type": "number"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "line": {
+            "title": "Line",
+            "type": "string"
+          },
+          "rule_note": {
+            "title": "Rule Note",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "target_pct": {
+            "title": "Target Pct",
+            "type": "number"
+          },
+          "tax_note": {
+            "title": "Tax Note",
+            "type": "string"
+          },
+          "warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning"
+          }
+        },
+        "required": [
+          "line",
+          "label",
+          "target_pct",
+          "current_pct",
+          "gap_pp",
+          "status",
+          "tax_note",
+          "rule_note"
+        ],
+        "title": "EtfSuggestionLine",
+        "type": "object"
+      },
+      "EtfSuggestions": {
+        "description": "Plan-gap ETF lines (rule-based, not a forecast) and the info-only list.",
+        "properties": {
+          "covered": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EtfCovered"
+            },
+            "title": "Covered",
+            "type": "array"
+          },
+          "estimate": {
+            "default": true,
+            "title": "Estimate",
+            "type": "boolean"
+          },
+          "info": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EtfInfoItem"
+            },
+            "title": "Info",
+            "type": "array"
+          },
+          "lines": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EtfSuggestionLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "not_tax_advice": {
+            "default": true,
+            "title": "Not Tax Advice",
+            "type": "boolean"
+          },
+          "rule_note": {
+            "default": "",
+            "title": "Rule Note",
+            "type": "string"
+          }
+        },
+        "title": "EtfSuggestions",
+        "type": "object"
+      },
       "EvidenceGateFreshness": {
         "properties": {
           "as_of": {
@@ -6113,6 +6336,16 @@
               }
             ],
             "title": "Drift Band Pp"
+          },
+          "etf_suggestions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EtfSuggestions"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "evidence": {
             "anyOf": [
@@ -16354,6 +16587,17 @@
             "title": "Not Financial Advice",
             "type": "boolean"
           },
+          "recommendation_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recommendation Label"
+          },
           "regime_context": {
             "anyOf": [
               {
@@ -16371,6 +16615,18 @@
             "default": {},
             "title": "Signal Breakdown",
             "type": "object"
+          },
+          "skill_horizon": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Horizon"
           },
           "thesis": {
             "default": "",

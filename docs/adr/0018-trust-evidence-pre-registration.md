@@ -401,6 +401,36 @@ never run (the first run is the Saturday job of 2026-10-10), so
 `trust_factor_study` was empty and no fit or R² had been computed. Spec v1 is
 therefore still unrecorded, and the version number stays 1.
 
+## Amendment of 2026-10-12 (release after the prod audit) — draft, T0 to be set by the owner
+
+Observed when this was written (prod audit 2026-10-12): over 24 trading days against
+EUNL.DE the "ideas" sleeve stood at about −4.6 % and the advisor at about −4.4 %; 46
+resolved Discover predictions had a mean excess return of −1.28 % (t ≈ −1.5, not
+significant). No trading day on or after the original T0 (2026-10-12) had resolved.
+
+What changes, in one release (plan `docs/plan-audit-fixes-2026-10-12.md`, D12):
+
+- the bars every return is computed from (one adjusted provider per series, ingest guard,
+  quarantine) and the benchmarks they are judged against (total return, by asset class,
+  both legs in EUR);
+- the advisor optimiser (minimum variance with Ledoit-Wolf inside the owner's plan, 20 %
+  turnover cap) and the mandates' sell gates;
+- the Discover ETF lane (plan lines only, one fund per index, held indices skipped, no
+  momentum rank for bonds, cash and gold), the composite's fundamentals inputs and the
+  dossier's direction (deterministic). The shadow ledger's cohort spec moves to
+  `composite_formula_version = "adr0017.2-2026-10-12"` and `universe_rule_version = 2`,
+  so rows before and after are separate cohorts.
+
+Because every one of these changes what the ledgers measure, the primary e-processes
+restart:
+
+- **New T0 = `YYYY-MM-DD`** — the first trading day after the release is deployed and the
+  five paper sleeves are archived and reset through the existing reset. *The owner fills in
+  the date when the reset has run.*
+- Ledger rows before the new T0 stay as they are (never edited or deleted) and are
+  reported as the pre-release cohort; they do not enter the primary tests.
+- Tests, metrics, thresholds and priors are otherwise unchanged.
+
 ## Consequences
 
 **Gained.**

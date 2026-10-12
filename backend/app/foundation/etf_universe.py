@@ -103,6 +103,19 @@ def _safe_float(value: float | str | None, default: float = 0.0) -> float:
         return default
 
 
+def _optional_float(value: Any) -> float | None:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if out != out else out
+
+
+def _optional_int(value: Any) -> int | None:
+    out = _optional_float(value)
+    return int(out) if out is not None else None
+
+
 def _to_xetra_symbol(
     ticker: object, wkn: object, isin: str
 ) -> str | None:
@@ -228,6 +241,10 @@ class EtfUniverseProvider:
                 "dividends": row.get("dividends") or "",
                 "replication": row.get("replication") or "",
                 "ter": _safe_float(row.get("ter"), default=0.0),
+                # Fund size in EUR millions and number of holdings (D4/D6);
+                # None when justETF has no figure (swap funds report no holdings).
+                "size_eur_m": _optional_float(row.get("size")),
+                "number_of_holdings": _optional_int(row.get("number_of_holdings")),
                 "strategy": strategy_val,
                 "tf_class": _derive_tf_class(name, strategy_val),
             })

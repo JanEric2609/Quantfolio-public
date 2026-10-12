@@ -13,6 +13,7 @@ import {
   type MonthlyPlan,
   type PlanAction,
   type PlanCash,
+  type PlanEtfSuggestions,
   type PlanSavingsPlans,
   type PlanSleeve,
   type RunningSavingsPlan,
@@ -125,7 +126,7 @@ function SleeveCard({ sleeve, lookThrough, fund }: { sleeve: PlanSleeve; lookThr
         {fund && (
           <p className="text-sm text-text-secondary">
             <span className="font-medium text-text-primary">Suggested fund: {fund.isin ?? fund.name}. </span>
-            {fund.why}
+            {fund.why} <span className="text-text-muted">Rule, not a forecast.</span>
           </p>
         )}
         {lookThrough && (
@@ -179,6 +180,36 @@ function SleeveCard({ sleeve, lookThrough, fund }: { sleeve: PlanSleeve; lookThr
 }
 
 /** A sleeve that is still locked: one line, with the way to settings. */
+function EtfLines({ suggestions }: { suggestions: PlanEtfSuggestions }) {
+  return (
+    <div className="space-y-4">
+      {suggestions.lines.map((line) => (
+        <div key={line.line} data-testid={`etf-line-${line.line}`} className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-text-primary">{line.label}</span>
+            <Badge variant="secondary">Rule, not a forecast</Badge>
+            <span className="ml-auto text-xs tabular-nums text-text-secondary">
+              now {pct(line.current_pct)} · target {pct(line.target_pct)}
+            </span>
+          </div>
+          {line.status === "under" && line.fund ? (
+            <p className="text-sm text-text-secondary">
+              <span className="font-medium text-text-primary">
+                Add about {formatCurrency(line.amount_eur ?? 0, "EUR")}: {line.fund.isin}.{" "}
+              </span>
+              {line.fund.why}
+            </p>
+          ) : (
+            <p className="text-sm text-text-secondary">Within the band; nothing to do.</p>
+          )}
+          {line.warning && <p className="text-sm text-warn">{line.warning}</p>}
+          <p className="text-xs text-text-muted">Tax (estimate, not tax advice): {line.tax_note}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function LockedSleeveLine({ sleeve, fund }: { sleeve: PlanSleeve; fund?: SuggestedFund | null }) {
   return (
     <li className="flex flex-col gap-1 py-2 text-sm sm:flex-row sm:items-start sm:justify-between">
@@ -464,6 +495,31 @@ export function ThisMonthPage() {
             </ul>
           )}
         </Details>
+        {data.etf_suggestions && data.etf_suggestions.lines.length > 0 && (
+          <Details
+            title="Bonds, cash and gold"
+            summary={`${data.etf_suggestions.lines.filter((l) => l.status === "under").length} below target`}
+          >
+            <EtfLines suggestions={data.etf_suggestions} />
+          </Details>
+        )}
+        {data.etf_suggestions && data.etf_suggestions.info.length > 0 && (
+          <Details title="Other indices" summary="outside your plan: information only">
+            <p className="text-sm text-text-secondary">
+              These indices are not part of your plan, so they are never suggested. Shown for information only.
+            </p>
+            <ul className="text-sm text-text-secondary list-disc pl-5">
+              {data.etf_suggestions.info.map((i) => (
+                <li key={`${i.index}-${i.isin}`}>{i.index}{i.name ? ` — ${i.name}` : ""}</li>
+              ))}
+            </ul>
+            {data.etf_suggestions.covered.length > 0 && (
+              <p className="text-xs text-text-muted">
+                Already covered: {data.etf_suggestions.covered.map((c) => `${c.index} by ${c.held_by}`).join("; ")}.
+              </p>
+            )}
+          </Details>
+        )}
         {data.acc_dist_note && (
           <Details title="Accumulating or distributing?" summary="why accumulating is the default">
             <p className="text-sm text-text-secondary">{data.acc_dist_note}</p>

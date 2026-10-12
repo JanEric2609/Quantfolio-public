@@ -168,6 +168,11 @@ class DossierResponse(BaseModel):
     # equity premium, market-implied prior, anchor, credibility weight, tilt.
     # Null for dossiers written before it existed or with no anchor.
     expected_return_components: dict[str, Any] | None = None
+    # "Years to tell skill from luck" at this tracking error (WP13); None
+    # without a tracking error or for dossiers written before it existed.
+    skill_horizon: dict[str, Any] | None = None
+    # "Rule, not a forecast" (funds) or "Shadow — not a recommendation" (stocks).
+    recommendation_label: str | None = None
     # Every composite input as {signal, score, weight, contribution}, largest
     # contribution first; null for dossiers written before ADR 0017.
     composite_breakdown: list[dict[str, Any]] | None = None
@@ -646,6 +651,8 @@ def get_dossier(
         expected_return_anchor_kind=data.get("expected_return_anchor_kind"),
         expected_return_band=data.get("expected_return_band"),
         expected_return_components=data.get("expected_return_components"),
+        skill_horizon=data.get("skill_horizon"),
+        recommendation_label=data.get("recommendation_label"),
         composite_breakdown=data.get("composite_breakdown"),
         thesis=data.get("thesis", ""),
         key_risks=data.get("key_risks", []),

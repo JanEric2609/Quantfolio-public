@@ -209,6 +209,11 @@ def test_backtest_stage_flags_stale_benchmark_concern():
     from app.decision.discover.pipeline import stage_backtest_vs_benchmark
 
     db = _memory_db_bars()
+    from app.foundation.models.entities import ListingCurrency
+
+    # Both legs EUR: the test is about staleness, not FX (test_eur_prices).
+    db.add_all([ListingCurrency(symbol=s, currency="EUR", source="test") for s in ("CAND", "SPY")])
+    db.commit()
     _seed_price_cache(db, "CAND", [100.0 + i * 0.05 for i in range(300)])
     # SPY: ~450 calendar-daily bars ending 45 days ago → >=250 aligned obs.
     _seed_bars(db, "SPY", n=450, newest_age_days=45)

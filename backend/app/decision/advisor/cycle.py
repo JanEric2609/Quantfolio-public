@@ -22,7 +22,6 @@ from app.foundation.models.entities import (
     DiscoverRun,
     LlmPortfolioDecision,
     PaperPortfolio,
-    PaperTrade,
 )
 from app.foundation.models.entities._core import now_utc
 from app.decision.advisor.costs import affordable_notional, resolve_fee_schedule, trade_fee
@@ -33,7 +32,7 @@ from app.decision.advisor.llm_decision import (
     build_decision_schema,
     decide_trades,
 )
-from app.foundation import provenance
+from app.foundation import provenance, sell_caps
 from app.foundation.llm.sampling import QWEN_SAMPLING
 from app.foundation.paper_cash import MAX_QUOTE_AGE_TRADING_DAYS
 from app.decision.advisor.risk_gate import check_risk_gate
@@ -84,7 +83,7 @@ DEFAULT_MIN_TICKET_PCT = 0.01  # skip orders smaller than this share of NAV
 # one shot. Applies to both model-directed sells (``_plan_decision``) and
 # optimiser-driven funding trims (``_raise_cash``) — a funding sell is still a
 # sell of the same position and must respect the same per-cycle ceiling.
-DEFAULT_MAX_SELL_PCT_OF_POSITION = 1.0 / 3.0
+DEFAULT_MAX_SELL_PCT_OF_POSITION = sell_caps.MAX_SELL_PCT_OF_POSITION
 # Cumulative sell-rate cap (2026-09 follow-up to the per-cycle cap above, ADR
 # 0013): historical replay of the champion sleeve's actual Jul-Aug drift found
 # the per-cycle cap alone insufficient — the aggregate turnover budget was
@@ -100,11 +99,11 @@ DEFAULT_MAX_SELL_PCT_OF_POSITION = 1.0 / 3.0
 # per-holding price snapshot, since none is stored — an approximation that
 # ignores price drift within the window, in keeping with the per-cycle cap's
 # own use of "current value" as its baseline.
-DEFAULT_MAX_CUMULATIVE_SELL_PCT = 1.0 / 3.0
+DEFAULT_MAX_CUMULATIVE_SELL_PCT = sell_caps.MAX_CUMULATIVE_SELL_PCT
 # Calendar days, not trading days, since no trading-calendar dependency
 # exists elsewhere in this codebase; ~28 calendar days approximates 20
 # trading days (the window locked in during the fix's design grilling).
-DEFAULT_CUMULATIVE_SELL_WINDOW_DAYS = 28
+DEFAULT_CUMULATIVE_SELL_WINDOW_DAYS = sell_caps.CUMULATIVE_SELL_WINDOW_DAYS
 # Core-holding floor (ADR 0013, shipped alongside the cumulative cap as
 # defense-in-depth): a diversified/index holding (asset_type == "etf") may
 # never be sold below this share of NAV, a hard block with no override path —
@@ -195,59 +194,9 @@ class PlannedTrade:
         return self.notional / self.price if self.price > 0 else 0.0
 
 
-def _cumulative_sell_totals(
-    db: Session, portfolio_id: str, window_days: int
-) -> dict[str, tuple[float, float]]:
-    """Per-ticker ``(sell_value_eur, buy_value_eur)`` from trades in the
-    trailing *window_days*, used to reconstruct each position's window-start
-    value without a daily per-holding price snapshot (none is stored)."""
-    cutoff = now_utc() - timedelta(days=window_days)
-    rows = (
-        db.query(PaperTrade.ticker, PaperTrade.side, PaperTrade.value)
-        .filter(PaperTrade.portfolio_id == portfolio_id, PaperTrade.date >= cutoff)
-        .all()
-    )
-    totals: dict[str, list[float]] = {}
-    for ticker, side, value in rows:
-        if not ticker:
-            continue
-        bucket = totals.setdefault(ticker.upper(), [0.0, 0.0])
-        v = float(value or 0.0)
-        if side == "sell":
-            bucket[0] += v
-        elif side == "buy":
-            bucket[1] += v
-    return {ticker: (sell_v, buy_v) for ticker, (sell_v, buy_v) in totals.items()}
-
-
-def _effective_sell_cap(
-    ticker: str,
-    current_value: float,
-    total_value: float,
-    *,
-    max_sell_pct_of_position: float,
-    cumulative_totals: dict[str, tuple[float, float]],
-    max_cumulative_sell_pct: float,
-    instrument_types: dict[str, str],
-    core_holding_floor_pct: float,
-) -> float:
-    """The most a position may be sold this cycle, folding in all three
-    guardrails: the per-cycle cap, the trailing-window cumulative cap, and
-    (for a diversified/index holding) the core-holding floor. Returns the
-    tightest of whichever apply."""
-    cap = current_value * max_sell_pct_of_position
-
-    sell_v, buy_v = cumulative_totals.get(ticker.upper(), (0.0, 0.0))
-    window_start_value = max(0.0, current_value + sell_v - buy_v)
-    cumulative_cap = window_start_value * max_cumulative_sell_pct
-    cumulative_remaining = max(0.0, cumulative_cap - sell_v)
-    cap = min(cap, cumulative_remaining)
-
-    if instrument_types.get(ticker.upper()) == "etf":
-        floor_value = total_value * core_holding_floor_pct
-        cap = min(cap, max(0.0, current_value - floor_value))
-
-    return cap
+# Shared with the LLM mandates' sell gate (plan 2026-10-12, D6).
+_cumulative_sell_totals = sell_caps.cumulative_sell_totals
+_effective_sell_cap = sell_caps.effective_sell_cap
 
 
 # A cached bar older than this many trading days is no basis for a fill.
@@ -758,7 +707,17 @@ def run_advisor_cycle(
         logger.warning("advisor cycle for user %s: no candidates — nothing to trade", user_id)
         return result
 
-    # C1 → C2 → C3
+    # C1 → C2 → C3. The optimiser works inside the owner's plan: covariance
+    # only, core held near its target, a satellite budget for Discover's
+    # picks (plan 2026-10-12, D5). quant_proposal is foundation-tier and
+    # cannot read the plan itself.
+    if "plan_targets" not in config:
+        try:
+            from app.decision.monthly_plan import paper_plan_targets
+
+            config = {**config, "plan_targets": paper_plan_targets(db)}
+        except Exception:
+            logger.error("advisor cycle: plan targets unavailable for %s", user_id, exc_info=True)
     proposal = build_trade_proposal(db, portfolio.id, candidates, config=config)
     # Advisory-only (Track D2): a validated RL policy's rollout weights, read
     # if one exists. Never blocks or overrides the deterministic MC/skfolio

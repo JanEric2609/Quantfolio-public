@@ -357,9 +357,14 @@ def _assemble_text(blocks: dict[str, Any], max_chars: int) -> str:
 # {"action": "rebalance"}, an action the trade executor cannot act on.
 _PROMPT_PROTOCOL = (
     "An `Assessment` section of deterministic facts (concentration, ETF floor, "
-    "drawdown, benchmark excess) is provided FIRST — these are computed, not for "
-    "you to recompute. Ground your thesis in them and explicitly address any check "
-    "with status \"breach\".\n"
+    "deploy cash, drawdown, benchmark excess) is provided FIRST — these are computed, "
+    "not for you to recompute. Ground your thesis in them and explicitly address any "
+    "check with status \"breach\" or \"action\".\n"
+    "Concentration is measured on look-through issuer exposure: a broad index fund "
+    "(MSCI World, ACWI, FTSE All-World, S&P 500, STOXX 600, EM IMI) is diversified and "
+    "never a single-position breach. Sells are capped at one third of a position per "
+    "review and may not take ETF weight below the ETF floor; a larger sell is clipped "
+    "or rejected.\n"
     "You have access to tools: get_quote, get_history_stats, get_etf_profile, get_discover_shortlist. "
     "You have a LIMITED number of turns this review — each tool call spends one. "
     "Use only the tool calls you actually need and return the final decision as soon "

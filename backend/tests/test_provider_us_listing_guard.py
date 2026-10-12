@@ -149,10 +149,14 @@ def _ingestion_order(symbol):
     return calls
 
 
-def test_us_symbol_keeps_the_quant_grade_order_without_eod():
+def test_us_symbol_uses_adjusted_providers_yfinance_first():
+    # Bars come only from adjusted providers (plan 2026-10-12, D1): Twelve Data
+    # stays out until its adjusted closes are verified on the owner's plan.
+    # yfinance first: a series is pinned to the provider that answers first,
+    # and Tiingo's 50 calls an hour cannot serve every pinned US series.
     order = _ingestion_order("AAPL")
-    assert order[:3] == ["tiingo", "twelvedata", "databento"]
-    assert "eod" not in order
+    assert order[:2] == ["yfinance", "tiingo"]
+    assert not {"eod", "twelvedata", "databento", "finnhub"} & set(order)
 
 
 def test_eod_is_used_only_when_asked_for_by_name():
@@ -180,6 +184,5 @@ def test_eod_is_used_only_when_asked_for_by_name():
 def test_non_us_symbol_skips_us_only_providers_and_eod():
     for symbol in ("EUNL.DE", "VWRA.L", "ASML.AS", "IE00B4L5Y983"):
         order = _ingestion_order(symbol)
-        assert order[0] == "twelvedata", symbol
-        assert not {"tiingo", "databento", "finnhub", "eod"} & set(order), symbol
-        assert "yfinance" in order
+        assert order[0] == "yfinance", symbol
+        assert not {"tiingo", "databento", "finnhub", "eod", "twelvedata"} & set(order), symbol

@@ -309,3 +309,22 @@ supply a grounded view later at no ongoing cost.
 is a deterministic function of holdings and mandate; computing it in Python
 makes it testable and removes the exact inference step that produced the
 "Value ETF described as growth" error.
+
+## Amendment 2026-10-12: price history from adjusted providers, yfinance first
+
+Decision 7's routing of price history is replaced by plan 2026-10-12 D1 (see
+`ProviderRegistry._PRICE_HISTORY_PROVIDER_ORDER`). Observed before the change:
+SPY's stored 2023-12-29 close was Twelve Data's raw 475.31, the fallback from
+Twelve Data to yfinance spliced SPY, URTH and VGK on 2021-10-13, and EODHD bars
+sat on the raw-close scale, so stored benchmarks were price-only (URTH-EUR
+trailed EUNL.DE by 1.5 to 2.0 pp a year on common sessions, 2023-2025).
+
+- Only split- and dividend-adjusted providers write `bar_prices`: yfinance,
+  Tiingo and Alpaca (`adjustment=all`). Twelve Data comes back only after its
+  `adjust=all` output is verified on the owner's plan; EODHD is explicit-only
+  and stores `adjusted_close`; Databento and the others are out.
+- Each series is pinned to one provider (`bar_series_meta`) and changes provider
+  only through a full re-pull.
+- yfinance is first, Tiingo second. A series is pinned to whichever provider
+  answers its first ingest, and Tiingo's free tier (50 calls an hour) served
+  only about 49 symbols a day on prod, so Tiingo-first pins would outgrow it.

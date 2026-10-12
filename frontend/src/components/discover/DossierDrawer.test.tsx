@@ -415,3 +415,34 @@ describe("DossierDrawer broker tradeability", () => {
     expect(screen.getByText(/header chip shows a separate rule-based regime/)).toBeInTheDocument();
   });
 });
+
+describe("DossierDrawer honesty labels (WP13)", () => {
+  it("shows the shadow label and the years-to-tell line", () => {
+    render(
+      <DossierDrawer
+        open
+        onClose={() => {}}
+        dossier={dossierFixture({
+          recommendation_label: "Shadow — not a recommendation",
+          skill_horizon: {
+            tracking_error: 0.05,
+            benchmark: "EUNL.DE",
+            basis: "weekly active returns, last 2 years",
+            years: { alpha_1pct: 100, alpha_2pct: 25 },
+            text: "At this tracking error (5%/yr), a 2 %/yr edge needs about 25 years of live data to show, a 1 %/yr edge about 100.",
+          },
+        })}
+        symbol="AAPL"
+      />,
+    );
+    expect(screen.getByTestId("recommendation-label")).toHaveTextContent("Shadow — not a recommendation");
+    expect(screen.getByTestId("skill-horizon")).toHaveTextContent("about 25 years");
+    expect(screen.getByTestId("skill-horizon")).toHaveTextContent("vs EUNL.DE");
+  });
+
+  it("shows neither when the dossier predates them", () => {
+    render(<DossierDrawer open onClose={() => {}} dossier={dossierFixture()} symbol="AAPL" />);
+    expect(screen.queryByTestId("recommendation-label")).toBeNull();
+    expect(screen.queryByTestId("skill-horizon")).toBeNull();
+  });
+});

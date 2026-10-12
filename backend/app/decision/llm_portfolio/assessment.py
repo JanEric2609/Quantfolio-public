@@ -7,9 +7,12 @@ persisted verbatim on the decision so the UI can render objective facts instead
 of trusting the model's prose.
 
 Facts produced:
-  * concentration  — largest position weight vs `max_single_position_pct`
+  * concentration  — largest look-through issuer exposure vs
+                     `max_single_position_pct`; a broad index fund is exempt
+                     (plan 2026-10-12, D6)
   * etf_floor      — ETF weight vs `min_etf_pct`
   * cash           — cash weight (informational)
+  * deploy_cash    — cash above 10 % of NAV: invest it, core ETF named (D6)
   * drawdown       — portfolio max drawdown (from the latest PaperSnapshot)
   * benchmark_excess — portfolio return minus EUNL.DE over the interval since the
                        previous review (best-effort; `unresolvable` if no data)
@@ -27,6 +30,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from app.foundation.etf_classes import is_diversified_fund
 from app.foundation.live_positions import live_prices_by_isin
 from app.foundation.models.entities import (
     LlmPortfolioDecision,
@@ -38,6 +42,21 @@ from app.foundation.models.entities import (
 logger = logging.getLogger(__name__)
 
 BENCHMARK_TICKER = "EUNL.DE"
+#: Cash above this share of NAV puts the review in "deploy cash" mode (D6).
+DEPLOY_CASH_ABOVE_PCT = 0.10
+
+
+def core_etf_ticker(db: Session) -> str:
+    """The plan's core ETF (EUNL.DE unless the plan names another)."""
+    try:
+        from app.decision.monthly_plan import paper_plan_targets
+
+        tickers = paper_plan_targets(db).get("core_tickers") or []
+        if tickers:
+            return str(tickers[0]).upper()
+    except Exception:  # noqa: BLE001 - the plan is optional context here
+        logger.debug("plan targets unavailable for the core ETF", exc_info=True)
+    return BENCHMARK_TICKER
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -53,6 +72,84 @@ def _is_etf(asset_type: Optional[str]) -> bool:
     return (asset_type or "").strip().lower() == "etf"
 
 
+#: Issuers reported in the look-through check.
+LOOK_THROUGH_TOP_N = 10
+
+
+def _issuer_key(ticker: Optional[str]) -> str:
+    """``NVDA`` for ``NVDA``, ``nvda`` and ``NVDA.DE``: one issuer across listings."""
+    return (ticker or "").strip().upper().split(".")[0]
+
+
+def _concentration_check(
+    weighted: list[dict[str, Any]],
+    total_value: float,
+    cap: float,
+    etf_holdings: dict[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Single-position cap on look-through issuer exposure (D6).
+
+    A diversified index fund (broad-index name or >= 100 holdings) is one
+    position but no single-issuer risk, so it is exempt. Its top holdings
+    still count: an issuer's exposure is its direct weight plus
+    ``fund weight x issuer weight`` inside every held ETF.
+    """
+    exempt: list[str] = []
+    exposure: dict[str, dict[str, Any]] = {}
+
+    def _add(key: str, label: str, name: Any, direct: float, via: float) -> None:
+        row = exposure.setdefault(key, {"ticker": label, "name": name, "direct_pct": 0.0, "via_etf_pct": 0.0})
+        row["direct_pct"] += direct
+        row["via_etf_pct"] += via
+
+    for e in weighted:
+        weight = e["market_value"] / total_value
+        label = e["ticker"] or e["name"]
+        if _is_etf(e["asset_type"]):
+            for h in etf_holdings.get(str(e["ticker"] or "").upper()) or []:
+                try:
+                    inner = float(h.get("weight") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if inner > 0 and h.get("ticker"):
+                    _add(_issuer_key(h["ticker"]), _issuer_key(h["ticker"]), h.get("name"), 0.0, weight * inner)
+            if is_diversified_fund(e["name"], isin=e["isin"], holdings_count=e.get("holdings_count")):
+                exempt.append(label)
+                continue
+            # A narrow fund (sector, theme, single country) is one position.
+            _add(f"fund:{label}", label, e["name"], weight, 0.0)
+            continue
+        _add(_issuer_key(e["ticker"]) or f"name:{e['name']}", label, e["name"], weight, 0.0)
+
+    rows = []
+    for row in exposure.values():
+        total = row["direct_pct"] + row["via_etf_pct"]
+        rows.append({
+            "ticker": row["ticker"],
+            "name": row["name"],
+            "weight_pct": round(total * 100, 2),
+            "direct_pct": round(row["direct_pct"] * 100, 2),
+            "via_etf_pct": round(row["via_etf_pct"] * 100, 2),
+            "_w": total,
+        })
+    rows.sort(key=lambda r: r["_w"], reverse=True)
+    breaches = [{k: v for k, v in r.items() if k != "_w"} for r in rows if r["_w"] > cap]
+    look_through = [{k: v for k, v in r.items() if k != "_w"} for r in rows[:LOOK_THROUGH_TOP_N]]
+    top = look_through[0] if look_through else None
+    return {
+        "key": "concentration",
+        "label": "Single-position cap",
+        "basis": "look_through",
+        "status": "breach" if breaches else "ok",
+        "cap_pct": round(cap * 100, 2),
+        "top_position": top["ticker"] if top else None,
+        "top_weight_pct": top["weight_pct"] if top else 0.0,
+        "breaches": breaches,
+        "exempt_diversified": exempt,
+        "look_through": look_through,
+    }
+
+
 def compute_assessment(
     *,
     positions: list[dict[str, Any]],
@@ -63,6 +160,8 @@ def compute_assessment(
     max_single_position_pct: float,
     min_etf_pct: float,
     as_of: Optional[datetime] = None,
+    etf_holdings: Optional[dict[str, list[dict[str, Any]]]] = None,
+    core_etf: Optional[str] = None,
 ) -> dict[str, Any]:
     """Compute deterministic assessment facts. Pure — no DB, no network.
 
@@ -76,6 +175,9 @@ def compute_assessment(
         max_single_position_pct: Concentration cap as a fraction (A 0.15 / B 0.20).
         min_etf_pct: ETF floor as a fraction (A 0.40 / B 0.30).
         as_of: Timestamp stamped onto the result (defaults to now, UTC).
+        etf_holdings: ETF ticker -> its top holdings (``ticker``, ``name``,
+            ``weight`` as a fraction of the fund), for the look-through check.
+        core_etf: The plan's core ETF, named in the ``deploy_cash`` check.
 
     Returns:
         A JSON-serialisable dict with ``positions``, ``checks`` and a
@@ -94,6 +196,7 @@ def compute_assessment(
             "ticker": p.get("ticker"),
             "name": p.get("name"),
             "asset_type": p.get("asset_type"),
+            "holdings_count": p.get("holdings_count"),
             "market_value": (qty * price) if price is not None else None,
         }
         if price is None:
@@ -113,23 +216,9 @@ def compute_assessment(
 
     checks: list[dict[str, Any]] = []
 
-    # 1. Concentration — largest position vs single-position cap.
+    # 1. Concentration — look-through issuer exposure vs single-position cap.
     if total_value > 0 and weighted:
-        breaches = [
-            {"ticker": e["ticker"], "name": e["name"], "weight_pct": e["weight_pct"]}
-            for e in weighted
-            if e["market_value"] / total_value > max_single_position_pct
-        ]
-        top = weighted[0]
-        checks.append({
-            "key": "concentration",
-            "label": "Single-position cap",
-            "status": "breach" if breaches else "ok",
-            "cap_pct": round(max_single_position_pct * 100, 2),
-            "top_position": top["ticker"] or top["name"],
-            "top_weight_pct": top["weight_pct"],
-            "breaches": breaches,
-        })
+        checks.append(_concentration_check(weighted, total_value, max_single_position_pct, etf_holdings or {}))
     else:
         checks.append({
             "key": "concentration",
@@ -165,6 +254,23 @@ def compute_assessment(
         "label": "Cash weight",
         "status": "info",
         "value_pct": round((cash / total_value) * 100, 2) if total_value > 0 else None,
+    })
+
+    # 3b. Deploy cash — idle cash above the threshold is a decision to act on.
+    cash_frac = (cash / total_value) if total_value > 0 else 0.0
+    deploy = cash_frac > DEPLOY_CASH_ABOVE_PCT
+    checks.append({
+        "key": "deploy_cash",
+        "label": "Deploy cash",
+        "status": "action" if deploy else "ok",
+        "cash_pct": round(cash_frac * 100, 2),
+        "threshold_pct": round(DEPLOY_CASH_ABOVE_PCT * 100, 2),
+        "core_etf": core_etf or BENCHMARK_TICKER,
+        **({"instruction": (
+            f"Cash is {cash_frac:.0%} of the portfolio. Deploy it: buy {core_etf or BENCHMARK_TICKER} "
+            "(the core ETF) or a better-diversified holding. If you hold, the core ETF is bought "
+            "up to the ETF floor automatically."
+        )} if deploy else {}),
     })
 
     # 4. Max drawdown — informational (already a fraction on the snapshot).
@@ -213,14 +319,19 @@ def _summary_line(checks: list[dict[str, Any]]) -> str:
 
     conc = by_key.get("concentration", {})
     if conc.get("status") == "breach":
+        worst = (conc.get("breaches") or [{}])[0]
         parts.append(
-            f"Concentration breach: {conc['top_position']} "
-            f"{conc['top_weight_pct']}% > {conc['cap_pct']}% cap"
+            f"Concentration breach: {worst.get('ticker', conc.get('top_position'))} "
+            f"{worst.get('weight_pct', conc.get('top_weight_pct'))}% > {conc['cap_pct']}% cap"
         )
 
     etf = by_key.get("etf_floor", {})
     if etf.get("status") == "breach":
         parts.append(f"ETF {etf['etf_pct']}% below {etf['floor_pct']}% floor")
+
+    dc = by_key.get("deploy_cash", {})
+    if dc.get("status") == "action":
+        parts.append(f"Deploy cash: {dc['cash_pct']}% cash, core ETF {dc['core_etf']}")
 
     dd = by_key.get("drawdown", {})
     if dd.get("value_pct") is not None:
@@ -346,6 +457,25 @@ def _price_map_for_portfolio(db: Session, portfolio: PaperPortfolio) -> dict[str
     return live_prices_by_isin(db, portfolio.user_id)
 
 
+def _etf_holdings(positions: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Top holdings of each held ETF (``etf_lookup``, cached 24 h); best effort."""
+    from app.foundation.etf_lookup import get_etf_composition
+
+    out: dict[str, list[dict[str, Any]]] = {}
+    for p in positions:
+        ticker = str(p.get("ticker") or "").upper()
+        if not ticker or not _is_etf(p.get("asset_type")) or ticker in out:
+            continue
+        try:
+            comp = get_etf_composition(ticker)
+        except Exception as exc:  # network / provider errors: no look-through for this fund
+            logger.debug("ETF composition failed for %s: %s", ticker, exc)
+            comp = None
+        if comp is not None:
+            out[ticker] = [{"ticker": h.ticker, "name": h.name, "weight": h.weight} for h in comp.holdings]
+    return out
+
+
 def build_assessment(
     db: Session,
     portfolio: PaperPortfolio,
@@ -402,4 +532,6 @@ def build_assessment(
         benchmark_excess=benchmark,
         max_single_position_pct=float(mandate_config.get("max_single_position_pct", 0.20)),
         min_etf_pct=float(mandate_config.get("min_etf_pct", 0.30)),
+        etf_holdings=_etf_holdings(positions),
+        core_etf=core_etf_ticker(db),
     )

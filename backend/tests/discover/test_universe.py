@@ -182,24 +182,40 @@ class TestIsinBackfill:
 
 class TestFixedIncomeSeed:
     """F17: CBE3.L has no Xetra listing, so EtfUniverseProvider's justETF
-    scrape (Xetra-only symbols) can never surface it — it must be seeded
-    explicitly and always included, independent of the fundamentals floor."""
+    scrape (Xetra-only symbols) can never surface it — it is seeded
+    explicitly. Since D4 (plan 2026-10-12) it enters only as the plan's bond
+    line: when the owner sets a bond target."""
+
+    @staticmethod
+    def _bond_target(db, pct=10):
+        from app.foundation.settings import upsert_public_settings
+
+        upsert_public_settings(db, {"plan_bond_target_pct": pct})
 
     def test_seed_present_even_with_empty_etf_provider(self):
         db = _memory_db()
         user = _user(db)
+        self._bond_target(db)
         candidates = _build(db, user)
         symbols = {c["symbol"] for c in candidates}
         assert "CBE3.L" in symbols
 
+    def test_seed_absent_without_a_bond_target(self):
+        db = _memory_db()
+        user = _user(db)
+        assert "CBE3.L" not in {c["symbol"] for c in _build(db, user)}
+
     def test_seed_candidate_has_bond_metadata(self):
         db = _memory_db()
         user = _user(db)
+        self._bond_target(db)
         candidates = _build(db, user)
         cbe3 = next(c for c in candidates if c["symbol"] == "CBE3.L")
         assert cbe3["isin"] == "IE00B3VTMJ91"
         assert cbe3["source"] == "screen_etf"
         assert cbe3["tf_class"] == "other"
+        assert cbe3["asset_class"] == "bond_govt_eur_short"
+        assert cbe3["plan_line"] == "bond"
 
     def test_seed_excluded_when_already_held(self):
         db = _memory_db()

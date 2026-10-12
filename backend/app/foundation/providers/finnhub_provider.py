@@ -97,6 +97,10 @@ class FinnhubProvider(MarketDataProvider):
                 "debt_equity": _scaled(
                     _first(metric, "totalDebt/totalEquityQuarterly", "totalDebt/totalEquityAnnual"), 100.0,
                 ),
+                # Wrong for banks: revenueGrowthTTMYoy evidently counts gross
+                # revenue including interest income (JPM 109 % vs ~14 %). Kept
+                # as is; Discover drops it for financials and for unconfirmed
+                # |growth| > 100 % (pipeline._sane_revenue_growth, plan 2026-10-12).
                 "revenue_growth": _scaled(metric.get("revenueGrowthTTMYoy"), 0.01),
                 "earnings_growth": _scaled(metric.get("epsGrowthTTMYoy"), 0.01),
                 "dividend_yield": _scaled(metric.get("currentDividendYieldTTM"), 0.01),

@@ -12,12 +12,14 @@ from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import NewsItem, Recommendation, RecommendationDossier
 from app.decision.discover.candidate_gate import (
+    UNPROVEN_VERDICT,
     _resolve_cohort_instrument_type,
     discover_verdict,
     evaluate_track_record,
 )
 from app.decision.discover.composite import ic_signal_usable
 from app.decision.discover.config import DEFAULT_PROMPT_TEMPLATE
+from app.decision.discover.thesis_checks import check_thesis
 from app.foundation.expected_return import (
     EQUITY_PREMIUM_OVER_CASH,
     credibility_weight,
@@ -59,6 +61,25 @@ _MAX_RISK_CHARS = 160
 _MAX_RISKS = 6
 
 _COMPLETION_TOKENS = 1024
+#: The prompt asks for at most this many characters (the schema keeps 600 as a net).
+_PROMPT_THESIS_CHARS = 450
+#: Dossier horizon unless the prompt config sets ``horizon_months``.
+DEFAULT_DOSSIER_HORIZON_MONTHS = 6
+#: Content-check retries before the deterministic template (D7: one retry).
+_MAX_CONTENT_RETRIES = 1
+
+#: Rules appended to every dossier request in code, so they hold whatever
+#: prompt template is stored.
+_THESIS_RULES = (
+    "Rules for thesis and key_risks:\n"
+    f"- thesis: at most 3 complete sentences and {_PROMPT_THESIS_CHARS} characters; end with a full stop.\n"
+    "- Use only numbers that appear above. Do not invent figures, multiples, targets or consensus values.\n"
+    "- Do not describe interest-rate moves (hikes, cuts, tightening, easing) unless the Macro facts above "
+    "show that direction.\n"
+    "- Direction and horizon are fixed by the system (above); do not argue the opposite stance.\n"
+    "- The investor holds EUR. Mention currency risk only if the listing or reporting currency is not EUR.\n"
+    "- English only.\n"
+)
 
 # How much of a rejected completion is quoted back on a retry, so echoing one
 # runaway answer cannot push the next attempt past the context window.
@@ -67,9 +88,9 @@ _RETRY_EXCERPT_CHARS = 800
 DOSSIER_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "direction": {"type": "string", "enum": ["long", "short", "neutral"]},
+        # direction and horizon_months are deterministic (plan 2026-10-12,
+        # D7): the system sets them after validation, like conviction.
         "conviction": {"type": "number", "minimum": 0, "maximum": 1},
-        "horizon_months": {"type": "integer", "minimum": 1, "maximum": 12},
         # minLength closes the same gap fixed in advisor/llm_decision.py's
         # thesis field (audit-fixes-2026-08 todo 6): without it, the grammar
         # has no reason to refuse "" for a required string field.
@@ -103,15 +124,17 @@ DOSSIER_JSON_SCHEMA: dict[str, Any] = {
     # a 3-month forecast — see docs/archive/plans/unified-portfolio-engine-implementation.md
     # Phase 3).
     "required": [
-        "direction", "conviction", "horizon_months", "thesis", "key_risks",
+        "conviction", "thesis", "key_risks",
     ],
 }
 
 
 class DossierOutputModel(BaseModel):
-    direction: Literal["long", "short", "neutral"]
+    # Set by the system after validation (deterministic_direction, the
+    # configured horizon); whatever the model sends here is overwritten.
+    direction: Literal["long", "short", "neutral"] = "neutral"
     conviction: float  # 0-1
-    horizon_months: int  # 1-12
+    horizon_months: int = 6  # 1-12
     # min_length matches DOSSIER_JSON_SCHEMA's thesis/key_risks minLength
     # (audit-fixes-2026-08 todo 6): _coerce_dossier fills a genuinely-missing
     # thesis with "" so pydantic sees a value at all, and this constraint is
@@ -124,6 +147,87 @@ class DossierOutputModel(BaseModel):
     signal_breakdown: dict  # passed in input, echoed back
     estimate: bool = True
     not_financial_advice: bool = True
+
+
+def skill_horizon(tracking_error: Any, benchmark: Any) -> dict[str, Any] | None:
+    """Years of live data a t of 2 needs at this tracking error: (2 * TE / alpha)^2.
+
+    Evaluated at alpha = 1 % and 2 % a year. None without a tracking error.
+    """
+    if not isinstance(tracking_error, (int, float)) or tracking_error <= 0:
+        return None
+    te = float(tracking_error)
+    years = {f"alpha_{int(a * 100)}pct": round((2.0 * te / a) ** 2, 1) for a in (0.01, 0.02)}
+    return {
+        "tracking_error": round(te, 4),
+        "benchmark": benchmark,
+        "basis": "weekly active returns, last 2 years",
+        "years": years,
+        "text": (
+            f"At this tracking error ({te:.0%}/yr), a 2 %/yr edge needs about {years['alpha_2pct']:g} years "
+            f"of live data to show, a 1 %/yr edge about {years['alpha_1pct']:g}."
+        ),
+    }
+
+
+def deterministic_direction(expected_return_pct: float | None, estr_pct: float | None, verdict: str) -> str:
+    """``long`` when the system's expected return beats €STR over the horizon and
+    the verdict is not HOLD; otherwise ``neutral``. Never ``short``: long-only (D7)."""
+    if expected_return_pct is None or str(verdict).upper() == "HOLD":
+        return "neutral"
+    return "long" if float(expected_return_pct) > float(estr_pct or 0.0) else "neutral"
+
+
+def estr_over_horizon_pct(db: Session | None, horizon_months: int) -> float | None:
+    """€STR (latest fixing) accrued over the horizon, in percent; None when unknown."""
+    if db is None:
+        return None
+    try:
+        from app.foundation.estr import stored_fixings
+
+        fixings = stored_fixings(db, start=datetime.now(UTC).date() - timedelta(days=20))
+    except Exception:  # noqa: BLE001
+        return None
+    if not fixings:
+        return None
+    return round(fixings[-1][1] * horizon_months / 12.0, 3)
+
+
+def _regime_text(db: Session, regime_state: Any) -> str:
+    """The regime as a model's state with its reliability, never as a fact (D9)."""
+    label = str(regime_state or "").strip()
+    reliability = None
+    label_source = None
+    try:
+        from app.foundation.data_backbone.regime_store import RegimeStore
+
+        snap = RegimeStore(db).get_latest_snapshot(source="jump")
+        if snap:
+            label = label or str(snap.get("label") or "")
+            score = snap.get("score")
+            reliability = float(score) if isinstance(score, (int, float)) else None
+            label_source = (snap.get("payload") or {}).get("label_source")
+    except Exception:  # noqa: BLE001 - context only
+        logger.debug("dossier: regime snapshot unavailable", exc_info=True)
+    if not label:
+        return "Regime model: unavailable"
+    rel = f" (reliability {reliability:.0%})" if reliability is not None else ""
+    carried = " (label carried over after a model refit)" if label_source == "carried_after_refit" else ""
+    return f"Regime model: {label}{rel}{carried}. A model state, not a fact: do not state it as the market's condition"
+
+
+def _macro_facts(db: Session) -> dict[str, Any] | None:
+    """The WP8 macro block; None when nothing is stored (rate words are then refused)."""
+    try:
+        from app.foundation.euro_macro import macro_fact_block
+
+        block = macro_fact_block(db)
+    except Exception:  # noqa: BLE001
+        logger.debug("dossier: macro block unavailable", exc_info=True)
+        return None
+    if not any(block.get(k) for k in ("ecb_deposit_rate", "fed_funds_upper", "hicp_euro_area")):
+        return None
+    return block
 
 
 def _fetch_fundamentals(symbol: str, db: Session) -> dict[str, Any] | None:
@@ -146,10 +250,18 @@ def _fetch_fundamentals(symbol: str, db: Session) -> dict[str, Any] | None:
             except (TypeError, ValueError):
                 return None
 
+        roe = _as_float("roe")
+        pb = _as_float("pb_ratio")
+        forward_pe = _as_float("forward_pe")
         fundamentals = {
+            # Labelled by source field: pe_ratio is trailing everywhere it comes from.
             "pe": _as_float("pe_ratio"),
-            "pb": _as_float("pb_ratio"),
-            "roe": _as_float("roe"),
+            "pe_basis": "trailing",
+            "forward_pe": forward_pe,
+            "pb": pb,
+            # Above 100 % or with negative equity ROE is not meaningful (D8);
+            # the score keeps its own clip. (JPM-style 200-631 % were shown raw.)
+            "roe": "n/m" if roe is not None and (roe > 1.0 or (pb is not None and pb < 0)) else roe,
             "de_ratio": _as_float("debt_equity"),
             "market_cap": _as_float("market_cap"),
             "revenue_growth": _as_float("revenue_growth"),
@@ -157,6 +269,8 @@ def _fetch_fundamentals(symbol: str, db: Session) -> dict[str, Any] | None:
             # sector/industry rather than leaving the LLM to infer them.
             "sector": data.get("sector"),
             "industry": data.get("industry"),
+            "reporting_currency": data.get("financial_currency") or data.get("financialCurrency")
+            or data.get("reporting_currency"),
             "source": result.get("source", "unknown"),
             "stale": bool(result.get("stale", True)),
         }
@@ -275,11 +389,21 @@ def _gather_instrument_facts(
     from app.foundation.etf_lookup import get_etf_profile
     from app.foundation.providers.registry import build_provider_registry
 
+    listing_ccy: str | None = None
+    try:
+        from app.foundation.data_backbone.listing_currency import resolve_currency
+
+        listing_ccy = resolve_currency(db, symbol)
+    except Exception:  # noqa: BLE001 - best effort
+        listing_ccy = None
     if instrument_type not in ("etf", "fund"):
         return {
             "instrument_type": instrument_type,
             "sector": fundamentals.get("sector"),
             "industry": fundamentals.get("industry"),
+            "listing_currency": listing_ccy,
+            "reporting_currency": fundamentals.get("reporting_currency"),
+            "investor_currency": "EUR",
         }
 
     if isin:
@@ -320,6 +444,8 @@ def _gather_instrument_facts(
         "tracked_index": index_name,
         "inception_date": inception_date,
         "style": style,
+        "listing_currency": listing_ccy,
+        "investor_currency": "EUR",
     }
 
 
@@ -404,14 +530,16 @@ def _grounding_prompt_lines(scores: dict[str, Any], annual: dict[str, Any]) -> s
     sf = _as_dict(scores.get("sentiment_fundamentals"))
     if sf.get("analyst_estimate_score") is not None:
         target_text = (
-            f"median price target {sf['analyst_target']} ({_pct((sf.get('analyst_upside') or 0.0) * 100)} "
-            "vs current price)"
+            f"{sf.get('analyst_target_kind') or 'median'} price target {sf['analyst_target']} "
+            f"({_pct((sf.get('analyst_upside') or 0.0) * 100)} vs current price)"
             if sf.get("analyst_target") is not None
             else "no price target"
         )
+        source = str(sf.get("analyst_source") or "provider").split("_")[0].title()
+        as_of = f" as of {sf['analyst_as_of']}" if sf.get("analyst_as_of") else ""
         lines.append(
-            f"Analyst consensus: {target_text}, rating {sf.get('analyst_recommendation') or 'n/a'}, "
-            f"{sf.get('analyst_count') or 'unknown number of'} analysts."
+            f"Analyst consensus ({source} consensus{as_of}): {target_text}, rating "
+            f"{sf.get('analyst_recommendation') or 'n/a'}, {sf.get('analyst_count') or 'unknown number of'} analysts."
         )
     elif "analyst_unavailable" in (sf.get("concerns") or []):
         lines.append("Analyst consensus: unavailable for this run — do not assume it is neutral or positive.")
@@ -645,12 +773,34 @@ def write_dossier(
             f"Tracked index: {instrument_facts.get('tracked_index') or 'N/A'}\n"
             f"Inception date: {instrument_facts.get('inception_date') or 'N/A'}\n"
             f"Style (established fact from holdings/mandate — do not re-derive or contradict): {style_text}\n"
+            f"Listing currency: {instrument_facts.get('listing_currency') or 'N/A'}; investor currency: EUR\n"
         )
     else:
         instrument_facts_lines = (
             f"Sector: {instrument_facts.get('sector') or 'N/A'}\n"
             f"Industry: {instrument_facts.get('industry') or 'N/A'}\n"
+            f"Listing currency: {instrument_facts.get('listing_currency') or 'N/A'}; "
+            f"reporting currency: {instrument_facts.get('reporting_currency') or 'N/A'}; investor currency: EUR\n"
         )
+
+    # Deterministic fields (D7): the model narrates them, it does not choose them.
+    horizon_months = int((prompt_config or {}).get("horizon_months") or DEFAULT_DOSSIER_HORIZON_MONTHS)
+    horizon_months = max(1, min(12, horizon_months))
+    resolved = _resolve_expected_return(
+        db,
+        profile.get("user_id", "unknown"),
+        instrument_type,
+        scores,
+        horizon_months,
+        symbol,
+        signal_breakdown=signal_breakdown,
+        annual=annual_estimate,
+    )
+    verdict = discover_verdict(track_record_gate)
+    direction = deterministic_direction(
+        resolved["expected_return_pct"], estr_over_horizon_pct(db, horizon_months), verdict,
+    )
+    macro = _macro_facts(db)
 
     system_prompt: str
     if prompt_config and "system_prompt" in prompt_config:
@@ -664,7 +814,7 @@ def write_dossier(
         f"Source: {candidate.get('source')}\n"
         f"Composite score: {composite_score}\n"
         f"ICIR: {icir}\n"
-        f"Regime state: {regime_state}\n"
+        f"{_regime_text(db, regime_state)}\n"
         f"ML signal regime context: {json.dumps(ml_regime_context)}\n"
         f"Portfolio context: {json.dumps(portfolio_fit_raw)}\n"
         f"Quantitative scores: {json.dumps(_reword_concerns_for_prompt(scores))}\n"
@@ -675,6 +825,10 @@ def write_dossier(
         f"Signal breakdown (evaluated signals): {json.dumps(evaluated_signals)}\n"
         f"{grounding_lines}"
         f"User profile: {json.dumps(profile)}\n"
+        f"Macro facts: {json.dumps(macro) if macro else 'unavailable'}\n"
+        f"Direction (fixed by the system): {direction}. Horizon: {horizon_months} months. "
+        f"System expected return over the horizon: {resolved['expected_return_pct']} %.\n"
+        f"\n{_THESIS_RULES}"
         "\nGenerate a research hypothesis as structured JSON matching the schema."
     )
 
@@ -692,12 +846,14 @@ def write_dossier(
         fallback_reason = "llm_skipped: circuit breaker open after repeated LLM failures"
         final_dossier = deterministic_template(
             candidate, scores, signal_breakdown, db, profile.get("user_id"), annual=annual_estimate,
+            direction=direction, horizon_months=horizon_months,
         )
     else:
         base_messages = list(messages)
         attempt_messages = list(messages)
         last_error: str | None = None
         telemetry: dict[str, Any] = {}
+        content_rejections: list[str] = []
         for attempt in range(_MAX_JSON_RETRIES + 1):
             telemetry.clear()
             try:
@@ -714,11 +870,29 @@ def write_dossier(
                 break
 
             parsed = _try_parse_json(raw)
+            content_problems: list[str] = []
             if parsed is not None:
                 try:
                     validated = DossierOutputModel.model_validate(_coerce_dossier(parsed))
-                    final_dossier = validated.model_dump()
-                    break
+                    candidate_dossier = validated.model_dump()
+                    check = check_thesis(
+                        candidate_dossier.get("thesis") or "",
+                        list(candidate_dossier.get("key_risks") or []),
+                        facts_text=context,
+                        macro=macro,
+                        direction=direction,
+                    )
+                    if check.ok:
+                        candidate_dossier["thesis"] = check.thesis
+                        candidate_dossier["key_risks"] = check.key_risks
+                        final_dossier = candidate_dossier
+                        break
+                    content_rejections.append(check.reason or "invalid")
+                    content_problems = check.problems
+                    last_error = f"{check.reason}: {'; '.join(check.problems)}"
+                    logger.info("Dossier thesis for %s rejected: %s", symbol, last_error)
+                    if len(content_rejections) > _MAX_CONTENT_RETRIES:
+                        break
                 except ValidationError as exc:
                     logger.warning("Dossier validation failed for %s: %s", symbol, exc)
                     last_error = "llm_invalid: response failed schema validation"
@@ -736,19 +910,30 @@ def write_dossier(
                 instruction = (
                     f"That response was unusable: {last_error}. Reply with exactly "
                     "one JSON object, no markdown, no text outside the object. Keep "
-                    f"thesis under {_MAX_THESIS_CHARS} characters so the object "
+                    f"thesis under {_PROMPT_THESIS_CHARS} characters so the object "
                     "closes inside the token budget."
                 )
+                if content_problems:
+                    instruction += " Fix these problems: " + "; ".join(content_problems) + "."
                 attempt_messages = build_retry_messages(
                     base_messages, raw, instruction, excerpt_chars=_RETRY_EXCERPT_CHARS
                 )
 
         if final_dossier is None:
             generated_by = "fallback"
-            fallback_reason = last_error or "llm_invalid: response failed schema validation"
+            # A content rejection is stored as its bare reason code
+            # (truncated / script / ungrounded_number / macro / contradiction)
+            # so the rejection rate per rule can be counted.
+            fallback_reason = (
+                content_rejections[-1] if content_rejections
+                else last_error or "llm_invalid: response failed schema validation"
+            )
             final_dossier = deterministic_template(
-            candidate, scores, signal_breakdown, db, profile.get("user_id"), annual=annual_estimate,
-        )
+                candidate, scores, signal_breakdown, db, profile.get("user_id"), annual=annual_estimate,
+                direction=direction, horizon_months=horizon_months,
+            )
+        elif content_rejections:
+            final_dossier["content_retries"] = content_rejections
 
     assert final_dossier is not None
     # expected_return is always computed here, from the quant anchor — never
@@ -757,15 +942,16 @@ def write_dossier(
     # deterministic-fallback paths resolve it through the single dispatcher
     # below, so there is exactly one place expected_return (and its PRIIPs
     # uncertainty band) is derived.
-    resolved = _resolve_expected_return(
-        db,
-        profile.get("user_id", "unknown"),
-        instrument_type,
-        scores,
-        final_dossier.get("horizon_months", 6),
-        symbol,
-        signal_breakdown=signal_breakdown,
-        annual=annual_estimate,
+    # (resolved once, before the LLM call, over the fixed horizon.)
+    final_dossier["direction"] = direction
+    final_dossier["horizon_months"] = horizon_months
+    # UI honesty (plan 2026-10-12, WP13).
+    final_dossier["skill_horizon"] = skill_horizon(
+        backtest_raw.get("tracking_error_weekly_2y"), backtest_raw.get("benchmark"),
+    )
+    final_dossier["recommendation_label"] = (
+        "Rule, not a forecast" if instrument_type in ("etf", "fund", "bond", "money_market")
+        else "Shadow — not a recommendation"
     )
     final_dossier["expected_return"] = resolved["expected_return_pct"]
     final_dossier["expected_return_components"] = resolved["components"]
@@ -820,7 +1006,7 @@ def write_dossier(
             user_id=profile.get("user_id", "unknown"),
             ticker=symbol,
             # Evidence, not a score level: see candidate_gate.discover_verdict.
-            verdict=discover_verdict(track_record_gate),
+            verdict=verdict,
             confidence=__import__("decimal").Decimal(str(min(conviction, 1.0))),
             payload_json=json.dumps({
                 "dossier_id": dossier_id,
@@ -854,6 +1040,7 @@ def write_dossier(
         "dossier": final_dossier,
         "generated_by": generated_by,
         "fallback_reason": fallback_reason,
+        "direction": direction,
         # The horizon-free estimate, so the prediction ledger can restate it
         # over its own horizon (see expected_return_over_trading_days).
         "annual_estimate": {
@@ -1092,6 +1279,8 @@ def _try_bl_er(
         from app.decision.discover.pipeline import _pick_benchmark
 
         benchmark = _pick_benchmark(symbol, instrument_type == "etf")
+        if benchmark is None or instrument_type in ("bond", "money_market"):
+            return None
         days = 365 * 3 + 30
 
         import numpy as np
@@ -1422,6 +1611,9 @@ def deterministic_template(
     db: Session | None = None,
     user_id: str | None = None,
     annual: dict[str, Any] | None = None,
+    *,
+    direction: str | None = None,
+    horizon_months: int = DEFAULT_DOSSIER_HORIZON_MONTHS,
 ) -> dict[str, Any]:
     """Create a §5 dossier without LLM when LLM is unavailable or max retries exceeded.
 
@@ -1432,7 +1624,6 @@ def deterministic_template(
     """
     composite = scores.get("composite", 0.0)
     symbol = candidate["symbol"]
-    horizon_months = 6
     instrument_type = signal_breakdown.get("instrument_type", "equity")
     resolved = _resolve_expected_return(
         db,
@@ -1470,7 +1661,9 @@ def deterministic_template(
         )
 
     dossier = {
-        "direction": "long" if composite >= 0.5 else "neutral",
+        "direction": direction if direction is not None else deterministic_direction(
+            resolved["expected_return_pct"], None, UNPROVEN_VERDICT,
+        ),
         "conviction": composite,
         "horizon_months": horizon_months,
         "expected_return": resolved["expected_return_pct"],
@@ -1528,7 +1721,7 @@ def _coerce_dossier(raw: dict[str, Any]) -> dict[str, Any]:
         direction = "neutral"
     raw["direction"] = direction
     raw.setdefault("conviction", 0.5)
-    raw.setdefault("horizon_months", 6)
+    raw.setdefault("horizon_months", DEFAULT_DOSSIER_HORIZON_MONTHS)
     raw.setdefault("thesis", "")
     raw.setdefault("key_risks", [])
     raw.setdefault("signal_breakdown", {})

@@ -104,7 +104,9 @@ def test_build_council_context_has_all_18_keys_with_holdings_and_prices():
     assert context["correlation_matrix"].get("assets")
 
 
-def test_build_council_context_degrades_cleanly_with_no_holdings_or_prices():
+def test_build_council_context_degrades_cleanly_with_no_holdings_or_prices(monkeypatch):
+    # The plan's core ETF joins the universe; keep its price fetch offline.
+    monkeypatch.setattr("app.foundation.quant_proposal.market_history", lambda *a, **k: [])
     db = _memory_db()
     user = _user(db)
     portfolio = _portfolio(db, user)

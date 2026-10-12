@@ -341,6 +341,8 @@ def test_weekly_beta_recovers_beta_that_daily_misses_on_lagged_closes(monkeypatc
         "SPY": _rows(100 * np.cumprod(1 + bench_r)),
     }
     monkeypatch.setattr(pipeline_mod, "market_history", lambda _db, sym, days=0, **_kw: series[sym])
+    # Both legs are EUR here; the EUR restatement itself is tested in test_eur_prices.
+    monkeypatch.setattr("app.foundation.eur_prices.to_eur", lambda _db, _sym, closes, **_kw: (closes, "EUR"))
 
     from app.foundation.quant_metrics import beta
 
@@ -437,8 +439,10 @@ def test_bbva_dossier_is_grounded_and_estimate_starts_from_market_prior(monkeypa
     assert comp["prior_pct"] == pytest.approx(prior, abs=0.01)
     assert comp["credibility_weight"] == pytest.approx(weight, abs=1e-4)
     expected = prior + weight * (59.77 - prior)
-    assert dossier["expected_return"] == pytest.approx(round(expected, 1))
-    assert 7.0 < dossier["expected_return"] < 10.0  # was 6.0 (zero-centred shrink)
+    # Over the system's fixed 6-month horizon (D7), not the 12 months the LLM sent.
+    assert dossier["horizon_months"] == 6
+    assert dossier["expected_return"] == pytest.approx(round(expected * 6 / 12, 1), abs=0.051)
+    assert 3.5 < dossier["expected_return"] < 5.0
     assert dossier["composite_breakdown"] == _BBVA_SCORES["composite_inputs"]
     assert dossier["signal_breakdown"]["expected_return_anchor_kind"] == "trailing_3y_annualized_return"
     assert dossier["signal_breakdown"]["analyst_consensus"] == pytest.approx(0.3909)

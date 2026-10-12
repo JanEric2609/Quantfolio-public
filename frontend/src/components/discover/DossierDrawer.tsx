@@ -234,6 +234,11 @@ export function DossierDrawer({ open, onClose, dossier, symbol, concerns, name, 
                     Quant template — LLM unavailable
                   </Badge>
                 )}
+                {dossier.recommendation_label && (
+                  <Badge variant="secondary" data-testid="recommendation-label">
+                    {dossier.recommendation_label}
+                  </Badge>
+                )}
                 <DirectionBadge direction={dossier.direction} />
               </div>
             </div>
@@ -242,6 +247,12 @@ export function DossierDrawer({ open, onClose, dossier, symbol, concerns, name, 
             <section>
               <h4 className="text-sm font-semibold text-text-primary mb-2">Signal score</h4>
               <ScoreBar label="Score (0–1, not a probability)" value={dossier.conviction} hint="Composite ranking score from 0 to 1, built from trailing signals. Not a probability that the pick beats the market." />
+              {dossier.skill_horizon && (
+                <p data-testid="skill-horizon" className="mt-2 text-xs text-text-muted">
+                  {dossier.skill_horizon.text} (Tracking error from {dossier.skill_horizon.basis}
+                  {dossier.skill_horizon.benchmark ? ` vs ${dossier.skill_horizon.benchmark}` : ""}.)
+                </p>
+              )}
             </section>
 
             {/* Return estimate */}
@@ -283,7 +294,7 @@ export function DossierDrawer({ open, onClose, dossier, symbol, concerns, name, 
               {anchorKindLabel(dossier.expected_return_anchor_kind) && (
                 <p className="text-xs text-text-muted mt-1">
                   Anchored on {anchorKindLabel(dossier.expected_return_anchor_kind)} — a historical figure, not a
-                  guarantee of future performance.
+                  guarantee of future performance. A trailing return rarely persists at the same pace.
                 </p>
               )}
             </section>

@@ -85,7 +85,12 @@ class TwelveDataProvider(MarketDataProvider):
                 warnings=[f"twelvedata: unsupported listing '{symbol}'"],
             )
         try:
-            params: dict[str, Any] = {**_symbol_params(symbol), "interval": "1day", "outputsize": 5000}
+            # `adjust=all` (splits and dividends); the API default is splits only,
+            # which stored raw closes (SPY 2023-12-29 = 475.31). See
+            # ProviderRegistry.TWELVEDATA_ADJUSTED_VERIFIED.
+            params: dict[str, Any] = {
+                **_symbol_params(symbol), "interval": "1day", "outputsize": 5000, "adjust": "all",
+            }
             if start:
                 params["start_date"] = start
             elif days:

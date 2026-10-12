@@ -130,8 +130,20 @@ def run_optimisation(
     previous_weights: dict[str, float] | None = None,
     max_turnover: float | None = None,
     periods_per_year: int = TRADING_DAYS_PER_YEAR,
+    covariance_estimator: str | None = None,
+    extra_groups: dict[str, list[str]] | None = None,
+    extra_constraints: list[str] | None = None,
+    max_weight_by_asset: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Run a full skfolio optimisation on a price matrix.
+
+    Decision paths (the advisor proposal, goal planning) use
+    ``objective="min_risk"`` with ``risk_measure="variance"`` and
+    ``covariance_estimator="ledoit_wolf"``: covariance only, no expected
+    returns. ``max_ratio`` maximises a ratio built on two-year sample means,
+    the "error maximiser" of Michaud (1989); it set the advisor's EUNL target
+    to 0 % and sold about €2.8k of the core a day (audit H3, plan D5). It
+    stays available for the interactive frontier endpoint only.
 
     Args:
         price_matrix: {ticker: {date_str: price}} dict.
@@ -161,18 +173,25 @@ def run_optimisation(
         previous_weights: Optional {ticker: weight} of the book's current
             weights, for turnover control (paired with max_turnover).
         max_turnover: Optional per-asset cap on |new_weight - previous_weight|.
-            Only meaningful together with previous_weights. Silently ignored
-            when objective is MAXIMIZE_RATIO ("max_ratio") — its fractional
-            reformulation is incompatible with the turnover constraint in
-            the installed skfolio/CLARABEL combination (confirmed
-            empirically: identical inputs solve under MINIMIZE_RISK, fail
-            under MAXIMIZE_RATIO for both VARIANCE and CVAR). A caller on
-            that objective still gets the policy-band constraints; it just
-            doesn't get turnover control, rather than the whole call failing.
+            Only meaningful together with previous_weights. Raises
+            ``ValueError`` with objective MAXIMIZE_RATIO ("max_ratio"): its
+            fractional reformulation is incompatible with the turnover
+            constraint in the installed skfolio/CLARABEL combination, and the
+            cap used to be dropped silently, which let the advisor sell its
+            whole core in a week.
         periods_per_year: Sampling frequency of ``price_matrix`` (ADR 0003:
             pass the named constant, never a bare number). Defaults to
             trading days, matching the daily price matrices every caller
             builds today.
+        covariance_estimator: ``"ledoit_wolf"`` fits the prior's covariance
+            with Ledoit-Wolf shrinkage (Ledoit & Wolf 2004); None keeps the
+            sample covariance.
+        extra_groups: {ticker: [group labels]} added to the policy groups,
+            for constraints such as ``"core >= 0.85"``.
+        extra_constraints: skfolio linear-constraint strings over the
+            policy and extra groups.
+        max_weight_by_asset: per-asset upper bounds (tickers missing from it
+            keep the global ``max_weights``).
 
     Returns a dict with weights, expected_return, volatility, risk_metric_value,
     and optionally cv_summary if a cross-validation scheme is selected.
@@ -207,6 +226,11 @@ def run_optimisation(
     obj_key = _OBJECTIVE_MAP.get(objective.lower(), "MAXIMIZE_RATIO")
     rm = getattr(RiskMeasure, rm_key)
     obj = getattr(ObjectiveFunction, obj_key)
+    if obj == ObjectiveFunction.MAXIMIZE_RATIO and max_turnover is not None:
+        raise ValueError(
+            "max_turnover cannot be combined with objective 'max_ratio' (unsupported by the solver); "
+            "use objective 'min_risk' for decision paths"
+        )
 
     # Determine weight bounds: caller's constraint takes precedence;
     # fall back to regime-adjusted constraints, then safe defaults.
@@ -224,39 +248,51 @@ def run_optimisation(
         min_weights = float(weights_constraint.get("min", 0.0))
         max_weights = float(weights_constraint.get("max", 1.0))
 
-    groups = None
-    linear_constraints = None
+    groups: dict[str, list[str]] | None = None
+    linear_constraints: list[str] | None = None
     if instrument_types:
         groups, linear_constraints = _build_policy_constraints({
             col: instrument_types.get(col, "equity") for col in returns.columns
         })
+    if extra_groups:
+        groups = groups or {col: [] for col in returns.columns}
+        for col in returns.columns:
+            groups.setdefault(col, []).extend(extra_groups.get(col, []))
+        # skfolio needs every asset to carry the same number of labels.
+        width = max(len(v) for v in groups.values())
+        for col in returns.columns:
+            labels = groups.setdefault(col, [])
+            labels.extend(["_none"] * (width - len(labels)))
+        linear_constraints = [*(linear_constraints or []), *(extra_constraints or [])]
 
     prev_weights_arr = None
     if previous_weights:
         prev_weights_arr = [previous_weights.get(col, 0.0) for col in returns.columns]
 
-    # MAXIMIZE_RATIO's fractional-programming reformulation (Charnes-Cooper)
-    # is incompatible with the turnover constraint's per-asset abs-value
-    # term in the installed skfolio/CLARABEL combination — confirmed
-    # empirically: identical inputs solve fine under MINIMIZE_RISK and fail
-    # every time under MAXIMIZE_RATIO, for both VARIANCE and CVAR. Silently
-    # dropping max_turnover here (rather than passing it through and letting
-    # the whole optimisation fail) keeps the policy-band constraints load
-    # bearing even for callers that also pass turnover control.
-    effective_max_turnover = max_turnover
-    if obj == ObjectiveFunction.MAXIMIZE_RATIO and max_turnover is not None:
-        effective_max_turnover = None
+    max_weights_arg: Any = max_weights
+    if max_weight_by_asset:
+        max_weights_arg = [
+            min(max_weights, float(max_weight_by_asset.get(col, max_weights))) for col in returns.columns
+        ]
+
+    prior = None
+    if covariance_estimator and covariance_estimator.lower() == "ledoit_wolf":
+        from skfolio.moments import LedoitWolf
+        from skfolio.prior import EmpiricalPrior
+
+        prior = EmpiricalPrior(covariance_estimator=LedoitWolf())
 
     model = MeanRisk(
         objective_function=obj,
         risk_measure=rm,
+        prior_estimator=prior,
         min_weights=min_weights,
-        max_weights=max_weights,
+        max_weights=max_weights_arg,
         risk_free_rate=per_period_risk_free_rate(risk_free_rate, periods_per_year),
         groups=groups,
         linear_constraints=linear_constraints,
         previous_weights=prev_weights_arr,
-        max_turnover=effective_max_turnover,
+        max_turnover=max_turnover,
     )
 
     result: dict[str, Any] = {"status": "unavailable", "objective": objective, "risk_measure": risk_measure}

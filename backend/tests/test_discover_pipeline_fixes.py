@@ -52,15 +52,26 @@ def _seed_prices(db, ticker: str, closes: list[float], end: date | None = None) 
 
 
 def test_pick_benchmark_is_region_aware():
-    assert _pick_benchmark("SAP.DE", is_etf=False) == "VGK"
-    assert _pick_benchmark("MC.PA", is_etf=False) == "VGK"
-    assert _pick_benchmark("ASML.AS", is_etf=False) == "VGK"
-    assert _pick_benchmark("AAPL", is_etf=False) == "SPY"
+    assert _pick_benchmark("SAP.DE", False) == "VGK"
+    assert _pick_benchmark("MC.PA", False) == "VGK"
+    assert _pick_benchmark("ASML.AS", False) == "VGK"
+    assert _pick_benchmark("AAPL", False) == "SPY"
     # Tokyo used to fall through to SPY.
-    assert _pick_benchmark("7203.T", is_etf=False) == "EWJ"
-    assert _pick_benchmark("0700.HK", is_etf=False) == "URTH"
-    assert _pick_benchmark("INTC", is_etf=False) == "SPY"
-    assert _pick_benchmark("VWCE.DE", is_etf=True) == "URTH"
+    assert _pick_benchmark("7203.T", False) == "EWJ"
+    assert _pick_benchmark("0700.HK", False) == "EUNL.DE"
+    assert _pick_benchmark("INTC", False) == "SPY"
+    assert _pick_benchmark("VWCE.DE", True) == "EUNL.DE"
+
+
+def test_pick_benchmark_never_gives_bonds_cash_or_gold_an_equity_benchmark():
+    """Plan 2026-10-12, D3: CBE3 showed -14.5 %/yr "excess" against URTH."""
+    equity = {"SPY", "VGK", "EWJ", "URTH", "EUNL.DE"}
+    for cls in ("bond", "money_market", "gold", "bond_govt_eur_short", "bond_govt_eur_mid",
+                "bond_aggregate_eur_hedged", "bond_other", "commodity_other"):
+        assert _pick_benchmark("X.DE", cls) not in equity
+    assert _pick_benchmark("XEON.DE", "money_market") == "ESTR"
+    assert _pick_benchmark("4GLD.DE", "gold") is None
+    assert _pick_benchmark("CBE3.L", "bond_govt_eur_short") == "CBE3.L"
 
 
 def test_portfolio_fit_aligns_date_indexed_candidate_with_portfolio():
@@ -201,7 +212,11 @@ def test_backtest_vs_benchmark_applies_fx_adjustment():
     vgk_closes = [80.0 for _ in range(n)]  # flat in USD
     fx_closes = [0.90 * (1.0005 ** i) for i in range(n)]  # USD strengthens vs EUR
 
+    from app.foundation.models.entities import ListingCurrency
+
     _seed_prices(db, "CAND.DE", cand_closes)
+    db.add(ListingCurrency(symbol="VGK", currency="USD", source="test"))
+    db.flush()
     _seed_prices(db, "VGK", vgk_closes)
     _seed_prices(db, "USDEUR=X", fx_closes)
 

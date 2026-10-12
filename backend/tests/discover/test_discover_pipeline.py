@@ -517,7 +517,7 @@ class TestDossierWriter:
                     "direction": "long",
                     "conviction": 0.75,
                     "horizon_months": 6,
-                    "thesis": "Buy AAPL",
+                    "thesis": "Buy AAPL now.",
                     "key_risks": ["Valuation risk"],
                 }
             ),
@@ -540,13 +540,13 @@ class TestDossierWriter:
         assert "dossier_id" in result
         assert "recommendation_id" in result
         dossier = result["dossier"]
-        assert dossier["direction"] == "long"
+        assert dossier["direction"] == "neutral"  # no expected return (D7)
         assert dossier["conviction"] == 0.75
         assert dossier["horizon_months"] == 6
         # No quant anchor in scores_json for this candidate, so
         # expected_return is deterministically None (never LLM-produced).
         assert dossier["expected_return"] is None
-        assert dossier["thesis"] == "Buy AAPL"
+        assert dossier["thesis"] == "Buy AAPL now."
         assert dossier["key_risks"] == ["Valuation risk"]
         assert dossier["signal_breakdown"]["composite_score"] == 0.75
         assert dossier["estimate"] is True

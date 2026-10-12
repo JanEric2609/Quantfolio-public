@@ -104,6 +104,7 @@ def test_bond_fund_keeps_bond_label():
         "name": "iShares Core Global Aggregate Bond UCITS ETF",
         "isin": "IE00BDBRDM35",
         "source": "screen_etf",
+        "plan_line": "bond",  # the universe admits a bond ETF only as the plan's bond line (D4)
     }
     # Sanity: the classifier itself resolves this candidate to "bond" —
     # the label loss happens between here and scores["quant_signals"].
@@ -237,8 +238,8 @@ def test_factor_regression_restates_local_returns_in_usd():
     ):
         eu, _ = stage_quant_signals(db, "ACME.DE", is_etf=False)
 
-    rates.assert_called_once()
-    assert rates.call_args.args[1] == "EUR"
+    # The factor leg asks for EUR->USD (the benchmark legs may ask too).
+    assert rates.call_args_list and all(c.args[1] == "EUR" for c in rates.call_args_list)
     assert eu["factor_fit"]["returns_in"] == "USD"
 
 

@@ -337,6 +337,16 @@ class JumpRegimeModel:
             probs[state_label] += float(last[state_idx])
         return {"label": label, "score": probs[label], "probs": probs, "score_basis": "dp_softmax"}
 
+    def fingerprint(self) -> str | None:
+        """A short hash of the fitted scaler and centres: changes when (and only when) a refit changes the model."""
+        if self.model is None or self.scaler is None:
+            return None
+        import hashlib
+
+        parts = [np.round(np.asarray(self.scaler.mean_), 10), np.round(np.asarray(self.model.centers_), 10)]
+        digest = hashlib.sha256(b"".join(np.ascontiguousarray(p).tobytes() for p in parts))
+        return digest.hexdigest()[:16]
+
     def save(self, model_id: str, base: str | None = None) -> str:
         """Persist a plain state dict (see RegimeHMM.save for why not ``self``).
 

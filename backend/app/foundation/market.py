@@ -2,7 +2,7 @@ import json
 import logging
 import math
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import InvalidOperation
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -403,18 +403,32 @@ def provider_status(db: Session) -> list[dict[str, Any]]:
 
 
 def macro_indicators(db: Session) -> list[dict[str, Any]]:
-    rows = db.query(MacroIndicator).order_by(MacroIndicator.date.desc()).limit(25).all()
-    if rows and _is_fresh(max(row.fetched_at for row in rows), MACRO_TTL):
-        return [_macro_to_dict(row, stale=False) for row in rows]
+    """The latest row of each stored macro series, newest first.
+
+    No zero-valued fallback rows (plan 2026-10-12, D11): with nothing stored
+    this returns ``[]`` and callers show "unavailable". Latest per series, not
+    the 25 newest rows: €STR is stored daily and would crowd out the rest.
+    """
+    from sqlalchemy import func
+
+    latest = (
+        db.query(MacroIndicator.name, MacroIndicator.source, func.max(MacroIndicator.date).label("d"))
+        .filter(MacroIndicator.source != "fallback")
+        .group_by(MacroIndicator.name, MacroIndicator.source)
+        .subquery()
+    )
+    rows = (
+        db.query(MacroIndicator)
+        .join(latest, (MacroIndicator.name == latest.c.name) & (MacroIndicator.source == latest.c.source)
+              & (MacroIndicator.date == latest.c.d))
+        .order_by(MacroIndicator.date.desc())
+        .limit(40)
+        .all()
+    )
     if not rows:
-        defaults = [
-            MacroIndicator(name="ECB deposit rate", value=Decimal("0"), date=date.today(), source="fallback", stale=True),
-            MacroIndicator(name="Euro area CPI", value=Decimal("0"), date=date.today(), source="fallback", stale=True),
-        ]
-        db.add_all(defaults)
-        db.commit()
-        rows = defaults
-    return [_macro_to_dict(row, stale=True) for row in rows]
+        return []
+    fresh = _is_fresh(max(row.fetched_at for row in rows), MACRO_TTL)
+    return [_macro_to_dict(row, stale=not fresh) for row in rows]
 
 
 def _is_valid_close(value: Any) -> bool:

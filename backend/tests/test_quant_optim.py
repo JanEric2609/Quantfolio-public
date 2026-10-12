@@ -341,27 +341,42 @@ class TestRunOptimisationPolicyBands:
         )
         assert max_per_asset_move <= 0.10 + 1e-6
 
-    def test_max_turnover_silently_dropped_under_max_ratio(self) -> None:
-        """MAXIMIZE_RATIO's fractional reformulation is incompatible with
-        skfolio's turnover constraint (confirmed: identical inputs solve
-        under min_risk, fail under max_ratio) — run_optimisation must drop
-        max_turnover rather than let the whole call fail, so a caller on
-        max_ratio still gets the load-bearing policy-band constraints."""
+    def test_max_turnover_with_max_ratio_raises(self) -> None:
+        """The cap used to be dropped silently under max_ratio, which let the
+        advisor sell its core in a week (plan 2026-10-12, D5). Now it is an
+        error: decision paths use min_risk."""
         pytest.importorskip("skfolio")
         from app.foundation.quant_optim import run_optimisation
 
         matrix = _make_cash_attractor_matrix()
         previous_weights = {"EQUITY1": 1.0, "EQUITY2": 0.0, "CASH1": 0.0}
+        with pytest.raises(ValueError, match="max_turnover"):
+            run_optimisation(
+                matrix,
+                objective="max_ratio",
+                risk_measure="cvar",
+                previous_weights=previous_weights,
+                max_turnover=0.10,
+            )
+
+    def test_min_variance_ledoit_wolf_with_group_floor(self) -> None:
+        """A group floor and a per-name cap hold under min variance with LW."""
+        pytest.importorskip("skfolio")
+        from app.foundation.quant_optim import run_optimisation
+
+        matrix = _make_cash_attractor_matrix()
         result = run_optimisation(
             matrix,
-            objective="max_ratio",
-            risk_measure="cvar",
-            previous_weights=previous_weights,
-            max_turnover=0.10,
+            objective="min_risk",
+            risk_measure="variance",
+            covariance_estimator="ledoit_wolf",
+            extra_groups={"EQUITY1": ["core"], "EQUITY2": ["satellite"], "CASH1": ["satellite"]},
+            extra_constraints=["core >= 0.85", "satellite <= 0.15"],
+            max_weight_by_asset={"EQUITY2": 0.05, "CASH1": 0.05},
         )
-        assert result["status"] == "completed"
-
-
+        assert result["status"] == "completed", result
+        assert result["weights"]["EQUITY1"] >= 0.85 - 1e-6
+        assert result["weights"]["EQUITY2"] <= 0.05 + 1e-6
 
 
 class TestRiskFreeRateUnits:
