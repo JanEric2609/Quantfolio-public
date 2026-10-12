@@ -130,3 +130,124 @@ Adding two strategies adds 2 strategies × 2 regions = 4 trials to the
 `factor_premia` ledger context, which slightly raises the pass bar for every
 other result. That is accepted. Each region-strategy pair stays its own
 trial, so the ledger counts the widened search either way.
+
+## Amendment 1 (2026-10-08) — how the 2019–2025 panels are built
+
+Written before any panel was built and before the exam was opened. What
+had been observed at that point: the panel's column list, its date range
+(1963-01 to 2025-12), and per-year **non-null shares** of the inputs for
+the top-100 US and eurozone stocks (95–100 %; eurozone `at_gr1` ~80 %). No
+score, forward return or IC had been computed. The owner chose the data
+source and the portfolio-fit reference.
+
+**Source.** The point-in-time JKP global characteristics panel already on
+prod (`parquet_panel/wrds_factor_characteristics_pit`). It keeps delisted
+stocks, so the universe has no survivorship bias. Rows are deduplicated on
+(`gvkey`, `permno`, `eom`), keeping the largest `me`. All returns are the
+panel's USD returns.
+
+**Periods.** The 84 month-ends 2019-01 … 2025-12. Every score uses data up to
+and including its month-end only.
+
+**Universe.** The analogue of Discover's live seed (S&P 100, Nasdaq-100,
+DAX 40, EuroStoxx 50 and mid-caps): at each month-end, the **100 largest US
+and the 100 largest eurozone stocks** by `me` (`excntry` in DEU, FRA, NLD,
+ITA, ESP, BEL, FIN, IRL, AUT, PRT, LUX, GRC). A stock without a forward
+return that month drops out of that month's IC.
+
+**Forward return.** `ret_exc_lead1m` (next month) minus the same month's
+return of the stock's region benchmark. This is the analogue of the live
+excess over the benchmark, and it removes the common EUR/USD move from the
+eurozone names.
+
+**Benchmarks**, all value-weighted with the previous month's `me` over the
+panel's `mega` and `large` size groups:
+US = USA; Europe = eurozone plus GBR, CHE, DNK, SWE, NOR (live: a
+developed-Europe ETF); world = Europe plus USA, CAN, JPN, AUS (live:
+MSCI World).
+
+**Ingredients.** The live formulas from `decision/discover/composite.py` and
+`pipeline.py`. Daily inputs are rebuilt from monthly data where the panel
+has no daily series:
+
+| Ingredient | Score at month-end *t* | Difference from live |
+|---|---|---|
+| `momentum` | mid-rank percentile `(rank − 0.5)/n` of `mom_12_1` in the month's universe | none |
+| `risk` | `1 − (0.4·min(1, σ/0.60) + 0.3·min(1, CVaR/0.06) + 0.3·min(1, MDD/0.30))`. σ = √(mean of `rvol_21d`² over months *t*−11…*t*)·√252; CVaR = daily σ·φ(1.645)/0.05 (normal); MDD = max drawdown of the 12-month path of `ret_1_0` | normal CVaR instead of historical; month-end drawdown misses drawdowns inside a month |
+| `benchmark` | active returns vs the region benchmark over months *t*−35…*t* (at least 12): t = IR·√years, score `0.5 + 0.5·tanh(t/2)` | monthly instead of daily returns |
+| `portfolio` | the owner's book is taken as the core MSCI World fund: corr = correlation of the stock's monthly returns with the world benchmark over *t*−23…*t* (at least 12, else 0.5); fit = `1 − 0.6·(corr+1)/2` | monthly instead of weekly returns; a fixed book |
+| `fundamentals` | `factor_characteristics_score` from `be_me`, `gp_at`, `at_gr1`; missing if all three are null | none (the live provider blend has no history) |
+| `composite` | live `WEIGHTS` renormalised over the ingredients present: portfolio, fundamentals and momentum 0.15 each, risk 0.10, benchmark 0.05 | the AI ingredients are absent by design |
+
+The exam is opened once with these panels (`spec_version` 1). A bug fixed
+after the opening is a new spec version that has to say what had been
+observed, and both versions stay on the trial ledger.
+
+## Result — exam v1 opened 2026-10-08: **no**
+
+Opened once with the amendment-1 panels: 84 month-ends, about 199 stocks
+each. Report: `docs/research/ranking-replay/exam-v1-report.json`; panel
+checksums are next to it, and the panels are kept on prod in
+`data/ranking_replay/exam-v1/`.
+
+| Ingredient | Mean rank IC | Newey-West t | p | Holm p |
+|---|---|---|---|---|
+| momentum | 0.031 | 1.68 | 0.093 | 0.47 |
+| fundamentals | 0.022 | 1.42 | 0.156 | 0.62 |
+| benchmark | 0.028 | 0.93 | 0.353 | 1.00 |
+| risk | −0.011 | −0.49 | 0.625 | 1.00 |
+| portfolio | −0.010 | −0.65 | 0.513 | 1.00 |
+| **composite** | **0.032** | **1.61** | 0.108 | — |
+
+The composite's t of 1.61 is below the pre-registered 2.0, so the verdict is
+**no**. No ingredient survives Holm. Momentum and fundamentals point the
+right way, as the literature expects, but over seven years and ~200 large
+caps their effect is too small to tell apart from noise. Risk and portfolio
+fit point slightly the wrong way.
+
+Consequence, as fixed in Decision 4: stock-ranking effort ends. The
+satellite stays locked. Discover keeps running as a shadow measurement (ADR
+0018), but no further tuning of its ranking is planned on the strength of
+this replay. Re-running with changed ingredients or weights would be a new,
+mined search, and would have to clear the t > 3 discovery bar on data it
+was not tuned on.
+
+## Amendment 2 (2026-10-08) — spec v2 fixes three panel-builder bugs
+
+Written after exam v1 had been opened. **Observed by then: every v1 number
+in the table above** (verdict no, composite t 1.61). Review of the v1 code
+(PR #328) found three bugs in `panels.py`:
+
+1. A benchmark member's return was dropped in a month in which it left
+   the `mega`/`large` groups, which biased each benchmark slightly upward.
+   This affects the `benchmark` and `portfolio` ingredients; the forward
+   returns are not affected.
+2. A path containing a −100 % month annualised to 0 % instead of −100 %.
+   This cannot happen in a top-100 universe.
+3. Benchmark weights were lagged by one *observed* month, not one
+   calendar month. This cannot happen in this data, which has no missing
+   months.
+
+Spec v2 changes only these three things. The universe, ingredients,
+weights, years and pass bar are unchanged. Both specs are entered on the
+trial ledger (`exam-v1:*` and `exam-v2:*`), so the search breadth counts
+both openings. **v2 is the verdict of record**, whichever way it falls, and
+any later spec follows the same rule.
+
+## Result — exam v2 opened 2026-10-08: **no** (verdict of record)
+
+Report: `docs/research/ranking-replay/exam-v2-report.json`. Panels are on
+prod in `data/ranking_replay/exam-v2/`. The `momentum`, `risk` and
+`fundamentals` panels are byte-identical to v1, as expected.
+
+| Ingredient | Mean rank IC | Newey-West t | Holm p |
+|---|---|---|---|
+| momentum | 0.031 | 1.68 | 0.47 |
+| fundamentals | 0.022 | 1.42 | 0.62 |
+| benchmark | 0.028 | 0.93 | 1.00 |
+| risk | −0.011 | −0.49 | 1.00 |
+| portfolio | −0.010 | −0.66 | 1.00 |
+| **composite** | **0.032** | **1.61** | — |
+
+The bug fixes move the composite t from 1.608 to 1.613. The verdict is
+unchanged: **no**, with the consequences given under the v1 result.
