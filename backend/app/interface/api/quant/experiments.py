@@ -11,19 +11,20 @@ from app.foundation.core.db import get_db
 from app.foundation.models.entities import QuantExperiment, QuantExperimentRun, User
 from app.foundation.schemas import GraveyardIn, QuantExperimentIn
 from app.foundation.auth import current_user
+from app.interface.api.params import LimitQuery
 
 router = APIRouter(tags=["quant-experiments"])
 
 
 @router.get("/experiments")
-def list_experiments(limit: int = 200, db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[dict[str, Any]]:
+def list_experiments(limit: LimitQuery = 200, db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[dict[str, Any]]:
     rows = db.query(QuantExperiment).filter(QuantExperiment.user_id == user.id).order_by(QuantExperiment.created_at.desc()).limit(max(1, min(limit, 1000))).all()
     return [_experiment_to_dict(row) for row in rows]
 
 
 @router.get("/runs/recent")
 def list_recent_runs(
-    limit: int = 50, db: Session = Depends(get_db), user: User = Depends(current_user)
+    limit: LimitQuery = 50, db: Session = Depends(get_db), user: User = Depends(current_user)
 ) -> dict[str, Any]:
     """Unified, chronologically-sorted run history."""
     from app.foundation.models.entities import BacktestResult
@@ -132,7 +133,7 @@ def run_experiment(experiment_id: str, db: Session = Depends(get_db), user: User
 
 
 @router.get("/experiments/{experiment_id}/runs")
-def experiment_runs(experiment_id: str, limit: int = 200, db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[dict[str, Any]]:
+def experiment_runs(experiment_id: str, limit: LimitQuery = 200, db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[dict[str, Any]]:
     experiment = db.get(QuantExperiment, experiment_id)
     if experiment is None or experiment.user_id != user.id:
         raise HTTPException(status_code=404, detail="Not found")
@@ -157,7 +158,7 @@ def create_graveyard_entry(payload: GraveyardIn, db: Session = Depends(get_db), 
 
 
 @router.get("/graveyard")
-def strategy_graveyard(limit: int = 200, db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[dict[str, Any]]:
+def strategy_graveyard(limit: LimitQuery = 200, db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[dict[str, Any]]:
     from app.foundation.models.entities import StrategyGraveyardEntry
     rows = db.query(StrategyGraveyardEntry).filter(StrategyGraveyardEntry.user_id == user.id).order_by(StrategyGraveyardEntry.created_at.desc()).limit(max(1, min(limit, 1000))).all()
     return [_graveyard_to_dict(row) for row in rows]

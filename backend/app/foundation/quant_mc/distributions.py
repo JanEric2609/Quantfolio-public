@@ -42,6 +42,10 @@ class NormalDistribution(Distribution):
     mu: float = 0.0
     sigma: float = 1.0
 
+    def __post_init__(self):
+        if self.sigma < 0:
+            raise ValueError(f"sigma must not be negative, got {self.sigma}")
+
     def sample(self, size: int, rng: np.random.Generator) -> np.ndarray:
         return rng.normal(self.mu, self.sigma, size)
 
@@ -62,6 +66,13 @@ class StudentTDistribution(Distribution):
     nu: float  # degrees of freedom
     mu: float = 0.0
     sigma: float = 1.0
+
+    def __post_init__(self):
+        # Checked at construction so a bad request is refused before any run.
+        if self.nu <= 2:
+            raise ValueError(f"StudentTDistribution requires nu > 2 for finite variance, got nu={self.nu}")
+        if self.sigma <= 0:
+            raise ValueError(f"sigma must be positive, got {self.sigma}")
 
     def sample(self, size: int, rng: np.random.Generator) -> np.ndarray:
         # numpy's standard_t(nu) has variance nu/(nu-2) for nu>2.
@@ -108,6 +119,8 @@ class NIGDistribution(Distribution):
     def __post_init__(self):
         if self.alpha <= abs(self.beta):
             raise ValueError(f"alpha={self.alpha} must be > |beta|={abs(self.beta)}")
+        if self.delta <= 0:
+            raise ValueError(f"delta must be positive, got {self.delta}")
 
     def sample(self, size: int, rng: np.random.Generator) -> np.ndarray:
         # NIG sampling via inverse-Gaussian + normal mixture

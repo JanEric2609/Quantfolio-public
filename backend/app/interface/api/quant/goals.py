@@ -9,6 +9,7 @@ from app.interface.api.quant._common import book_volatility
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import Goal, User
 from app.foundation.auth import current_user
+from app.interface.api.params import LimitQuery
 
 router = APIRouter(tags=["quant-goals"])
 
@@ -118,7 +119,7 @@ def goal_monte_carlo(
 
 
 @router.get("/goals")
-def list_goals(limit: int = 200, db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[dict[str, Any]]:
+def list_goals(limit: LimitQuery = 200, db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[dict[str, Any]]:
     goals = db.query(Goal).filter(Goal.user_id == user.id).order_by(Goal.created_at.desc()).limit(max(1, min(limit, 1000))).all()
     return [
         {

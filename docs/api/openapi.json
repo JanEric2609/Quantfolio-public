@@ -17091,9 +17091,14 @@
             "content": {
               "application/json": {
                 "schema": {}
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
               }
             },
-            "description": "Successful Response"
+            "description": "SSE stream"
           },
           "422": {
             "content": {

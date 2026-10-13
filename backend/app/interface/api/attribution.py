@@ -20,6 +20,7 @@ from app.foundation.data_backbone.bars import BarStore
 from app.foundation.data_backbone.listing_currency import resolve_currency
 from app.foundation.market import usd_per_unit_by_date
 from app.foundation.quant_factors import restate_in_usd
+from app.interface.api.params import LimitQuery, OffsetQuery
 
 router = APIRouter(prefix="/api/attribution", tags=["attribution"])
 
@@ -70,12 +71,15 @@ def _resolve_portfolio(db: Session, user_id: str, portfolio_id: str) -> Portfoli
     """Resolve a portfolio for *user_id*.
 
     A blank id or the sentinel ``"main"``/``"default"`` selects the user's
-    primary (oldest) portfolio, so the UI does not need to know the UUID.
+    portfolio the way the rest of the app does (``portfolio_analysis``,
+    ``monthly_plan``), so the UI does not need to know the UUID. Portfolios
+    carry no ``created_at``: ordering by it raised on every "main" request,
+    which is the Attribution page's default.
     """
     q = db.query(Portfolio).filter(Portfolio.user_id == user_id)
     if portfolio_id and portfolio_id.lower() not in ("main", "default"):
         return q.filter(Portfolio.id == portfolio_id).first()
-    return q.order_by(Portfolio.__table__.c.created_at.asc()).first()
+    return q.first()
 
 
 class BrinsonRequest(BaseModel):
@@ -357,8 +361,8 @@ def get_attribution_run(
 
 @router.get("/runs")
 def list_attribution_runs(
-    limit: int = 20,
-    offset: int = 0,
+    limit: LimitQuery = 20,
+    offset: OffsetQuery = 0,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:

@@ -11,6 +11,7 @@ from starlette.responses import StreamingResponse
 
 from app.foundation.core.db import get_db
 from app.foundation.core.security import limiter
+from app.foundation.llm.base import LlmUnavailableError
 from app.foundation.models.entities import (
     AnalysisReport,
     ChatMessage,
@@ -174,7 +175,11 @@ def generate_recommendations(
     return RecommendationGenerateResult(created=created, failed=failed, message=message)
 
 
-@router.post("/chat/stream")
+@router.post(
+    "/chat/stream",
+    # Server-sent events, not JSON: declared so clients (and the API scan) know.
+    responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}, "description": "SSE stream"}},
+)
 @limiter.limit("10/minute")
 def chat_stream(request: Request, payload: ChatStreamRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> StreamingResponse:
     conv_id = payload.conversation_id or str(uuid.uuid4())
@@ -325,7 +330,11 @@ def _infer_ticker(content: str) -> str:
     return "EUNL.DE"
 
 
-def _llm_recommendation_error(exc: Exception) -> HTTPException:
+def _llm_recommendation_error(exc: Exception) -> Exception:
+    # An unreachable model keeps its own type: the app answers it with the
+    # common 503 "llm_unavailable", which tells the user what to fix.
+    if isinstance(exc, LlmUnavailableError):
+        return exc
     # The cause (endpoint URL, provider response, schema-validation dump) stays on
     # the server: it is logged here and stored on the RecommendationAttempt row.
     logger.warning("LLM recommendation failed: %s", exc, exc_info=exc)

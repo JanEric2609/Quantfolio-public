@@ -5,6 +5,14 @@ from typing import Literal, Protocol, runtime_checkable
 from pydantic import BaseModel
 
 
+class LlmUnavailableError(RuntimeError):
+    """The LLM backend could not be reached (connection refused, DNS, timeout).
+
+    A ``RuntimeError`` so existing ``except RuntimeError`` fallbacks still
+    catch it; the API answers it with 503 instead of 500.
+    """
+
+
 class Completion(BaseModel):
     """Response from an LLM backend."""
     content: str

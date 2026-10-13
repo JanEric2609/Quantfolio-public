@@ -8,13 +8,14 @@ from sqlalchemy.orm import Session
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import User
 from app.foundation.auth import current_user
+from app.interface.api.params import LimitQuery
 
 router = APIRouter(tags=["quant-data"])
 
 
 @router.get("/data-quality/events")
 def data_quality_events(
-    limit: int = 50,
+    limit: LimitQuery = 50,
     db: Session = Depends(get_db),
     _user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -37,7 +38,7 @@ def data_quality_events(
 
 @router.get("/signals/recent")
 def recent_signals(
-    limit: int = 100,
+    limit: LimitQuery = 100,
     db: Session = Depends(get_db),
     _user: User = Depends(current_user),
 ) -> dict[str, Any]:

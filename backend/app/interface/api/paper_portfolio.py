@@ -23,6 +23,8 @@ from app.decision.paper_portfolio import (
     snapshot_paper_portfolio,
 )
 from app.foundation.models.entities import PaperPortfolio, PaperPortfolioArchive
+from app.interface.api.params import DaysQuery
+from app.foundation.schemas.bounds import MoneyFloat
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +34,8 @@ router = APIRouter(prefix="/api/paper-portfolio", tags=["paper-portfolio"])
 class TradeIn(BaseModel):
     ticker: str
     side: Literal["buy", "sell"]
-    quantity: float = Field(gt=0)
-    price: float = Field(gt=0, description="Per unit, in EUR.")
+    quantity: MoneyFloat = Field(gt=0)
+    price: MoneyFloat = Field(gt=0, description="Per unit, in EUR.")
     confidence: float | None = Field(None, ge=0, le=1)
     rationale: str | None = None
 
@@ -78,7 +80,7 @@ def list_trades(user: User = Depends(current_user), db: Session = Depends(get_db
 
 @router.get("/snapshots")
 @safe_endpoint
-def list_snapshots(days: int = 365, user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+def list_snapshots(days: DaysQuery = 365, user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     portfolio, _ = get_or_create_paper_portfolio(db, user.id)
     snapshots = get_snapshots(db, portfolio.id, days=days)
     return [

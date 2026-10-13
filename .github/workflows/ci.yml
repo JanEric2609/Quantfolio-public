@@ -189,11 +189,17 @@ jobs:
           fail-on: ERR
           review: false
 
-  # ── OPTIONAL: Schemathesis API fuzz — manual dispatch only, non-blocking ──
-  api-fuzz-experimental:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    continue-on-error: true
+  # ── API security scan: Schemathesis against the app in-process ────────
+  # Every operation from the OpenAPI schema, without a session (must answer
+  # 401/403/422, never 5xx) and with an admin session (generated input
+  # reaches the handlers; outbound network is blocked). See
+  # backend/tests/test_api_security.py. Replaces the APIsec SaaS template,
+  # which cannot reach an API that is never exposed to the internet.
+  api-security-scan:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -213,12 +219,24 @@ jobs:
           .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
           .venv/bin/pip install -e ".[dev]"
 
-      - name: Schemathesis conformance fuzz (SCHEMATHESIS=1-gated test)
+      - name: Unauthenticated and authenticated API fuzz
         working-directory: backend
         env:
           DATABASE_URL: "sqlite:///:memory:"
           SCHEMATHESIS: "1"
-        run: .venv/bin/pytest tests/test_api_contract_schemathesis.py -q -n 0
+        # A fresh network namespace has no route out, so no handler under
+        # test can reach a provider (yfinance goes through libcurl, which a
+        # patched socket would not stop). Unprivileged when the runner allows
+        # user namespaces, else via sudo, back to the runner user inside. The
+        # test fails on its own if the network is still reachable.
+        run: |
+          if unshare -rn true 2>/dev/null; then
+            isolate="unshare -rn"
+          else
+            isolate="sudo unshare --net -- sudo --preserve-env -u $USER"
+          fi
+          $isolate .venv/bin/pytest tests/test_api_contract_schemathesis.py tests/test_api_security.py \
+            -q -n 4 -p no:cacheprovider --timeout=180
 
   # ── Frontend type-check + tests + coverage + build ───────────────────
   frontend:

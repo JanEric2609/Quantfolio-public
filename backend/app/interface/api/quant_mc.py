@@ -1,21 +1,30 @@
 """Monte Carlo simulation API endpoints (Phase 2)."""
 
 import json
+import math
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 from sqlalchemy.orm import Session
 
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import McRun, User
 from app.foundation.auth import current_user
 from app.foundation.quant_mc import MonteCarloEngine, McSpec
+from app.foundation.quant_mc.distributions import create_distribution
+from app.foundation.quant_mc.paths import create_simulator
+from app.foundation.quant_mc.payoffs import create_payoff
 from app.interface.api.safe_endpoint import safe_endpoint
+from app.interface.api.params import LimitQuery, OffsetQuery, between
 
 router = APIRouter(prefix="/api/quant/mc", tags=["quant-mc"])
+
+
+#: Largest n_paths x horizon_steps a request may ask for (~160 MB per float64 array).
+MAX_GRID_CELLS = 20_000_000
 
 
 # Request/Response Schemas
@@ -24,9 +33,9 @@ class McSpecSchema(BaseModel):
 
     model: Literal["gbm_euler", "gbm_milstein", "heston_euler", "ou_euler"] = "gbm_euler"
     model_params: Optional[dict] = None
-    horizon_steps: int = 100
+    horizon_steps: Annotated[int, between(1, 10_000)] = 100
     T: float = 1.0
-    n_paths: int = 10000
+    n_paths: Annotated[int, between(1, None)] = 10000
     payoff: Literal["european_call", "european_put", "asian_call", "lookback_call", "barrier_call", "portfolio_var", "portfolio_es"] = "european_call"
     payoff_params: Optional[dict] = None
     distribution: Literal["normal", "student_t", "nig"] = "normal"
@@ -39,11 +48,39 @@ class McSpecSchema(BaseModel):
     # never silently dropped at the API boundary (deepdive-03-quantlab Issue 2).
     additional_data: Optional[dict] = None
     use_mlmc: bool = False
-    mlmc_levels: Optional[int] = None
+    mlmc_levels: Annotated[Optional[int], between(1, 10)] = None
     seed: Optional[int] = None
     return_paths: bool = False
     compute_greeks: bool = True
     compute_greeks_method: Literal["pathwise", "likelihood_ratio"] = "pathwise"
+
+    @model_validator(mode="after")
+    def _bounded_grid(self) -> "McSpecSchema":
+        # One float per path and step, several arrays deep: an unbounded grid
+        # let a single request exhaust the worker's memory.
+        if not (0 < self.T <= 100):
+            raise ValueError("T must be in (0, 100] years")
+        if self.n_paths * self.horizon_steps > MAX_GRID_CELLS:
+            raise ValueError(f"n_paths x horizon_steps must be at most {MAX_GRID_CELLS:,}")
+        return self
+
+    @model_validator(mode="after")
+    def _buildable(self) -> "McSpecSchema":
+        # The three parameter dicts go straight into dataclass constructors:
+        # a missing NIG alpha or a string sigma answered 500, not 422.
+        for name in ("model_params", "distribution_params", "payoff_params"):
+            for key, value in (getattr(self, name) or {}).items():
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                    raise ValueError(f"{name}.{key} must be a finite number")
+        if (self.model_params or {}).get("S0", 100.0) <= 0:
+            raise ValueError("model_params.S0 must be positive")
+        try:
+            create_distribution(self.distribution, self.distribution_params)
+            create_simulator(self.model, self.model_params or {})
+            create_payoff(self.payoff, self.payoff_params)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid parameters: {exc}") from exc
+        return self
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -170,26 +207,29 @@ def get_mc_run(
     run_id: UUID,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
-) -> McRun:
+) -> McRunDetailSchema:
     """Retrieve a stored MC run by ID."""
     mc_run = db.query(McRun).filter(
-        McRun.id == run_id,
+        McRun.id == str(run_id),  # String(36) column: a UUID object never matched
         McRun.user_id == user.id,
     ).first()
 
     if not mc_run:
         raise HTTPException(status_code=404, detail="MC run not found")
 
-    return mc_run
+    # Explicitly: FastAPI's response validation does not call the
+    # model_validate override that parses the JSON columns, so returning the
+    # ORM row answered 500 (found by the API scan).
+    return McRunDetailSchema.model_validate(mc_run)
 
 
 @router.get("/runs", response_model=list[McRunDetailSchema])
 def list_mc_runs(
-    limit: int = 20,
-    offset: int = 0,
+    limit: LimitQuery = 20,
+    offset: OffsetQuery = 0,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
-) -> list[McRun]:
+) -> list[McRunDetailSchema]:
     """List recent MC runs for the current user."""
     runs = db.query(McRun).filter(
         McRun.user_id == user.id,
@@ -197,4 +237,4 @@ def list_mc_runs(
         McRun.created_at.desc(),
     ).offset(offset).limit(limit).all()
 
-    return runs
+    return [McRunDetailSchema.model_validate(run) for run in runs]

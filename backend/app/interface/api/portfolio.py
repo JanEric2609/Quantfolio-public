@@ -9,7 +9,7 @@ OpenAPI snapshot. See docs/archive/audits Wave 6 evidence for the tag-semantics 
 
 import logging
 from datetime import date, timedelta
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -21,6 +21,7 @@ from app.foundation.schemas.common import TargetAllocationItem
 from app.foundation.auth import current_user
 from app.foundation.portfolio_service import allocation_by_asset_type, dkb_availability, main_portfolio, portfolio_performance, wealth_summary
 from app.foundation.tax import german_tax_hints
+from app.interface.api.params import DaysQuery, ROWS_BOUND
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 @router.get("/holdings", response_model=list[HoldingOut])
 def list_holdings(
     limit: int = Query(500, ge=1, le=2000),
-    offset: int = Query(0, ge=0),
+    offset: Annotated[int, Query(ge=0), ROWS_BOUND] = 0,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> list[HoldingOut]:
@@ -151,7 +152,7 @@ def wealth(user: User = Depends(current_user), db: Session = Depends(get_db)) ->
 
 
 @router.get("/snapshots")
-def snapshots(days: int = 30, user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+def snapshots(days: DaysQuery = 30, user: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     """Return the user's recent daily wealth snapshots for portfolio charts."""
     try:
         wealth_summary(db, user.id)  # side-effect: ensures today's snapshot exists
@@ -227,7 +228,7 @@ def allocation(user: User = Depends(current_user), db: Session = Depends(get_db)
 @router.get("/watchlist", response_model=list[WatchlistOut])
 def list_watchlist(
     limit: int = Query(500, ge=1, le=2000),
-    offset: int = Query(0, ge=0),
+    offset: Annotated[int, Query(ge=0), ROWS_BOUND] = 0,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ):

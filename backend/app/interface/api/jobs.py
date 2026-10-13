@@ -1,7 +1,7 @@
 """API endpoints for scheduled job run tracking."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import JobRun, User
 from app.foundation.auth import current_user
+from app.interface.api.params import ROWS_BOUND
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -45,7 +46,7 @@ def list_job_runs(
     job_name: str | None = Query(None, description="Filter by job name"),
     status: str | None = Query(None, description="Filter by status"),
     limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    offset: Annotated[int, Query(ge=0), ROWS_BOUND] = 0,
     _user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:

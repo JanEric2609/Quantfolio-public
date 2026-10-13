@@ -28,9 +28,11 @@ from app.foundation.models.entities import (
     ActivityLedgerEntry,
     CompositeMembership,
     PerformanceLedgerEntry,
+    Portfolio,
     PortfolioSnapshot,
     User,
 )
+from app.interface.api.params import LimitQuery, OffsetQuery
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +63,19 @@ def create_composite_endpoint(
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
     """Create a composite portfolio."""
+    # Found by the API scan: a repeated id hit the membership primary key, an
+    # unknown one the portfolios foreign key (500s), and nothing stopped a
+    # composite from taking in another user's portfolio.
+    portfolio_ids = list(dict.fromkeys(request.portfolio_ids))
+    owned = {
+        pid for (pid,) in db.query(Portfolio.id).filter(
+            Portfolio.user_id == user.id, Portfolio.id.in_(portfolio_ids),
+        )
+    }
+    if unknown := [pid for pid in portfolio_ids if pid not in owned]:
+        raise HTTPException(status_code=404, detail=f"Unknown portfolio: {unknown[0]}")
     composite = create_composite(
-        db, user_id=user.id, name=request.name, portfolio_ids=request.portfolio_ids
+        db, user_id=user.id, name=request.name, portfolio_ids=portfolio_ids
     )
     db.commit()
 
@@ -70,7 +83,7 @@ def create_composite_endpoint(
         research={
             "id": composite.id,
             "name": composite.name,
-            "portfolio_ids": request.portfolio_ids,
+            "portfolio_ids": portfolio_ids,
             "created_at": composite.created_at.isoformat(),
         }
     )
@@ -292,8 +305,8 @@ def write_ledger_snapshot_endpoint(
 @router.get("/ledger")
 def get_ledger_entries(
     composite_id: str,
-    limit: int = 50,
-    offset: int = 0,
+    limit: LimitQuery = 50,
+    offset: OffsetQuery = 0,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:

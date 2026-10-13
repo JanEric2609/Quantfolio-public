@@ -24,6 +24,7 @@ from app.foundation.scalable import login as scalable_login
 from app.foundation.scalable import service as scalable
 from app.foundation.scalable.cli import SC_BINARY, ScalableError, ScalableLoginRequired, binary_sha256
 from app.foundation.settings import upsert_public_settings
+from app.interface.api.params import LimitQuery
 
 router = APIRouter(prefix="/api/scalable", tags=["scalable"])
 
@@ -178,7 +179,7 @@ def post_test(db: Session = Depends(get_db), user: User = Depends(current_user))
 
 
 @router.get("/sync/logs", response_model=list[ScalableSyncLogOut])
-def get_sync_logs(limit: int = 20, db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[dict[str, Any]]:
+def get_sync_logs(limit: LimitQuery = 20, db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[dict[str, Any]]:
     return scalable.sync_logs(db, user.id, limit=limit)
 
 

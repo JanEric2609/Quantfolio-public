@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import func, or_
@@ -26,6 +26,7 @@ from app.decision.portfolio_advisor.deep import run_deep_analysis, make_llm_func
 from app.foundation.etf_lookthrough import portfolio_lookthrough
 from app.lab.regime.macro_snapshot import get_or_refresh_regime
 from app.decision.regime_advisor import get_regime_adjusted_weights, get_weights_summary, get_factor_ics, run_mwu_update, update_factor_ic_tracking
+from app.interface.api.params import ROWS_BOUND
 
 router = APIRouter(prefix="/api/portfolio/advisor", tags=["portfolio-advisor"])
 
@@ -212,7 +213,7 @@ def trigger_advisor_run(
 
 @router.get("/runs")
 def list_advisor_runs(
-    limit: int = Query(20, description="Max runs to return"),
+    limit: Annotated[int, Query(description="Max runs to return"), ROWS_BOUND] = 20,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:

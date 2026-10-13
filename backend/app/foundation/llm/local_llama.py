@@ -6,7 +6,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel
 
-from .base import Completion
+from .base import Completion, LlmUnavailableError
 from .sampling import QWEN_SAMPLING
 
 logger = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ class LocalLlamaBackend:
         timeout_s: float = 60.0,
     ) -> Completion:
         """Complete a chat request using local llama.cpp."""
-        from openai import APIError
+        from openai import APIConnectionError, APIError
         from openai.types.chat import ChatCompletionMessageParam
 
         client = self._get_client()
@@ -106,6 +106,8 @@ class LocalLlamaBackend:
                 timeout=timeout_s,
                 **_build_completion_kwargs(structured_output),
             )
+        except APIConnectionError as e:  # includes APITimeoutError
+            raise LlmUnavailableError(f"Local llama.cpp endpoint unreachable: {e}") from e
         except APIError as e:
             if structured_output is None or not _is_schema_rejection(e):
                 raise RuntimeError(f"Local llama.cpp endpoint error: {e}") from e
@@ -159,6 +161,8 @@ class LocalLlamaBackend:
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed texts using local llama.cpp."""
+        from openai import APIConnectionError
+
         client = self._get_client()
 
         try:
@@ -167,5 +171,7 @@ class LocalLlamaBackend:
                 input=texts,
             )
             return [item.embedding for item in response.data]
+        except APIConnectionError as e:
+            raise LlmUnavailableError(f"Local embedding endpoint unreachable: {e}") from e
         except Exception as e:
             raise RuntimeError(f"Local embedding failed: {e}") from e

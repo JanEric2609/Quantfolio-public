@@ -17,6 +17,8 @@ from typing import Any, ParamSpec, TypeVar, overload
 
 from fastapi import HTTPException
 
+from app.foundation.llm.base import LlmUnavailableError
+
 logger = logging.getLogger(__name__)
 
 P = ParamSpec("P")
@@ -34,15 +36,16 @@ def safe_endpoint(func: Callable[P, R]) -> Callable[P, R]: ...
 def safe_endpoint(func: Any) -> Any:
     """Wrap an endpoint so that all unhandled exceptions become 500 responses.
 
-    HTTPException and its subclasses are re-raised (FastAPI handles them).
-    All other exceptions are caught, logged, and returned as HTTP 500.
+    HTTPException and its subclasses are re-raised (FastAPI handles them), and
+    so is ``LlmUnavailableError`` (the app answers it with 503). All other
+    exceptions are caught, logged, and returned as HTTP 500.
     """
 
     @functools.wraps(func)
     async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> object:
         try:
             return await func(*args, **kwargs)
-        except HTTPException:
+        except (HTTPException, LlmUnavailableError):
             raise
         except Exception as exc:
             logger.error("Unhandled error in %s: %s", func.__name__, exc, exc_info=True)
@@ -52,7 +55,7 @@ def safe_endpoint(func: Any) -> Any:
     def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> object:
         try:
             return func(*args, **kwargs)
-        except HTTPException:
+        except (HTTPException, LlmUnavailableError):
             raise
         except Exception as exc:
             logger.error("Unhandled error in %s: %s", func.__name__, exc, exc_info=True)
