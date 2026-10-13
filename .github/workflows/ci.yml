@@ -217,7 +217,12 @@ jobs:
           python -m venv .venv
           .venv/bin/pip install --upgrade pip
           .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
-          .venv/bin/pip install -e ".[dev]"
+          # The lock as constraints: the scan runs the versions prod and the
+          # local gate run. Floating ones broke it silently once (FastAPI 0.143
+          # nests included routers; schemathesis 4.31 collected no cases).
+          # torch is left out, the CPU wheel above stands.
+          grep -v '^torch==' requirements.lock > /tmp/constraints.txt
+          .venv/bin/pip install -e ".[dev]" -c /tmp/constraints.txt
 
       - name: Unauthenticated and authenticated API fuzz
         working-directory: backend
@@ -235,8 +240,14 @@ jobs:
           else
             isolate="sudo unshare --net -- sudo --preserve-env -u $USER"
           fi
+          set -o pipefail
           $isolate .venv/bin/pytest tests/test_api_contract_schemathesis.py tests/test_api_security.py \
-            -q -n 4 -p no:cacheprovider --timeout=180
+            -q -n 4 -p no:cacheprovider --timeout=180 | tee /tmp/scan.out
+          # A scan that collects no cases passes; it must not.
+          passed=$(grep -oE '[0-9]+ passed' /tmp/scan.out | tail -1 | cut -d' ' -f1)
+          if [ "${passed:-0}" -lt 600 ]; then
+            echo "::error::only ${passed:-0} scan cases ran (expected ~760)"; exit 1
+          fi
 
   # ── Frontend type-check + tests + coverage + build ───────────────────
   frontend:

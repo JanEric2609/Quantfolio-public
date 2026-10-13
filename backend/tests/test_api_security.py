@@ -67,6 +67,24 @@ PUBLIC_ROUTES = {
 _GUARDS = {auth.current_user, auth.require_admin}
 
 
+def _api_routes() -> list[tuple[set[str], str, object]]:
+    """(methods, path, dependant) of every APIRoute in the app.
+
+    FastAPI 0.143 stopped copying an included router's routes into
+    ``app.routes`` (it keeps one nested entry per router), so walk them with
+    ``iter_route_contexts``; older versions have no such helper and are flat.
+    """
+    try:
+        from fastapi.routing import iter_route_contexts
+    except ImportError:
+        return [(r.methods, r.path, r.dependant) for r in app.routes if isinstance(r, APIRoute)]
+    return [
+        (c.methods, c.path, c.dependant)
+        for c in iter_route_contexts(app.routes)
+        if isinstance(c.original_route, APIRoute)
+    ]
+
+
 def _guarded(dependant) -> bool:
     return dependant.call in _GUARDS or any(_guarded(d) for d in dependant.dependencies)
 
@@ -95,12 +113,9 @@ def _cookie(user: User) -> str:
 
 
 def test_every_route_needs_a_session_unless_listed_as_public():
-    open_routes = {
-        (method, route.path)
-        for route in app.routes
-        if isinstance(route, APIRoute) and not _guarded(route.dependant)
-        for method in route.methods
-    }
+    routes = _api_routes()
+    assert len(routes) > 300, f"only {len(routes)} routes found; the route walk is broken"
+    open_routes = {(method, path) for methods, path, dependant in routes if not _guarded(dependant) for method in methods}
     unexpected = open_routes - set(PUBLIC_ROUTES)
     assert not unexpected, f"routes without Depends(current_user): {sorted(unexpected)}"
     stale = set(PUBLIC_ROUTES) - open_routes
@@ -165,8 +180,8 @@ def test_admin_routes_refuse_a_plain_user(client):
     db.add(user)
     db.commit()
     admin_routes = [
-        (sorted(r.methods)[0], r.path) for r in app.routes
-        if isinstance(r, APIRoute) and _requires_admin(r.dependant) and "{" not in r.path
+        (sorted(methods)[0], path) for methods, path, dependant in _api_routes()
+        if _requires_admin(dependant) and "{" not in path
     ]
     assert admin_routes, "expected at least one admin-only route"
     c.cookies.set(auth.COOKIE_NAME, _cookie(user))

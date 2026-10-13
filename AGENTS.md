@@ -269,6 +269,9 @@ two documented dependency answers: 503 `llm_unavailable` and Scalable's 502
 `not_installed`. It also pins the routes reachable without a session
 (`PUBLIC_ROUTES`) — a new route without `Depends(current_user)` fails it.
 Re-run some operations with `API_SCAN_ONLY="GET /api/x;POST /api/y"`.
+The CI job installs `requirements.lock` as pip constraints and fails if fewer
+than 600 cases ran: on floating versions (FastAPI 0.143, schemathesis 4.31) it
+once collected no fuzz cases at all.
 Request bounds that only refuse input which used to 500 are validators
 (`foundation/schemas/bounds.py`, `interface/api/params.py`), not `ge`/`le`, so
 they stay out of the OpenAPI contract.
