@@ -238,8 +238,10 @@ jobs:
           if unshare -rn true 2>/dev/null; then
             isolate="unshare -rn"
           else
-            isolate="sudo unshare --net -- sudo --preserve-env -u $USER"
+            # sudo resets the environment, so hand the scan's variables on.
+            isolate="sudo unshare --net -- sudo -u $USER env PATH=$PATH HOME=$HOME SCHEMATHESIS=$SCHEMATHESIS DATABASE_URL=$DATABASE_URL"
           fi
+          echo "isolation: $isolate"
           set -o pipefail
           $isolate .venv/bin/pytest tests/test_api_contract_schemathesis.py tests/test_api_security.py \
             -q -n 4 -p no:cacheprovider --timeout=180 | tee /tmp/scan.out
