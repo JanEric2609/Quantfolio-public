@@ -60,6 +60,14 @@ export default defineConfig({
       "/health": "http://127.0.0.1:8000",
     },
   },
+  // The browser smoke test (e2e/run-smoke.sh) serves the production build here.
+  preview: {
+    port: 4173,
+    proxy: {
+      "/api": "http://127.0.0.1:8000",
+      "/health": "http://127.0.0.1:8000",
+    },
+  },
   build: {
     rolldownOptions: {
       output: {

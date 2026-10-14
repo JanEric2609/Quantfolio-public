@@ -1,233 +1,91 @@
-# QuantFolio Backup and Restore Runbook
+# Backup and restore
 
-## Backup Strategy
+Two layers protect the data:
 
-**Schedule:** Daily at 2 AM (configured via cron)  
-**Retention:** Last 30 backups (~90 days at daily frequency)  
-**Components:** Database (pg_dump), Obsidian vault, Encrypted API keys  
-**Backup size:** ~15-20 GB per backup (compressed)  
+| Layer | What | Where | Schedule |
+|---|---|---|---|
+| Database dump | `pg_dump --format=custom` of the `quantfolio` database | `/var/backups/quantfolio/quantfolio-<UTC stamp>.dump` on the app LXC (111) | Nightly 02:15 (`/etc/cron.d/quantfolio-backup`), and before every `quantfolio-update-app` |
+| Container snapshot | `vzdump` of every LXC (zstd, snapshot mode) | Proxmox Backup Server storage `proxmox-backups` (10.0.0.12:8007) | Nightly 03:00 (`/etc/pve/jobs.cfg`) |
 
-## Creating a Manual Backup
+The dump is the one to restore application data from; the container snapshot
+brings back a whole LXC (OS, packages, `.env`). Dumps older than 14 days are
+deleted by the nightly run. Dumps sit on the same host as the database, so the
+container snapshot on the backup server is the only off-host copy.
 
-```bash
-# In app container (111)
-cd /opt/quantfolio
-./infra/scripts/backup.sh /var/backups/quantfolio manual
+The daily self-check (`python -m app.foundation.self_check`) alerts on Telegram
+when the last good dump is older than 36 hours, when the backup server does not
+answer, or when the nightly run failed. It reads
+`/var/lib/quantfolio-backup/status.json`, which `backup-db.sh` writes after
+every run.
 
-# Or from Proxmox host (mounts backup dir)
-/root/quantfolio/infra/scripts/backup.sh /var/backups/quantfolio manual
-```
+Until 2026-10-14 root's crontab called a dev-era `backup.sh` that was not
+executable and expected the database on localhost; no nightly dump was ever
+written, only the pre-update ones. `update-app.sh` now installs the cron file
+and removes that line.
 
-**Output:**
-```
-Manifest: /var/backups/quantfolio/manifest-20260524_120000.json
-Database: /var/backups/quantfolio/db-20260524_120000.sql
-Vault: /var/backups/quantfolio/vault-20260524_120000.tar.gz
-API Keys: /var/backups/quantfolio/api_keys-20260524_120000.json.enc.gz
-```
-
-## Listing Available Backups
+## Take a backup now
 
 ```bash
-# On Proxmox host or app container
-ls -lh /var/backups/quantfolio/manifest-*.json
-
-# Show creation dates
-ls -lt /var/backups/quantfolio/ | grep manifest
+# On the app LXC (111), as root
+bash /opt/quantfolio/infra/scripts/backup-db.sh
+cat /var/lib/quantfolio-backup/status.json
 ```
 
-## Restoring from Backup
-
-### 1. Verify Backup Integrity
+## List backups
 
 ```bash
-# Check manifest exists
-cat /var/backups/quantfolio/manifest-20260524_120000.json | jq '.'
-
-# Verify all files present
-jq -r '.files | .[]' /var/backups/quantfolio/manifest-20260524_120000.json | \
-  while read f; do [ -f "/var/backups/quantfolio/$f" ] && echo "✓ $f" || echo "✗ MISSING: $f"; done
+ls -lt /var/backups/quantfolio/ | head
+tail -n 20 /var/log/quantfolio-backup.log
 ```
 
-### 2. Full System Restore (Production)
+## Check a dump (restore into a scratch database)
 
-**WARNING:** This procedure restores the entire database. Production data will be overwritten.
+Do this once a month; a backup that was never restored is a hope, not a backup.
 
 ```bash
-# Step 1: Stop application
-pct exec 111 systemctl stop quantfolio-api quantfolio-worker
+# On the DB LXC (110): create the scratch database once
+su postgres -c "createdb -O quantfolio_user quantfolio_restored"
 
-# Step 2: Stop database
-pct exec 110 systemctl stop postgresql
+# On the app LXC (111)
+bash /opt/quantfolio/infra/scripts/restore-db.sh /var/backups/quantfolio/quantfolio-<STAMP>.dump
+# prints the alembic revision and the user count of the restored copy
 
-# Step 3: Restore from backup
-./infra/scripts/restore.sh /var/backups/quantfolio/manifest-20260524_120000.json
-
-# Step 4: Start database
-pct exec 110 systemctl start postgresql
-
-# Step 5: Verify restored data
-pct exec 110 psql -h localhost -U postgres -d quantfolio_restored -c "SELECT COUNT(*) FROM portfolios;"
-
-# Step 6: Rename restored database
-pct exec 110 psql -h localhost -U postgres << 'EOF'
-ALTER DATABASE quantfolio RENAME TO quantfolio_backup_old;
-ALTER DATABASE quantfolio_restored RENAME TO quantfolio;
-EOF
-
-# Step 7: Start application
-pct exec 111 systemctl start quantfolio-api quantfolio-worker
-
-# Step 8: Verify
-curl http://<APP_HOST>:8000/health
+# On the DB LXC (110): drop it again
+su postgres -c "dropdb quantfolio_restored"
 ```
 
-### 3. Restore to Test Environment
+## Restore the live database
 
-To test a restore without affecting production:
+Only after data loss or a failed migration that cannot be rolled forward.
 
 ```bash
-# Create test database
-pct exec 110 psql -h localhost -U postgres << 'EOF'
-CREATE DATABASE quantfolio_test;
-EOF
-
-# Restore into test DB
-./infra/scripts/restore.sh /var/backups/quantfolio/manifest-20260524_120000.json quantfolio_test
-
-# Connect and verify
-pct exec 110 psql -h localhost -U postgres -d quantfolio_test -c "SELECT COUNT(*) FROM portfolios;"
-
-# Cleanup when done
-pct exec 110 psql -h localhost -U postgres -c "DROP DATABASE quantfolio_test;"
+# On the app LXC (111)
+systemctl stop quantfolio-worker quantfolio-api
+bash /opt/quantfolio/infra/scripts/backup-db.sh          # keep what is there now
+bash /opt/quantfolio/infra/scripts/restore-db.sh /var/backups/quantfolio/quantfolio-<STAMP>.dump quantfolio --replace-live
+cd /opt/quantfolio/backend && set -a && . ../.env && set +a
+.venv/bin/alembic current                                  # must match the code's head, else check out that revision
+systemctl start quantfolio-api quantfolio-worker
 ```
 
-## Point-in-Time Recovery (PITR)
+If the code on disk is newer than the dump's alembic revision, run
+`.venv/bin/alembic upgrade head` before starting the services.
 
-PostgreSQL WAL (Write-Ahead Logs) enable recovery to any point in time. To set up:
+## Restore a whole container
+
+From the Proxmox web UI (Datacenter → Backup storage → `proxmox-backups`) or:
 
 ```bash
-# On database container (110)
-# Edit /etc/postgresql/16/main/postgresql.conf:
-
-wal_level = replica
-archive_mode = on
-archive_command = 'test ! -f /var/lib/postgresql/wal_archive/%f && cp %p /var/lib/postgresql/wal_archive/%f'
-
-# Create archive directory
-mkdir -p /var/lib/postgresql/wal_archive
-chown postgres:postgres /var/lib/postgresql/wal_archive
-
-# Restart PostgreSQL
-systemctl restart postgresql
-
-# To restore to a point in time:
-# 1. Obtain last base backup: /var/backups/quantfolio/db-*.sql
-# 2. Restore base backup to recovery_target_timeline='latest'
-# See PostgreSQL PITR docs for full procedure
+# On the Proxmox host
+pvesm list proxmox-backups | grep vzdump-lxc-111
+pct stop 111
+pct restore 111 <volume id from the list> --force
+pct start 111
 ```
 
-## Automated Backup Scheduling
+## When the backup server is down
 
-Add to app container crontab:
-
-```bash
-# In app container (111)
-crontab -e
-
-# Add line:
-0 2 * * * /opt/quantfolio/infra/scripts/backup.sh /var/backups/quantfolio cron >> /var/log/quantfolio-backup.log 2>&1
-
-# Verify
-crontab -l
-```
-
-Or use systemd timer (preferred):
-
-```bash
-# Create /etc/systemd/system/quantfolio-backup.service
-[Unit]
-Description=QuantFolio Daily Backup
-After=quantfolio-api.service
-
-[Service]
-Type=oneshot
-ExecStart=/opt/quantfolio/infra/scripts/backup.sh /var/backups/quantfolio cron
-User=quantfolio
-
-# Create /etc/systemd/system/quantfolio-backup.timer
-[Unit]
-Description=QuantFolio Daily Backup Timer
-Requires=quantfolio-backup.service
-
-[Timer]
-OnCalendar=*-*-* 02:00:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-
-# Enable
-systemctl daemon-reload
-systemctl enable --now quantfolio-backup.timer
-systemctl status quantfolio-backup.timer
-```
-
-## Remote Backup Storage
-
-To back up to a NAS or cloud storage:
-
-```bash
-# Set env var before running backup
-export BACKUP_REMOTE=backup_user@<BACKUP_HOST>:/nas/quantfolio_backups
-
-# Run backup (will rsync to remote after local backup)
-./backup.sh /var/backups/quantfolio
-
-# Or manually sync existing backups
-rsync -avz /var/backups/quantfolio/ backup_user@<BACKUP_HOST>:/nas/quantfolio_backups/
-```
-
-## Backup Integrity Checks
-
-### Database Consistency
-
-```bash
-# Verify database integrity
-pct exec 110 psql -h localhost -U quantfolio_user -d quantfolio << 'EOF'
--- Check for missing foreign keys
-SELECT * FROM information_schema.table_constraints WHERE constraint_type='FOREIGN KEY';
-
--- Check table sizes
-SELECT schemaname, tablename, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename))
-FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
-ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
-EOF
-```
-
-### Backup File Integrity
-
-```bash
-# Verify checksums match manifest
-jq -r '.checksums | to_entries[] | "\(.value) /var/backups/quantfolio/\(.key | gsub("_md5"; ""))"' \
-  /var/backups/quantfolio/manifest-*.json | \
-  md5sum -c
-```
-
-## Disaster Recovery Timeframes
-
-| Scenario | RTO | RPO |
-|----------|-----|-----|
-| Single container failure | 5 min | 24 hours |
-| Datacenter failure (restore to new host) | 1-2 hours | 24 hours |
-| Ransomware/data corruption | 30 min | 24 hours |
-
-**RTO:** Recovery Time Objective (how fast you can restore)  
-**RPO:** Recovery Point Objective (how much data loss is acceptable)
-
-Current setup: RPO = 24 hours (daily backups). For RPO < 1 hour, implement WAL archiving (see PITR section).
-
----
-
-**Last updated:** 2026-05-24  
-**Related:** `deploy.md`, `rollback.md`
+`pvesm status` shows `proxmox-backups` as `inactive` and the nightly vzdump
+task fails with "No route to host". Start the backup server (or fix its
+address in Datacenter → Storage); the next nightly run picks it up. Until
+then only the local dumps exist.

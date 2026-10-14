@@ -344,26 +344,6 @@ class ObsidianQueryRequest(BaseModel):
     limit: int = Field(default=10, ge=1, le=50)
 
 
-class ChatStreamRequest(BaseModel):
-    message: str
-    conversation_id: str | None = None
-
-
-class ChatConversationOut(BaseModel):
-    conversation_id: str
-    title: str
-    last_at: str
-    message_count: int
-
-
-class ChatMessageOut(BaseModel):
-    id: str
-    conversation_id: str | None = None
-    role: str
-    content: str
-    timestamp: str
-
-
 class BacktestRequest(BaseModel):
     ticker: str
     strategy: str = "sma_cross"

@@ -3756,3 +3756,33 @@ export interface BacktestRun {
   assumptions?: Record<string, string>;
   estimate?: true;
 }
+
+// Unexpected API and browser errors (GET /api/errors) and the daily self-check.
+export interface AppErrorRow {
+  id: string;
+  source: "api" | "client" | string;
+  kind: string;
+  message: string;
+  location: string;
+  count: number;
+  first_seen: string;
+  last_seen: string;
+}
+
+export interface SelfCheckProblem {
+  id: string;
+  severity: "error" | "warning";
+  title: string;
+  detail: string;
+  href: string;
+  action: string;
+}
+
+export interface SelfCheckResult {
+  ran_at: string | null;
+  problems: SelfCheckProblem[];
+  notified: boolean;
+}
+
+export const getAppErrors = (days = 7) => api<AppErrorRow[]>(`/api/errors?days=${days}`);
+export const getSelfCheck = () => api<SelfCheckResult>("/api/errors/self-check");

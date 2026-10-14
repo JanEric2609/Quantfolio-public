@@ -148,8 +148,8 @@ echo ""
 echo "========== Step 5: Setting up backup infrastructure =========="
 
 BACKUP_SCRIPTS=(
-    "backup.sh"
-    "restore.sh"
+    "backup-db.sh"
+    "restore-db.sh"
     "healthcheck.sh"
 )
 
@@ -171,8 +171,7 @@ echo "✓ Backup directory: $BACKUP_DIR"
 
 # Optional: Set up daily backup cron (on app container)
 echo ""
-echo "To enable automated daily backups, add to app container crontab:"
-echo "  0 2 * * * /opt/quantfolio/infra/scripts/backup.sh $BACKUP_DIR cron >> /var/log/quantfolio-backup.log 2>&1"
+echo "Nightly backups: quantfolio-update-app installs /etc/cron.d/quantfolio-backup on the app container."
 echo ""
 
 # ====================================================================
@@ -289,9 +288,9 @@ cat << 'EOF'
    [ ] Create a test user and log in
 
 7. Backup Setup:
-   [ ] Test backup: ./scripts/backup.sh /var/backups/quantfolio manual
-   [ ] Test restore: ./scripts/restore.sh /var/backups/quantfolio/manifest-*.json
-   [ ] Set up cron: 0 2 * * * /opt/quantfolio/infra/scripts/backup.sh
+   [ ] Test backup: bash infra/scripts/backup-db.sh
+   [ ] Test restore: bash infra/scripts/restore-db.sh /var/backups/quantfolio/quantfolio-<STAMP>.dump
+   [ ] Check cron: cat /etc/cron.d/quantfolio-backup
 
 EOF
 

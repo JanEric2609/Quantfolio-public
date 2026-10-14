@@ -18,14 +18,14 @@ describe("route manifest", () => {
 
     expect(main.map((e) => e.label)).toEqual([
       "Home", "This month", "Portfolio", "Tax", "Budget", "Discover", "Watchlist", "News",
-      "Can I trust it?", "Quant Lab", "Strategy lab", "AI Chat",
+      "Can I trust it?", "Quant Lab", "Strategy lab",
     ]);
     expect(groups.find((g) => g.id === "admin")?.items.map((e) => e.label)).toEqual(["Control Center"]);
     expect(groups.map((g) => g.label)).toEqual(["Today", "My money", "Ideas", "Trust", "Research tools", "Admin"]);
   });
 
-  it("flags exactly Quant Lab, Strategy lab and AI Chat as research tools", () => {
-    expect(ROUTE_ENTRIES.filter((e) => e.researchTool).map((e) => e.label)).toEqual(["Quant Lab", "Strategy lab", "AI Chat"]);
+  it("flags exactly Quant Lab and Strategy lab as research tools", () => {
+    expect(ROUTE_ENTRIES.filter((e) => e.researchTool).map((e) => e.label)).toEqual(["Quant Lab", "Strategy lab"]);
     expect(isResearchToolPath("/quantlab/risk")).toBe(true);
     expect(isResearchToolPath("/advisor/loop")).toBe(true);
     expect(isResearchToolPath("/portfolio/paper")).toBe(true);
@@ -58,7 +58,7 @@ describe("route manifest", () => {
       ["/", "home"], ["/dashboard", "home"], ["/plan", "plan"], ["/portfolio/risk", "portfolio"],
       ["/portfolio/analysis", "portfolio"], ["/portfolio/paper", "strategy-lab"], ["/tax/lots", "tax"],
       ["/money/subscriptions", "budget"], ["/research/stocks/AAPL", "watchlist"], ["/news", "news"],
-      ["/discover", "discover"], ["/trust", "trust"], ["/evidence", "strategy-lab"], ["/chat", "chat"],
+      ["/discover", "discover"], ["/trust", "trust"], ["/evidence", "strategy-lab"],
       ["/settings/status", "settings"], ["/decide", "decide"],
     ] as const) {
       expect(activeEntry(path)?.id, path).toBe(id);

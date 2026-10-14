@@ -1,5 +1,5 @@
 import {
-  Bot, BrainCircuit, CalendarCheck, Calculator, CreditCard, FlaskConical, Home, Inbox, LandPlot,
+  BrainCircuit, CalendarCheck, Calculator, CreditCard, FlaskConical, Home, Inbox, LandPlot,
   LineChart, Newspaper, PieChart, Settings, ShieldCheck, Table2, ListChecks, FileText, Target,
   Wallet, Receipt, Repeat, Briefcase, ArrowLeftRight, Activity, Gauge, Library, Star, type LucideIcon,
 } from "lucide-react";
@@ -96,7 +96,6 @@ export const ROUTE_ENTRIES: RouteEntry[] = [
     match: isStrategyLabPath,
     keywords: ["evidence", "advisor", "mandates", "graduation", "paper"],
   },
-  { id: "chat", to: "/chat", label: "AI Chat", icon: Bot, group: "tools", researchTool: true, keywords: ["assistant", "llm"] },
   { id: "settings", to: "/settings", label: "Control Center", icon: Settings, group: "admin", keywords: ["settings", "connections", "status"] },
 ];
 

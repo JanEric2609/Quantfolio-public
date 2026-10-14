@@ -115,6 +115,10 @@ DEFAULT_PUBLIC_SETTINGS: dict[str, Any] = {
     # contact, e.g. "Jane Doe jane@example.com" (data_engineering.
     # sec_edgar_insider). Empty: a generic Quantfolio agent string.
     "sec_edgar_user_agent": "",
+    # host:port of the off-host backup target (a Proxmox Backup Server
+    # answers on 8007). The daily self-check opens a TCP connection to it
+    # and alerts when it does not answer. Empty: not checked.
+    "backup_offsite_probe": "",
     "alphacrafter_ic_horizon_days": 5,
     "alphacrafter_min_ic": 0.02,
     "alphacrafter_min_icir": 0.3,

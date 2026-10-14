@@ -72,7 +72,7 @@ from .dkb import (
 )
 from .embedding import Embedding as Embedding, FinAgentRun as FinAgentRun
 from .goal import Goal as Goal
-from .jobs import JobRun as JobRun
+from .jobs import AppError as AppError, JobRun as JobRun
 from .market import (
     AnalystEstimateSnapshot as AnalystEstimateSnapshot,
     BarQuarantine as BarQuarantine,

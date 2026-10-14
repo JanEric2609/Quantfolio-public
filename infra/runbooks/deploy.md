@@ -378,10 +378,9 @@ See `rollback.md` for rollback steps.
 
 ### Scheduled Backup
 
-Set up daily backup (in app container crontab):
-```bash
-0 2 * * * /opt/quantfolio/infra/scripts/backup.sh /var/backups/quantfolio cron >> /var/log/quantfolio-backup.log 2>&1
-```
+`quantfolio-update-app` installs `/etc/cron.d/quantfolio-backup` (nightly
+`backup-db.sh`) and `/etc/cron.d/quantfolio-self-check` (the daily self-check
+that alerts on Telegram). See `backup-restore.md`.
 
 ### Unattended Updates (SSH deploy keys)
 

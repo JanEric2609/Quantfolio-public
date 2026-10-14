@@ -74,8 +74,8 @@ pct stop <vmid>  # e.g., pct stop 111
 # Option A: Restore from LVM snapshot (if available)
 lvconvert --merge /dev/pve/vm-111-disk-0-backup
 
-# Option B: Restore from backup script
-/root/quantfolio/infra/scripts/restore.sh /var/backups/quantfolio/manifest-*.json
+# Option B: restore the container from the backup server (see backup-restore.md)
+pct restore <vmid> <volume id> --force
 ```
 
 ### 3. Start Container
@@ -95,10 +95,11 @@ If multiple components are affected:
 pct stop 110 111 112 113
 ```
 
-### 2. Restore All Containers from Backup
+### 2. Restore the Database from Backup
 
 ```bash
-./infra/scripts/restore.sh /var/backups/quantfolio/manifest-<TIMESTAMP>.json
+# On the app LXC (111); see backup-restore.md for the full procedure
+bash /opt/quantfolio/infra/scripts/restore-db.sh /var/backups/quantfolio/quantfolio-<STAMP>.dump quantfolio --replace-live
 ```
 
 ### 3. Verify Backup Integrity
@@ -137,8 +138,8 @@ pct start 113  # Web
   lvcreate -L50G -s -n vm-111-backup-snapshot /dev/pve/vm-111-disk-0
   ```
 
-- **Automated backups:** Cron job runs `backup.sh` daily at 2 AM
-- **Test restores monthly:** `restore.sh` on a non-production DB to verify integrity
+- **Automated backups:** `/etc/cron.d/quantfolio-backup` runs `backup-db.sh` nightly at 02:15
+- **Test restores monthly:** `restore-db.sh` into `quantfolio_restored` to verify a dump
 
 ---
 

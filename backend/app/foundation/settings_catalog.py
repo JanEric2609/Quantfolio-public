@@ -795,6 +795,10 @@ _reg(CatalogEntry("quant_lab_signal_batch_dir", "system", "Signal-batch output",
 _reg(CatalogEntry("quant_factors_ff_cache_dir", "system", "Fama-French cache",
     "Cache for downloaded Fama-French factor files.", placeholder="/tmp/quantfolio_ff_cache",
     status="needs_worker_restart", section="Storage"))
+_reg(CatalogEntry("backup_offsite_probe", "system", "Backup server address",
+    "host:port of the server that keeps the off-host backups (Proxmox Backup Server: port 8007). "
+    "The daily self-check alerts on Telegram when it does not answer. Empty: not checked.",
+    placeholder="10.0.0.12:8007", section="Backups"))
 _reg(CatalogEntry("duckdb_memory_limit", "system", "DuckDB memory limit",
     "Memory cap for PIT panel reads, e.g. 2GB. The env var QUANTFOLIO_DUCKDB_MEMORY_LIMIT wins.",
     placeholder="2GB", status="needs_worker_restart", section="DuckDB"))

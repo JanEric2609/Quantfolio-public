@@ -138,6 +138,56 @@
         "title": "AnnualSankeyOut",
         "type": "object"
       },
+      "AppErrorOut": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "first_seen": {
+            "format": "date-time",
+            "title": "First Seen",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_seen": {
+            "format": "date-time",
+            "title": "Last Seen",
+            "type": "string"
+          },
+          "location": {
+            "title": "Location",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "kind",
+          "message",
+          "location",
+          "count",
+          "first_seen",
+          "last_seen"
+        ],
+        "title": "AppErrorOut",
+        "type": "object"
+      },
       "AttentionItemOut": {
         "properties": {
           "action": {
@@ -1391,95 +1441,40 @@
         "title": "CategoryOut",
         "type": "object"
       },
-      "ChatConversationOut": {
+      "ClientErrorIn": {
         "properties": {
-          "conversation_id": {
-            "title": "Conversation Id",
+          "kind": {
+            "default": "Error",
+            "maxLength": 120,
+            "title": "Kind",
             "type": "string"
           },
-          "last_at": {
-            "title": "Last At",
+          "location": {
+            "default": "",
+            "maxLength": 300,
+            "title": "Location",
             "type": "string"
-          },
-          "message_count": {
-            "title": "Message Count",
-            "type": "integer"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "conversation_id",
-          "title",
-          "last_at",
-          "message_count"
-        ],
-        "title": "ChatConversationOut",
-        "type": "object"
-      },
-      "ChatMessageOut": {
-        "properties": {
-          "content": {
-            "title": "Content",
-            "type": "string"
-          },
-          "conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation Id"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "role": {
-            "title": "Role",
-            "type": "string"
-          },
-          "timestamp": {
-            "title": "Timestamp",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "role",
-          "content",
-          "timestamp"
-        ],
-        "title": "ChatMessageOut",
-        "type": "object"
-      },
-      "ChatStreamRequest": {
-        "properties": {
-          "conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Conversation Id"
           },
           "message": {
+            "default": "",
+            "maxLength": 1000,
             "title": "Message",
             "type": "string"
+          },
+          "stack": {
+            "anyOf": [
+              {
+                "maxLength": 8000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stack"
           }
         },
-        "required": [
-          "message"
-        ],
-        "title": "ChatStreamRequest",
+        "title": "ClientErrorIn",
         "type": "object"
       },
       "CompositeRequest": {
@@ -9081,6 +9076,19 @@
         "title": "RecommendationsGenerateRequest",
         "type": "object"
       },
+      "RecordedOut": {
+        "properties": {
+          "recorded": {
+            "title": "Recorded",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "recorded"
+        ],
+        "title": "RecordedOut",
+        "type": "object"
+      },
       "RegimeCurrentResponse": {
         "description": "Current market regime snapshot for the Dashboard badge.",
         "properties": {
@@ -11191,6 +11199,37 @@
           "timestamp"
         ],
         "title": "ScreenerRunResponse",
+        "type": "object"
+      },
+      "SelfCheckOut": {
+        "properties": {
+          "notified": {
+            "default": false,
+            "title": "Notified",
+            "type": "boolean"
+          },
+          "problems": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "ran_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ran At"
+          }
+        },
+        "title": "SelfCheckOut",
         "type": "object"
       },
       "SettingsPayload": {
@@ -16958,165 +16997,6 @@
         ]
       }
     },
-    "/api/ai/chat/conversations": {
-      "get": {
-        "operationId": "list_conversations_api_ai_chat_conversations_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ChatConversationOut"
-                  },
-                  "title": "Response List Conversations Api Ai Chat Conversations Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "List Conversations",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/api/ai/chat/conversations/{conversation_id}": {
-      "delete": {
-        "operationId": "delete_conversation_api_ai_chat_conversations__conversation_id__delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "conversation_id",
-            "required": true,
-            "schema": {
-              "title": "Conversation Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Delete Conversation Api Ai Chat Conversations  Conversation Id  Delete",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Delete Conversation",
-        "tags": [
-          "ai"
-        ]
-      },
-      "get": {
-        "operationId": "get_conversation_api_ai_chat_conversations__conversation_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "conversation_id",
-            "required": true,
-            "schema": {
-              "title": "Conversation Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ChatMessageOut"
-                  },
-                  "title": "Response Get Conversation Api Ai Chat Conversations  Conversation Id  Get",
-                  "type": "array"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Conversation",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
-    "/api/ai/chat/stream": {
-      "post": {
-        "operationId": "chat_stream_api_ai_chat_stream_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ChatStreamRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              },
-              "text/event-stream": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "SSE stream"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Chat Stream",
-        "tags": [
-          "ai"
-        ]
-      }
-    },
     "/api/ai/context/obsidian/query": {
       "post": {
         "operationId": "obsidian_query_api_ai_context_obsidian_query_post",
@@ -22110,6 +21990,120 @@
         "summary": "Test Email",
         "tags": [
           "email"
+        ]
+      }
+    },
+    "/api/errors": {
+      "get": {
+        "description": "API and browser errors seen in the last *days*, most recent first.",
+        "operationId": "list_errors_api_errors_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 7,
+              "maximum": 90,
+              "minimum": 1,
+              "title": "Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AppErrorOut"
+                  },
+                  "title": "Response List Errors Api Errors Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Errors",
+        "tags": [
+          "errors"
+        ]
+      }
+    },
+    "/api/errors/client": {
+      "post": {
+        "description": "Record a crash the browser caught. Signed-in users only, rate-limited.",
+        "operationId": "report_client_error_api_errors_client_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientErrorIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Report Client Error",
+        "tags": [
+          "errors"
+        ]
+      }
+    },
+    "/api/errors/self-check": {
+      "get": {
+        "description": "The stored result of the last daily self-check (it runs from cron, not from here).",
+        "operationId": "last_self_check_api_errors_self_check_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfCheckOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Last Self Check",
+        "tags": [
+          "errors"
         ]
       }
     },

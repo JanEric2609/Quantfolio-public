@@ -22,7 +22,8 @@ import {
  * resolver that back the graduation gate's Deflated Sharpe deflation — the
  * mechanism that makes the "silent period" un-gameable. Read-only.
  */
-export function EvidencePage() {
+export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}) {
+  const Heading = headingLevel === 1 ? "h1" : "h2";
   const [summary, setSummary] = useState<NTrialsSummaryResponse | null>(null);
   const [entries, setEntries] = useState<TrialLedgerEntryDto[]>([]);
   const [context, setContext] = useState("");
@@ -89,9 +90,9 @@ export function EvidencePage() {
   return (
     <div className="p-6 space-y-6 max-w-4xl">
       <div>
-        <h1 className="text-xl font-semibold flex items-center gap-2">
+        <Heading className="text-xl font-semibold flex items-center gap-2">
           <FlaskConical className="h-5 w-5" /> Evidence
-        </h1>
+        </Heading>
         <p className="text-sm text-text-secondary mt-1 max-w-2xl">
           The checks a strategy must pass before it gets any of your money. Documented factor
           premia are tested with a prior from the literature; mined signals must clear the
