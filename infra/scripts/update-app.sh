@@ -195,6 +195,27 @@ install_unit_if_changed quantfolio-worker.service
 if [[ "${UNITS_CHANGED}" -eq 1 ]]; then
   systemctl daemon-reload
 fi
+
+# Nightly backup and daily self-check. Until 2026-10 root's crontab called the
+# dev-era backup.sh, which was not executable and looked for the database on
+# localhost: every night logged "Permission denied" and no dump was written.
+install_cron_if_changed() {
+  local name="$1"
+  local repo_cron="${APP_DIR}/infra/cron/${name}"
+  local installed="/etc/cron.d/${name}"
+  [[ -f "${repo_cron}" ]] || return 0
+  if [[ -f "${installed}" ]] && cmp -s "${repo_cron}" "${installed}"; then
+    return 0
+  fi
+  log "Installing cron job ${name}"
+  install -m 0644 "${repo_cron}" "${installed}"
+}
+install_cron_if_changed quantfolio-backup
+install_cron_if_changed quantfolio-self-check
+if crontab -l 2>/dev/null | grep -qF 'infra/scripts/backup.sh'; then
+  log "Removing the old backup.sh line from root's crontab"
+  crontab -l 2>/dev/null | grep -vF 'infra/scripts/backup.sh' | crontab - || true
+fi
 if [[ -z "$(read_env_value FORWARDED_ALLOW_IPS)" ]]; then
   log "FORWARDED_ALLOW_IPS is not set in ${ENV_FILE}: the unit default (the web LXC, 10.0.0.23) applies. Set it if Caddy runs elsewhere, or every client shares one address for the login lockout."
 fi

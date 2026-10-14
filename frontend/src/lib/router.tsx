@@ -112,8 +112,6 @@ export const appChildren: RouteObject[] = [
   ] },
   { path: "profile", element: <Navigate to="/settings/profile" replace /> },
   { path: "news", ...lazyNamed(() => import("../pages/news/NewsPage"), "NewsPage"), handle: { title: "News" } },
-  // The chat page has no PageHeader, so the shell supplies its h1 (see useRouteMeta).
-  { path: "chat", ...lazyNamed(() => import("../pages/chat/ChatPage"), "ChatPage"), handle: { title: "AI Chat", noPageHeader: true } },
   { path: "llm-portfolio", element: <Navigate to="/advisor" replace /> },
   // Report Phase 5: the Strategy lab. A pathless layout, so every tab keeps its URL.
   { path: "lab", element: <Navigate to="/evidence" replace /> },

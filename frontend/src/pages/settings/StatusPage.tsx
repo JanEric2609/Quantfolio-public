@@ -6,7 +6,9 @@ import { AlertTriangle, ChevronRight, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   api,
+  getAppErrors,
   getJobSchedule,
+  getSelfCheck,
   type LLMHealthResponse,
   type ProviderHealth,
   type ScheduledJob,
@@ -49,6 +51,8 @@ export function StatusPage() {
         <p className="text-sm text-text-secondary">Read-only health of everything running in the background.</p>
         <nav aria-label="On this page" className="flex flex-wrap gap-x-4 gap-y-1 pt-2 text-sm">
           {[
+            ["self-check", "Self-check"],
+            ["errors", "Errors"],
             ["jobs", "Worker & jobs"],
             ["providers", "Data providers"],
             ["ai", "AI models"],
@@ -62,6 +66,8 @@ export function StatusPage() {
           ))}
         </nav>
       </header>
+      <SelfCheckSection />
+      <ErrorsSection />
       <JobsSection />
       <ProvidersSection />
       <AiSection />
@@ -79,6 +85,101 @@ export function StatusPage() {
         <DataCoveragePanel />
       </Section>
     </div>
+  );
+}
+
+function SelfCheckSection() {
+  const check = useQuery({ queryKey: ["errors", "self-check"], queryFn: getSelfCheck });
+  const result = check.data;
+  return (
+    <Section
+      id="self-check"
+      title="Daily self-check"
+      description="Every morning at 06:00 UTC the server checks backups, prices, jobs, broker syncs, disk space and errors, and sends any problem to Telegram. On Mondays it also confirms when everything is fine."
+    >
+      {check.isLoading ? <Skeleton className="h-16 w-full" /> : null}
+      {check.isError ? <p className="text-sm text-danger">Could not load the last self-check.</p> : null}
+      {result && !result.ran_at ? (
+        <p className="text-sm text-text-secondary">
+          It has not run yet. <code className="font-mono text-xs">quantfolio-update</code> installs it; it then runs the next morning.
+        </p>
+      ) : null}
+      {result?.ran_at ? (
+        <div className="space-y-2 rounded-lg border border-border bg-surface p-4 text-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={cn("h-2 w-2 rounded-full", result.problems.length ? "bg-danger" : "bg-success")} aria-hidden="true" />
+            <span className="font-medium">
+              {result.problems.length ? `${result.problems.length} problem${result.problems.length === 1 ? "" : "s"}` : "All fine"}
+            </span>
+            <span className="text-text-muted">
+              · ran {ago(result.ran_at)} · {result.notified ? "sent to Telegram" : "no message sent"}
+            </span>
+          </div>
+          {result.problems.length ? (
+            <ul className="space-y-1.5">
+              {result.problems.map((problem) => (
+                <li key={problem.id} className="flex items-start gap-2">
+                  <AlertTriangle
+                    className={cn("mt-0.5 h-4 w-4 shrink-0", problem.severity === "error" ? "text-danger" : "text-warn")}
+                    aria-hidden="true"
+                  />
+                  <span>
+                    <span className="font-medium">{problem.title}</span>
+                    <span className="text-text-secondary"> — {problem.detail}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+    </Section>
+  );
+}
+
+function ErrorsSection() {
+  const errors = useQuery({ queryKey: ["errors", "recent"], queryFn: () => getAppErrors(7), refetchInterval: 60_000 });
+  return (
+    <Section
+      id="errors"
+      title="Errors"
+      description="Unexpected server errors and page crashes from the last 7 days. The same error is one row with a count."
+    >
+      {errors.isLoading ? <Skeleton className="h-16 w-full" /> : null}
+      {errors.isError ? <p className="text-sm text-danger">Could not load the error log.</p> : null}
+      {errors.data && errors.data.length === 0 ? <p className="text-sm text-text-secondary">No errors in the last 7 days.</p> : null}
+      {errors.data && errors.data.length ? (
+        <div className="overflow-x-auto rounded-lg border border-border bg-surface">
+          <table className="w-full text-sm">
+            <thead className="border-b border-border text-left text-xs text-text-muted">
+              <tr>
+                <th className="px-4 py-2 font-medium">Error</th>
+                <th className="px-4 py-2 font-medium">Where</th>
+                <th className="px-4 py-2 font-medium">Last seen</th>
+                <th className="px-4 py-2 font-medium">Count</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {errors.data.map((row) => (
+                <tr key={row.id}>
+                  <td className="px-4 py-2 align-top">
+                    <div className="font-medium">
+                      {row.kind} <span className="text-xs font-normal text-text-muted">({row.source === "client" ? "browser" : "server"})</span>
+                    </div>
+                    <div className="max-w-md truncate text-xs text-text-secondary" title={row.message}>
+                      {row.message || "—"}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2 align-top font-mono text-xs text-text-secondary">{row.location || "—"}</td>
+                  <td className="whitespace-nowrap px-4 py-2 align-top text-text-secondary">{ago(row.last_seen)}</td>
+                  <td className="px-4 py-2 align-top">{row.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </Section>
   );
 }
 

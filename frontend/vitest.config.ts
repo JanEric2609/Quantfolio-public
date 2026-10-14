@@ -22,6 +22,8 @@ export default defineConfig({
     css: false,
     globals: true,
     testTimeout: 20000,
+    // e2e/ is Playwright's (npx playwright test), not vitest's.
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],

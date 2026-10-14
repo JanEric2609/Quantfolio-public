@@ -8,6 +8,7 @@ import { router } from "./lib/router";
 import { useUiStore } from "./lib/store";
 import { getSettings } from "./lib/api";
 import { setReportingCurrency } from "./lib/format";
+import { installGlobalErrorReporting } from "./lib/errorReporting";
 import "./styles.css";
 
 // Quantfolio is dark-only by design. Theme is forced to dark regardless of any
@@ -18,6 +19,7 @@ function applyTheme() {
 }
 
 applyTheme();
+installGlobalErrorReporting();
 document.documentElement.dataset.density = useUiStore.getState().density;
 
 // Guard: only fetch settings when a session cookie is plausibly present (i.e. not on the

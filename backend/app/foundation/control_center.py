@@ -6,12 +6,16 @@ stale research extracts, an expiring NV certificate, and settings whose value
 silently does nothing. Each item links to the page that fixes it.
 
 Only reads state other code already records; never probes a network service.
+The daily self-check (``foundation.self_check``) sends the error and warning
+items of this same list to Telegram, so a new check belongs here.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
@@ -34,6 +38,19 @@ PROVIDER_HEALTH_MAX_AGE = timedelta(days=7)
 NV_WARN_DAYS = 60
 DKB_SYNC_STALE_DAYS = 30
 ALPHACRAFTER_MIN_BASKET = 30
+# Written by infra/scripts/backup-db.sh after every nightly run.
+BACKUP_STATUS_FILE = os.environ.get("QUANTFOLIO_BACKUP_STATUS", "/var/lib/quantfolio-backup/status.json")
+BACKUP_MAX_AGE = timedelta(hours=36)
+# Business days without a new close before a price counts as stale (a long
+# weekend plus one late provider is three).
+PRICE_STALE_BUSINESS_DAYS = 4
+PRICE_BENCHMARK = "EUNL.DE"
+# The evidence gate regrades weekly (Sunday 05:30 UTC).
+EVIDENCE_GATE_MAX_AGE = timedelta(days=10)
+JOB_STUCK_AFTER = timedelta(hours=6)
+JOB_OVERDUE_AFTER = timedelta(hours=2)
+DISK_WARN_FREE = 0.10
+DISK_ERROR_FREE = 0.05
 
 
 @dataclass
@@ -99,6 +116,12 @@ def attention_items(db: Session, *, today: date | None = None) -> list[dict[str,
     _dkb_items(db, now, items)
     _scalable_items(db, settings, items)
     _setting_items(settings, clock, items)
+    _backup_items(db, now, items)
+    _price_items(db, now, items)
+    _evidence_gate_items(db, now, items)
+    _stuck_job_items(db, heartbeat, now, items)
+    _disk_items(items)
+    _error_items(db, now, items)
 
     items.sort(key=lambda item: _SEVERITY_ORDER[item.severity])
     return [asdict(item) for item in items]
@@ -406,3 +429,163 @@ def _parse_date(value: Any) -> date | None:
         return date.fromisoformat(str(value)[:10])
     except ValueError:
         return None
+
+
+def _is_postgres(db: Session) -> bool:
+    bind = db.get_bind()
+    return bind is not None and bind.dialect.name == "postgresql"
+
+
+def _backup_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
+    """The nightly dump: missing, failed, or older than BACKUP_MAX_AGE."""
+    try:
+        with open(BACKUP_STATUS_FILE, encoding="utf-8") as handle:
+            status = json.load(handle)
+    except FileNotFoundError:
+        # A dev or test database has no backup job; production must.
+        if _is_postgres(db):
+            items.append(AttentionItem(
+                "backup-missing", "error", "No nightly database backup recorded",
+                f"{BACKUP_STATUS_FILE} does not exist: the nightly backup has never run on this server. "
+                "Run quantfolio-update (it installs the job), then check /var/log/quantfolio-backup.log.",
+                "/settings/status", "View status",
+            ))
+        return
+    except (OSError, ValueError) as exc:
+        items.append(AttentionItem(
+            "backup-unreadable", "warning", "Backup status unreadable", f"{BACKUP_STATUS_FILE}: {exc}",
+            "/settings/status", "View status",
+        ))
+        return
+    finished = _parse_dt(status.get("finished_at"))
+    if status.get("status") != "ok":
+        items.append(AttentionItem(
+            "backup-failed", "error", "Last nightly backup failed",
+            str(status.get("detail") or "See /var/log/quantfolio-backup.log on the app server."),
+            "/settings/status", "View status",
+        ))
+    elif finished is None or now - finished > BACKUP_MAX_AGE:
+        when = finished.strftime("%Y-%m-%d %H:%M UTC") if finished else "unknown"
+        items.append(AttentionItem(
+            "backup-stale", "error", "Database backup is out of date",
+            f"The last good backup finished {when}. The nightly job has stopped running.",
+            "/settings/status", "View status",
+        ))
+
+
+def _business_days_between(start: date, end: date) -> int:
+    import numpy as np
+
+    return int(np.busday_count(start, end)) if start < end else 0
+
+
+def _price_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
+    """Stale closes for the benchmark and every held instrument."""
+    from app.foundation.live_positions import combined_positions
+    from app.foundation.market import history
+    from app.foundation.models.entities import User
+
+    tickers = {PRICE_BENCHMARK}
+    for (user_id,) in db.query(User.id).all():
+        try:
+            tickers.update(p.ticker for p in combined_positions(db, user_id, include_unreconciled=True) if p.ticker)
+        except Exception:
+            logger.warning("Holdings unavailable for the price check", exc_info=True)
+    production = _is_postgres(db)
+    stale: list[str] = []
+    for ticker in sorted(tickers):
+        try:
+            rows = history(db, ticker, days=30, allow_live=False)
+        except Exception:
+            rows = []
+        last = max((row["date"] for row in rows if row.get("close") is not None and row.get("date")), default=None)
+        if last is None:
+            # A dev or test database simply has no prices; production must.
+            if production:
+                stale.append(f"{ticker} (none in 30 days)")
+        elif _business_days_between(last, now.date()) > PRICE_STALE_BUSINESS_DAYS:
+            stale.append(f"{ticker} (last {last.isoformat()})")
+    if stale:
+        benchmark_stale = any(s.startswith(PRICE_BENCHMARK + " ") for s in stale)
+        items.append(AttentionItem(
+            "prices-stale", "error" if benchmark_stale else "warning",
+            f"{len(stale)} price series {'are' if len(stale) > 1 else 'is'} out of date",
+            ", ".join(stale[:12]) + (" …" if len(stale) > 12 else "")
+            + ". Values, the plan and the benchmark comparison use these closes.",
+            "/settings/status#coverage", "View coverage",
+        ))
+
+
+def _evidence_gate_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
+    from app.foundation.factor_evidence import latest_evidence_gate
+
+    gate = latest_evidence_gate(db)
+    computed = _parse_dt(gate.get("computed_at")) if gate else None
+    if gate is None or computed is None:
+        return  # never run: the plan already says the satellite is locked
+    if now - computed > EVIDENCE_GATE_MAX_AGE:
+        items.append(AttentionItem(
+            "evidence-gate-stale", "warning", "Evidence gate has not run this week",
+            f"Last verdict {computed.strftime('%Y-%m-%d')}. It regrades every Sunday; check the evidence_gate job.",
+            "/settings/status#jobs", "View jobs",
+        ))
+
+
+def _stuck_job_items(db: Session, heartbeat: dict[str, Any] | None, now: datetime, items: list[AttentionItem]) -> None:
+    """Runs that never finished, and scheduled runs the scheduler missed."""
+    cutoff = now - JOB_STUCK_AFTER
+    stuck = sorted({
+        name for (name, started) in db.query(JobRun.job_name, JobRun.started_at).filter(JobRun.status == "running").all()
+        if started is not None and (started if started.tzinfo else started.replace(tzinfo=UTC)) < cutoff
+    })
+    if stuck:
+        items.append(AttentionItem(
+            "jobs-stuck", "warning", f"{len(stuck)} job{'s' if len(stuck) > 1 else ''} running for over 6 hours",
+            ", ".join(stuck) + ". A worker restart marks them failed and frees the next run.",
+            "/settings/status#jobs", "View jobs",
+        ))
+    if heartbeat is None:
+        return
+    beat_at = _parse_dt(heartbeat.get("beat_at"))
+    if beat_at is None or now - beat_at > timedelta(minutes=3 * int(heartbeat.get("interval_minutes", 5))):
+        return  # the worker-down item already covers it
+    overdue = sorted(
+        job["id"] for job in heartbeat.get("jobs", [])
+        if (next_run := _parse_dt(job.get("next_run"))) is not None and beat_at - next_run > JOB_OVERDUE_AFTER
+    )
+    if overdue:
+        items.append(AttentionItem(
+            "jobs-overdue", "warning", f"{len(overdue)} scheduled job{'s' if len(overdue) > 1 else ''} overdue",
+            ", ".join(overdue) + ". The scheduler is running but did not start them on time.",
+            "/settings/status#jobs", "View jobs",
+        ))
+
+
+def _disk_items(items: list[AttentionItem]) -> None:
+    try:
+        usage = shutil.disk_usage("/")
+    except OSError:
+        return
+    free = usage.free / usage.total if usage.total else 1.0
+    if free < DISK_WARN_FREE:
+        items.append(AttentionItem(
+            "disk-low", "error" if free < DISK_ERROR_FREE else "warning", "App server disk almost full",
+            f"{free:.0%} free ({usage.free / 1e9:.1f} GB). Backups and price data stop when it is full.",
+            "/settings/status", "View status",
+        ))
+
+
+def _error_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
+    from app.foundation.app_errors import recent_errors
+
+    errors = recent_errors(db, since=timedelta(days=1), now=now)
+    if not errors:
+        return
+    total = sum(int(str(e["count"])) for e in errors)
+    top = "; ".join(f"{e['kind']} at {e['location']}" for e in errors[:3])
+    items.append(AttentionItem(
+        "app-errors", "warning",
+        f"{total} unexpected error{'s' if total > 1 else ''} in the last day",
+        f"{len(errors)} distinct: {top}" + (" …" if len(errors) > 3 else ""),
+        "/settings/status#errors", "View errors",
+    ))

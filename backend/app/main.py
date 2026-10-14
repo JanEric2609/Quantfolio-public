@@ -317,8 +317,16 @@ def create_app() -> FastAPI:
         )
 
     @app.exception_handler(Exception)
-    async def unexpected_error(_request: Request, exc: Exception):
+    async def unexpected_error(request: Request, exc: Exception):
         logger.exception("Unhandled API error", exc_info=exc)
+        from starlette.concurrency import run_in_threadpool
+
+        from app.foundation.app_errors import record_api_exception
+
+        # The route template, not the raw path: /api/x/{id} groups every id.
+        route = request.scope.get("route")
+        location = f"{request.method} {getattr(route, 'path', None) or request.url.path}"
+        await run_in_threadpool(record_api_exception, exc, location)
         return JSONResponse(
             status_code=500,
             content={"error": {"code": 500, "message": "Internal server error"}},

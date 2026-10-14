@@ -106,12 +106,35 @@ describe("route table", () => {
     expect(missing).toEqual([]);
   });
 
+  it("lists every page in the browser smoke test (e2e/pages.ts)", async () => {
+    const { appChildren } = await import("./router");
+    const { SMOKE_PAGES, SETTINGS_PAGES } = await import("../../e2e/pages");
+    const leaves: string[] = [];
+    const walk = (routes: RouteObject[], trail: string) => {
+      for (const route of routes) {
+        const path = route.index ? trail || "/" : `${trail}/${route.path ?? ""}`.replace(/\/+$/, "").replace(/\/\//g, "/");
+        const isRedirect = route.element !== undefined && route.lazy === undefined;
+        if (route.children) walk(route.children, route.path ? `${trail}/${route.path}` : trail);
+        else if (!isRedirect) leaves.push(path || "/");
+      }
+    };
+    walk(appChildren, "");
+    const missing = leaves.filter((leaf) => {
+      if (leaf.includes(":")) {
+        const pattern = new RegExp(`^${leaf.replace(/:[^/]+/g, "[^/]+")}$`);
+        return !SMOKE_PAGES.some((page) => pattern.test(page));
+      }
+      return !SMOKE_PAGES.includes(leaf);
+    });
+    expect(missing).toEqual([]);
+    expect(SETTINGS_PAGES.length).toBeGreaterThan(0);
+  });
+
   it("flags the pages without a PageHeader so the shell can supply their h1", async () => {
     const { appChildren } = await import("./router");
     const flagged = (path: string) =>
       (appChildren.find((route) => route.path === path)?.handle as { noPageHeader?: boolean } | undefined)?.noPageHeader;
     expect(flagged("quantlab")).toBe(true);
-    expect(flagged("chat")).toBe(true);
     expect(flagged("plan")).toBeUndefined();
   });
 

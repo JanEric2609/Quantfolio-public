@@ -1,27 +1,19 @@
-import json
 import logging
-import uuid
-from typing import Any, Generator
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from starlette.requests import Request
-from starlette.responses import StreamingResponse
 
 from app.foundation.core.db import get_db
 from app.foundation.core.security import limiter
 from app.foundation.llm.base import LlmUnavailableError
 from app.foundation.models.entities import (
     AnalysisReport,
-    ChatMessage,
     User,
 )
 from app.foundation.schemas import (
     BacktestRequest,
-    ChatConversationOut,
-    ChatMessageOut,
-    ChatStreamRequest,
     ObsidianQueryRequest,
     RecommendationGenerateRequest,
     RecommendationGenerateResult,
@@ -173,143 +165,6 @@ def generate_recommendations(
         else "No recommendations were saved because scoring could not build enough context for any candidate."
     )
     return RecommendationGenerateResult(created=created, failed=failed, message=message)
-
-
-@router.post(
-    "/chat/stream",
-    # Server-sent events, not JSON: declared so clients (and the API scan) know.
-    responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}, "description": "SSE stream"}},
-)
-@limiter.limit("10/minute")
-def chat_stream(request: Request, payload: ChatStreamRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> StreamingResponse:
-    conv_id = payload.conversation_id or str(uuid.uuid4())
-    db.add(ChatMessage(user_id=user.id, role="user", content=payload.message, conversation_id=conv_id))
-    db.commit()
-
-    context = build_analysis_context(db, user.id, "EUNL.DE")
-    system_content = f"Current finance context: {json.dumps(context, default=str)}"
-
-    def generate() -> Generator[str, None, None]:
-        full_answer = ""
-        try:
-            llm = configured_llm(db)
-            tokens = llm.chat([
-                {"role": "system", "content": system_content},
-                {"role": "user", "content": payload.message},
-            ])
-            for token in tokens:
-                full_answer += token
-                yield f"data: {json.dumps({'delta': token})}\n\n"
-        except Exception:
-            fallback = "The local LLM endpoint is not available or returned invalid JSON."
-            full_answer = fallback
-            yield f"data: {json.dumps({'delta': fallback})}\n\n"
-
-        msg = ChatMessage(user_id=user.id, role="assistant", content=full_answer, conversation_id=conv_id)
-        db.add(msg)
-        try:
-            db.commit()
-            db.refresh(msg)
-            yield f"data: {json.dumps({'done': True, 'message_id': msg.id, 'conversation_id': conv_id})}\n\n"
-        except Exception:
-            db.rollback()
-            yield f"data: {json.dumps({'done': True, 'error': 'Failed to persist assistant message'})}\n\n"
-
-    return StreamingResponse(generate(), media_type="text/event-stream")
-
-
-@router.get("/chat/conversations", response_model=list[ChatConversationOut])
-def list_conversations(db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[ChatConversationOut]:
-    first_win = (
-        select(
-            ChatMessage.conversation_id,
-            ChatMessage.content,
-            func.row_number()
-            .over(partition_by=ChatMessage.conversation_id, order_by=ChatMessage.timestamp)
-            .label("rn"),
-        )
-        .where(
-            ChatMessage.user_id == user.id,
-            ChatMessage.role == "user",
-            ChatMessage.conversation_id.isnot(None),
-        )
-        .subquery()
-    )
-    stats = (
-        select(
-            ChatMessage.conversation_id,
-            func.max(ChatMessage.timestamp).label("last_at"),
-            func.count(ChatMessage.id).label("message_count"),
-        )
-        .where(
-            ChatMessage.user_id == user.id,
-            ChatMessage.conversation_id.isnot(None),
-        )
-        .group_by(ChatMessage.conversation_id)
-        .subquery()
-    )
-    rows = (
-        db.execute(
-            select(
-                first_win.c.conversation_id,
-                first_win.c.content,
-                stats.c.last_at,
-                stats.c.message_count,
-            )
-            .join(stats, first_win.c.conversation_id == stats.c.conversation_id)
-            .where(first_win.c.rn == 1)
-            .order_by(stats.c.last_at.desc())
-        )
-        .all()
-    )
-    return [
-        ChatConversationOut(
-            conversation_id=row.conversation_id,
-            title=((row.content or "")[:60] + "..." if len(row.content or "") > 60 else (row.content or "")),
-            last_at=row.last_at.isoformat() if row.last_at else "",
-            message_count=row.message_count,
-        )
-        for row in rows
-    ]
-
-
-@router.get("/chat/conversations/{conversation_id}", response_model=list[ChatMessageOut])
-def get_conversation(conversation_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[ChatMessageOut]:
-    rows = (
-        db.query(ChatMessage)
-        .filter(
-            ChatMessage.user_id == user.id,
-            ChatMessage.conversation_id == conversation_id,
-        )
-        .order_by(ChatMessage.timestamp.asc())
-        .all()
-    )
-    return [
-        ChatMessageOut(
-            id=row.id,
-            conversation_id=row.conversation_id,
-            role=row.role,
-            content=row.content,
-            timestamp=row.timestamp.isoformat() if row.timestamp else "",
-        )
-        for row in rows
-    ]
-
-
-@router.delete("/chat/conversations/{conversation_id}")
-def delete_conversation(conversation_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict[str, str]:
-    rows = (
-        db.query(ChatMessage)
-        .filter(
-            ChatMessage.user_id == user.id,
-            ChatMessage.conversation_id == conversation_id,
-        )
-        .all()
-    )
-    for row in rows:
-        db.delete(row)
-    db.commit()
-    return {"deleted": conversation_id}
 
 
 @router.get("/context/obsidian/status")
