@@ -112,9 +112,7 @@ def test_benchmark_symbols_deduped_against_candidates(monkeypatch):
 
     assert requested == [
         pipeline._BENCHMARK_US,
-        pipeline._BENCHMARK_EUROPE,
-        pipeline._BENCHMARK_GLOBAL_ETF,
-        pipeline._BENCHMARK_JAPAN,
+        *[s for s in pipeline._benchmark_symbols() if s != pipeline._BENCHMARK_US],
     ]
 
 

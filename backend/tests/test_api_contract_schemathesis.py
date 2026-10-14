@@ -2,8 +2,9 @@
 
 OPT-IN and never part of the default suite: the whole module skips unless
 SCHEMATHESIS=1, mirroring the TAXVER_GOLDEN_CAPTURE gating pattern in
-tests/test_tax_verification_contracts.py. CI runs it only in the optional,
-non-blocking "api-fuzz-experimental" job.
+tests/test_tax_verification_contracts.py. CI runs it in the blocking
+"api-security-scan" job, next to the authenticated pass in
+tests/test_api_security.py.
 
 Run locally:
 

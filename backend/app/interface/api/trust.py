@@ -11,7 +11,7 @@ for the definitions.
 """
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
@@ -22,6 +22,7 @@ from app.decision.verification.trust import build_verdict, list_calls
 from app.foundation.auth import current_user
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import User
+from app.interface.api.params import ROWS_BOUND
 
 router = APIRouter(prefix="/api/trust", tags=["trust"])
 
@@ -564,7 +565,7 @@ def get_verdict(
 def get_calls(
     type: TypeKey | None = Query(None, description="Only this prediction type"),
     limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    offset: Annotated[int, Query(ge=0), ROWS_BOUND] = 0,
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:

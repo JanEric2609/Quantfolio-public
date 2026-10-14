@@ -12,6 +12,7 @@ import json
 import logging
 import math
 import os
+import re
 import statistics
 import threading
 from pathlib import Path
@@ -25,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.foundation.core.db import SessionLocal
 from app.foundation.data_backbone.ingest import DataIngester
+from app.foundation.etf_classes import classify_etf, index_key
 from app.foundation.data_engineering.pit_panel_joins import (
     pit_ibes_estimate_signal_for_symbol,
     pit_insider_signal_for_symbol,
@@ -219,19 +221,33 @@ _EXCESS_MIN = -0.10
 _SHARPE_DELTA_MIN = -0.5
 _MDD_MAX = 0.30
 
-# Region-aware benchmark mapping by listing suffix. Values are liquid, USD-listed
-# ETFs the provider chain can resolve (same path that already fetches SPY/URTH).
-# Comparing a German stock to the S&P 500 systematically penalises it; a regional
-# benchmark removes that bias. Missing benchmark data fails open (signal skipped).
+# Benchmarks by asset class (plan 2026-10-12, D3). Stocks keep a region
+# benchmark (a German stock against the S&P 500 is penalised for being
+# European); every series is total return now that bar_prices takes only
+# adjusted providers (D1), and both legs are compared in EUR. ETFs are
+# benchmarked by what they are: equity funds against EUNL.DE (the owner's
+# core, i.e. the alternative use of the money), euro bonds against a fund of
+# the same duration bucket, money market against compounded €STR, gold and
+# other commodities against nothing (a diversifier has no excess-return
+# score). Every ETF used to be scored against URTH, so bonds and cash could
+# never be shortlisted and gold looked like alpha (audit H5).
 _BENCHMARK_EUROPE = "VGK"  # Vanguard FTSE Developed Europe (USD)
 _BENCHMARK_US = "SPY"
-_BENCHMARK_GLOBAL_ETF = "URTH"  # iShares MSCI World
+_BENCHMARK_GLOBAL_ETF = "EUNL.DE"  # iShares Core MSCI World (EUR, accumulating)
 _BENCHMARK_JAPAN = "EWJ"  # iShares MSCI Japan (USD); Tokyo listings used to get SPY
 
 
 def _benchmark_symbols() -> list[str]:
-    """Benchmark ETFs warmed alongside candidates on every discover run."""
-    return [_BENCHMARK_EUROPE, _BENCHMARK_US, _BENCHMARK_GLOBAL_ETF, _BENCHMARK_JAPAN]
+    """Benchmark series warmed alongside candidates on every discover run."""
+    from app.foundation.etf_classes import REFERENCE_FUNDS
+
+    bond_refs = [
+        REFERENCE_FUNDS[k].symbol
+        for k in ("bond_govt_eur_short", "bond_govt_eur_mid", "bond_aggregate_eur_hedged")
+    ]
+    return _ordered_unique(
+        [_BENCHMARK_EUROPE, _BENCHMARK_US, _BENCHMARK_GLOBAL_ETF, _BENCHMARK_JAPAN, *bond_refs]
+    )
 
 
 def _ordered_unique(symbols: list[str]) -> list[str]:
@@ -468,6 +484,18 @@ def _evaluate_history_rows(
     return scores, None
 
 
+def _series_quarantine(db: Session, symbol: str) -> str | None:
+    from app.foundation.models.entities import BarSeriesMeta
+
+    try:
+        pin = db.get(BarSeriesMeta, symbol)
+    except Exception:  # noqa: BLE001 - table missing before 0133
+        logger.debug("_series_quarantine: lookup failed for %s", symbol, exc_info=True)
+        db.rollback()
+        return None
+    return pin.quarantine_reason if pin is not None else None
+
+
 def stage_history_ingest(
     db: Session,
     symbol: str,
@@ -480,6 +508,13 @@ def stage_history_ingest(
     a shallow cache can never bless data the ingest path would reject.
     """
     logger.debug("stage_history_ingest: %s", symbol)
+
+    # A series whose split survived a full re-pull is on two scales: every
+    # return across the split is wrong (P500.DE, -98.8 % "momentum"). It stays
+    # out of Discover until a re-pull clears it (plan 2026-10-12, D2).
+    quarantine = _series_quarantine(db, symbol)
+    if quarantine:
+        return None, f"history_ingest: bar series quarantined ({quarantine})"
 
     # Cache-first: check if warm-up already populated the DB for this symbol.
     # On gate failure we deliberately FALL THROUGH to a fresh ingest: the cache
@@ -811,17 +846,23 @@ def _apply_analyst_consensus(result: dict[str, Any], est_result: dict[str, Any])
     # provider's shape unconditionally.
     if not isinstance(est, dict):
         return
-    target = _safe_float(
-        est.get("target_median")
-        or est.get("target_consensus")
-        or est.get("target_mean")
+    target_kind = next(
+        (kind for kind in ("median", "consensus", "mean") if _safe_float(est.get(f"target_{kind}")) is not None),
+        None,
     )
+    target = _safe_float(est.get(f"target_{target_kind}")) if target_kind else None
     current = _safe_float(est.get("current_price"))
     rec = str(est.get("recommendation") or "").lower() or None
     count = est.get("number_analysts")
     result["analyst_recommendation"] = rec
     result["analyst_count"] = int(count) if isinstance(count, (int, float)) else None
     result["analyst_source"] = est_result.get("provider")
+    # Shown with its source and date: aggregators' consensus differs by a few
+    # percent (Yahoo ran 4-5 % above others in 2026-10); a source difference,
+    # disclosed rather than "fixed" (plan 2026-10-12, WP6).
+    result["analyst_target_kind"] = target_kind
+    as_of = est.get("as_of") or est_result.get("as_of")
+    result["analyst_as_of"] = str(as_of)[:10] if as_of else None
     for key in ("sector", "industry"):
         value = est.get(key)
         if result.get(key) is None and isinstance(value, str) and value.strip():
@@ -887,6 +928,41 @@ def attach_earnings_calendar(db: Session, symbol: str, scores: dict[str, Any]) -
     return scores
 
 
+#: Revenue growth means nothing comparable for these (plan 2026-10-12, D8):
+#: Finnhub's revenueGrowthTTMYoy counts gross interest income for banks
+#: (JPM 109 % vs about 14 % actual; BAC/C 99 %, USB 84 %).
+_FINANCIALS = re.compile(r"financ|bank|insurance|capital markets|mortgage", re.I)
+#: |growth| above this needs a second provider within _RG_CONFIRM_PP.
+_RG_MAX_UNCONFIRMED = 1.0
+_RG_CONFIRM_PP = 0.10
+
+
+def _yfinance_revenue_growth(symbol: str) -> float | None:
+    """yfinance's ``revenueGrowth`` (a fraction), the second opinion for an extreme value."""
+    try:
+        import yfinance as yf
+
+        return _safe_float((yf.Ticker(symbol).info or {}).get("revenueGrowth"))
+    except Exception:  # noqa: BLE001 - network / provider failure: no confirmation
+        return None
+
+
+def _sane_revenue_growth(
+    symbol: str, rg: float | None, *, sector: str | None, industry: str | None, source: str,
+) -> tuple[float | None, str | None]:
+    """``(growth, concern)``: None with ``revenue_growth_unreliable`` for financials,
+    and for |growth| > 100 % that yfinance does not confirm within 10 pp (D8)."""
+    if rg is None:
+        return None, None
+    if _FINANCIALS.search(f"{sector or ''} {industry or ''}"):
+        return None, "revenue_growth_unreliable"
+    if abs(rg) > _RG_MAX_UNCONFIRMED:
+        second = rg if source.startswith("yfinance") else _yfinance_revenue_growth(symbol)
+        if second is None or abs(second - rg) > _RG_CONFIRM_PP:
+            return None, "revenue_growth_unreliable"
+    return rg, None
+
+
 def stage_sentiment_fundamentals(
     db: Session,
     symbol: str,
@@ -919,6 +995,8 @@ def stage_sentiment_fundamentals(
         "analyst_count": None,
         "analyst_recommendation": None,
         "analyst_source": None,
+        "analyst_target_kind": None,
+        "analyst_as_of": None,
         "sector": None,
         "industry": None,
         "pe": None,
@@ -945,17 +1023,24 @@ def stage_sentiment_fundamentals(
         mc = _safe_float(data.get("market_cap"))
         rg = _safe_float(data.get("revenue_growth"))
 
+        # Sector/industry feed the shortlist's per-sector cap
+        # (apply_sector_cap) and the dossier prompt.
+        for key in ("sector", "industry"):
+            value = data.get(key)
+            result[key] = value if isinstance(value, str) and value.strip() else None
+        rg, rg_concern = _sane_revenue_growth(
+            symbol, rg, sector=result["sector"], industry=result["industry"],
+            source=str(fund_result.get("source") or ""),
+        )
+        if rg_concern:
+            result["concerns"].append(rg_concern)
+
         result["pe"] = pe
         result["pb"] = pb
         result["roe"] = roe
         result["de_ratio"] = de
         result["market_cap"] = mc
         result["revenue_growth"] = rg
-        # Sector/industry feed the shortlist's per-sector cap
-        # (apply_sector_cap) and the dossier prompt.
-        for key in ("sector", "industry"):
-            value = data.get(key)
-            result[key] = value if isinstance(value, str) and value.strip() else None
 
         score = 0.5
         # A non-positive P/E or P/B is a loss or negative equity, not a cheap
@@ -1093,14 +1178,28 @@ def stage_momentum_quality(
 # Stage 3 — backtest vs benchmark
 # ---------------------------------------------------------------------------
 
-def _pick_benchmark(symbol: str, is_etf: bool) -> str:
-    """Choose a region-appropriate benchmark for *symbol*.
+def _pick_benchmark(symbol: str, asset_class: str | bool = "equity") -> str | None:
+    """The D3 benchmark for *symbol*; ``None`` when the class has none (gold).
 
-    ETFs are global → MSCI World. Otherwise the listing suffix decides: European
-    venues benchmark against developed Europe rather than the S&P 500.
+    ``asset_class`` is ``"equity"`` for a single stock, else an ETF class
+    from :mod:`app.foundation.etf_classes` (``True``/``False`` are accepted
+    for the old is-ETF flag). Stocks: the listing region decides, European
+    venues against developed Europe; anything outside the US, Europe and
+    Japan against EUNL.DE. Money market returns ``ESTR``, the synthetic
+    compounded €STR series.
     """
-    if is_etf:
-        return _BENCHMARK_GLOBAL_ETF
+    from app.foundation.etf_classes import benchmark_symbol_for
+
+    if asset_class is True:
+        asset_class = "equity_broad"
+    elif asset_class is False:
+        asset_class = "equity"
+    if asset_class not in ("equity", "stock"):
+        if asset_class == "etf":
+            asset_class = "equity_broad"
+        elif asset_class == "bond":
+            asset_class = "bond_other"
+        return benchmark_symbol_for(str(asset_class))
     s = symbol.upper()
     if is_eu_listing(s):
         return _BENCHMARK_EUROPE
@@ -1110,6 +1209,48 @@ def _pick_benchmark(symbol: str, is_etf: bool) -> str:
     if region != "us":
         return _BENCHMARK_GLOBAL_ETF
     return _BENCHMARK_US
+
+
+def _closes_by_day(rows: list[dict[str, Any]]) -> dict[str, float]:
+    out: dict[str, float] = {}
+    for row in rows or []:
+        close = row.get("close")
+        if close is None:
+            continue
+        value = float(close)
+        if value > 0:
+            out[str(row.get("date"))[:10]] = value
+    return out
+
+
+def _eur_legs(
+    db: Session, symbol: str, benchmark: str, cand_rows: list[dict[str, Any]],
+    bench_rows: list[dict[str, Any]] | None, *, days: int,
+) -> "pd.DataFrame":
+    """Aligned closes of candidate and benchmark, both restated in EUR.
+
+    Columns ``date`` (datetime64), ``close_c``, ``close_b``. A EUR listing
+    passes through; a USD or GBp listing is multiplied by the day's EUR rate
+    (``eur_prices.to_eur``), so EUNL.DE needs no FX and SPY against AAPL
+    compares like with like. ``ESTR`` reads the compounded €STR index on the
+    candidate's dates.
+    """
+    from app.foundation.estr import closes_on as estr_closes_on
+    from app.foundation.etf_classes import ESTR_BENCHMARK
+    from app.foundation.eur_prices import to_eur
+
+    rate_cache: dict[str, dict[str, float] | None] = {}
+    cand, _ = to_eur(db, symbol, _closes_by_day(cand_rows), days=days + 30, rate_cache=rate_cache)
+    if benchmark == ESTR_BENCHMARK:
+        bench = estr_closes_on(db, sorted(cand))
+    else:
+        bench, _ = to_eur(db, benchmark, _closes_by_day(bench_rows or []), days=days + 30, rate_cache=rate_cache)
+    common = sorted(cand.keys() & bench.keys())
+    return pd.DataFrame({
+        "date": pd.to_datetime(pd.Series(common, dtype="object")),
+        "close_c": [cand[d] for d in common],
+        "close_b": [bench[d] for d in common],
+    })
 
 
 def _infer_currency(db: Session | None, symbol: str) -> str:
@@ -1122,8 +1263,8 @@ def _infer_currency(db: Session | None, symbol: str) -> str:
     return resolve_currency(db, symbol)
 
 
-# SPY/VGK/URTH are all US-listed and settle in USD, so this is the only
-# direction the FX adjustment below needs to run in. Cached per calendar day:
+# USD->candidate-currency series for the verification gate's drawdown leg.
+# (The benchmark legs go through eur_prices.to_eur.) Cached per calendar day:
 # the FX series is stable across the ~300 candidates of one discover run, and
 # re-fetching per candidate would be 100+ redundant calls for the same pair.
 # The day is part of the key because the worker process lives for weeks; a
@@ -1154,52 +1295,41 @@ def _get_fx_series(db: Session, currency: str) -> "pd.DataFrame | None":
     return df
 
 
-def _fx_adjust_bench_returns(
-    db: Session,
-    candidate_currency: str,
-    bench_currency: str,
-    dates: pd.Series,
-    bench_rets: pd.Series,
-) -> pd.Series | None:
-    """Restate *bench_rets* (in ``bench_currency``) into ``candidate_currency`` terms.
-
-    Comparing a EUR-priced stock's returns directly against a USD-listed
-    benchmark's unconverted USD returns bakes the EURUSD move into the excess
-    return and beta — not a real performance difference. Restated return is
-    ``(1+r_local)*(1+r_fx) - 1`` where ``r_fx`` is the daily return of the
-    USD->candidate_currency rate. Returns ``None`` (caller keeps the
-    unconverted series) when the currencies already match or the FX series
-    can't be fetched — fails open like every other stage here.
-    """
-    if candidate_currency == bench_currency:
+def _weekly_tracking_error(merged: pd.DataFrame, years: float = 2.0) -> float | None:
+    """Annualised std of Friday-to-Friday active returns over the last ``years``."""
+    try:
+        frame = merged.assign(date=pd.to_datetime(merged["date"])).set_index("date")
+        index = pd.DatetimeIndex(frame.index)
+        cutoff = cast(pd.Timestamp, index.max()) - pd.Timedelta(days=int(365 * years))
+        closes = cast(pd.DataFrame, frame.loc[index >= cutoff, ["close_c", "close_b"]]).astype(float)
+        weekly = closes.resample("W-FRI").last().pct_change().dropna()
+    except Exception:  # noqa: BLE001
         return None
-    fx_df = _get_fx_series(db, candidate_currency)
-    if fx_df is None or fx_df.empty:
+    if len(weekly) < 26:
         return None
-    fx_series = fx_df.set_index("date")["close"]
-    aligned = fx_series.reindex(dates).ffill()
-    if bool(aligned.isna().any()):
-        return None
-    fx_rets = aligned.pct_change()
-    # First element of bench_rets/fx_rets has no prior day; align by dropping it.
-    adjusted = (1.0 + bench_rets.reset_index(drop=True)) * (1.0 + fx_rets.reset_index(drop=True)) - 1.0
-    return adjusted.dropna()
+    active = weekly["close_c"] - weekly["close_b"]
+    return float(active.std(ddof=1) * math.sqrt(52))
 
 
 def stage_backtest_vs_benchmark(
     db: Session,
     symbol: str,
     is_etf: bool = False,
+    asset_class: str | None = None,
 ) -> tuple[dict[str, Any] | None, str | None]:
-    """3-year backtest vs a region-appropriate benchmark.
+    """3-year backtest vs the D3 benchmark of the candidate's asset class.
 
-    Computes excess return and Sharpe delta. Data-availability problems (missing
-    benchmark, too few aligned observations) fail open to a neutral signal rather
-    than rejecting — a benchmark we cannot fetch is not the candidate's fault.
-    Under-performance is recorded as an advisory ``concern``, not a rejection.
+    Computes excess return and Sharpe delta, both legs total return in EUR.
+    Data-availability problems (missing benchmark, too few aligned
+    observations) fail open to a neutral signal rather than rejecting — a
+    benchmark we cannot fetch is not the candidate's fault. Under-performance
+    is recorded as an advisory ``concern``, not a rejection. A class without
+    a benchmark (gold, other commodities) is skipped with no concern.
     """
+    from app.foundation.etf_classes import ESTR_BENCHMARK
+
     logger.debug("stage_backtest_vs_benchmark: %s", symbol)
-    benchmark = _pick_benchmark(symbol, is_etf)
+    benchmark = _pick_benchmark(symbol, asset_class if asset_class is not None else is_etf)
 
     def _neutral(reason: str) -> tuple[dict[str, Any], None]:
         return {
@@ -1211,51 +1341,35 @@ def stage_backtest_vs_benchmark(
             "concerns": [],
         }, None
 
-    cand_rows = market_history(db, symbol, days=365 * 3 + 30)
-    bench_rows = market_history(db, benchmark, days=365 * 3 + 30)
+    if benchmark is None:
+        return _neutral("no benchmark for this asset class (diversifier, not scored on excess return)")
 
-    if not cand_rows or not bench_rows:
+    days = 365 * 3 + 30
+    cand_rows = market_history(db, symbol, days=days)
+    bench_rows = [] if benchmark == ESTR_BENCHMARK else market_history(db, benchmark, days=days)
+
+    if not cand_rows or (benchmark != ESTR_BENCHMARK and not bench_rows):
         return _neutral("benchmark or candidate price data unavailable")
 
     # Audit F16: a frozen series used to be served as fresh, silently
     # truncating anchors. Surface vintage problems as advisory concerns.
     stale_concerns: list[str] = []
     for leg_symbol, leg_rows in ((symbol, cand_rows), (benchmark, bench_rows)):
-        if any(r.get("stale") for r in leg_rows):
+        if leg_rows and any(r.get("stale") for r in leg_rows):
             stale_concerns.append(f"{leg_symbol} data stale since {leg_rows[-1]['date']}")
 
-    cand_df = pd.DataFrame(cand_rows).dropna(subset=["close"]).sort_values("date")
-    bench_df = pd.DataFrame(bench_rows).dropna(subset=["close"]).sort_values("date")
-
-    if len(cand_df) < 250 or len(bench_df) < 250:
+    if len(cand_rows) < 250 or (benchmark != ESTR_BENCHMARK and len(bench_rows) < 250):
         return _neutral("too few observations for a 3y comparison")
 
-    # Align on common dates (normalise both to datetime64 so dtype never blocks).
-    cand_df = cand_df.assign(date=pd.to_datetime(cand_df["date"]))
-    bench_df = bench_df.assign(date=pd.to_datetime(bench_df["date"]))
-    merged = pd.merge(cand_df[["date", "close"]], bench_df[["date", "close"]], on="date", suffixes=("_c", "_b"))
+    merged = _eur_legs(db, symbol, benchmark, cand_rows, bench_rows, days=days)
     if len(merged) < 250:
         return _neutral("insufficient aligned observations vs benchmark")
 
     cand_rets_series = merged["close_c"].pct_change()
     bench_rets_series = merged["close_b"].pct_change()
 
-    # Neither series is USD/USD; both the candidate and the benchmark returns
-    # above are each in their own listing currency. Restate the benchmark leg
-    # into the candidate's currency so excess return isn't really an FX bet.
-    fx_adjusted = _fx_adjust_bench_returns(
-        db, _infer_currency(db, symbol), "USD",
-        cast(pd.Series, merged["date"]), cast(pd.Series, bench_rets_series),
-    )
-    if fx_adjusted is not None:
-        bench_rets_series = fx_adjusted
-
     cand_rets = cand_rets_series.dropna().tolist()
     bench_rets = bench_rets_series.dropna().tolist()
-    if len(cand_rets) != len(bench_rets):
-        # FX alignment dropped different rows than the plain dropna above —
-        # fall back to the unconverted comparison rather than misalign.
-        bench_rets = merged["close_b"].pct_change().dropna().tolist()
 
     cand_ann = annualised_return(cand_rets)
     bench_ann = annualised_return(bench_rets)
@@ -1275,6 +1389,7 @@ def stage_backtest_vs_benchmark(
     information_ratio = excess / tracking_error if tracking_error > 0 else 0.0
     active_t_stat = information_ratio * math.sqrt(years)
     cand_vol = annualised_volatility(cand_rets) if len(cand_rets) >= 2 else 0.0
+    te_weekly = _weekly_tracking_error(merged)
 
     concerns: list[str] = stale_concerns
     if excess < _EXCESS_MIN:
@@ -1289,6 +1404,9 @@ def stage_backtest_vs_benchmark(
         "candidate_sharpe": round(cand_sharpe, 4),
         "benchmark_sharpe": round(bench_sharpe, 4),
         "tracking_error": round(tracking_error, 4),
+        # Weekly active returns over the last 2 years (UI's "years to tell
+        # skill from luck", plan 2026-10-12 WP13); None with too few weeks.
+        "tracking_error_weekly_2y": round(te_weekly, 4) if te_weekly is not None else None,
         "information_ratio": round(information_ratio, 4),
         "active_t_stat": round(active_t_stat, 4),
         "candidate_volatility_annual": round(cand_vol, 4),
@@ -1362,7 +1480,7 @@ _WEEKLY_BETA_MIN_WEEKS = 52
 _FACTOR_MIN_OBS = 120
 
 
-def _weekly_beta(db: Session, symbol: str, benchmark: str) -> float | None:
+def _weekly_beta(db: Session, symbol: str, benchmark: str | None) -> float | None:
     """Beta from two years of Friday-to-Friday returns vs *benchmark*.
 
     Daily beta against a US-listed benchmark ETF is biased toward zero for a
@@ -1371,27 +1489,25 @@ def _weekly_beta(db: Session, symbol: str, benchmark: str) -> float | None:
     (Scholes & Williams 1977; Dimson 1979). Weekly returns share almost all
     of their window, which removes most of that bias. BBVA.MC measured 0.85
     daily vs 1.10 weekly against VGK (prod, 2026-09-26). The benchmark is
-    restated into the candidate's currency first, like the daily path.
+    and the candidate are both restated in EUR first, like the daily path.
     Returns None (fail-open) on missing data or fewer than
     ``_WEEKLY_BETA_MIN_WEEKS`` aligned weeks.
     """
+    from app.foundation.etf_classes import ESTR_BENCHMARK
+
+    if not benchmark or benchmark == ESTR_BENCHMARK:
+        return None
     cand_rows = market_history(db, symbol, days=_WEEKLY_BETA_DAYS)
     bench_rows = market_history(db, benchmark, days=_WEEKLY_BETA_DAYS)
     if not cand_rows or not bench_rows:
         return None
 
-    def _closes(rows: list[dict[str, Any]]) -> pd.Series:
-        df = pd.DataFrame(rows).dropna(subset=["close"]).sort_values("date")
-        return cast(pd.Series, df.assign(date=pd.to_datetime(df["date"])).set_index("date")["close"]).astype(float)
-
-    cand = _closes(cand_rows)
-    bench = _closes(bench_rows)
-    currency = _infer_currency(db, symbol)
-    if currency != "USD":
-        fx_df = _get_fx_series(db, currency)
-        if fx_df is not None and not fx_df.empty:
-            fx = fx_df.set_index("date")["close"].astype(float)
-            bench = (bench * fx.reindex(bench.index).ffill()).dropna()
+    legs = _eur_legs(db, symbol, benchmark, cand_rows, bench_rows, days=_WEEKLY_BETA_DAYS)
+    if legs.empty:
+        return None
+    indexed = legs.set_index("date")
+    cand = cast(pd.Series, indexed["close_c"]).astype(float)
+    bench = cast(pd.Series, indexed["close_b"]).astype(float)
     weekly = pd.concat(
         [cand.resample("W-FRI").last(), bench.resample("W-FRI").last()],
         axis=1,
@@ -1407,6 +1523,7 @@ def stage_quant_signals(
     db: Session,
     symbol: str,
     is_etf: bool = False,
+    asset_class: str | None = None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Deterministic quant feature set: VaR/CVaR, market beta, factor betas.
 
@@ -1441,27 +1558,17 @@ def stage_quant_signals(
 
     # Market beta vs region-appropriate benchmark (fail-open to None).
     market_beta: float | None = None
-    benchmark = _pick_benchmark(symbol, is_etf)
+    benchmark = _pick_benchmark(symbol, asset_class if asset_class is not None else is_etf)
     try:
-        bench_rows = market_history(db, benchmark, days=365)
+        from app.foundation.etf_classes import ESTR_BENCHMARK
+
+        bench_rows = market_history(db, benchmark, days=365) if benchmark and benchmark != ESTR_BENCHMARK else []
         if bench_rows:
-            bench_df = pd.DataFrame(bench_rows).dropna(subset=["close"]).sort_values("date")
-            cand = df.assign(date=pd.to_datetime(df["date"])).set_index("date")["close"]
-            bench = bench_df.assign(date=pd.to_datetime(bench_df["date"])).set_index("date")["close"]
-            common = cand.index.intersection(bench.index)
-            if len(common) >= 60:
-                cand_r = cand.loc[common].pct_change()
-                bench_r = bench.loc[common].pct_change()
-                fx_adjusted = _fx_adjust_bench_returns(
-                    db, _infer_currency(db, symbol), "USD",
-                    pd.Series(common), bench_r.reset_index(drop=True),
-                )
-                if fx_adjusted is not None:
-                    bench_r = fx_adjusted
-                cand_r = cand_r.dropna()
-                bench_r = bench_r.dropna()
-                n = min(len(cand_r), len(bench_r))
-                market_beta = beta_vs_benchmark(cand_r.tolist()[-n:], bench_r.tolist()[-n:])
+            legs = _eur_legs(db, symbol, cast(str, benchmark), rows, bench_rows, days=365)
+            if len(legs) >= 60:
+                cand_r = legs["close_c"].pct_change().dropna()
+                bench_r = legs["close_b"].pct_change().dropna()
+                market_beta = beta_vs_benchmark(cand_r.tolist(), bench_r.tolist())
     except Exception:
         logger.debug("stage_quant_signals: market beta failed for %s", symbol, exc_info=True)
 
@@ -1583,6 +1690,24 @@ _FIT_HISTORY_DAYS = 730
 _FIT_MIN_WEEKS = 26
 
 
+def _held_etf_tickers(db: Session, user_id: str) -> list[str]:
+    """Tickers of the funds the user holds, from every broker and by hand (plan 2026-10-12, WP4d)."""
+    from app.decision.etf_suggestions import is_fund
+    from app.foundation.live_positions import live_positions, manual_holdings_filter
+    from app.foundation.models.entities import Holding, Portfolio
+
+    tickers: list[str] = []
+    for pos in live_positions(db, user_id):
+        if pos.ticker and ((pos.security_type or "").upper() in ("ETF", "ETC", "FUND") or is_fund(pos.name, pos.isin)):
+            tickers.append(pos.ticker.upper())
+    portfolio = db.query(Portfolio).filter(Portfolio.user_id == user_id).first()
+    if portfolio is not None:
+        for h in db.query(Holding).filter(Holding.portfolio_id == portfolio.id, manual_holdings_filter()).all():
+            if h.ticker and ((h.asset_type or "").lower() == "etf" or is_fund(h.name, h.isin)):
+                tickers.append(h.ticker.upper())
+    return list(dict.fromkeys(tickers))
+
+
 def stage_portfolio_fit(
     db: Session,
     user_id: str,
@@ -1657,23 +1782,13 @@ def stage_portfolio_fit(
         comp = get_etf_composition(symbol)
         if comp and comp.holdings:
             cand_holdings = [{"ticker": hh.ticker, "weight": hh.weight} for hh in comp.holdings]
-            # Held ETFs
-            from app.foundation.models.entities import Holding, Portfolio
-            portfolio = db.query(Portfolio).filter(Portfolio.user_id == user_id).first()
-            if portfolio:
-                held_etfs = (
-                    db.query(Holding)
-                    .filter(
-                        Holding.portfolio_id == portfolio.id,
-                        Holding.asset_type == "etf",
-                    )
-                    .all()
-                )
+            # Held ETFs: every synced broker depot (Scalable's VWRA too) plus
+            # holdings entered by hand, through live_positions (AGENTS.md).
+            held_etfs = _held_etf_tickers(db, user_id)
+            if held_etfs:
                 max_overlap = 0.0
-                for h in held_etfs:
-                    if not h.ticker:
-                        continue
-                    held_comp = get_etf_composition(h.ticker)
+                for held_ticker in held_etfs:
+                    held_comp = get_etf_composition(held_ticker)
                     if held_comp and held_comp.holdings:
                         held_list = [{"ticker": hh.ticker, "weight": hh.weight} for hh in held_comp.holdings]
                         try:
@@ -1982,6 +2097,8 @@ def run_candidate_pipeline(
         alias_source="discover_pipeline",
     )
 
+    plan_scope_ = _etf_plan_scope(db)
+
     for idx, cand in enumerate(candidates):
         if cancel_token is not None:
             cancel_token.raise_if_cancelled()
@@ -1992,10 +2109,25 @@ def run_candidate_pipeline(
         name = cand.get("name", symbol)
         instrument_type = classify_instrument(symbol, source, name)
         is_etf = instrument_type in ("etf", "money_market", "bond")
+        # The D3 benchmark class: an ETF's own taxonomy (gold is not an
+        # equity fund), a stock's region.
+        asset_class = classify_etf(name, isin=isin) if is_etf else "equity"
+        if is_etf and asset_class == "other":
+            asset_class = {"money_market": "money_market", "bond": "bond_other"}.get(instrument_type, "equity_broad")
 
         scores: dict[str, Any] = {}
         reject_stage: str | None = None
         reject_reason: str | None = None
+
+        # Stage 0 — an ETF is a candidate only for a line of the owner's plan
+        # (D4). An index outside it (FTSE 100, sectors, themes) is information
+        # only: no momentum or portfolio-fit score can shortlist it.
+        if is_etf and plan_scope_ is not None:
+            key = cand.get("index_key") or index_key(name, isin=isin)
+            line = cand.get("plan_line") or plan_scope_.line_for(asset_class, key)
+            if line is None or asset_class == "leveraged_inverse":
+                reject_stage = "plan_scope"
+                reject_reason = f"plan_scope: {key} ({asset_class}) is outside the plan; information only"
 
         # Stage 1
         if reject_stage is None:
@@ -2050,13 +2182,18 @@ def run_candidate_pipeline(
                 reject_stage = "momentum_quality"
                 reject_reason = r
             else:
+                if asset_class in NON_MOMENTUM_CLASSES and s is not None:
+                    # Bonds, cash and gold are not ranked against equities on
+                    # momentum (D4); volatility and drawdown stay as facts.
+                    s["momentum_skipped"] = f"{asset_class}: not ranked on momentum"
+                    s["concerns"] = [c for c in s.get("concerns", []) if "momentum" not in c]
                 scores["momentum_quality"] = s
 
         # Stage 3
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_backtest_vs_benchmark(db, symbol, is_etf=is_etf)
+            s, r = stage_backtest_vs_benchmark(db, symbol, is_etf=is_etf, asset_class=asset_class)
             if r:
                 reject_stage = "backtest_vs_benchmark"
                 reject_reason = r
@@ -2078,7 +2215,7 @@ def run_candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_quant_signals(db, symbol, is_etf=is_etf)
+            s, r = stage_quant_signals(db, symbol, is_etf=is_etf, asset_class=asset_class)
             if r:
                 reject_stage = "quant_signals"
                 reject_reason = r
@@ -2244,6 +2381,26 @@ MOMENTUM_RANK_MIN_CANDIDATES = 20
 SECTOR_CAP_FRACTION = 0.2
 
 
+#: ETF classes that are not ranked on momentum against equities (D4).
+NON_MOMENTUM_CLASSES = frozenset({
+    "bond_govt_eur_short", "bond_govt_eur_mid", "bond_govt_eur_long", "bond_aggregate_eur_hedged",
+    "bond_other", "money_market", "gold", "commodity_other",
+})
+
+
+def _etf_plan_scope(db: Session) -> Any:
+    """The owner's plan lines for the ETF stage-0 check; None if it cannot be read (fail open)."""
+    try:
+        from app.decision.etf_suggestions import plan_scope
+        from app.decision.monthly_plan import plan_settings
+        from app.foundation.settings import get_public_settings
+
+        return plan_scope(get_public_settings(db), plan_settings(db)["core_isins"])
+    except Exception:  # noqa: BLE001
+        logger.warning("run_candidate_pipeline: plan scope unavailable", exc_info=True)
+        return None
+
+
 def assign_momentum_ranks(score_dicts: list[dict[str, Any]]) -> None:
     """Stamp ``momentum_quality.momentum_rank`` (mid-rank percentile in (0, 1)).
 
@@ -2256,6 +2413,7 @@ def assign_momentum_ranks(score_dicts: list[dict[str, Any]]) -> None:
         for sd in score_dicts
         if isinstance(sd.get("momentum_quality"), dict)
         and isinstance(sd["momentum_quality"].get("momentum_12_1m"), (int, float))
+        and not sd["momentum_quality"].get("momentum_skipped")
     ]
     n = len(rankable)
     if n < MOMENTUM_RANK_MIN_CANDIDATES:

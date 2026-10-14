@@ -5,7 +5,7 @@ risk-profile updates, and the aggregated stock context endpoint.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -16,6 +16,7 @@ from app.foundation.core.db import get_db
 from app.foundation.models.entities import User
 from app.foundation.schemas.common import OrmModel
 from app.foundation.auth import current_user
+from app.interface.api.params import DAYS_BOUND
 
 router = APIRouter(prefix="/api/research", tags=["research"])
 
@@ -93,7 +94,7 @@ async def get_piotroski_score(
 @safe_endpoint
 async def get_sentiment(
     ticker: str,
-    days: int = Query(21, description="Look-back window in days"),
+    days: Annotated[int, Query(description="Look-back window in days"), DAYS_BOUND] = 21,
     db: Session = Depends(get_db),
     _user: User = Depends(current_user),
 ) -> dict[str, Any]:

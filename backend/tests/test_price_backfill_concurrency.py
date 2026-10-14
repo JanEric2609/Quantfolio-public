@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -188,6 +187,16 @@ def test_default_on_sqlite_stays_sequential(tmp_path, fake_ingester):
 # -- end to end: real DataIngester, real rows, concurrent writers ------------
 
 
+def _xetra_sessions(n: int) -> list[str]:
+    """``n`` XETRA sessions from 2024-01-02: the ingest guard quarantines non-sessions."""
+    import exchange_calendars as xcals
+
+    return [d.date().isoformat() for d in xcals.get_calendar("XETR").sessions_in_range("2024-01-02", "2024-12-31")[:n]]
+
+
+_SESSIONS = _xetra_sessions(120)
+
+
 class _FakeRegistry:
     """A provider chain that answers get_price_history with deterministic bars."""
 
@@ -195,7 +204,7 @@ class _FakeRegistry:
         seed = sum(ord(c) for c in symbol)
         data = [
             {
-                "date": (date(2024, 1, 1) + timedelta(days=i)).isoformat(),
+                "date": _SESSIONS[i],
                 "open": seed + i,
                 "high": seed + i + 1,
                 "low": seed + i - 1,

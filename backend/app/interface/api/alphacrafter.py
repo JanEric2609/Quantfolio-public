@@ -18,7 +18,7 @@ Routes:
 
 import json
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -41,7 +41,9 @@ from app.foundation.jobs import submit_job
 from app.foundation.providers.registry import build_provider_registry
 from app.lab.alphacrafter.universe import MIN_MINER_UNIVERSE, MINER_UNIVERSE
 from app.foundation.settings import get_public_settings
+from app.foundation.schemas.bounds import at_most, between
 from app.interface.api.safe_endpoint import safe_endpoint
+from app.interface.api.params import ROWS_BOUND
 
 router = APIRouter(
     prefix="/api/alphacrafter",
@@ -74,8 +76,9 @@ def _get_scoped_job(db: Session, job_id: str, user: User) -> AlphacrafterJobRun 
 
 class MinerRunRequest(BaseModel):
     """Request to run the Miner agent."""
-    universe: list[str]
-    lookback_years: float = 5.0
+    # Every symbol is a price fetch; a huge lookback overflowed the start date.
+    universe: Annotated[list[str], at_most(500)]
+    lookback_years: Annotated[float, between(0.1, 50)] = 5.0
 
 
 class MinerRunResponse(BaseModel):
@@ -389,7 +392,7 @@ async def generate_recommendations_endpoint(
 @router.get("/dossiers")
 def list_dossiers(
     limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    offset: Annotated[int, Query(ge=0), ROWS_BOUND] = 0,
     symbol: str | None = Query(None),
     db: Session = Depends(get_db),
     _user: User = Depends(current_user),

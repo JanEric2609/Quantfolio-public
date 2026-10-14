@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.interface.api.params import MonthField, YearField
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import FinAgentRun, User
 from app.foundation.auth import current_user
@@ -14,14 +15,15 @@ from app.foundation.finagent.explainer_agent import ExplainerAgent, ExplanationR
 from app.foundation.finagent.rag import RAGRetriever
 from app.foundation.finagent.substitution_agent import SubstitutionAgent, SubstitutionAgentResponse
 from app.foundation.llm.scheduler import get_scheduler
+from app.foundation.schemas.bounds import MoneyFloat
 
 router = APIRouter(prefix="/api/finagent", tags=["finagent"])
 
 
 class BudgetQueryRequest(BaseModel):
     query: str
-    year: int
-    month: int
+    year: YearField
+    month: MonthField
 
 
 class SubstitutionRequest(BaseModel):
@@ -30,7 +32,7 @@ class SubstitutionRequest(BaseModel):
 
 
 class ExplainerRequest(BaseModel):
-    amount: float
+    amount: MoneyFloat
     category: str
     description: str
     date: str

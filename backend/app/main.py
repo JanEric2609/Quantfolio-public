@@ -3,6 +3,7 @@ import logging
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
@@ -14,6 +15,7 @@ from app.interface.middleware import CrossSiteRequestGuard
 from app.foundation.core.config import _DEFAULT_JWT_SECRET, get_settings
 from app.foundation.core.db import create_all, SessionLocal
 from app.foundation.core.logging_setup import configure_logging
+from app.foundation.llm.base import LlmUnavailableError
 from app.foundation.core.security import limiter
 from app.interface.cors import DynamicCORSMiddleware, env_fallback_origins, resolve_origins_from_db
 from app.lab.alphacrafter.orchestrator import reap_stale_job_runs
@@ -297,7 +299,21 @@ def create_app() -> FastAPI:
     async def validation_error(_request: Request, exc: RequestValidationError):
         return JSONResponse(
             status_code=422,
-            content={"error": {"code": 422, "message": "Validation failed", "details": exc.errors()}},
+            # jsonable_encoder: a Decimal bound (gt=Decimal("0")) or a bytes
+            # input in the errors is not JSON as is, and failed as a 500.
+            content={"error": {"code": 422, "message": "Validation failed", "details": jsonable_encoder(exc.errors())}},
+        )
+
+    @app.exception_handler(LlmUnavailableError)
+    async def llm_unavailable(_request: Request, exc: LlmUnavailableError):
+        logger.warning("LLM backend unreachable: %s", exc)
+        return JSONResponse(
+            status_code=503,
+            content={"error": {
+                "code": 503,
+                "reason": "llm_unavailable",
+                "message": "The language model is not reachable. Check the LLM endpoint in the Control Center.",
+            }},
         )
 
     @app.exception_handler(Exception)

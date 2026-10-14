@@ -21,6 +21,7 @@ from app.foundation.models.entities import GraduationAssessment, User
 from app.foundation.auth import current_user
 from app.decision.graduation import GraduationResult, evaluate_graduation
 from app.foundation.settings import get_public_settings
+from app.interface.api.params import LimitQuery
 
 router = APIRouter(prefix="/api/graduation", tags=["graduation"])
 
@@ -123,7 +124,7 @@ def status(
 
 @router.get("/transitions")
 def transitions(
-    limit: int = 30,
+    limit: LimitQuery = 30,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> list[dict[str, Any]]:
@@ -153,7 +154,7 @@ def transitions(
 
 @router.get("/history")
 def history(
-    limit: int = 30,
+    limit: LimitQuery = 30,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> list[dict[str, Any]]:

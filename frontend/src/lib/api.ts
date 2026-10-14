@@ -2793,7 +2793,19 @@ export interface DiscoverDossier {
   not_financial_advice: boolean;
   generated_by?: "llm" | "fallback";
   fallback_reason?: string | null;
+  /** "Rule, not a forecast" (funds) or "Shadow — not a recommendation" (stocks). */
+  recommendation_label?: string | null;
+  /** Years of live data needed to tell skill from luck at this tracking error. */
+  skill_horizon?: DiscoverSkillHorizon | null;
   created_at: string | null;
+}
+
+export interface DiscoverSkillHorizon {
+  tracking_error: number;
+  benchmark: string | null;
+  basis: string;
+  years: { alpha_1pct: number; alpha_2pct: number };
+  text: string;
 }
 
 export const getRecentRuns = (limit = 50) =>
@@ -3062,6 +3074,34 @@ export interface MonthlyPlan {
   not_investment_advice: boolean;
   suggested_funds?: SuggestedFund[];
   acc_dist_note?: string;
+  /** Bond, cash and gold lines from the owner's targets (rule-based, not a forecast). */
+  etf_suggestions?: PlanEtfSuggestions | null;
+}
+
+export interface PlanEtfSuggestionLine {
+  line: "bond" | "cash" | "gold";
+  label: string;
+  target_pct: number;
+  current_pct: number;
+  gap_pp: number;
+  status: "under" | "ok";
+  tax_note: string;
+  rule_note: string;
+  duration_bucket?: "short" | "mid" | "long" | null;
+  fund?: { isin: string; name: string; why: string } | null;
+  amount_eur?: number | null;
+  warning?: string | null;
+}
+
+export interface PlanEtfSuggestions {
+  lines: PlanEtfSuggestionLine[];
+  /** Equity indices outside the plan: information only, never shortlisted. */
+  info: { isin: string | null; name: string | null; index: string; asset_class: string; reason: string }[];
+  /** Indices already held, and the fund that covers each. */
+  covered: { index: string; held_by: string }[];
+  rule_note: string;
+  estimate: boolean;
+  not_tax_advice: boolean;
 }
 
 export async function getMonthlyPlan(): Promise<MonthlyPlan> {

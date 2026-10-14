@@ -13,6 +13,7 @@ from app.lab.regime.hmm_model import RegimeHMM
 from app.lab.regime.jump_model import JumpRegimeModel
 from app.lab.regime.crisis_gate import evaluate_crisis
 from app.lab.regime.history import record_regime_label
+from app.lab.regime.hysteresis import apply_hysteresis
 from app.foundation.data_backbone.bars import BarStore
 from app.foundation.data_backbone.ingest import DataIngester
 from app.foundation.data_backbone.regime_store import RegimeStore
@@ -323,9 +324,22 @@ def classify_and_store(
             return result
         result["source"] = source
 
-        # 6. Classify the latest row
+        # 6. Classify the latest row; a refit alone may not flip the published
+        # label (hysteresis, plan 2026-10-12 D9).
         classification = model.classify_latest(features)
-        result["label"] = classification["label"]
+        fingerprint_fn = getattr(model, "fingerprint", None)
+        fingerprint = fingerprint_fn() if callable(fingerprint_fn) else None
+        previous = RegimeStore(db).get_latest_snapshot(source=source)
+        published, hysteresis = apply_hysteresis(
+            classification["label"],
+            previous_label=str(previous.get("label")) if previous and previous.get("label") else None,
+            previous_payload=(previous or {}).get("payload") if previous else None,
+            feature_ts=feature_dt.isoformat(),
+            fingerprint=fingerprint if isinstance(fingerprint, str) else None,
+        )
+        result["label"] = published
+        result["model_label"] = classification["label"]
+        result["label_source"] = hysteresis["label_source"]
         result["score"] = classification["score"]
         result["probs"] = classification["probs"]
         if "score_basis" in classification:
@@ -367,6 +381,7 @@ def classify_and_store(
                 "vix": vix_value,
                 "credit_spread": credit_spread_value,
             },
+            **hysteresis,
         }
 
         regime_store = RegimeStore(db)

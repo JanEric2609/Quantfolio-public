@@ -181,6 +181,18 @@ numeric path is dangerous, and the boundary is enforceable). Pivoting to US data
 via Open Source Asset Pricing (better data, wrong geography; retained as a future
 validation set for condition 5).
 
+## Amendment 2026-10-12: what `n_trials` counts
+
+Condition 1's `ledger_count` is the trial ledger **plus** `ac_trial_ledger`: every
+AlphaCrafter factor evaluation is a trial. On 2026-10-12 `resolve_n_trials` counted the
+30 trial-ledger rows only, against 6,219 AlphaCrafter rows, so the gate ignored most of
+the search it was meant to deflate for (prod audit M5; plan `plan-audit-fixes-2026-10-12`,
+D10). The conservative upper end stays the gate's input, consistent with "cannot be gamed
+by moving the search into an uncounted corner". `effective_n_trials`, the lower bound,
+counts each AlphaCrafter job run as one family. The satellite stays locked either way;
+the change only makes the gate honest. After deploy, re-run the evidence gate and record
+the new `n_trials` (expected at least 6,249).
+
 ## References
 
 - Lo (2002), *The Statistics of Sharpe Ratios* — Sharpe standard error

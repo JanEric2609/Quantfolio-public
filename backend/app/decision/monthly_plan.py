@@ -43,6 +43,7 @@ Advisory only. Nothing here places orders.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
 from typing import Any
@@ -59,6 +60,8 @@ from app.foundation.models.entities import BrokerSyncLog, ConnectedAccount, DkbA
 from app.foundation.portfolio_utils import holding_market_value
 from app.foundation.settings import get_public_settings
 from app.decision.monthly_plan_funds import ACC_DIST_NOTE, suggest_all
+
+logger = logging.getLogger(__name__)
 
 # Broad, market-cap-weighted global equity ETFs, and the emerging-markets funds
 # that complete a world ETF (MSCI World + EM is the ACWI). Any of these counts
@@ -678,6 +681,33 @@ def sleeve_targets_from(cfg: dict[str, Any], evidence: dict[str, Any]) -> tuple[
     return targets, unlocked
 
 
+def paper_plan_targets(db: Session) -> dict[str, Any]:
+    """The plan bounds the paper sleeves' optimiser works inside (plan 2026-10-12, D5).
+
+    The satellite budget is ``plan_satellite_max_pct`` even while the real
+    satellite is locked: the paper experiment exists to measure Discover's
+    picks, and it can only do that if it may hold some. The core is held at
+    its target minus the drift band at least; each satellite name at 5 % of
+    the book at most. Fractions of the invested book, for
+    ``foundation.quant_proposal.build_trade_proposal(config={"plan_targets": ...})``.
+    """
+    cfg = plan_settings(db)
+    try:
+        tilt_unlocked = bool(evidence_state(db)["tilt_unlocked"])
+    except Exception:  # noqa: BLE001 - evidence lookup must not stop a cycle
+        tilt_unlocked = False
+    tilt = cfg["tilt_max_pct"] if tilt_unlocked else 0.0
+    satellite = cfg["satellite_max_pct"]
+    core_target = max(0.0, 100.0 - tilt - satellite)
+    return {
+        "core_min": max(0.0, core_target - cfg["drift_band_pp"]) / 100.0,
+        "satellite_max": min(100.0, satellite + tilt) / 100.0,
+        "name_max": 0.05,
+        "core_tickers": [cfg["core_ticker"]],
+        "core_isins": sorted(cfg["core_isins"]),
+    }
+
+
 def sleeve_plan(db: Session, user_id: str) -> dict[str, Any]:
     """The plan's sleeve targets for the rebalance view.
 
@@ -712,6 +742,24 @@ def sleeve_plan(db: Session, user_id: str) -> dict[str, Any]:
         "other_budget_eur": other_budget,
         "classify": lambda isin: classify((isin or "").upper(), cfg),
     }
+
+
+def _etf_suggestions(
+    db: Session, holdings: list[dict[str, Any]], book: float, cfg: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Bond, cash and gold lines from the owner's targets, plus the info-only list (D4)."""
+    from app.decision.etf_suggestions import asset_class_suggestions
+    from app.foundation.etf_universe import EtfUniverseProvider
+
+    try:
+        # Cached universe only: the plan page never waits on justETF.
+        universe = EtfUniverseProvider().get_universe_cached()
+        return asset_class_suggestions(
+            get_public_settings(db), holdings, book_eur=book, universe=universe, core_isins=cfg["core_isins"],
+        )
+    except Exception:  # noqa: BLE001 - optional block; the plan itself must render
+        logger.warning("monthly plan: ETF suggestions failed", exc_info=True)
+        return None
 
 
 def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None) -> dict[str, Any]:
@@ -1152,4 +1200,5 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
         "not_investment_advice": True,
         "suggested_funds": suggest_all(cfg["tilt_isins"]),
         "acc_dist_note": ACC_DIST_NOTE,
+        "etf_suggestions": _etf_suggestions(db, holdings, book, cfg),
     }

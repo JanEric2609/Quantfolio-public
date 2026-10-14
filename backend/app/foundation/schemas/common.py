@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from app.foundation.schemas.bounds import MoneyDecimal
 
 # `DateType` aliases datetime.date so that Pydantic fields *named* `date` can be
 # annotated without the field name shadowing the type in the class namespace
@@ -108,8 +109,8 @@ class HoldingIn(BaseModel):
     ticker: str | None = None
     name: str
     asset_type: str = "stock"
-    quantity: Decimal
-    avg_buy_price: Decimal
+    quantity: MoneyDecimal
+    avg_buy_price: MoneyDecimal
     buy_date: date | None = None
     currency: str = "EUR"
     source: str = "manual"
@@ -124,7 +125,7 @@ class HoldingOut(HoldingIn, OrmModel):
 
 class ExpenseIn(BaseModel):
     date: date
-    amount: Decimal
+    amount: MoneyDecimal
     currency: str = "EUR"
     description: str
     category_id: str | None = None
@@ -408,7 +409,7 @@ class WatchlistIn(BaseModel):
     name: str
     notes: str | None = None
     horizon_tag: Literal["short", "mid", "long"] = "mid"
-    target_price: Decimal | None = None
+    target_price: MoneyDecimal | None = None
 
 
 class WatchlistOut(OrmModel):
@@ -426,12 +427,12 @@ class WatchlistOut(OrmModel):
 
 
 class WatchlistAlertIn(BaseModel):
-    target_price: Decimal | None = None
+    target_price: MoneyDecimal | None = None
 
 
 class SubscriptionIn(BaseModel):
     name: str
-    amount: Decimal
+    amount: MoneyDecimal
     currency: str = "EUR"
     billing_cycle: Literal["monthly", "quarterly", "annual", "weekly"] = "monthly"
     next_due_date: date
@@ -444,7 +445,7 @@ class SubscriptionIn(BaseModel):
 
 class IncomeSourceIn(BaseModel):
     name: str
-    amount: Decimal
+    amount: MoneyDecimal
     currency: str = "EUR"
     cadence: Literal["weekly", "monthly", "quarterly", "annual"] = "monthly"
     next_date: date
@@ -453,7 +454,7 @@ class IncomeSourceIn(BaseModel):
 
 class InvoiceIn(BaseModel):
     issuer: str
-    amount: Decimal
+    amount: MoneyDecimal
     currency: str = "EUR"
     due_date: date | None = None
     paid: bool = False
@@ -470,7 +471,7 @@ class CategoryIn(BaseModel):
     color: str = "#3B82F6"
     icon: str = "tag"
     type: Literal["income", "expense", "investment"] = "expense"
-    target_amount: Decimal | None = None
+    target_amount: MoneyDecimal | None = None
     target_date: date | None = None
 
     @model_validator(mode="after")
@@ -592,9 +593,9 @@ class TransactionIn(BaseModel):
     holding_id: str
     type: str
     date: DateType
-    quantity: Decimal
-    price: Decimal
-    fees: Decimal = Decimal("0")
+    quantity: MoneyDecimal
+    price: MoneyDecimal
+    fees: MoneyDecimal = Decimal("0")
     notes: Optional[str] = None
 
 

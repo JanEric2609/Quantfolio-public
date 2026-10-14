@@ -413,6 +413,19 @@ def _benchmark_base_quote(db: Session) -> tuple[float | None, datetime]:
     price = q.get("price")
     if price and price > 0 and not q.get("stale"):
         return float(price), now_utc()
+    # No fresh quote (a weekend or holiday reset left every sleeve's base NULL
+    # on 2026-10-11): the latest EUR close at or before now, at most 5 days old.
+    try:
+        from app.foundation.eur_prices import eur_closes
+
+        closes = eur_closes(db, benchmark_ticker(db).upper(), days=15)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("benchmark base close failed: %s", exc)
+        return None, now_utc()
+    today = now_utc().date()
+    before = sorted(k for k in closes if k <= today.isoformat())
+    if before and (today - date.fromisoformat(before[-1])).days <= 5 and closes[before[-1]] > 0:
+        return float(closes[before[-1]]), now_utc()
     return None, now_utc()
 
 
@@ -951,6 +964,12 @@ def snapshot_paper_portfolio(
         existing.cash_balance = cash_balance
         existing.securities_value = Decimal(str(securities_value))
         existing.total_return_pct = Decimal(str(total_return_pct))
+        snap = existing
+
+    # Max drawdown of the NAV series to date, on every write (L2): compute_metrics
+    # needs 20 snapshots, so a freshly reset sleeve showed NULL everywhere.
+    db.flush()
+    snap.max_drawdown = _nav_max_drawdown(db, portfolio_id, today)
 
     db.commit()
     logger.info("Snapshot paper portfolio %s on %s: total=%.2f", portfolio_id, today.isoformat(), float(total_value))
@@ -962,6 +981,25 @@ def snapshot_paper_portfolio(
         "total_return_pct": total_return_pct,
         "stale_quotes": stale_quotes,
     }
+
+
+def _nav_max_drawdown(db: Session, portfolio_id: str, through: date) -> float | None:
+    """Worst peak-to-trough fall of the snapshot NAV up to ``through`` (a fraction <= 0)."""
+    values = [
+        float(v) for (v,) in db.query(PaperSnapshot.total_value)
+        .filter(PaperSnapshot.portfolio_id == portfolio_id, PaperSnapshot.date <= through)
+        .order_by(PaperSnapshot.date)
+        .all()
+        if v is not None
+    ]
+    if not values:
+        return None
+    peak, worst = values[0], 0.0
+    for v in values:
+        peak = max(peak, v)
+        if peak > 0:
+            worst = min(worst, v / peak - 1.0)
+    return round(worst, 6)
 
 
 def compute_metrics(

@@ -116,19 +116,13 @@ class EodProvider(MarketDataProvider):
                     error=f"No data found for {symbol}",
                 )
 
-            # Transform to standard format
-            records = [
-                {
-                    "date": row.get("date"),
-                    "open": row.get("open"),
-                    "high": row.get("high"),
-                    "low": row.get("low"),
-                    "close": row.get("close"),
-                    "adjusted_close": row.get("adjusted_close"),
-                    "volume": row.get("volume"),
-                }
-                for row in data
-            ]
+            # Transform to standard format. EODHD's `close` is the raw close;
+            # `adjusted_close` folds in splits and dividends. Stored bars must
+            # be total return (plan 2026-10-12, D1), so the close is the
+            # adjusted one and open/high/low are scaled by the same factor —
+            # the raw `close` is what made `eod` bars sit off the scale of the
+            # yfinance bars of the same symbol.
+            records = [_adjusted_record(row) for row in data if isinstance(row, dict)]
 
             return provider_result(
                 self.name,
@@ -216,3 +210,31 @@ class EodProvider(MarketDataProvider):
                 error=str(e),
                 warnings=[f"EOD quote fetch failed: {str(e)}"],
             )
+
+
+def _adjusted_record(row: dict[str, Any]) -> dict[str, Any]:
+    """One EODHD bar with OHLC restated on the adjusted-close scale."""
+    close = row.get("close")
+    adjusted = row.get("adjusted_close")
+    factor = 1.0
+    try:
+        if close and adjusted:
+            factor = float(adjusted) / float(close)
+    except (TypeError, ValueError, ZeroDivisionError):
+        factor = 1.0
+
+    def _scaled(value: Any) -> Any:
+        try:
+            return float(value) * factor if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "date": row.get("date"),
+        "open": _scaled(row.get("open")),
+        "high": _scaled(row.get("high")),
+        "low": _scaled(row.get("low")),
+        "close": adjusted if adjusted is not None else close,
+        "raw_close": close,
+        "volume": row.get("volume"),
+    }

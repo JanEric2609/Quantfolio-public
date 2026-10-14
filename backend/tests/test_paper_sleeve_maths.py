@@ -24,6 +24,7 @@ from app.foundation.models.entities import (
     PaperCashFlow,
     PaperHolding,
     PaperPortfolio,
+    PaperTrade,
     User,
 )
 from app.foundation.quant_proposal import McSummary, TradeProposal
@@ -125,9 +126,13 @@ def test_mandate_sell_is_booked_with_fee_and_needs_a_quote(monkeypatch):
     db.add(ListingCurrency(symbol="SAP", currency="EUR", source="test"))
     db.commit()
     execute_trade(db, p.id, "SAP", "buy", 5, 100.0, fee=0.99)
+    # Bought before the ADR-0013 window, so only the per-review third applies.
+    db.query(PaperTrade).filter(PaperTrade.portfolio_id == p.id).update(
+        {PaperTrade.date: datetime.now(UTC) - timedelta(days=40)})
+    db.commit()
     cash_before = current_cash_balance(p, db)
 
-    sell = json.dumps({"decision": {"action": "sell", "ticker": "SAP", "quantity": 2, "thesis": "t",
+    sell = json.dumps({"decision": {"action": "sell", "ticker": "SAP", "quantity": 1, "thesis": "t",
                                     "confidence": 0.5, "key_risks": [], "alternatives_considered": [],
                                     "expectation": {}}})
     monkeypatch.setattr(review_mod, "_local_llm_sync", lambda *a, **k: sell)
@@ -142,7 +147,7 @@ def test_mandate_sell_is_booked_with_fee_and_needs_a_quote(monkeypatch):
     with patch("app.decision.paper_portfolio.paper_quote_eur", return_value={"price": 110.0}):
         review_mod.run_mandate_review(db, user.id, "A")
     db.expire_all()
-    assert current_cash_balance(p, db) == cash_before + Decimal("220") - Decimal("0.99")
+    assert current_cash_balance(p, db) == cash_before + Decimal("110") - Decimal("0.99")
 
 
 # --- execution price ---------------------------------------------------------

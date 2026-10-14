@@ -243,8 +243,9 @@ def test_last_bar_date_then_ingest_no_autobegin_conflict():
         "ok": True,
         "provider": "test",
         "data": [
-            {"date": "2026-01-01", "open": 100, "high": 105, "low": 95, "close": 101, "volume": 1000},
-            {"date": "2026-01-02", "open": 101, "high": 106, "low": 96, "close": 102, "volume": 1100},
+            # Sessions: the ingest guard quarantines 2026-01-01 (a holiday) since D2.
+            {"date": "2026-01-05", "open": 100, "high": 105, "low": 95, "close": 101, "volume": 1000},
+            {"date": "2026-01-06", "open": 101, "high": 106, "low": 96, "close": 102, "volume": 1100},
         ],
     }
 

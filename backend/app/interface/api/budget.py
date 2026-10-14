@@ -1,13 +1,13 @@
 import logging
 from datetime import date
-from decimal import Decimal
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.interface.api.params import MonthField, MonthQuery, YearField, YearQuery, between
 from app.interface.api.safe_endpoint import safe_endpoint
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import Category, DkbTransaction, Expense, ExpenseRule, IncomeSource, Invoice, Subscription, User
@@ -61,6 +61,7 @@ from app.foundation.envelope import (
     sinking_fund_progress,
 )
 from app.foundation.expense_rules import apply_rules, llm_categorize_uncategorized, seed_default_rules
+from app.foundation.schemas.bounds import MoneyDecimal
 
 logger = logging.getLogger(__name__)
 
@@ -137,8 +138,8 @@ def delete_expense(expense_id: str, db: Session = Depends(get_db), user: User = 
 
 @router.get("/summary", response_model=BudgetSummaryOut)
 def summary(
-    year: int | None = None,
-    month: int | None = None,
+    year: YearQuery | None = None,
+    month: MonthQuery | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -499,15 +500,15 @@ def run_categorization(db: Session = Depends(get_db), user: User = Depends(curre
 
 
 class EnvelopeBudgetSet(BaseModel):
-    year: int
-    month: int
-    budgeted_amount: Decimal
+    year: YearField
+    month: MonthField
+    budgeted_amount: MoneyDecimal
 
 
 @router.get("/envelopes", response_model=EnvelopesOut)
 def envelopes(
-    year: int | None = None,
-    month: int | None = None,
+    year: YearQuery | None = None,
+    month: MonthQuery | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -546,9 +547,9 @@ def update_envelope_budget(
 class EnvelopeCoverRequest(BaseModel):
     from_category_id: str
     to_category_id: str
-    amount: Decimal
-    year: int
-    month: int
+    amount: MoneyDecimal
+    year: YearField
+    month: MonthField
 
 
 @router.post("/envelopes/cover", response_model=EnvelopeCoverOut)
@@ -573,7 +574,8 @@ def cover_envelope_overspend(
 
 @router.get("/envelopes/history", response_model=list[EnvelopeHistoryRowOut])
 def envelope_budget_history(
-    months: int = 6,
+    # 0 or fewer months indexed an empty list; thousands built an OR too deep for SQLite.
+    months: Annotated[int, between(1, 120)] = 6,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> list[dict[str, Any]]:
@@ -590,7 +592,7 @@ def buffer(
 
 @router.get("/reports/sankey", response_model=AnnualSankeyOut)
 def annual_sankey(
-    year: int | None = None,
+    year: YearQuery | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -599,8 +601,8 @@ def annual_sankey(
 
 @router.get("/review", response_model=MonthlyReviewOut)
 def monthly_review(
-    year: int | None = None,
-    month: int | None = None,
+    year: YearQuery | None = None,
+    month: MonthQuery | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:

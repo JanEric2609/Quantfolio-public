@@ -141,6 +141,51 @@ class SuggestedFund(BaseModel):
     overridden: bool = False
 
 
+class EtfSuggestionFund(BaseModel):
+    isin: str
+    name: str
+    why: str
+
+
+class EtfSuggestionLine(BaseModel):
+    line: str
+    label: str
+    target_pct: float
+    current_pct: float
+    gap_pp: float
+    status: str
+    tax_note: str
+    rule_note: str
+    duration_bucket: str | None = None
+    fund: EtfSuggestionFund | None = None
+    amount_eur: float | None = None
+    warning: str | None = None
+
+
+class EtfInfoItem(BaseModel):
+    isin: str | None = None
+    name: str | None = None
+    index: str
+    asset_class: str
+    reason: str
+
+
+class EtfCovered(BaseModel):
+    index: str
+    held_by: str
+
+
+class EtfSuggestions(BaseModel):
+    """Plan-gap ETF lines (rule-based, not a forecast) and the info-only list."""
+
+    lines: list[EtfSuggestionLine] = []
+    info: list[EtfInfoItem] = []
+    covered: list[EtfCovered] = []
+    rule_note: str = ""
+    estimate: bool = True
+    not_tax_advice: bool = True
+
+
 class MonthlyPlanResponse(BaseModel):
     month: str
     generated_at: str
@@ -169,6 +214,7 @@ class MonthlyPlanResponse(BaseModel):
     not_investment_advice: bool
     suggested_funds: list[SuggestedFund] = []
     acc_dist_note: str = ""
+    etf_suggestions: EtfSuggestions | None = None
 
 
 @router.get("/month", response_model=MonthlyPlanResponse)

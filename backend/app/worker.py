@@ -420,6 +420,8 @@ def register_provider_health_probe_job(scheduler: Any | None = None) -> str:
     )
 
 _REGIME_MACRO_SERIES = ["VIXCLS", "T10Y2Y", "BAA10Y"]
+#: Fed funds target range (upper limit) for the dossier macro block (WP8).
+_DOSSIER_MACRO_SERIES = ["DFEDTARU"]
 
 
 def register_macro_refresh_job(scheduler: Any | None = None) -> str:
@@ -428,8 +430,9 @@ def register_macro_refresh_job(scheduler: Any | None = None) -> str:
     Runs at 07:00 UTC every day, before the regime classify job at 07:15
     that consumes ``macro_indicators`` rows. Fetches exactly the FRED series
     the regime classifier maps (VIXCLS/T10Y2Y/BAA10Y — see
-    ``app.lab.regime.classifier.MACRO_SERIES_MAP``) via the FRED
-    provider specifically. Previously nothing ever called
+    ``app.lab.regime.classifier.MACRO_SERIES_MAP``) plus the Fed funds target
+    (DFEDTARU) via the FRED provider specifically, then the euro-area series
+    from the ECB Data Portal (``foundation/euro_macro.py``). Previously nothing ever called
     ``ingest_macro_indicators`` on a schedule (only a manual
     ``POST /api/data/macro/refresh``), so ``macro_indicators`` stayed empty
     and the regime classifier silently ran price-only.
@@ -441,10 +444,21 @@ def register_macro_refresh_job(scheduler: Any | None = None) -> str:
 
         db = SessionLocal()
         try:
-            result = DataIngester(db).ingest_macro_indicators(series_ids=_REGIME_MACRO_SERIES)
+            result = DataIngester(db).ingest_macro_indicators(
+                series_ids=[*_REGIME_MACRO_SERIES, *_DOSSIER_MACRO_SERIES]
+            )
             logger.info("macro_refresh: %s", result)
         except Exception as exc:
             logger.error("macro_refresh failed: %s", exc, exc_info=True)
+        # Euro-area series (ECB DFR/MRO, HICP headline and core), plan 2026-10-12 D11.
+        try:
+            from app.foundation.euro_macro import refresh_ecb_series
+            from app.foundation.providers.ecb_provider import EcbProvider
+
+            logger.info("macro_refresh ecb: %s", refresh_ecb_series(db, EcbProvider()))
+        except Exception as exc:
+            db.rollback()
+            logger.error("macro_refresh ecb failed: %s", exc, exc_info=True)
         finally:
             db.close()
 
@@ -473,6 +487,27 @@ def register_listing_currency_audit_job(scheduler: Any | None = None) -> str:
     return register_interval_job(
         "listing_currency_audit", listing_currency_audit_inner,
         scheduler=scheduler, hours=24, run_immediately=True,
+    )
+
+
+def register_bar_repull_job(scheduler: Any | None = None) -> str:
+    """Register the weekly full re-pull of stored bar series (Sunday 05:00 UTC).
+
+    Adjusted providers restate history after each dividend, so incrementally
+    ingested series are re-pulled once a week to stay on one scale (plan
+    2026-10-12, D1; see ``data_backbone.series_repull``).
+    """
+
+    def bar_repull_inner() -> None:
+        from app.foundation.core.db import SessionLocal
+        from app.foundation.data_backbone.series_repull import repull_due_series
+
+        with SessionLocal() as db:
+            repull_due_series(db)
+
+    return register_cron_job(
+        "bar_repull_weekly", bar_repull_inner,
+        scheduler=scheduler, day_of_week="sun", hour=5, minute=0,
     )
 
 
@@ -538,7 +573,6 @@ def register_risk_free_rate_refresh_job(scheduler: Any | None = None) -> str:
     """
 
     def risk_free_rate_refresh_inner() -> None:
-        from datetime import timedelta
 
         from app.foundation.core.db import SessionLocal
         from app.foundation.providers.ecb_provider import EcbProvider
@@ -546,22 +580,24 @@ def register_risk_free_rate_refresh_job(scheduler: Any | None = None) -> str:
 
         db = SessionLocal()
         try:
+            from app.foundation.estr import refresh_fixings
+
             provider = EcbProvider()
-            end = datetime.now(UTC).date()
-            start = end - timedelta(days=10)
-            result = provider.get_history(
-                "EST.B.EU000A2X2A25.WT",
-                start=start.isoformat(),
-                end=end.isoformat(),
-            )
+            # The fixings are also stored (macro_indicators, name "ESTR"):
+            # Discover scores money-market funds against the compounded
+            # series (plan 2026-10-12, D3). A short window normally, a 4-year
+            # backfill once.
+            result = refresh_fixings(db, provider)
             if not result.get("ok"):
                 logger.warning("risk_free_rate_refresh: ECB SDW fetch failed: %s", result.get("error"))
                 return
-            observations = result.get("data") or []
+            observations = result.get("observations") or []
             if not observations:
                 logger.warning("risk_free_rate_refresh: ECB SDW returned no observations")
                 return
             latest = observations[-1]
+            # Stored as a fraction (0.02437 = 2.437 %) despite the key's
+            # "_pct" suffix; internal key, renaming it would drift (L5).
             rate_pct = float(latest["value"]) / 100.0
             upsert_public_settings(db, {
                 "risk_free_rate_pct": rate_pct,
@@ -1002,6 +1038,7 @@ def build_scheduler() -> Any:
     register_index_currency_weights_job(scheduler)
     register_insider_trading_refresh_job(scheduler)
     register_price_backfill_daily_job(scheduler)
+    register_bar_repull_job(scheduler)
     # Read-only and TAN-free, unlike DKB; wakes hourly, syncs per scalable_sync_hours.
     register_scalable_sync_job(scheduler)
     register_evidence_gate_job(scheduler)

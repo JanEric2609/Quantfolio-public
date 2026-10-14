@@ -3,11 +3,11 @@
 import json
 from typing import cast
 
-from openai import APIError, AsyncOpenAI
+from openai import APIConnectionError, APIError, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from pydantic import BaseModel
 
-from .base import Completion
+from .base import Completion, LlmUnavailableError
 
 
 class OpenAIBackend:
@@ -73,6 +73,8 @@ class OpenAIBackend:
                 tokens_out=usage.completion_tokens if usage else 0,
                 backend="openai",
             )
+        except APIConnectionError as e:
+            raise LlmUnavailableError(f"OpenAI API unreachable: {e}") from e
         except APIError as e:
             raise RuntimeError(f"OpenAI API error: {e}") from e
 
@@ -84,5 +86,7 @@ class OpenAIBackend:
                 input=texts,
             )
             return [item.embedding for item in response.data]
+        except APIConnectionError as e:
+            raise LlmUnavailableError(f"OpenAI embedding API unreachable: {e}") from e
         except APIError as e:
             raise RuntimeError(f"OpenAI embedding error: {e}") from e

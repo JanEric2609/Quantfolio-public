@@ -37,7 +37,7 @@ from scipy.stats import skew as _scipy_skew
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.foundation.models.entities import TrialLedgerEntry
+from app.foundation.models.entities import AcTrialLedger, TrialLedgerEntry
 
 # Euler-Mascheroni constant, used by the False Strategy Theorem.
 _EULER_MASCHERONI = 0.5772156649015328606
@@ -1026,12 +1026,15 @@ def resolve_n_trials(db: Session, floor: int = DEFAULT_N_TRIALS_FLOOR) -> int:
     """Global experiment count for Deflated Sharpe deflation (ADR 0015).
 
     Counts every row ever written to the trial ledger, across every
-    context: search breadth spent in one context still raises the bar
-    everywhere else, so the gate cannot be gamed by moving the search into
-    an uncounted corner. ``floor`` only keeps the count at least 1.
+    context, plus every AlphaCrafter factor evaluation in
+    ``ac_trial_ledger`` (6,219 rows on 2026-10-12, against 30 in the trial
+    ledger; plan 2026-10-12, D10): search breadth spent in one context still
+    raises the bar everywhere else, so the gate cannot be gamed by moving the
+    search into an uncounted corner. ``floor`` only keeps the count at least 1.
     """
     count = db.execute(select(func.count()).select_from(TrialLedgerEntry)).scalar_one()
-    return max(int(count), floor)
+    ac_count = db.execute(select(func.count()).select_from(AcTrialLedger)).scalar_one()
+    return max(int(count) + int(ac_count), floor)
 
 
 def trial_family(context: str, trial_key: str, metadata: dict | None) -> str:
@@ -1056,7 +1059,10 @@ def effective_n_trials(db: Session) -> int:
     rows = db.execute(
         select(TrialLedgerEntry.context, TrialLedgerEntry.trial_key, TrialLedgerEntry.metadata_json)
     ).all()
-    return max(1, len({trial_family(c, k, m) for c, k, m in rows}))
+    families = {trial_family(c, k, m) for c, k, m in rows}
+    # Each AlphaCrafter job run searched one family of factors (D10).
+    families |= {f"alphacrafter:{run_id}" for (run_id,) in db.execute(select(AcTrialLedger.run_id).distinct())}
+    return max(1, len(families))
 
 
 def dsr_hurdle_curve(

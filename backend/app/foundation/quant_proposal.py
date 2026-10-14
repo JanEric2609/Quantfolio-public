@@ -174,6 +174,70 @@ def _portfolio_risk_envelope(
     }
 
 
+#: Per-name cap on |target - current| per proposal; honoured by min_risk.
+PROPOSAL_MAX_TURNOVER = 0.20
+#: Default cap on any one non-core name, as a fraction of the book (D5).
+DEFAULT_NAME_MAX = 0.05
+
+
+def _plan_constraints(
+    plan: dict[str, Any],
+    evaluable: list[str],
+    previous: dict[str, float],
+    isins: dict[str, str],
+    *,
+    max_turnover: float,
+) -> tuple[dict[str, Any], list[str]]:
+    """skfolio group constraints that keep the paper book on the owner's plan (D5).
+
+    The core group holds at least ``core_min`` and the satellite (stocks and
+    non-plan ETFs) at most ``satellite_max``; each non-core name at most
+    ``name_max``. With a per-name turnover cap a book far from the plan
+    cannot reach it in one step, so each bound is loosened to what the cap
+    allows this time (the book walks toward the plan over several cycles
+    instead of the solver failing).
+    """
+    notes: list[str] = []
+    core_tickers = {str(t).upper() for t in plan.get("core_tickers") or []}
+    core_isins = {str(i).upper() for i in plan.get("core_isins") or []}
+    core = [s for s in evaluable if s in core_tickers or (isins.get(s) and isins[s] in core_isins)]
+    satellite = [s for s in evaluable if s not in core]
+    if not core:
+        notes.append("plan: no core ETF with a price series — core floor not applied")
+        return {}, notes
+    core_min = float(plan.get("core_min", 0.0))
+    sat_max = float(plan.get("satellite_max", 1.0))
+    name_max = float(plan.get("name_max", DEFAULT_NAME_MAX))
+
+    # What one step can reach: each name moves at most max_turnover.
+    reachable_core = sum(min(1.0, previous.get(s, 0.0) + max_turnover) for s in core) if previous else 1.0
+    lowest_sat = sum(max(0.0, previous.get(s, 0.0) - max_turnover) for s in satellite) if previous else 0.0
+    floor = min(core_min, reachable_core)
+    ceiling = max(sat_max, lowest_sat)
+    if floor < core_min:
+        notes.append(f"plan: core floor {core_min:.0%} not reachable this cycle; {floor:.0%} instead")
+    if ceiling > sat_max:
+        notes.append(f"plan: satellite cap {sat_max:.0%} not reachable this cycle; {ceiling:.0%} instead")
+    caps = {
+        s: max(name_max, previous.get(s, 0.0) - max_turnover) for s in satellite
+    }
+    # One fund carries the core (ADR 0019). Without this, minimum variance
+    # swaps the core fund for other core-ISIN funds a little every cycle
+    # (the 2026-10-06..09 replay sold 20 % of EUNL a day into VWRA and EIMI):
+    # turnover and fees for no change in exposure. Other core funds already
+    # held may be kept or sold, not bought.
+    primary = [s for s in core if s in core_tickers]
+    if primary:
+        caps.update({s: previous.get(s, 0.0) for s in core if s not in primary})
+    kwargs: dict[str, Any] = {
+        "extra_groups": {s: ["core" if s in core else "satellite"] for s in evaluable},
+        "extra_constraints": [f"core >= {round(floor, 6)}"]
+        + ([f"satellite <= {round(ceiling, 6)}"] if satellite else []),
+        "max_weight_by_asset": caps,
+    }
+    return kwargs, notes
+
+
 def build_trade_proposal(
     db: Session,
     portfolio_id: str,
@@ -189,7 +253,13 @@ def build_trade_proposal(
         candidates: Discover candidates (dicts with at least ``symbol``;
             optional ``source``).
         config: Optional overrides (``objective``, ``risk_measure``,
-            ``max_candidates``).
+            ``max_candidates``) and ``plan_targets`` from
+            ``decision.monthly_plan.paper_plan_targets`` (this module is
+            foundation-tier and may not import it): ``core_min`` and
+            ``satellite_max`` as fractions of the invested book,
+            ``name_max`` for each non-core name, ``core_tickers`` /
+            ``core_isins`` naming the core. The core is always part of the
+            universe, so the optimiser can hold it.
 
     Returns:
         TradeProposal — never raises for data gaps; degrades with notes.
@@ -229,14 +299,24 @@ def build_trade_proposal(
             else classify_instrument(sym, name=h.name)
         )
 
+    plan = cfg.get("plan_targets") or None
+    book_isins = {h.ticker.upper(): (h.isin or "").upper() for h in book_rows if h.ticker}
+    cand_isins: dict[str, str] = {}
     cand_symbols: list[str] = []
     cand_types: dict[str, str] = {}
+    if plan:
+        for core_sym in plan.get("core_tickers") or []:
+            sym = str(core_sym).upper()
+            if sym not in book_quantities and sym not in cand_types:
+                cand_symbols.append(sym)
+                cand_types[sym] = "etf"
     for cand in candidates[:max_candidates]:
         sym = str(cand["symbol"]).upper()
         if sym in cand_types:
             continue
         cand_symbols.append(sym)
         cand_types[sym] = classify_instrument(sym, cand.get("source"), cand.get("name"))
+        cand_isins[sym] = str(cand.get("isin") or "").upper()
 
     universe = list(dict.fromkeys([*book_quantities.keys(), *cand_symbols]))
 
@@ -295,14 +375,28 @@ def build_trade_proposal(
                 else None
             )
 
+            plan_kwargs: dict[str, Any] = {}
+            if plan:
+                plan_kwargs, plan_notes = _plan_constraints(
+                    plan, evaluable, previous_weights or {},
+                    {**book_isins, **cand_isins}, max_turnover=PROPOSAL_MAX_TURNOVER,
+                )
+                notes.extend(plan_notes)
+
+            objective = str(cfg.get("objective", "min_risk"))
             result = run_optimisation(
                 price_matrix,
-                objective=str(cfg.get("objective", "max_ratio")),
-                risk_measure=str(cfg.get("risk_measure", "cvar")),
+                objective=objective,
+                risk_measure=str(cfg.get("risk_measure", "variance")),
                 risk_free_rate=get_risk_free_rate(db),
-                instrument_types=instrument_types,
+                # The plan's core/satellite bounds replace the old 50/35/15
+                # equity/bond/cash policy bands, which contradict a core floor
+                # (and the owner's asset-class targets default to 0).
+                instrument_types=None if plan_kwargs else instrument_types,
                 previous_weights=previous_weights,
-                max_turnover=0.20,
+                max_turnover=PROPOSAL_MAX_TURNOVER,
+                covariance_estimator=str(cfg.get("covariance_estimator", "ledoit_wolf")),
+                **plan_kwargs,
             )
             optimizer_status = str(result.get("status", "unavailable"))
             if result.get("weights"):

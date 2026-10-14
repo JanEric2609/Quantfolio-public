@@ -61,3 +61,31 @@ async def test_router_call_times_out_and_raises_queue_wait_timeout_error():
                 timeout_s=0.05,
             )
         assert "timed out" in str(exc_info.value)
+
+
+def test_router_serves_a_second_event_loop_in_another_thread():
+    # A sync endpoint runs the router on its own thread's loop. The queue and
+    # worker were module-wide and bound to the first loop, so the second call
+    # from another thread waited forever (found by the API scan on
+    # POST /api/ai/recommendations/generate).
+    import threading
+
+    db = _memory_db()
+    done = Completion(content="ok", tokens_in=1, tokens_out=1, model="test-model", backend="local_llama")
+    results: list[str] = []
+
+    def one_call() -> None:
+        # Like decision.ai._run_async: the thread's loop is left open, so the
+        # worker started on it stays pending after the call returns.
+        loop = asyncio.new_event_loop()
+        results.append(loop.run_until_complete(call(
+            db, task_type="interactive", messages=[{"role": "user", "content": "hi"}], timeout_s=5.0,
+        )).content)
+
+    with patch("app.foundation.llm.router.LocalLlamaBackend.complete", new_callable=AsyncMock, return_value=done):
+        for _ in range(2):
+            thread = threading.Thread(target=one_call)
+            thread.start()
+            thread.join(timeout=10)
+            assert not thread.is_alive(), "router call hung on a second event loop"
+    assert results == ["ok", "ok"]

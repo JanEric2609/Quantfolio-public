@@ -242,6 +242,12 @@ DEFAULT_PUBLIC_SETTINGS: dict[str, Any] = {
     "plan_drift_band_pp": 5,
     "plan_core_isins": "",
     "plan_tilt_isins": "",
+    # Asset-class targets in percent of the book (plan 2026-10-12, D4). 0 =
+    # no target: the plan then suggests no fund for that class.
+    "plan_bond_target_pct": 0,
+    "plan_bond_duration_bucket": "short",
+    "plan_cash_target_pct": 0,
+    "plan_gold_target_pct": 0,
     # Candidate ETFs the Quant Lab allocator splits new money across; empty = the core ETFs held.
     "allocator_universe_isins": "",
     # Fixed cash kept aside (Tagesgeld and broker cash), never suggested for

@@ -117,6 +117,10 @@ def compute_regime_snapshot(db=None) -> dict[str, Any]:
         "yield_spread": None,
         "momentum_3m": None,
         "stale_bars": bool(payload.get("stale_bars")),
+        # "carried_after_refit" / "carried_no_new_data" when the published
+        # label is held across a refit (hysteresis, plan 2026-10-12 D9).
+        "label_source": payload.get("label_source") or "model",
+        "model_label": payload.get("model_label") or label,
         "state_since": _state_since(db, label, ts),
         "as_of": str(as_of)[:10] if as_of else None,
         "updated_at": ts.isoformat(),

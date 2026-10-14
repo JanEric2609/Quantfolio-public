@@ -3,11 +3,11 @@
 import json
 from typing import Any, cast
 
-from anthropic import APIError, AsyncAnthropic
+from anthropic import APIConnectionError, APIError, AsyncAnthropic
 from anthropic.types import MessageParam, TextBlock
 from pydantic import BaseModel
 
-from .base import Completion
+from .base import Completion, LlmUnavailableError
 
 
 class AnthropicBackend:
@@ -70,6 +70,8 @@ class AnthropicBackend:
                 tokens_out=response.usage.output_tokens,
                 backend="anthropic",
             )
+        except APIConnectionError as e:
+            raise LlmUnavailableError(f"Anthropic API unreachable: {e}") from e
         except APIError as e:
             raise RuntimeError(f"Anthropic API error: {e}") from e
 

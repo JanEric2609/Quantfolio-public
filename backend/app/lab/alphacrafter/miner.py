@@ -137,24 +137,14 @@ class MinerAgent:
         # 2. LLM factor proposals (best-effort, fail-open, non-blocking)
         if propose_llm:
             try:
-                # Dispatch safely across thread boundaries to the main event loop's PriorityQueue
-                from app.foundation.llm import router as llm_router
-                main_task = llm_router._worker_task
-                main_loop = main_task.get_loop() if main_task and not main_task.done() else None
-
-                if main_loop and main_loop.is_running():
-                    fut = asyncio.run_coroutine_threadsafe(
+                # The LLM router keeps a queue per event loop, so this thread's
+                # own loop is served directly.
+                extras = asyncio.run(
+                    asyncio.wait_for(
                         _llm_extra_factors(db, panel, h.market_state.regime_label, settings),
-                        main_loop,
+                        timeout=45.0,
                     )
-                    extras = fut.result(timeout=45.0)
-                else:
-                    extras = asyncio.run(
-                        asyncio.wait_for(
-                            _llm_extra_factors(db, panel, h.market_state.regime_label, settings),
-                            timeout=45.0,
-                        )
-                    )
+                )
                 llm_status = "ok"
             except Exception as exc:
                 logger.warning("Miner: LLM proposal fetch failed (non-fatal): %s", exc)

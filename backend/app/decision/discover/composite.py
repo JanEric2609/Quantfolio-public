@@ -277,7 +277,9 @@ def derive_signals_from_scores(scores: dict[str, Any] | Any) -> dict[str, float]
     # return level that a broad rally lifts everyone over.
     momentum_raw = _num(mom.get("momentum_12_1m"), 0.0)
     momentum_rank = mom.get("momentum_rank")
-    if instrument_type == "money_market":
+    # Bonds and gold (D4, plan 2026-10-12) get the same neutral treatment.
+    not_ranked = instrument_type == "money_market" or bool(mom.get("momentum_skipped"))
+    if not_ranked:
         momentum_score = 0.5
     elif isinstance(momentum_rank, (int, float)):
         momentum_score = max(0.0, min(1.0, float(momentum_rank)))
@@ -291,7 +293,7 @@ def derive_signals_from_scores(scores: dict[str, Any] | Any) -> dict[str, float]
     cvar_pen = min(1.0, cvar_raw / 0.06)
     mdd_pen = min(1.0, mdd_raw / _MDD_MAX) if _MDD_MAX else 0.0
     risk_score = max(0.0, min(1.0, 1.0 - (0.4 * vol_pen + 0.3 * cvar_pen + 0.3 * mdd_pen)))
-    if instrument_type == "money_market":
+    if not_ranked:
         # Same reasoning as momentum above: a cash fund's ~1.0 risk score is
         # structural (no volatility by construction), not evidence of a good
         # pick. Once momentum became a rank (ADR 0017) and equity composites

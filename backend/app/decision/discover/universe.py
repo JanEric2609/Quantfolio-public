@@ -253,6 +253,26 @@ def _user_holdings_tickers(db: Session, user_id: str) -> set[str]:
     return tickers
 
 
+def _user_held_indices(
+    db: Session, user_id: str, universe_by_isin: dict[str, dict[str, Any]],
+) -> dict[str, str]:
+    """``index key -> held fund`` for every fund the user holds (plan 2026-10-12, D4).
+
+    A fund tracking an index already held (EIMI and IS3N, VWRA and VWCE) is
+    never suggested again, whatever its ticker or ISIN.
+    """
+    from app.decision.etf_suggestions import held_index_keys
+
+    positions: list[dict[str, Any]] = []
+    portfolio = db.query(Portfolio).filter(Portfolio.user_id == user_id).first()
+    if portfolio:
+        for h in db.query(Holding).filter(Holding.portfolio_id == portfolio.id).all():
+            positions.append({"isin": h.isin, "ticker": h.ticker, "name": h.name})
+    for pos in live_positions(db, user_id, include_unreconciled=True):
+        positions.append({"isin": pos.isin, "ticker": pos.ticker, "name": pos.name})
+    return held_index_keys(positions, universe_by_isin)
+
+
 def _profile_exclusions(db: Session, user_id: str) -> list[str]:
     """Return comma-separated exclusion keywords from investor profile."""
     settings = get_public_settings(db)
@@ -601,13 +621,33 @@ def build_universe(
         candidates.append({"symbol": t, "isin": fund.get("isin"), "name": name, "source": "screen_index"})
         seen.add(t)
 
-    # --- 2. UCITS ETFs (from justETF via EtfUniverseProvider) ---
-    etf_universe = _get_etf_provider().get_universe()
-    for etf in etf_universe:
+    # --- 2. UCITS ETFs: one fund per index, only for a line of the plan (D4) ---
+    # ETFs are not ranked against each other by momentum. Within an index the
+    # ADR-0019 rule picks one fund; an index already held (by ISIN or index)
+    # is skipped; an index outside the plan is information only (shown on the
+    # plan page) and never enters the candidate pipeline.
+    from app.decision.etf_suggestions import best_per_index, plan_scope
+    from app.decision.monthly_plan import plan_settings
+
+    etf_universe = [*_get_etf_provider().get_universe(), *_FIXED_INCOME_SEED]
+    by_isin = {str(e.get("isin") or "").upper(): e for e in etf_universe if e.get("isin")}
+    held_indices = _user_held_indices(db, user_id, by_isin)
+    scope = plan_scope(get_public_settings(db), plan_settings(db)["core_isins"])
+    eligible_etfs = [
+        e for e in etf_universe
+        if e["symbol"].upper() not in held and str(e.get("isin") or "").upper() not in held
+        and not any(excl in e["symbol"].lower() or excl in e["name"].lower() for excl in exclusions)
+    ]
+    skipped_held = 0
+    for key, etf in sorted(best_per_index(eligible_etfs).items()):
         t = etf["symbol"].upper()
-        if t in seen or t in held:
+        if t in seen:
             continue
-        if any(excl in t.lower() or excl in etf["name"].lower() for excl in exclusions):
+        if key in held_indices:
+            skipped_held += 1
+            continue
+        line = scope.line_for(etf["asset_class"], key)
+        if line is None:
             continue
         candidates.append({
             "symbol": t,
@@ -616,29 +656,16 @@ def build_universe(
             "source": "screen_etf",
             "tf_class": etf.get("tf_class", "aktien"),
             "domicile_country": etf.get("domicile_country", ""),
-            "distribution_policy": etf.get("dividends", ""),
+            "distribution_policy": etf.get("dividends") or etf.get("distribution_policy", ""),
+            "asset_class": etf["asset_class"],
+            "index_key": key,
+            "plan_line": line,
         })
         seen.add(t)
         if len(candidates) >= etf_cap:
             break
-
-    # --- 2b. Curated fixed-income seed (F17) — always included, not screened ---
-    for etf in _FIXED_INCOME_SEED:
-        t = etf["symbol"].upper()
-        if t in seen or t in held:
-            continue
-        if any(excl in t.lower() or excl in etf["name"].lower() for excl in exclusions):
-            continue
-        candidates.append({
-            "symbol": t,
-            "isin": etf["isin"],
-            "name": etf["name"],
-            "source": "screen_etf",
-            "tf_class": etf["tf_class"],
-            "domicile_country": etf["domicile_country"],
-            "distribution_policy": etf["distribution_policy"],
-        })
-        seen.add(t)
+    if skipped_held:
+        logger.info("build_universe: %d ETF index(es) already held, not suggested", skipped_held)
 
     # --- 3. News sentiment candidates ---
     cutoff = datetime.now(UTC) - timedelta(days=14)

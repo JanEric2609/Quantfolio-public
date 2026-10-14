@@ -1,11 +1,11 @@
-"""Deterministic buy gates for LLM portfolio decisions.
+"""Deterministic buy and sell gates for LLM portfolio decisions.
 
 All checks are synchronous and do NOT call any LLM.
 """
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 from typing import Any
 
 from sqlalchemy import text
@@ -13,6 +13,11 @@ from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import Asset, PaperPortfolio
 from app.foundation.data_backbone.ingest import DataIngester
+from app.foundation.sell_caps import (
+    MAX_CUMULATIVE_SELL_PCT,
+    MAX_SELL_PCT_OF_POSITION,
+    effective_sell_cap,
+)
 from app.foundation.settings import get_public_settings
 
 logger = logging.getLogger(__name__)
@@ -222,6 +227,98 @@ def check_buy_gates(
         "checks": checks,
         "reason": reason,
     }
+
+
+def check_sell_gates(
+    *,
+    ticker: str,
+    quantity: Decimal,
+    price: Decimal,
+    book: dict[str, tuple[float, str | None]],
+    cash: float,
+    mandate_config: dict[str, Any],
+    cumulative_totals: dict[str, tuple[float, float]],
+) -> dict[str, Any]:
+    """Run deterministic sell gates (plan 2026-10-12, D6). Pure: no DB.
+
+    Mandate B sold 250 of 265 EUNL in one review to cure a cap breach that
+    was not one. A sell is now:
+
+    * rejected if it would push ETF weight below ``min_etf_pct``;
+    * clipped to ``MAX_SELL_PCT_OF_POSITION`` of the position per review
+      (ADR 0012) and to what the trailing-window cumulative cap leaves
+      (ADR 0013).
+
+    Args:
+        ticker: Ticker to sell.
+        quantity: Units the model asked to sell.
+        price: EUR price per unit.
+        book: ticker -> ``(EUR market value, asset_type)`` for every holding.
+        cash: Cash balance in EUR.
+        mandate_config: Parsed mandate config (``min_etf_pct``).
+        cumulative_totals: ``sell_caps.cumulative_sell_totals`` for the portfolio.
+
+    Returns:
+        ``passed``, ``checks``, ``reason`` and ``quantity`` (the units that may
+        be sold; less than requested when clipped).
+    """
+    checks: list[dict[str, Any]] = []
+    sym = ticker.upper()
+    current_value, asset_type = book.get(sym, (0.0, None))
+    total_value = sum(v for v, _ in book.values()) + max(cash, 0.0)
+    requested_value = float(quantity * price)
+
+    # 1. Per-review and cumulative caps: clip, do not reject.
+    cap_value = effective_sell_cap(
+        sym,
+        current_value,
+        total_value,
+        max_sell_pct_of_position=float(mandate_config.get("max_sell_pct_of_position", MAX_SELL_PCT_OF_POSITION)),
+        cumulative_totals=cumulative_totals,
+        max_cumulative_sell_pct=float(mandate_config.get("max_cumulative_sell_pct", MAX_CUMULATIVE_SELL_PCT)),
+        instrument_types={},
+        core_holding_floor_pct=0.0,
+    )
+    allowed_value = min(requested_value, cap_value)
+    checks.append({
+        "name": "SELL_RATE_CAP",
+        "passed": allowed_value > 0,
+        "detail": {
+            "requested_value": round(requested_value, 2),
+            "cap_value": round(cap_value, 2),
+            "clipped": allowed_value < requested_value,
+        },
+    })
+
+    # 2. ETF floor: a sell that leaves ETF weight under the floor is rejected.
+    min_etf = float(mandate_config.get("min_etf_pct", 0.30))
+    is_etf = (asset_type or "").lower() == "etf"
+    if is_etf and total_value > 0:
+        etf_value = sum(v for v, t in book.values() if (t or "").lower() == "etf")
+        etf_after = (etf_value - allowed_value) / total_value
+        floor_pass = etf_after >= min_etf - 1e-9
+        checks.append({
+            "name": "ETF_FLOOR",
+            "passed": floor_pass,
+            "detail": {"etf_pct_after": round(etf_after * 100, 2), "floor_pct": round(min_etf * 100, 2)},
+        })
+
+    passed = all(c["passed"] for c in checks)
+    allowed_qty = Decimal("0")
+    if passed and price > 0:
+        allowed_qty = (Decimal(str(allowed_value)) / price).quantize(Decimal("0.000001"), rounding=ROUND_DOWN)
+        allowed_qty = min(allowed_qty, quantity)
+        if allowed_qty <= 0:
+            passed = False
+    if passed:
+        reason = "All sell gates passed" if allowed_qty >= quantity else (
+            f"Sell clipped from {quantity} to {allowed_qty} units by the sell-rate cap"
+        )
+    else:
+        reason = "; ".join(f"{c['name']} failed: {c['detail']}" for c in checks if not c["passed"]) or (
+            "Nothing may be sold this review"
+        )
+    return {"passed": passed, "checks": checks, "reason": reason, "quantity": allowed_qty}
 
 
 # Backwards-compatible alias

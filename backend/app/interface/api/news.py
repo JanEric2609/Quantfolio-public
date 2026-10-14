@@ -1,5 +1,5 @@
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -12,6 +12,7 @@ from app.foundation.core.net import validate_outbound_url
 from app.foundation.models.entities import NewsItem, User, UserNewsRelevance
 from app.foundation.auth import current_user, require_admin
 from app.foundation.news import portfolio_symbols, refresh_news_for_user
+from app.interface.api.params import ROWS_BOUND
 
 
 router = APIRouter(prefix="/api/news", tags=["news"])
@@ -49,7 +50,7 @@ def list_news(
     relevance: str | None = None,
     macro: bool | None = None,
     limit: int = Query(200, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    offset: Annotated[int, Query(ge=0), ROWS_BOUND] = 0,
     db: Session = Depends(get_db),
     _user: User = Depends(current_user),
 ) -> list[dict[str, Any]]:
@@ -120,7 +121,7 @@ def news_status(db: Session = Depends(get_db), user: User = Depends(current_user
 def ticker_news(
     ticker: str,
     limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    offset: Annotated[int, Query(ge=0), ROWS_BOUND] = 0,
     db: Session = Depends(get_db),
     _user: User = Depends(current_user),
 ) -> list[dict[str, Any]]:
@@ -139,7 +140,7 @@ def ticker_news(
 @safe_endpoint
 def macro_news(
     limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    offset: Annotated[int, Query(ge=0), ROWS_BOUND] = 0,
     db: Session = Depends(get_db),
     _user: User = Depends(current_user),
 ) -> list[dict[str, Any]]:

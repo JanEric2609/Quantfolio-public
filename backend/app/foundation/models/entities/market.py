@@ -131,3 +131,51 @@ class DataQualityEvent(Base):
     message: Mapped[str] = mapped_column(Text)
     meta_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class BarSeriesMeta(Base):
+    """Which provider a symbol's stored daily bars come from (plan 2026-10-12, D1).
+
+    One series, one provider: incremental ingestion asks only the pinned
+    provider, and a provider change goes through
+    ``DataIngester.repull_series``, which replaces the whole window. Before
+    the pin, a fallback from Twelve Data (raw closes) to yfinance (adjusted)
+    spliced SPY, URTH and VGK on 2021-10-13 (+7 %, +9 %, +19 % jumps).
+    ``quarantine_reason`` set (``split_unadjusted``) keeps the symbol out of
+    Discover until a re-pull clears it.
+    """
+
+    __tablename__ = "bar_series_meta"
+
+    symbol: Mapped[str] = mapped_column(String(32), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(40))
+    adjusted: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_full_repull_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    quarantine_reason: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class BarQuarantine(Base):
+    """A provider bar the ingest guard kept out of ``bar_prices`` (D2).
+
+    ``reason``: ``non_session``, ``spike_reversal``, ``split_signature`` or
+    ``provider_scale``. A second provider confirming the close within 1 %
+    releases the bar (``resolution="confirmed:<provider>"``).
+    """
+
+    __tablename__ = "bar_quarantine"
+    __table_args__ = (UniqueConstraint("symbol", "ts", "provider", name="uq_bar_quarantine_symbol_ts_provider"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=False))
+    open: Mapped[float | None] = mapped_column(Float, nullable=True)
+    high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    close: Mapped[float] = mapped_column(Float)
+    provider: Mapped[str] = mapped_column(String(40))
+    reason: Mapped[str] = mapped_column(String(40))
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolution: Mapped[str | None] = mapped_column(String(80), nullable=True)

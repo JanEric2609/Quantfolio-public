@@ -582,7 +582,7 @@ class TestCrossComponentDataFlow:
                     "direction": "long",
                     "conviction": 0.75,
                     "horizon_months": 6,
-                    "thesis": "Buy AAPL on AI momentum",
+                    "thesis": "Buy AAPL on AI momentum.",
                     "key_risks": ["Valuation risk"],
                 }
             ),
@@ -630,7 +630,7 @@ class TestCrossComponentDataFlow:
         # 2.2% cash + 1.0 x 4.5% = 6.7%, plus 0.10 of the gap to the 20.0%/yr
         # anchor, at horizon 6mo -> (6.7 + 1.33) * 0.5 = 4.0
         assert data["expected_return"] == pytest.approx(4.0, abs=0.05)
-        assert data["thesis"] == "Buy AAPL on AI momentum"
+        assert data["thesis"] == "Buy AAPL on AI momentum."
         assert data["key_risks"] == ["Valuation risk"]
         assert data["signal_breakdown"]["composite_score"] == 0.85
         assert data["estimate"] is True

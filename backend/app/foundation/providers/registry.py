@@ -168,29 +168,55 @@ class ProviderRegistry:
     def get_history(self, symbol: str, start: str | None = None, end: str | None = None, days: int | None = None) -> dict[str, Any]:
         return self.first_success("get_history", symbol, start=start, end=end, days=days)
 
-    # Explicit provider order for bar_prices ingestion (ADR 0014 §7) — quant
-    # grade sources known for clean, adjusted OHLCV first, generic reference
-    # sources (finnhub, openbb-via-yfinance, yfinance itself) last-resort only.
-    # Distinct from the general provider_chain_json order get_history() uses,
-    # which deliberately prefers yfinance for quotes/fundamentals (ADR 0010) —
-    # that preference is wrong for the price-history writer specifically.
-    _PRICE_HISTORY_PROVIDER_ORDER = ["tiingo", "twelvedata", "databento"]
+    # Explicit provider order for bar_prices ingestion (ADR 0014 §7, amended by
+    # plan 2026-10-12 D1). Only providers that return split- AND
+    # dividend-adjusted closes may write a stored series: Twelve Data's
+    # default `adjust=splits` stored SPY's raw 475.31 for 2023-12-29, so every
+    # Discover benchmark was price-only (+1.3..2.9 pp/yr of fake excess), and
+    # the fallback from it to yfinance spliced SPY/URTH/VGK on 2021-10-13.
+    # Not adjusted for dividends, hence never in the automatic chain:
+    # databento (raw), Polygon/massive and openbb's yfinance route (splits
+    # only), justETF (price quote), alphavantage (adjusted close but raw OHLC
+    # and 100 days), eod (explicit-only, below). Distinct from the general
+    # provider_chain_json order get_history() uses for quotes (ADR 0010).
+    # yfinance comes first because a series is pinned to whichever provider
+    # answers its first ingest and a pinned provider has no fallback: Tiingo's
+    # free tier allows 50 calls an hour (prod served ~49 symbols a day from it
+    # and the rest from fallbacks), so Tiingo pins would pile up past what it
+    # can serve and those series would go stale. Both are split- and
+    # dividend-adjusted; Tiingo stays the fallback.
+    _PRICE_HISTORY_PROVIDER_ORDER = ["yfinance", "tiingo", "alpaca"]
+    ADJUSTED_HISTORY_PROVIDERS = frozenset({"tiingo", "yfinance", "alpaca"})
+    # Twelve Data documents `adjust=all` on /time_series and the provider now
+    # sends it, but whether the owner's plan honours it is unverified. Flip
+    # this only after the acceptance test: SPY 2023-12-29 must come back near
+    # the adjusted close (≈ 465-470 today), not the raw 475.31.
+    TWELVEDATA_ADJUSTED_VERIFIED = False
     # Providers that only know US listings: asking them for a European symbol
     # wastes a call (and a rate-limit slot) per symbol.
-    _US_ONLY_HISTORY_PROVIDERS = frozenset({"tiingo", "databento", "alpaca", "finnhub", "alphavantage"})
+    _US_ONLY_HISTORY_PROVIDERS = frozenset({"tiingo", "databento", "alpaca", "finnhub", "alphavantage", "twelvedata"})
     # EODHD's free plan is 20 calls a day, burned within a minute by the
     # ingestion universe: never part of automatic ingestion, for any symbol.
     # Use it only by asking for it: get_price_history(..., provider="eod").
     _EXPLICIT_ONLY_HISTORY_PROVIDERS = frozenset({"eod"})
 
+    @classmethod
+    def is_adjusted_history_provider(cls, name: str) -> bool:
+        """True when ``name`` returns split- and dividend-adjusted daily closes."""
+        if name == "twelvedata":
+            return cls.TWELVEDATA_ADJUSTED_VERIFIED
+        return name in cls.ADJUSTED_HISTORY_PROVIDERS or name == "eod"
+
     def get_price_history(
         self, symbol: str, start: str | None = None, end: str | None = None, days: int | None = None,
         provider: str | None = None,
     ) -> dict[str, Any]:
-        """Price history for bar_prices ingestion, routed to quant-grade sources first.
+        """Price history for bar_prices ingestion, from adjusted providers only.
 
-        Falls back to the general provider_chain_json order (which still
-        includes yfinance) only if none of the quant-grade providers succeed —
+        ``provider`` asks exactly that provider (the pinned one, see
+        ``bar_series_meta``) with no fallback. Without it the adjusted chain
+        is tried in order; there is no fallback to unadjusted sources, because
+        a stored series must be total return end to end (D1).
         DataIngester.ingest_bar_prices is the only intended caller. Every
         other price-history reader (quotes, dossiers, etc.) should keep using
         get_history(), where yfinance is deliberately preferred.
@@ -202,10 +228,10 @@ class ProviderRegistry:
         skip: set[str] = set(self._EXPLICIT_ONLY_HISTORY_PROVIDERS)
         if not _is_us_symbol(symbol):
             skip |= self._US_ONLY_HISTORY_PROVIDERS
-        ordered = [by_name[name] for name in self._PRICE_HISTORY_PROVIDER_ORDER if name in by_name and name not in skip]
-        ordered += [
-            p for p in self.providers if p.name not in self._PRICE_HISTORY_PROVIDER_ORDER and p.name not in skip
-        ]
+        order = list(self._PRICE_HISTORY_PROVIDER_ORDER)
+        if self.TWELVEDATA_ADJUSTED_VERIFIED:
+            order.insert(1, "twelvedata")
+        ordered = [by_name[name] for name in order if name in by_name and name not in skip]
         return self.first_success("get_history", symbol, start=start, end=end, days=days, providers=ordered)
 
     def get_fundamentals(self, symbol: str) -> dict[str, Any]:

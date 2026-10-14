@@ -198,6 +198,25 @@ def _no_live_analyst_estimates(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_revenue_confirmation(monkeypatch):
+    """Discover asks yfinance to confirm an extreme revenue growth; offline in tests."""
+    from app.decision.discover import pipeline
+
+    monkeypatch.setattr(pipeline, "_yfinance_revenue_growth", lambda _symbol: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_live_etf_composition(monkeypatch):
+    """Keep ETF look-through off yfinance: the mandate assessment reads the
+    top holdings of every held ETF. The static fallback still answers; a test
+    that needs a composition patches ``_fetch_yfinance_composition``."""
+    from app.foundation import etf_lookup
+
+    monkeypatch.setattr(etf_lookup, "_fetch_yfinance_composition", lambda _ticker: None)
+    monkeypatch.setattr(etf_lookup, "_cache", {})
+
+
+@pytest.fixture(autouse=True)
 def _fresh_settings_cache():
     """``get_public_settings`` is cached per engine for a few seconds; start and
     end every test with a cold cache so no test can read another's settings."""

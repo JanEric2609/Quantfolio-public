@@ -444,6 +444,85 @@ def _resolve_isin(db: Session, ticker: str) -> str | None:
     return candidate.isin if candidate else None
 
 
+
+
+def _book_values(db: Session, portfolio: Any) -> tuple[dict[str, tuple[float, str | None]], float]:
+    """``ticker -> (EUR value, asset_type)`` for every holding, and cash.
+
+    Valued at the EUR quote, else the average buy price, so a holding never
+    drops out of the denominator.
+    """
+    from app.decision.paper_portfolio import paper_quote_eur
+    from app.foundation.paper_cash import paper_cash_balance
+
+    book: dict[str, tuple[float, str | None]] = {}
+    for h in db.query(PaperHolding).filter(PaperHolding.portfolio_id == portfolio.id).all():
+        if not h.ticker:
+            continue
+        price = paper_quote_eur(db, h.ticker).get("price") or h.avg_buy_price or 0
+        book[h.ticker.upper()] = (float(h.quantity or 0) * float(price), h.asset_type)
+    return book, float(paper_cash_balance(portfolio, db))
+
+
+def _deploy_cash(
+    db: Session,
+    user_id: str,
+    portfolio: Any,
+    mandate: str,
+    mandate_config: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Deterministic core-ETF buy when the model holds with too much cash (D6).
+
+    Runs only when cash is above ``DEPLOY_CASH_ABOVE_PCT`` of NAV and ETF
+    weight is under ``min_etf_pct``; buys the core ETF up to that floor,
+    through the same buy gates and ``execute_trade`` as a model buy. Returns
+    ``{"gate_result", "trade_id", "ticker", "quantity"}`` or ``None`` when
+    nothing is due.
+    """
+    from app.decision.llm_portfolio.assessment import DEPLOY_CASH_ABOVE_PCT, core_etf_ticker
+    from app.decision.llm_portfolio.gates import check_buy_gates
+    from app.decision.paper_portfolio import execute_trade, paper_order_fee, paper_quote_eur
+
+    book, cash = _book_values(db, portfolio)
+    nav = sum(v for v, _ in book.values()) + cash
+    if nav <= 0 or cash / nav <= DEPLOY_CASH_ABOVE_PCT:
+        return None
+    min_etf = float(mandate_config.get("min_etf_pct", 0.30))
+    etf_value = sum(v for v, t in book.values() if (t or "").lower() == "etf")
+    gap = min_etf * nav - etf_value
+    if gap <= 0:
+        return None
+    ticker = core_etf_ticker(db)
+    pq = paper_quote_eur(db, ticker)
+    eur = None if pq.get("stale") else pq.get("price")
+    if not eur or eur <= 0:
+        return {"gate_result": {"passed": False, "checks": [], "reason": f"No EUR price for {ticker}"},
+                "trade_id": None, "ticker": ticker, "quantity": 0.0}
+    price = Decimal(str(eur))
+    # Leave room for the order fee inside the cash that is there.
+    notional = min(gap, cash - 1.0)
+    quantity = (Decimal(str(max(notional, 0.0))) / price).quantize(Decimal("0.000001"), rounding="ROUND_DOWN")
+    if quantity <= 0:
+        return None
+    isin = _resolve_isin(db, ticker)
+    gate_result = check_buy_gates(db, user_id, mandate_config, ticker, isin, quantity, price, mandate=mandate)
+    if not gate_result["passed"]:
+        return {"gate_result": gate_result, "trade_id": None, "ticker": ticker, "quantity": float(quantity)}
+    fee = paper_order_fee(db, ticker, float(quantity * price), isin=isin)
+    try:
+        booked = execute_trade(
+            db, portfolio.id, ticker, "buy", float(quantity), float(price), confidence=None,
+            rationale=(f"Deterministic cash deployment: cash {cash / nav:.0%} of NAV, ETF weight "
+                       f"{etf_value / nav:.0%} under the {min_etf:.0%} floor; core ETF bought up to it."),
+            fee=fee,
+        )
+    except ValueError as exc:
+        return {"gate_result": {**gate_result, "passed": False, "reason": f"Core buy not executed: {exc}"},
+                "trade_id": None, "ticker": ticker, "quantity": float(quantity)}
+    return {"gate_result": {**gate_result, "reason": "Deterministic core ETF buy (deploy cash)"},
+            "trade_id": booked["id"], "ticker": ticker, "quantity": float(quantity)}
+
+
 def run_mandate_review(db: Session, user_id: str, mandate: str) -> dict[str, Any]:
     """Run a full mandate review cycle.
 
@@ -830,33 +909,72 @@ def run_mandate_review(db: Session, user_id: str, mandate: str) -> dict[str, Any
                 }
                 logger.info("Sell of %s skipped: no current EUR price", ticker)
             else:
+                from app.decision.llm_portfolio.gates import check_sell_gates
+                from app.foundation.sell_caps import CUMULATIVE_SELL_WINDOW_DAYS, cumulative_sell_totals
+
                 price = Decimal(str(eur))
-                fee = paper_order_fee(
-                    db, ticker, float(quantity_dec * price), isin=holding.isin, name=holding.name, side="sell"
+                mandate_config = json.loads(portfolio.mandate_config_json or "{}")
+                book, cash_now = _book_values(db, portfolio)
+                sell_gate = check_sell_gates(
+                    ticker=ticker,
+                    quantity=quantity_dec,
+                    price=price,
+                    book=book,
+                    cash=cash_now,
+                    mandate_config=mandate_config,
+                    cumulative_totals=cumulative_sell_totals(db, portfolio_id, CUMULATIVE_SELL_WINDOW_DAYS),
                 )
-                try:
-                    booked = execute_trade(
-                        db,
-                        portfolio_id,
-                        ticker,
-                        "sell",
-                        float(quantity_dec),
-                        float(price),
-                        confidence=confidence,
-                        rationale=thesis,
-                        fee=fee,
-                    )
-                except ValueError as exc:
-                    gate_result = {
-                        "passed": False,
-                        "checks": [],
-                        "reason": f"Sell of {ticker} not executed: {exc}",
-                    }
-                    logger.info("Sell of %s rejected by the book: %s", ticker, exc)
+                if not sell_gate["passed"]:
+                    gate_result = {k: v for k, v in sell_gate.items() if k != "quantity"}
+                    logger.info("Sell of %s rejected by gates: %s", ticker, sell_gate["reason"])
                 else:
-                    trade = db.get(PaperTrade, booked["id"])
-                    trade_created = True
-                    gate_result = {"passed": True, "checks": [], "reason": "Sell executed"}
+                    sell_qty = sell_gate["quantity"]
+                    fee = paper_order_fee(
+                        db, ticker, float(sell_qty * price), isin=holding.isin, name=holding.name, side="sell"
+                    )
+                    try:
+                        booked = execute_trade(
+                            db,
+                            portfolio_id,
+                            ticker,
+                            "sell",
+                            float(sell_qty),
+                            float(price),
+                            confidence=confidence,
+                            rationale=thesis,
+                            fee=fee,
+                        )
+                    except ValueError as exc:
+                        gate_result = {
+                            "passed": False,
+                            "checks": sell_gate["checks"],
+                            "reason": f"Sell of {ticker} not executed: {exc}",
+                        }
+                        logger.info("Sell of %s rejected by the book: %s", ticker, exc)
+                    else:
+                        trade = db.get(PaperTrade, booked["id"])
+                        trade_created = True
+                        gate_result = {
+                            "passed": True,
+                            "checks": sell_gate["checks"],
+                            "reason": "Sell executed" if sell_qty >= quantity_dec else sell_gate["reason"],
+                            "executed_quantity": str(sell_qty),
+                        }
+
+    elif action == "hold":
+        mandate_config = json.loads(portfolio.mandate_config_json or "{}")
+        try:
+            deployed = _deploy_cash(db, user_id, portfolio, mandate, mandate_config)
+        except Exception as exc:  # noqa: BLE001 - never fail the review on the fallback
+            logger.warning("Cash deployment failed for mandate %s: %s", mandate, exc)
+            deployed = None
+        if deployed is not None:
+            gate_result = {**deployed["gate_result"], "deploy_cash": {
+                "ticker": deployed["ticker"], "quantity": deployed["quantity"],
+            }}
+            if deployed["trade_id"]:
+                trade = db.get(PaperTrade, deployed["trade_id"])
+                trade_created = True
 
     # Overwrite whatever the LLM echoed for `assessment` with the authoritative
     # Python-computed facts, so stored facts can never be model-fabricated.

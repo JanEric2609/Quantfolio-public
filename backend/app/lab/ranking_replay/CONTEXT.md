@@ -18,6 +18,8 @@ unchanged evidence gate.
 - `rank_ic_series(frame)` → per-period Spearman IC series.
 - `EXAM_START_YEAR`, `EXAM_END_YEAR` (2019–2025, opened once, at the end),
   `NON_AI_INGREDIENTS`, `TRIAL_CONTEXT`, `PASS_T`.
+- Panels: `python -m app.lab.ranking_replay.panels --out DIR` builds the 2019–2025
+  ingredient panels from the JKP Parquet panel (ADR 0019 amendment 1).
 - CLI: `python -m app.lab.ranking_replay --years 2019-2025 --input-dir DIR [--dry-run]`.
 
 ## Collaborators

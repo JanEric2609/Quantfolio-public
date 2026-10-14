@@ -55,57 +55,56 @@ class DataIngester:
 
         return resolve_quote_currency(self.db, symbol)
 
-    def ingest_bar_prices(
-        self,
-        symbol: str,
-        start_date: str | None = None,
-        end_date: str | None = None,
-        days: int | None = None,
-    ) -> dict[str, Any]:
-        """Ingest OHLCV data for a symbol.
+    # ------------------------------------------------------------------
+    # Bars: one pinned provider per series, guarded on ingest (plan
+    # 2026-10-12, D1/D2).
+    # ------------------------------------------------------------------
 
-        Args:
-            symbol: Ticker symbol (e.g., 'SPY', 'DBX1.DE').
-            start_date: ISO format start date.
-            end_date: ISO format end date.
-            days: Days back from today (if start/end not provided).
+    def _pin(self, symbol: str) -> Any:
+        from app.foundation.models.entities import BarSeriesMeta
 
-        Returns:
-            Dict with counts and provider info.
-        """
-        # ADR 0014 §7: bar_prices ingestion routes through quant-grade sources
-        # (tiingo/twelvedata/databento/eod) first, not the general chain's
-        # yfinance-preferred order — get_history() stays the right call for
-        # quotes/dossiers/etc, which deliberately prefer yfinance (ADR 0010).
-        result = self.registry.get_price_history(symbol, start=start_date, end=end_date, days=days)
+        try:
+            return self.db.get(BarSeriesMeta, symbol)
+        except Exception:  # noqa: BLE001 - a missing table must not stop ingestion
+            logger.debug("bar pin lookup failed for %s", symbol, exc_info=True)
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            return None
 
-        if not result.get("ok"):
-            # Record failure to provider_health_history
-            self._record_provider_health(
-                provider=result.get("provider", "unknown"),
-                capability="bar_prices",
-                ok=False,
-                message=result.get("error"),
-            )
-            return {
-                "success": False,
-                "symbol": symbol,
-                "message": result.get("error"),
-            }
+    def _set_pin(
+        self, symbol: str, provider: str, *, full_repull: bool = False, quarantine_reason: str | None = None,
+        clear_quarantine: bool = False,
+    ) -> None:
+        """Create or move the pin. Does not commit."""
+        from app.foundation.models.entities import BarSeriesMeta
 
-        # Parse data
+        from app.foundation.providers.registry import ProviderRegistry
+
+        adjusted = ProviderRegistry.is_adjusted_history_provider(provider)
+        pin = self.db.get(BarSeriesMeta, symbol)
+        now = datetime.now(UTC)
+        if pin is None:
+            pin = BarSeriesMeta(symbol=symbol, provider=provider, adjusted=adjusted, updated_at=now)
+            self.db.add(pin)
+        pin.provider = provider
+        pin.adjusted = adjusted
+        pin.updated_at = now
+        if full_repull:
+            pin.last_full_repull_at = now
+        if quarantine_reason is not None:
+            pin.quarantine_reason = quarantine_reason
+        elif clear_quarantine:
+            pin.quarantine_reason = None
+
+    def _bars_frame(self, symbol: str, result: dict[str, Any]) -> tuple[pd.DataFrame, str, str | None, int]:
+        """Provider rows as a validated bar frame: (frame, provider, reported currency, rows received)."""
         data = result.get("data", [])
         provider: str = result.get("provider") or "unknown"
-
-        if not data:
-            return {
-                "success": False,
-                "symbol": symbol,
-                "message": "No data returned",
-            }
-
-        # Convert to DataFrame
         df: pd.DataFrame = pd.DataFrame(data)
+        if df.empty:
+            return df, provider, None, 0
 
         # Standardize columns
         if "date" in df.columns:
@@ -138,6 +137,7 @@ class DataIngester:
         initial_count = len(df)
 
         if "close" in df.columns:
+            df["close"] = pd.to_numeric(df["close"], errors="coerce")
             nan_mask = df["close"].isna()
             if bool(nan_mask.any()):
                 nan_count = int(nan_mask.sum())
@@ -150,6 +150,7 @@ class DataIngester:
         # Reject negative prices (invalid data)
         for price_col in ("open", "high", "low", "close"):
             if price_col in df.columns:
+                df[price_col] = pd.to_numeric(df[price_col], errors="coerce")
                 neg_mask = df[price_col] < 0
                 if bool(neg_mask.any()):
                     neg_count = int(neg_mask.sum())
@@ -169,18 +170,181 @@ class DataIngester:
                     symbol, zero_count,
                 )
                 df = cast(pd.DataFrame, df[~zero_mask])
+        return df, provider, reported, initial_count
 
-        # Warn on extreme daily price changes (>50% day-over-day)
-        if "close" in df.columns and len(df) > 1:
-            sorted_df = cast(pd.DataFrame, df.sort_values("ts"))
-            pct_change = sorted_df["close"].pct_change().abs()
-            extreme_mask = pct_change > 0.5
-            if bool(extreme_mask.any()):
-                extreme_count = int(extreme_mask.sum())
-                logger.warning(
-                    "Symbol %s: %d rows with extreme daily price change (>50%%)",
-                    symbol, extreme_count,
+    def _stored_tail(self, symbol: str, before: Any) -> pd.DataFrame:
+        """The two newest stored bars before ``before`` (what the guard measures against)."""
+        rows = self.db.execute(
+            text(
+                "SELECT ts, open, high, low, close, provider FROM bar_prices "
+                "WHERE symbol = :symbol AND ts < :before ORDER BY ts DESC LIMIT 2"
+            ),
+            {"symbol": symbol, "before": before},
+        ).fetchall()
+        return pd.DataFrame(
+            [tuple(r) for r in rows], columns=pd.Index(["ts", "open", "high", "low", "close", "provider"]),
+        )
+
+    def _write_quarantine(self, symbol: str, bars: list[Any]) -> None:
+        """Store quarantined bars; a stored bar moved to quarantine leaves bar_prices. Does not commit."""
+        from app.foundation.models.entities import BarQuarantine
+
+        for q in bars:
+            ts = q.ts.to_pydatetime().replace(tzinfo=None)
+            existing = (
+                self.db.query(BarQuarantine)
+                .filter(BarQuarantine.symbol == symbol, BarQuarantine.ts == ts, BarQuarantine.provider == q.provider)
+                .first()
+            )
+            if existing is None:
+                self.db.add(BarQuarantine(
+                    symbol=symbol, ts=ts, open=q.open, high=q.high, low=q.low, close=q.close,
+                    provider=q.provider, reason=q.reason, detected_at=datetime.now(UTC),
+                ))
+            else:
+                existing.close = q.close
+                existing.reason = q.reason
+                existing.resolved_at = None
+                existing.resolution = None
+            if q.stored:
+                self.db.execute(
+                    text("DELETE FROM bar_prices WHERE symbol = :symbol AND ts = :ts"),
+                    {"symbol": symbol, "ts": q.ts.to_pydatetime()},
                 )
+            logger.warning("bar_guard: %s %s quarantined (%s, %s)", symbol, q.ts.date(), q.reason, q.provider)
+
+    def _confirm_quarantined(self, symbol: str, pinned: str, bars: list[Any]) -> list[Any]:
+        """Bars a second adjusted provider confirms (same date, close within 1 %).
+
+        Only spikes and scale breaks are worth a second call; a non-session
+        bar or a split stays quarantined whatever another provider says.
+        """
+        from app.foundation.data_backbone.bar_guard import confirms
+
+        from app.foundation.providers.registry import ProviderRegistry
+
+        candidates = [q for q in bars if q.reason in ("spike_reversal", "provider_scale")]
+        if not candidates:
+            return []
+        others = [
+            name for name in ProviderRegistry._PRICE_HISTORY_PROVIDER_ORDER
+            if name != pinned and name != candidates[0].provider
+        ]
+        start = (min(q.ts for q in candidates) - pd.Timedelta(days=3)).date().isoformat()
+        end = (max(q.ts for q in candidates) + pd.Timedelta(days=3)).date().isoformat()
+        for name in others:
+            try:
+                res = self.registry.get_price_history(symbol, start=start, end=end, provider=name)
+            except Exception:  # noqa: BLE001
+                continue
+            if not res.get("ok"):
+                continue
+            closes: dict[Any, float] = {}
+            for row in res.get("data") or []:
+                day = row.get("date")
+                if day is None or row.get("close") is None:
+                    continue
+                closes[pd.Timestamp(day).date()] = float(row["close"])
+            return [q for q in candidates if confirms(q.close, closes.get(q.ts.date()))]
+        return []
+
+    def _upsert_bars(self, df: pd.DataFrame, provider: str) -> None:
+        """Insert-or-update ``df`` into bar_prices. Does not commit."""
+        params_list: list[dict[str, Any]] = []
+        for _, row in df.iterrows():
+            ts_val = cast(pd.Timestamp, pd.Timestamp(cast(Any, row["ts"]))).to_pydatetime()
+            params_list.append({
+                "symbol": row["symbol"],
+                "ts": ts_val,
+                "open": float(row.get("open") or 0),
+                "high": float(row.get("high") or 0),
+                "low": float(row.get("low") or 0),
+                "close": float(row.get("close") or 0),
+                "volume": int(row.get("volume") or 0),
+                "currency": row["currency"],
+                "provider": row.get("provider") or provider,
+            })
+
+        # ON CONFLICT must name the (symbol, ts) unique index (migration 0075).
+        # The previous target-less DO NOTHING never fired because the only
+        # unique key was (id, ts) with an auto-generated id, so re-ingesting a
+        # symbol (daily 1-day overlap, and the discover 5-year re-pull) silently
+        # inserted duplicate bars that corrupt every bar-derived statistic.
+        sql = text("""
+            INSERT INTO bar_prices (symbol, ts, open, high, low, close, volume, currency, provider)
+            VALUES (:symbol, :ts, :open, :high, :low, :close, :volume, :currency, :provider)
+            ON CONFLICT (symbol, ts) DO UPDATE SET
+                open = EXCLUDED.open,
+                high = EXCLUDED.high,
+                low = EXCLUDED.low,
+                close = EXCLUDED.close,
+                volume = EXCLUDED.volume,
+                currency = EXCLUDED.currency,
+                provider = EXCLUDED.provider
+        """)
+        BATCH_SIZE = 500
+        for i in range(0, len(params_list), BATCH_SIZE):
+            batch = params_list[i:i + BATCH_SIZE]
+            self.db.execute(sql, batch)
+
+    def ingest_bar_prices(
+        self,
+        symbol: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        days: int | None = None,
+    ) -> dict[str, Any]:
+        """Ingest OHLCV data for a symbol.
+
+        Asks only the symbol's pinned provider (``bar_series_meta``); a
+        series without a pin is pinned to the provider the adjusted chain
+        answers with. A failing pinned provider is reported, not replaced:
+        switching provider mid-series is what spliced SPY/URTH/VGK, so a
+        switch goes through :meth:`repull_series`. New bars pass
+        :func:`~app.foundation.data_backbone.bar_guard.guard_bars` first.
+
+        Args:
+            symbol: Ticker symbol (e.g., 'SPY', 'DBX1.DE').
+            start_date: ISO format start date.
+            end_date: ISO format end date.
+            days: Days back from today (if start/end not provided).
+
+        Returns:
+            Dict with counts and provider info.
+        """
+        pin = self._pin(symbol)
+        pinned: str | None = pin.provider if pin is not None else None
+        if pinned:
+            result = self.registry.get_price_history(
+                symbol, start=start_date, end=end_date, days=days, provider=pinned,
+            )
+        else:
+            result = self.registry.get_price_history(symbol, start=start_date, end=end_date, days=days)
+
+        if not result.get("ok"):
+            # Record failure to provider_health_history
+            self._record_provider_health(
+                provider=pinned or result.get("provider", "unknown"),
+                capability="bar_prices",
+                ok=False,
+                message=result.get("error"),
+            )
+            return {
+                "success": False,
+                "symbol": symbol,
+                "message": (
+                    f"pinned provider {pinned} failed (no fallback mid-series): {result.get('error')}"
+                    if pinned else result.get("error")
+                ),
+            }
+
+        df, provider, reported, initial_count = self._bars_frame(symbol, result)
+        if initial_count == 0:
+            return {
+                "success": False,
+                "symbol": symbol,
+                "message": "No data returned",
+            }
 
         if df.empty:
             logger.warning("Symbol %s: all %d rows rejected by validation", symbol, initial_count)
@@ -190,51 +354,46 @@ class DataIngester:
                 "message": f"All {initial_count} rows rejected by data validation",
             }
 
-        rejected = initial_count - len(df)
+        from app.foundation.data_backbone.bar_guard import guard_bars, guard_class_for
+
+        try:
+            stored = self._stored_tail(symbol, cast(pd.Timestamp, df["ts"].min()).to_pydatetime())
+        except Exception:  # noqa: BLE001
+            logger.debug("bar_guard: stored tail unavailable for %s", symbol, exc_info=True)
+            stored = None
+        guarded = guard_bars(
+            df, stored, symbol=symbol, guard_class=guard_class_for(self.db, symbol),
+            pinned_provider=pinned or provider,
+        )
+        if guarded.split_suspected:
+            logger.warning("bar_guard: %s shows a split signature; re-pulling the series", symbol)
+            return self.repull_series(symbol, provider=pinned or provider)
+        released: list[Any] = []
+        if guarded.quarantined:
+            released = self._confirm_quarantined(symbol, pinned or provider, guarded.quarantined)
+        keep = cast(pd.DataFrame, guarded.accepted)
+        if released:
+            released_days = {q.ts.date() for q in released}
+            back = cast(pd.DataFrame, df[df["ts"].dt.date.isin(released_days)])
+            keep = cast(pd.DataFrame, pd.concat([keep, back], ignore_index=True))
+        quarantined = [q for q in guarded.quarantined if q not in released]
+
+        rejected = initial_count - len(keep)
         if rejected > 0:
             logger.info(
                 "Symbol %s: validated %d/%d rows (%d rejected)",
-                symbol, len(df), initial_count, rejected,
+                symbol, len(keep), initial_count, rejected,
             )
 
         # Insert into bar_prices hypertable (batched for performance)
         try:
-            params_list: list[dict[str, Any]] = []
-            for _, row in df.iterrows():
-                ts_val = cast(pd.Timestamp, row["ts"]).to_pydatetime()
-                params_list.append({
-                    "symbol": row["symbol"],
-                    "ts": ts_val,
-                    "open": float(row.get("open") or 0),
-                    "high": float(row.get("high") or 0),
-                    "low": float(row.get("low") or 0),
-                    "close": float(row.get("close") or 0),
-                    "volume": int(row.get("volume") or 0),
-                    "currency": row["currency"],
-                    "provider": row.get("provider", provider),
-                })
-
-            # ON CONFLICT must name the (symbol, ts) unique index (migration 0075).
-            # The previous target-less DO NOTHING never fired because the only
-            # unique key was (id, ts) with an auto-generated id, so re-ingesting a
-            # symbol (daily 1-day overlap, and the discover 5-year re-pull) silently
-            # inserted duplicate bars that corrupt every bar-derived statistic.
-            sql = text("""
-                INSERT INTO bar_prices (symbol, ts, open, high, low, close, volume, currency, provider)
-                VALUES (:symbol, :ts, :open, :high, :low, :close, :volume, :currency, :provider)
-                ON CONFLICT (symbol, ts) DO UPDATE SET
-                    open = EXCLUDED.open,
-                    high = EXCLUDED.high,
-                    low = EXCLUDED.low,
-                    close = EXCLUDED.close,
-                    volume = EXCLUDED.volume,
-                    currency = EXCLUDED.currency,
-                    provider = EXCLUDED.provider
-            """)
-            BATCH_SIZE = 500
-            for i in range(0, len(params_list), BATCH_SIZE):
-                batch = params_list[i:i + BATCH_SIZE]
-                self.db.execute(sql, batch)
+            self._write_quarantine(symbol, quarantined)
+            if released:
+                self._mark_released(symbol, released)
+            if not keep.empty:
+                self._upsert_bars(keep, provider)
+            if not pinned:
+                self._set_pin(symbol, provider)
             if reported:
                 # Older rows of the symbol may carry a guessed label; one
                 # series has one quote unit.
@@ -247,18 +406,26 @@ class DataIngester:
                 provider=provider,
                 capability="bar_prices",
                 ok=True,
-                message=f"Ingested {len(df)} bars for {symbol}",
+                message=f"Ingested {len(keep)} bars for {symbol}",
                 latency_ms=0,
             )
 
+            if keep.empty:
+                return {
+                    "success": False,
+                    "symbol": symbol,
+                    "message": f"All {initial_count} rows quarantined by the bar guard",
+                    "quarantined": len(quarantined),
+                }
             return {
                 "success": True,
                 "symbol": symbol,
-                "rows_inserted": len(df),
+                "rows_inserted": len(keep),
+                "quarantined": len(quarantined),
                 "provider": provider,
                 "date_range": {
-                    "start": str(df["ts"].min()),
-                    "end": str(df["ts"].max()),
+                    "start": str(keep["ts"].min()),
+                    "end": str(keep["ts"].max()),
                 },
             }
 
@@ -307,6 +474,149 @@ class DataIngester:
                 "message": str(e),
                 "error_type": "provider",
             }
+
+    def _mark_released(self, symbol: str, released: list[Any]) -> None:
+        """Record that a second provider confirmed these bars. Does not commit."""
+        from app.foundation.models.entities import BarQuarantine
+
+        now = datetime.now(UTC)
+        for q in released:
+            ts = q.ts.to_pydatetime().replace(tzinfo=None)
+            row = (
+                self.db.query(BarQuarantine)
+                .filter(BarQuarantine.symbol == symbol, BarQuarantine.ts == ts, BarQuarantine.provider == q.provider)
+                .first()
+            )
+            if row is None:
+                row = BarQuarantine(
+                    symbol=symbol, ts=ts, open=q.open, high=q.high, low=q.low, close=q.close,
+                    provider=q.provider, reason=q.reason, detected_at=now,
+                )
+                self.db.add(row)
+            row.resolved_at = now
+            row.resolution = "confirmed:second_provider"
+
+    #: Default window of a full re-pull when nothing is stored yet.
+    REPULL_DEFAULT_DAYS = 365 * 5 + 30
+
+    def repull_series(
+        self, symbol: str, provider: str | None = None, *, start_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Replace a symbol's whole stored series with one provider's, in one transaction.
+
+        The only way a series changes provider (D1). The window starts at the
+        oldest stored bar (or ``start_date``), so coverage never shrinks. A
+        split signature that survives the re-pull is stored as it is but
+        marks the series ``split_unadjusted``, which keeps the symbol out of
+        Discover. Cached closes for the symbol (``price_cache``) are dropped,
+        since they sit on the old scale.
+        """
+        from app.foundation.data_backbone.bar_guard import guard_bars, guard_class_for
+
+        if start_date is None:
+            oldest = self.db.execute(
+                text("SELECT min(ts) FROM bar_prices WHERE symbol = :symbol"), {"symbol": symbol},
+            ).scalar()
+            if oldest is not None:
+                start_date = cast(pd.Timestamp, pd.Timestamp(oldest)).date().isoformat()
+        if start_date is None:
+            start_date = (datetime.now(UTC).date() - timedelta(days=self.REPULL_DEFAULT_DAYS)).isoformat()
+
+        if provider is None:
+            result = self.registry.get_price_history(symbol, start=start_date)
+        else:
+            result = self.registry.get_price_history(symbol, start=start_date, provider=provider)
+        if not result.get("ok"):
+            self._record_provider_health(
+                provider=provider or str(result.get("provider") or "unknown"),
+                capability="bar_prices",
+                ok=False,
+                message=f"repull: {result.get('error')}",
+            )
+            return {"success": False, "symbol": symbol, "message": result.get("error"), "repull": True}
+
+        df, used, reported, initial_count = self._bars_frame(symbol, result)
+        if df.empty:
+            return {"success": False, "symbol": symbol, "message": "No data returned", "repull": True}
+        short = self._repull_too_short(symbol, start_date, df)
+        if short:
+            # A truncated answer (delisted ticker, partial window, rate limit)
+            # must not replace a longer stored series: the delete below would
+            # lose the history. AVB returned 1 bar for a 27-bar window.
+            logger.warning("repull of %s skipped: %s", symbol, short)
+            self._record_provider_health(
+                provider=used, capability="bar_prices", ok=False, message=f"repull: {short}",
+            )
+            return {"success": False, "symbol": symbol, "message": short, "repull": True}
+        guarded = guard_bars(
+            df, None, symbol=symbol, guard_class=guard_class_for(self.db, symbol),
+            pinned_provider=used, allow_split=True,
+        )
+        keep = cast(pd.DataFrame, guarded.accepted)
+        try:
+            self.db.execute(text("DELETE FROM bar_prices WHERE symbol = :symbol"), {"symbol": symbol})
+            self._write_quarantine(symbol, guarded.quarantined)
+            if not keep.empty:
+                self._upsert_bars(keep, used)
+            self._set_pin(
+                symbol, used, full_repull=True,
+                quarantine_reason="split_unadjusted" if guarded.split_suspected else None,
+                clear_quarantine=not guarded.split_suspected,
+            )
+            from app.foundation.models.entities import PriceCache
+
+            self.db.query(PriceCache).filter(PriceCache.ticker == symbol).delete(synchronize_session=False)
+            if reported:
+                from app.foundation.data_backbone.listing_currency import relabel_stored_prices
+
+                relabel_stored_prices(self.db, symbol, reported)
+            self.db.commit()
+        except Exception as e:  # noqa: BLE001
+            logger.error("repull of %s failed: %s", symbol, e)
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            return {"success": False, "symbol": symbol, "message": str(e), "repull": True}
+        if guarded.split_suspected:
+            logger.warning("bar_guard: %s still shows a split after a full re-pull from %s", symbol, used)
+        self._record_provider_health(
+            provider=used, capability="bar_prices", ok=True,
+            message=f"Re-pulled {len(keep)} bars for {symbol}",
+        )
+        return {
+            "success": not keep.empty,
+            "symbol": symbol,
+            "repull": True,
+            "rows_inserted": len(keep),
+            "rows_received": initial_count,
+            "quarantined": len(guarded.quarantined),
+            "provider": used,
+            "split_unadjusted": guarded.split_suspected,
+        }
+
+    #: A re-pull must return at least this share of the stored bars in its
+    #: window, and start within REPULL_START_SLACK_DAYS of the stored start.
+    REPULL_MIN_COVERAGE = 0.9
+    REPULL_START_SLACK_DAYS = 10
+
+    def _repull_too_short(self, symbol: str, start_date: str, df: pd.DataFrame) -> str | None:
+        """Why a re-pulled frame covers clearly less than the stored series, or None."""
+        row = self.db.execute(
+            text("SELECT count(*), min(ts) FROM bar_prices WHERE symbol = :symbol AND ts >= :start"),
+            {"symbol": symbol, "start": start_date},
+        ).fetchone()
+        if row is None or not row[0]:
+            return None
+        stored, oldest_raw = int(row[0]), row[1]
+        received = len(df)
+        if received < self.REPULL_MIN_COVERAGE * stored:
+            return f"provider returned {received} bars for a window holding {stored}; stored series kept"
+        oldest = cast(pd.Timestamp, pd.Timestamp(oldest_raw)).tz_localize(None)
+        first = cast(pd.Timestamp, pd.Timestamp(cast(Any, df["ts"].min()))).tz_localize(None)
+        if first - oldest > pd.Timedelta(days=self.REPULL_START_SLACK_DAYS):
+            return f"provider starts {first.date()}, stored series starts {oldest.date()}; stored series kept"
+        return None
 
     @staticmethod
     def _fetch_macro_history(provider: Any, series_id: str, start: str, end: str) -> dict[str, Any]:

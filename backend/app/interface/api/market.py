@@ -12,6 +12,7 @@ from app.foundation.schemas import MarketFundamentals, MarketHistoryPoint, Marke
 from app.foundation import market as market_service
 from app.foundation.providers.registry import build_provider_registry
 from app.foundation.auth import current_user
+from app.interface.api.params import DaysQuery
 
 router = APIRouter(prefix="/api/market", tags=["market"])
 
@@ -26,7 +27,7 @@ def quote(ticker: str, db: Session = Depends(get_db), _user: User = Depends(curr
 @safe_endpoint
 def history(
     ticker: str,
-    days: int = 365,
+    days: DaysQuery = 365,
     db: Session = Depends(get_db),
     _user: User = Depends(current_user),
 ) -> list[dict[str, Any]]:

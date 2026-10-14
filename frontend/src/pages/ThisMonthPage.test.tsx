@@ -234,4 +234,40 @@ describe("ThisMonthPage", () => {
     expect(await screen.findByText("boom")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Retry/ })).toBeInTheDocument();
   });
+
+  it("shows bond and gold lines with their fund, tax note and rule label, and the info list", async () => {
+    loadPlan = async () => ({
+      ...plan,
+      etf_suggestions: {
+        lines: [
+          {
+            line: "bond", label: "Bonds (EUR)", target_pct: 10, current_pct: 0, gap_pp: 10, status: "under",
+            tax_note: "Bond fund: Teilfreistellung 0 %.", rule_note: "Rule-based, not a forecast.",
+            duration_bucket: "short", amount_eur: 3600,
+            fund: { isin: "IE00B3VTMJ91", name: "iShares € Govt Bond 1-3yr (Acc)", why: "TER 0.10 %." },
+          },
+          {
+            line: "gold", label: "Gold", target_pct: 3, current_pct: 3, gap_pp: 0, status: "ok",
+            tax_note: "An ETC is not an investment fund (§ 23 EStG).", rule_note: "Rule-based, not a forecast.",
+          },
+        ],
+        info: [{ isin: "IE0005042456", name: "iShares Core FTSE 100", index: "FTSE 100", asset_class: "equity_region",
+                 reason: "Outside your plan" }],
+        covered: [{ index: "FTSE All-World", held_by: "VWRA.L" }],
+        rule_note: "Rule-based, not a forecast.",
+        estimate: true,
+        not_tax_advice: true,
+      },
+    });
+    renderPage();
+
+    expect(await screen.findByText("Bonds, cash and gold")).toBeInTheDocument();
+    const bond = screen.getByTestId("etf-line-bond");
+    expect(bond).toHaveTextContent("IE00B3VTMJ91");
+    expect(bond).toHaveTextContent("Rule, not a forecast");
+    expect(bond).toHaveTextContent("Tax (estimate, not tax advice): Bond fund: Teilfreistellung 0 %.");
+    expect(screen.getByTestId("etf-line-gold")).toHaveTextContent("§ 23 EStG");
+    expect(screen.getByText(/FTSE 100/)).toBeInTheDocument();
+    expect(screen.getByText(/FTSE All-World by VWRA.L/)).toBeInTheDocument();
+  });
 });

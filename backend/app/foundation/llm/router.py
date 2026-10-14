@@ -3,13 +3,14 @@
 import asyncio
 import itertools
 import uuid
+import weakref
 from typing import Any
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.foundation.llm.audit import record_llm_call
-from app.foundation.llm.base import Completion
+from app.foundation.llm.base import Completion, LlmUnavailableError
 from app.foundation.llm.cloud_anthropic import AnthropicBackend
 from app.foundation.llm.cloud_openai import OpenAIBackend
 from app.foundation.llm.local_llama import LocalLlamaBackend
@@ -37,9 +38,15 @@ _PRIORITY: dict[str, int] = {
     "batch_research": 2,
 }
 
-# Module-level queue and worker task (created lazily on first call)
-_queue: asyncio.PriorityQueue | None = None
-_worker_task: asyncio.Task | None = None
+# One queue and worker per event loop (created lazily on first call). A sync
+# endpoint runs its coroutine on its own thread's loop (``decision.ai._run_async``)
+# and so does every scheduler thread; a single module-level queue bound to the
+# first caller's loop left every later caller from another loop waiting on a
+# worker that never ran (found by the API scan: the second
+# POST /api/ai/recommendations/generate hung forever).
+_loop_state: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, tuple[asyncio.PriorityQueue, asyncio.Task | None]]" = (
+    weakref.WeakKeyDictionary()
+)
 
 # Monotonic tie-breaker so two items with identical priority never trigger the
 # Future-vs-Future comparison that asyncio.PriorityQueue would otherwise attempt
@@ -48,14 +55,17 @@ _seq_counter = itertools.count()
 
 
 def _get_queue() -> asyncio.PriorityQueue:
-    global _queue
-    if _queue is None:
-        _queue = asyncio.PriorityQueue()
-    return _queue
+    """The running loop's queue."""
+    loop = asyncio.get_running_loop()
+    state = _loop_state.get(loop)
+    if state is None:
+        state = (asyncio.PriorityQueue(), None)
+        _loop_state[loop] = state
+    return state[0]
 
 
 async def _worker() -> None:
-    """Background coroutine that drains the priority queue in priority order."""
+    """Background coroutine that drains this loop's priority queue in priority order."""
     queue = _get_queue()
     while True:
         priority, _seq, fut, db, backend, is_degraded, messages, opts, user_id = await queue.get()
@@ -99,10 +109,11 @@ def _ensure_worker() -> None:
     loop, which is the correct signal to surface rather than silently handing
     back a potentially wrong / deprecated loop from get_event_loop().
     """
-    global _worker_task
-    if _worker_task is None or _worker_task.done():
-        loop = asyncio.get_running_loop()
-        _worker_task = loop.create_task(_worker())
+    loop = asyncio.get_running_loop()
+    queue = _get_queue()
+    task = _loop_state[loop][1]
+    if task is None or task.done():
+        _loop_state[loop] = (queue, loop.create_task(_worker()))
 
 
 class RouterConfig:
@@ -258,5 +269,7 @@ async def embed(
 
     try:
         return await backend.embed(texts)
+    except LlmUnavailableError:
+        raise
     except Exception as e:
         raise RuntimeError(f"Embedding failed: {e}") from e

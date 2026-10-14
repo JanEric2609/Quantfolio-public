@@ -94,7 +94,9 @@ class AlpacaProvider(MarketDataProvider):
             return self.unavailable("history", f"Alpaca covers US listings only; skipping {symbol}.", reason="not_applicable")
         try:
             normalized = strip_exchange_suffix(symbol)
-            params: dict[str, Any] = {"timeframe": "1Day"}
+            # Alpaca's default `adjustment=raw` stores unadjusted closes; a
+            # stored series must be total return (plan 2026-10-12, D1).
+            params: dict[str, Any] = {"timeframe": "1Day", "adjustment": "all"}
             if start:
                 params["start"] = start
             if end:

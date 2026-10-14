@@ -51,6 +51,7 @@ from app.lab.regime.jobs import (
 )
 from app.foundation.scalable.jobs import register_scalable_sync_job
 from app.worker import (
+    register_bar_repull_job,
     register_daily_position_snapshot_job,
     register_index_currency_weights_job,
     register_insider_trading_refresh_job,
@@ -140,6 +141,7 @@ EXPECTED_REGISTRATIONS = {
     "rss_refresh": {"trigger": "cron", "minute": "*/30"},
     "snapshot_paper_portfolios": {"trigger": "cron", "hour": 0, "minute": 0},
     "price_backfill_daily": {"trigger": "cron", "hour": 6, "minute": 30},
+    "bar_repull_weekly": {"trigger": "cron", "day_of_week": "sun", "hour": 5, "minute": 0},
     "scalable_sync": {"trigger": "interval", "hours": 1},
     "llm_mandate_a_review": {
         "trigger": "cron",
@@ -222,6 +224,7 @@ def _drive_all_registrations(sched):
     returns["rss_refresh"] = register_rss_refresh_job(sched)
     returns["snapshot_paper_portfolios"] = register_snapshot_paper_portfolios_job(sched)
     returns["price_backfill_daily"] = register_price_backfill_daily_job(sched)
+    returns["bar_repull_weekly"] = register_bar_repull_job(sched)
     returns["scalable_sync"] = register_scalable_sync_job(sched)
     returns["llm_portfolio_review_jobs"] = register_llm_portfolio_review_jobs(sched)
     returns["llm_review_scoring"] = register_llm_review_scoring_job(sched)

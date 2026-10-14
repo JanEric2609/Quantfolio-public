@@ -7,12 +7,13 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
+from app.interface.api.params import YearField, YearQuery, between
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import TaxLedgerEvent, TaxLot, User
 from app.foundation.schemas import (
@@ -55,6 +56,7 @@ from app.foundation.tax_cockpit import (
     seed_lots_from_activity,
 )
 from app.foundation.tax_calc.vorabpauschale import BASISZINS_BY_YEAR
+from app.foundation.schemas.bounds import MoneyFloat
 
 
 router = APIRouter(prefix="/api/tax", tags=["tax"])
@@ -87,11 +89,11 @@ class TaxEventIn(BaseModel):
     name: str | None = None
     fund_class: str | None = None
     teilfreistellung_pct: float | None = None
-    gross_eur: float = 0
-    withheld_eur: float = 0
-    foreign_wht_eur: float = 0
+    gross_eur: MoneyFloat = 0
+    withheld_eur: MoneyFloat = 0
+    foreign_wht_eur: MoneyFloat = 0
     foreign_country: str | None = None
-    realised_gain_eur: float | None = None
+    realised_gain_eur: MoneyFloat | None = None
     bucket: str | None = None
     source: str = "manual"
     source_ref: str | None = None
@@ -110,9 +112,9 @@ class TaxLotIn(BaseModel):
     fund_class: str = "other"
     teilfreistellung_pct: float | None = None
     acquired_at: date
-    quantity: float
-    cost_basis_eur: float
-    fees_eur: float = 0
+    quantity: MoneyFloat
+    cost_basis_eur: MoneyFloat
+    fees_eur: MoneyFloat = 0
     fx_rate: float | None = None
     source: str = "manual"
     source_ref: str | None = None
@@ -123,9 +125,9 @@ class TaxLotIn(BaseModel):
 class TaxSaleIn(BaseModel):
     isin: str
     sell_date: date
-    sell_quantity: float
-    sell_price_per_unit_eur: float
-    sell_fees_eur: float = 0
+    sell_quantity: MoneyFloat
+    sell_price_per_unit_eur: MoneyFloat
+    sell_fees_eur: MoneyFloat = 0
     fund_class: str | None = None
     bucket: str | None = None
     source: str = "manual"
@@ -134,14 +136,19 @@ class TaxSaleIn(BaseModel):
     institution: str | None = Field(default=None, max_length=32)
 
 
+#: A fund value in euros: finite, 0 to a trillion. 1e27 overflowed the Decimal
+#: quantize in the estimate and answered 500.
+_EurAmount = Annotated[float, between(0, 1e12)]
+
+
 class VorabpauschaleIn(BaseModel):
     isin: str
-    fund_value_start_of_year_eur: float
-    fund_value_end_of_year_eur: float
-    distributions_during_year_eur: float = 0
-    tax_year: int
+    fund_value_start_of_year_eur: _EurAmount
+    fund_value_end_of_year_eur: _EurAmount
+    distributions_during_year_eur: _EurAmount = 0
+    tax_year: YearField
     fund_class: str | None = None
-    months_held: int = 12
+    months_held: Annotated[int, between(0, 12)] = 12
 
 
 # Sending null for these resets them to "not entered".
@@ -158,7 +165,7 @@ _CLEARABLE_TAX_SETTINGS = frozenset({
 class TaxSettingsIn(BaseModel):
     tax_residency_country: str | None = None
     church_tax: str | None = None
-    freistellungsauftrag_amount: float | None = None
+    freistellungsauftrag_amount: MoneyFloat | None = None
     freistellungsauftrag_used: float | None = None
     freistellungsauftrag_dkb_eur: float | None = Field(default=None, ge=0, le=2000)
     freistellungsauftrag_scalable_eur: float | None = Field(default=None, ge=0, le=2000)
@@ -263,7 +270,7 @@ def write_settings(
 
 @router.get("/reports/kap", response_model_exclude_unset=True, response_model=KapReportOut)
 def report_kap(
-    year: int = date.today().year,
+    year: YearQuery = date.today().year,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -297,7 +304,7 @@ def report_kap(
 
 @router.get("/events", response_model_exclude_unset=True, response_model=TaxEventsListOut)
 def read_events(
-    year: int | None = None,
+    year: YearQuery | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -572,7 +579,7 @@ def get_residency(
 
 @router.get("/box3", response_model_exclude_unset=True, response_model=TaxOverviewOut)
 def get_box3(
-    year: int,
+    year: YearQuery,
     bank_deposits: float = 0.0,
     investments: float = 0.0,
     debts: float = 0.0,
@@ -599,7 +606,7 @@ def get_box3(
 
 @router.get("/overview", response_model_exclude_unset=True, response_model=TaxOverviewOut)
 def get_tax_overview(
-    year: int,
+    year: YearQuery,
     jurisdiction: str | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
@@ -615,7 +622,7 @@ def get_tax_overview(
 
 @router.get("/harvest", response_model_exclude_unset=True, response_model=GainHarvestOut)
 def get_gain_harvest(
-    year: int,
+    year: YearQuery,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -625,7 +632,7 @@ def get_gain_harvest(
 
 @router.get("/allowances", response_model_exclude_unset=True, response_model=TaxAllowancePlanOut)
 def get_allowances(
-    year: int,
+    year: YearQuery,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:

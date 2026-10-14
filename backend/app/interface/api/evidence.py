@@ -27,6 +27,7 @@ from app.foundation.quant_metrics import (
     resolve_n_trials,
 )
 from app.lab.factor_premia import latest_cards
+from app.interface.api.params import LimitQuery
 
 router = APIRouter(prefix="/api/evidence", tags=["evidence"])
 
@@ -72,7 +73,7 @@ def n_trials_summary(
 @router.get("/trial-ledger")
 def trial_ledger_entries(
     context: str | None = None,
-    limit: int = 50,
+    limit: LimitQuery = 50,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> list[dict[str, Any]]:
