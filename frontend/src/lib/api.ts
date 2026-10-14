@@ -283,6 +283,15 @@ export async function createTelegramPairingCode(): Promise<TelegramPairingCode> 
   return api<TelegramPairingCode>("/api/telegram/pairing-code", { method: "POST" });
 }
 
+export interface TelegramTestMessage {
+  sent: boolean;
+  message: string;
+}
+
+export async function sendTelegramTestMessage(): Promise<TelegramTestMessage> {
+  return api<TelegramTestMessage>("/api/telegram/test-message", { method: "POST" });
+}
+
 export type Holding = {
   id: string;
   name: string;
@@ -2201,6 +2210,43 @@ export interface PaperArchive {
   trades: number;
   snapshots: number;
   last_total_return_pct: number | null;
+}
+
+/** One paper trade as the trade check saw it (decision/trade_check.py). */
+export interface TradeCheckRow {
+  trade_id: string;
+  traded_on: string;
+  ticker: string;
+  side: string;
+  notional_eur: number;
+  cost_eur: number;
+  tax_eur: number;
+  edge_eur: number;
+  p_hit: number | null;
+  /** "calibrated" | "track_record" | "none" */
+  p_source: string;
+  verdict: "pass" | "block" | string;
+  reason: string;
+  /** What the trade added against MSCI World over its 21 trading days, net of cost. */
+  contribution_eur: number | null;
+  resolved: boolean;
+}
+
+/** GET /api/paper-portfolio/{id}/trade-check: the trade check in shadow. */
+export interface TradeCheckSummary {
+  mode: string;
+  trades_checked: number;
+  would_block: number;
+  cost_paid_eur: number;
+  cost_of_blocked_eur: number;
+  blocked_contribution_eur: number;
+  passed_contribution_eur: number;
+  open: number;
+  nav_eur: number | null;
+  checked_nav_eur: number | null;
+  recent: TradeCheckRow[];
+  estimate: boolean;
+  not_tax_advice: boolean;
 }
 
 export interface PaperHolding {

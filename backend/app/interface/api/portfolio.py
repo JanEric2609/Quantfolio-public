@@ -95,9 +95,21 @@ def list_holdings(
     return [HoldingOut.model_validate(h) for h in holdings]
 
 
+def _refuse_duplicate_isin(db: Session, portfolio_id: str, isin: str | None, *, except_id: str | None = None) -> None:
+    """409 when the portfolio already holds *isin* (one row per ISIN, enforced by a unique index)."""
+    if isin is None:
+        return
+    query = db.query(Holding.id).filter(Holding.portfolio_id == portfolio_id, Holding.isin == isin)
+    if except_id is not None:
+        query = query.filter(Holding.id != except_id)
+    if query.first() is not None:
+        raise HTTPException(status_code=409, detail=f"There is already a holding with ISIN {isin}. Edit that one instead.")
+
+
 @router.post("/holdings", response_model=HoldingOut)
 def create_holding(payload: HoldingIn, user: User = Depends(current_user), db: Session = Depends(get_db)) -> HoldingOut:
     portfolio = main_portfolio(db, user.id)
+    _refuse_duplicate_isin(db, portfolio.id, payload.isin)
     holding = Holding(
         portfolio_id=portfolio.id,
         **payload.model_dump(),
@@ -120,6 +132,7 @@ def update_holding(
     holding = db.get(Holding, holding_id)
     if holding is None or holding.portfolio_id != portfolio.id:
         raise HTTPException(status_code=404, detail="Holding not found")
+    _refuse_duplicate_isin(db, portfolio.id, payload.isin, except_id=holding.id)
     for key, value in payload.model_dump().items():
         setattr(holding, key, value)
     holding.dkb_available = dkb_availability(payload.isin)

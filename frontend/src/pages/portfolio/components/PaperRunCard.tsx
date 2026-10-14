@@ -4,6 +4,7 @@ import { RotateCcw } from "lucide-react";
 import { api, type PaperArchive, type PaperPerformance } from "../../../lib/api";
 import { formatCurrency, formatDate, formatPercent } from "../../../lib/format";
 import { LineChart } from "../../../components/charts/LineChart";
+import { TradeCheckPanel } from "./TradeCheckPanel";
 import { Button } from "../../../components/ui/button";
 import { Skeleton } from "../../../components/ui/skeleton";
 import {
@@ -121,6 +122,8 @@ export function PaperRunCard({ portfolioId, invalidate = [] }: { portfolioId: st
       ) : (
         <p className="text-text-muted">The chart fills in from the daily snapshots after the first trading days.</p>
       )}
+
+      <TradeCheckPanel portfolioId={portfolioId} />
 
       {runs.length > 0 && (
         <details>

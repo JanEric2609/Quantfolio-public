@@ -148,6 +148,8 @@ def generate_pairing_code(db: Session, user_id: str) -> TelegramPairingCode:
 
 
 def link_pairing_code(db: Session, code: str, chat_id: str) -> TelegramAccount | None:
+    # Codes are upper case; a phone keyboard often sends them lower case.
+    code = code.strip().upper()
     pairing = db.query(TelegramPairingCode).filter(TelegramPairingCode.code == code).one_or_none()
     if pairing is None:
         return None
@@ -169,6 +171,8 @@ def link_pairing_code(db: Session, code: str, chat_id: str) -> TelegramAccount |
         db.add(account)
     else:
         account.chat_id = chat_id
+        # A new link: the settings card watches this to see its code was used.
+        account.linked_at = datetime.now(UTC)
 
     db.delete(pairing)
     db.commit()

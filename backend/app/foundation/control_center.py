@@ -23,7 +23,15 @@ from typing import Any, Literal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.foundation.models.entities import ApiKey, AppSetting, DkbSyncLog, JobRun, ProviderHealth
+from app.foundation.models.entities import (
+    ApiKey,
+    AppSetting,
+    DkbSyncLog,
+    JobRun,
+    ProviderHealth,
+    TelegramAccount,
+    User,
+)
 from app.foundation.settings import get_connection_tests, get_public_settings, get_setting_row
 from app.foundation.settings_catalog import CATALOG, CONNECTIONS, PAGE_PATHS
 
@@ -122,6 +130,7 @@ def attention_items(db: Session, *, today: date | None = None) -> list[dict[str,
     _stuck_job_items(db, heartbeat, now, items)
     _disk_items(items)
     _error_items(db, now, items)
+    _telegram_items(db, items)
 
     items.sort(key=lambda item: _SEVERITY_ORDER[item.severity])
     return [asdict(item) for item in items]
@@ -574,6 +583,31 @@ def _disk_items(items: list[AttentionItem]) -> None:
             "disk-low", "error" if free < DISK_ERROR_FREE else "warning", "App server disk almost full",
             f"{free:.0%} free ({usage.free / 1e9:.1f} GB). Backups and price data stop when it is full.",
             "/settings/status", "View status",
+        ))
+
+
+def _telegram_items(db: Session, items: list[AttentionItem]) -> None:
+    """The self-check and the crash guard alert on Telegram; without a linked chat they reach only the bell."""
+    if db.query(ApiKey.id).filter(ApiKey.service == "telegram").first() is None:
+        items.append(AttentionItem(
+            "telegram-missing", "warning", "Alerts have no Telegram bot",
+            "The daily self-check and the crash guard send their alerts to Telegram. No bot token is saved, "
+            "so they only reach the bell in this app.",
+            _page("notes_alerts", "telegram"), "Set up",
+        ))
+        return
+    linked = (
+        db.query(TelegramAccount.id)
+        .join(User, User.id == TelegramAccount.user_id)
+        .filter(User.role == "admin")
+        .first()
+    )
+    if linked is None:
+        items.append(AttentionItem(
+            "telegram-unlinked", "warning", "Telegram bot is not linked to you",
+            "A bot token is saved, but no admin has linked a chat, so alerts only reach the bell. "
+            "Generate a pairing code and send '/start CODE' to the bot.",
+            _page("notes_alerts", "telegram"), "Link",
         ))
 
 

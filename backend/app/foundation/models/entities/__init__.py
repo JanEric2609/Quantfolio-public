@@ -97,6 +97,7 @@ from .paper_portfolio import (
     PaperPortfolioArchive as PaperPortfolioArchive,
     PaperSnapshot as PaperSnapshot,
     PaperTrade as PaperTrade,
+    PaperTradeCheck as PaperTradeCheck,
 )
 from .metrics_snapshot import MetricsSnapshot as MetricsSnapshot
 from .performance import (

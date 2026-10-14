@@ -78,12 +78,13 @@ def test_link_pairing_code_relinking_replaces_chat_id():
     db = _memory_db()
     user = _make_user(db)
     first_pairing = generate_pairing_code(db, user.id)
-    link_pairing_code(db, first_pairing.code, "111")
+    first_linked_at = link_pairing_code(db, first_pairing.code, "111").linked_at
 
     second_pairing = generate_pairing_code(db, user.id)
     account = link_pairing_code(db, second_pairing.code, "222")
 
     assert account.chat_id == "222"
+    assert account.linked_at > first_linked_at
     assert db.query(TelegramAccount).filter(TelegramAccount.user_id == user.id).count() == 1
 
 
@@ -124,3 +125,13 @@ def test_verify_webhook_secret_matches_and_rejects():
     assert verify_webhook_secret(db, secret) is True
     assert verify_webhook_secret(db, "wrong") is False
     assert verify_webhook_secret(db, None) is False
+
+
+def test_link_pairing_code_accepts_a_lower_case_code():
+    db = _memory_db()
+    user = _make_user(db)
+    pairing = generate_pairing_code(db, user.id)
+
+    account = link_pairing_code(db, f" {pairing.code.lower()} ", "555999")
+
+    assert account is not None and account.user_id == user.id

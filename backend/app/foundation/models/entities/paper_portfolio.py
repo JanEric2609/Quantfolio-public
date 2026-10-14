@@ -6,6 +6,7 @@ from ._core import now_utc, uuid_pk
 from datetime import date, datetime
 from decimal import Decimal
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     Float,
@@ -115,6 +116,48 @@ class PaperTrade(Base):
 
     portfolio: Mapped[PaperPortfolio] = relationship(back_populates="trades", lazy="selectin")
     holding: Mapped[PaperHolding | None] = relationship(back_populates="trades", lazy="selectin")
+
+
+class PaperTradeCheck(Base):
+    """The trade check's verdict on one paper trade, in shadow (decision/trade_check.py).
+
+    Written after the fact for every trade a managed sleeve booked: the
+    trade's cost (fee, half spread, tax), the edge its source has shown so
+    far, and whether the check would have blocked it. Nothing is enforced:
+    the paper book trades as before. ``contribution_eur`` is what the trade
+    added against MSCI World over its 21-trading-day horizon, net of cost;
+    it is marked daily until ``horizon_end`` and then frozen (``resolved``).
+    """
+
+    __tablename__ = "paper_trade_checks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    trade_id: Mapped[str] = mapped_column(
+        ForeignKey("paper_trades.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    portfolio_id: Mapped[str] = mapped_column(
+        ForeignKey("paper_portfolios.id", ondelete="CASCADE"), index=True
+    )
+    traded_on: Mapped[date] = mapped_column(Date)
+    ticker: Mapped[str] = mapped_column(String(32))
+    side: Mapped[str] = mapped_column(String(4))
+    notional_eur: Mapped[float] = mapped_column(Float)
+    fee_eur: Mapped[float] = mapped_column(Float, default=0.0)
+    spread_eur: Mapped[float] = mapped_column(Float, default=0.0)
+    tax_eur: Mapped[float] = mapped_column(Float, default=0.0)
+    cost_eur: Mapped[float] = mapped_column(Float, default=0.0)
+    p_hit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    p_source: Mapped[str] = mapped_column(String(16))
+    mean_abs_excess: Mapped[float] = mapped_column(Float)
+    edge_eur: Mapped[float] = mapped_column(Float)
+    verdict: Mapped[str] = mapped_column(String(8))
+    reason: Mapped[str] = mapped_column(Text)
+    horizon_end: Mapped[date] = mapped_column(Date)
+    asset_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    benchmark_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    contribution_eur: Mapped[float | None] = mapped_column(Float, nullable=True)
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_text("false"))
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
 class PaperSnapshot(Base):

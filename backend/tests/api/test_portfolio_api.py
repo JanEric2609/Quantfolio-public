@@ -67,3 +67,17 @@ def test_get_holdings_returns_null_avg_buy_price_when_unknown(client, db):
     body = response.json()
     holding = next(h for h in body if h["isin"] == "IE00B4L5Y983")
     assert holding["avg_buy_price"] is None
+
+
+def test_a_second_holding_with_the_same_isin_is_refused_not_a_crash(client, db):
+    tc, _ = client
+    body = {"isin": "IE00B4L5Y983", "name": "iShares Core MSCI World", "quantity": 3.0, "avg_buy_price": 3.0}
+    first = tc.post("/api/portfolio/holdings", json=body)
+    assert first.status_code == 200
+    assert tc.post("/api/portfolio/holdings", json=body).status_code == 409
+
+    other = tc.post("/api/portfolio/holdings", json={**body, "isin": "IE00BK5BQT80"}).json()
+    moved = tc.put(f"/api/portfolio/holdings/{other['id']}", json=body)
+    assert moved.status_code == 409
+    # Saving a holding under its own ISIN is fine.
+    assert tc.put(f"/api/portfolio/holdings/{first.json()['id']}", json={**body, "quantity": 4.0}).status_code == 200

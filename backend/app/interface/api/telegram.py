@@ -7,11 +7,13 @@ from starlette.concurrency import run_in_threadpool
 
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import User
-from app.foundation.schemas import TelegramLinkStatusOut, TelegramPairingCodeOut
+from app.foundation.schemas import TelegramLinkStatusOut, TelegramPairingCodeOut, TelegramTestMessageOut
 from app.foundation.auth import current_user
 from app.foundation.telegram_bot import (
     generate_pairing_code,
+    get_bot_token,
     get_linked_account,
+    send_telegram_message,
     verify_webhook_secret,
 )
 from app.foundation.telegram_updates import handle_update
@@ -33,6 +35,20 @@ def link_status(db: Session = Depends(get_db), user: User = Depends(current_user
     if account is None:
         return {"linked": False}
     return {"linked": True, "linked_at": account.linked_at.isoformat()}
+
+
+@router.post("/test-message", response_model=TelegramTestMessageOut)
+def send_test_message(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict[str, Any]:
+    """Send one message to the caller's linked chat, so alerts are known to arrive."""
+    if not get_bot_token(db):
+        return {"sent": False, "message": "No bot token saved."}
+    account = get_linked_account(db, user.id)
+    if account is None:
+        return {"sent": False, "message": "No chat linked yet. Generate a pairing code first."}
+    text = "Quantfolio test message: alerts from the daily self-check and the crash guard will arrive here."
+    if send_telegram_message(db, account.chat_id, text):
+        return {"sent": True, "message": "Sent. Check Telegram."}
+    return {"sent": False, "message": "Telegram did not accept the message. Test the bot token above."}
 
 
 @router.post("/webhook")

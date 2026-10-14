@@ -29,6 +29,7 @@ from app.foundation.models.entities import (
     PaperPortfolioArchive,
     PaperSnapshot,
     PaperTrade,
+    PaperTradeCheck,
 )
 from app.foundation.models.entities._core import now_utc
 from app.foundation.market import quote as market_quote
@@ -259,6 +260,7 @@ def reset_portfolio(db: Session, portfolio_id: str, *, reason: str = "reset") ->
 
     holdings_q = db.query(PaperHolding).filter(PaperHolding.portfolio_id == portfolio_id)
     trades_q = db.query(PaperTrade).filter(PaperTrade.portfolio_id == portfolio_id)
+    checks_q = db.query(PaperTradeCheck).filter(PaperTradeCheck.portfolio_id == portfolio_id)
     snaps_q = db.query(PaperSnapshot).filter(PaperSnapshot.portfolio_id == portfolio_id)
     flows_q = db.query(PaperCashFlow).filter(PaperCashFlow.portfolio_id == portfolio_id)
     metrics_q = db.query(MetricsSnapshot).filter(MetricsSnapshot.portfolio_id == portfolio_id)
@@ -294,6 +296,11 @@ def reset_portfolio(db: Session, portfolio_id: str, *, reason: str = "reset") ->
         "holdings": _rows(holdings_q, ("id", "isin", "ticker", "name", "asset_type", "quantity", "avg_buy_price", "currency")),
         "trades": _rows(trades_q, ("id", "date", "ticker", "side", "quantity", "price", "value", "fee",
                                    "confidence", "rationale", "ai_decision_id")),
+        "trade_checks": _rows(checks_q, ("trade_id", "traded_on", "ticker", "side", "notional_eur", "fee_eur",
+                                         "spread_eur", "tax_eur", "cost_eur", "p_hit", "p_source",
+                                         "mean_abs_excess", "edge_eur", "verdict", "reason", "horizon_end",
+                                         "asset_return", "benchmark_return", "contribution_eur", "resolved",
+                                         "checked_at")),
         "snapshots": _rows(snaps_q, ("date", "total_value", "cash_balance", "securities_value", "total_return_pct",
                                      "sharpe", "max_drawdown")),
         "cash_flows": _rows(flows_q, ("date", "kind", "ticker", "quantity", "amount_per_unit", "currency", "amount_eur")),
@@ -308,7 +315,7 @@ def reset_portfolio(db: Session, portfolio_id: str, *, reason: str = "reset") ->
     )
     try:
         db.add(archive)
-        for q in (trades_q, flows_q, snaps_q, metrics_q, cards_q, holdings_q):
+        for q in (checks_q, trades_q, flows_q, snaps_q, metrics_q, cards_q, holdings_q):
             q.delete(synchronize_session=False)
         portfolio.initial_cash = total_cash if has_accounts else _FALLBACK_CASH
         portfolio.inception_at = now_utc()
