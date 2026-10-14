@@ -166,7 +166,7 @@ def market_state(db: Session) -> MarketState:
 def _core_units_by_day(db: Session, user_id: str, core_isins: set[str], since: date) -> dict[date, float]:
     from sqlalchemy import func
 
-    from app.foundation.models.entities import BookPositionSnapshot
+    from app.foundation.models.entities import BookPositionSnapshot, PortfolioSnapshot
 
     rows = (
         db.query(BookPositionSnapshot.snapshot_date, func.sum(BookPositionSnapshot.quantity))
@@ -178,7 +178,23 @@ def _core_units_by_day(db: Session, user_id: str, core_isins: set[str], since: d
         .group_by(BookPositionSnapshot.snapshot_date)
         .all()
     )
-    return {day: float(qty or 0) for day, qty in rows}
+    units = {day: float(qty or 0) for day, qty in rows}
+    # A fully sold position is dropped from the day's rows, not written as 0, so
+    # "now" is the latest day the book was recorded at all (snapshot_book_positions
+    # writes the day's dkb_mirror row on every run, positions or not). A core
+    # missing that day was sold; a day nothing ran has no row and changes nothing.
+    latest = (
+        db.query(func.max(PortfolioSnapshot.date))
+        .filter(
+            PortfolioSnapshot.user_id == user_id,
+            PortfolioSnapshot.source == "dkb_mirror",
+            PortfolioSnapshot.date >= since,
+        )
+        .scalar()
+    )
+    if units and latest is not None and latest > max(units):
+        units[latest] = 0.0
+    return units
 
 
 def behaviour(db: Session, user_id: str, state: MarketState) -> list[dict[str, Any]]:
@@ -277,6 +293,11 @@ def run_daily(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
 
     when = now or datetime.now(UTC)
     state = market_state(db)
+    if state.peak is None:
+        # No prices (an empty cache) is not a market at its high: send nothing
+        # and keep the stored state, or the recovery message would fire on a gap.
+        logger.warning("Crash guard skipped: no closes for %s", state.ticker)
+        return {"level": None, "drawdown": None, "sent": [], "skipped": "no_prices"}
     previous = _load_state(db)
     worst_level = str(previous.get("worst_level") or "calm")
     seen: set[str] = set(previous.get("behaviour_seen") or [])

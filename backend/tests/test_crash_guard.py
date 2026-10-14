@@ -197,3 +197,58 @@ def test_the_rule_goes_into_the_level_alert(monkeypatch):
     _patch_prices(monkeypatch, [100, 85])
     crash_guard.run_daily(db, now=datetime(2026, 10, 15, 7, tzinfo=UTC))
     assert "Keep buying." in sent[0]
+
+
+def _book_day(db, user, day, core_qty=None):
+    """One run of snapshot_book_positions: the day's whole-book row, plus a core row while it is held."""
+    from app.foundation.models.entities import PortfolioSnapshot
+
+    db.add(PortfolioSnapshot(user_id=user.id, date=day, source="dkb_mirror"))
+    if core_qty is not None:
+        db.add(BookPositionSnapshot(
+            user_id=user.id, snapshot_date=day, source="scalable",
+            account_id="a", isin="IE00B4L5Y983", name="Core", quantity=core_qty,
+        ))
+    db.commit()
+
+
+def test_selling_the_whole_core_is_flagged(monkeypatch):
+    # A fully sold position is dropped from the day's rows, not written as 0.
+    db = _memory_db()
+    user = _user(db)
+    start = date(2026, 1, 1)
+    _book_day(db, user, start + timedelta(days=1), 100)
+    _book_day(db, user, start + timedelta(days=2), 100)
+    _book_day(db, user, start + timedelta(days=3))
+    _patch_prices(monkeypatch, [100, 110, 90, 85], start)
+    findings = crash_guard.crash_guard(db, user.id)["behaviour"]
+    assert [f["kind"] for f in findings] == ["core_sold"]
+    assert "100%" in findings[0]["title"]
+
+
+def test_a_day_without_a_sync_is_not_a_sale(monkeypatch):
+    db = _memory_db()
+    user = _user(db)
+    start = date(2026, 1, 1)
+    _book_day(db, user, start + timedelta(days=1), 100)
+    _book_day(db, user, start + timedelta(days=2), 100)
+    _patch_prices(monkeypatch, [100, 110, 90, 85, 84, 83], start)  # prices go on; the book was not recorded
+    assert crash_guard.crash_guard(db, user.id)["behaviour"] == []
+
+
+def test_missing_prices_are_not_a_recovery(monkeypatch):
+    db = _memory_db()
+    user = _user(db)
+    _with_telegram(db, user)
+    sent = _capture(monkeypatch)
+    now = datetime(2026, 10, 15, 7, tzinfo=UTC)
+
+    _patch_prices(monkeypatch, [100, 75])
+    crash_guard.run_daily(db, now=now)
+    _patch_prices(monkeypatch, [])               # an empty price cache
+    assert crash_guard.run_daily(db, now=now)["skipped"] == "no_prices"
+    _patch_prices(monkeypatch, [100, 75, 74])    # prices back, market still down
+    crash_guard.run_daily(db, now=now)
+
+    assert len(sent) == 1 and "bear market" in sent[0]
+    assert crash_guard._load_state(db)["worst_level"] == "bear"
