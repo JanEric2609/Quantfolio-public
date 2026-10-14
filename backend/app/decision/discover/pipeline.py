@@ -389,6 +389,10 @@ _TRADING_DAYS_PER_YEAR = 252
 _MIN_COVERAGE = 0.90                 # unchanged legacy threshold
 _DATA_GAP_MEDIAN_DAYS = 3            # concern-only: median calendar spacing
 _DATA_GAP_MAX_DAYS = 14              # concern-only: single contiguous hole
+# A series whose last close is older than this stopped trading (delisted,
+# acquired, suspended): WBD was shortlisted on 2026-10-14 with its last bar
+# from 10-06. A week covers the longest exchange closures.
+_MAX_LAST_CLOSE_AGE_DAYS = 7
 
 
 def _row_date(value: Any) -> date:
@@ -410,7 +414,9 @@ def _evaluate_history_rows(
     gapless series score "100% coverage" and flow into annualisation with a
     tiny N (silently wrong CAGRs). This evaluator enforces, in order:
 
-    1. coverage — >= ``_MIN_COVERAGE`` non-null closes (unchanged legacy rule);
+    1. coverage — >= ``_MIN_COVERAGE`` non-null closes (unchanged legacy rule),
+       and a last close no older than ``_MAX_LAST_CLOSE_AGE_DAYS`` (a name that
+       stopped trading must not be ranked on its old prices);
     2. span — first bar must reach back to ``today - requested_days`` plus
        ``_SPAN_TOLERANCE_DAYS`` of weekend/holiday slack;
     3. length — ``n_closes >= max(_MIN_CLOSES_ABSOLUTE, ceil(_MIN_LENGTH_RATIO
@@ -445,6 +451,12 @@ def _evaluate_history_rows(
 
     if coverage < _MIN_COVERAGE:
         return None, f"history_ingest: coverage {coverage:.1%} (< 90%)"
+    last_close_age = (today - last_date).days
+    if last_close_age > _MAX_LAST_CLOSE_AGE_DAYS:
+        return None, (
+            f"history_ingest: last close {last_date} is {last_close_age} days old "
+            f"(> {_MAX_LAST_CLOSE_AGE_DAYS}); not trading"
+        )
 
     length_floor = max(
         _MIN_CLOSES_ABSOLUTE,

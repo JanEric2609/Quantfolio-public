@@ -157,7 +157,7 @@ def run_brinson_attribution(
     bench_bars = bar_store.get_bars(request.benchmark_ticker, start=start_dt, end=end_dt)
     if bench_bars is None or len(bench_bars) < 2:
         raise HTTPException(
-            status_code=501,
+            status_code=422,
             detail=f"Benchmark data not available for {request.benchmark_ticker} in the given date range",
         )
     bench_ret = float(bench_bars["close"].iloc[-1] / bench_bars["close"].iloc[0] - 1)
@@ -277,7 +277,7 @@ def run_factor_attribution(
     bench_bars = bar_store.get_bars(request.benchmark_ticker, start=start_dt, end=end_dt)
     if bench_bars is None or len(bench_bars) < 2:
         raise HTTPException(
-            status_code=501,
+            status_code=422,
             detail=f"Benchmark data not available for {request.benchmark_ticker} in the given date range",
         )
     benchmark_series = _usd_indexed_returns(db, request.benchmark_ticker, bench_bars)
