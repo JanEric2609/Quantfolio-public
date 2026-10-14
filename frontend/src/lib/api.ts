@@ -3771,3 +3771,35 @@ export interface SelfCheckResult {
 
 export const getAppErrors = (days = 7) => api<AppErrorRow[]>(`/api/errors?days=${days}`);
 export const getSelfCheck = () => api<SelfCheckResult>("/api/errors/self-check");
+
+// Crash guard (GET /api/plan/crash-guard): MSCI World's fall from its high,
+// earlier falls in the stored history, and anything that breaks the plan.
+export interface CrashGuardEpisode {
+  peak_date: string;
+  trough_date: string;
+  depth: number;
+  months_to_trough: number;
+  recovery_date: string | null;
+  months_to_recover: number | null;
+}
+
+export interface CrashGuardState {
+  active: boolean;
+  market: {
+    ticker: string;
+    as_of: string | null;
+    close: number | null;
+    peak: number | null;
+    peak_date: string | null;
+    drawdown: number;
+    level: "calm" | "correction" | "bear" | "crash" | string;
+    level_label: string;
+    history_start: string | null;
+  };
+  episodes: CrashGuardEpisode[];
+  message: string;
+  plan_note: string | null;
+  behaviour: { id: string; kind: string; title: string; detail: string }[];
+}
+
+export const getCrashGuard = () => api<CrashGuardState>("/api/plan/crash-guard");

@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, CalendarCheck, Inbox, PieChart } from "lucide-react";
 import { AttentionList } from "../components/composed/AttentionList";
+import { CrashGuardBanner } from "../components/composed/CrashGuardBanner";
 import { PageHeader } from "../components/composed/PageHeader";
 import { DkbSyncButton } from "../components/portfolio/DkbSyncButton";
 import { ScalableSyncButton } from "../components/portfolio/ScalableSync";
@@ -223,6 +224,7 @@ export function HomePage() {
         }
       />
       <StatusStrip />
+      <CrashGuardBanner />
       <ThisMonthCard />
       <NeedsYou />
       <DecideTeaser />

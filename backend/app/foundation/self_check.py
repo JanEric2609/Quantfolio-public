@@ -90,27 +90,19 @@ def format_message(problems: list[dict[str, Any]]) -> str:
 
 
 def _notify(db: Session, problems: list[dict[str, Any]], text: str) -> bool:
-    """Telegram to every admin with a linked chat, plus a bell notification. True if any message went out."""
-    from app.foundation.models.entities import TelegramAccount, User
-    from app.foundation.notify import create_notification
-    from app.foundation.telegram_bot import send_telegram_message
+    """Telegram to every admin with a linked chat, plus a bell notification when there are problems."""
+    from app.foundation.notify import alert_owners
 
-    sent = False
-    admins = db.query(User).filter(User.role == "admin").all()
-    for admin in admins:
-        account = db.query(TelegramAccount).filter(TelegramAccount.user_id == admin.id).first()
-        if account is not None and getattr(account, "chat_id", None):
-            sent = send_telegram_message(db, str(account.chat_id), text) or sent
-        if problems:
-            worst = problems[0]
-            create_notification(
-                db, admin.id, "self_check",
-                f"Self-check: {len(problems)} problem{'s' if len(problems) > 1 else ''}",
-                body="; ".join(p["title"] for p in problems)[:1000],
-                severity="error" if worst["severity"] == "error" else "warning",
-                href="/settings",
-            )
-    return sent
+    worst = problems[0]["severity"] if problems else "info"
+    return alert_owners(
+        db, source="self_check",
+        title=f"Self-check: {len(problems)} problem{'s' if len(problems) > 1 else ''}",
+        telegram_text=text,
+        body="; ".join(p["title"] for p in problems)[:1000] or None,
+        severity="error" if worst == "error" else "warning",
+        href="/settings",
+        bell=bool(problems),
+    )
 
 
 def run_self_check(db: Session, *, notify: bool = True, probe: bool = True, now: datetime | None = None) -> dict[str, Any]:

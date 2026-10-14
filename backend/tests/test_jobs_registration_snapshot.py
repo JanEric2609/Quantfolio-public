@@ -29,6 +29,7 @@ from app.lab.alphacrafter.jobs import (
     register_alphacrafter_daily_job,
     register_alphacrafter_tuning_job,
 )
+from app.decision.crash_guard import register_crash_guard_job
 from app.decision.discover.jobs import (
     register_analyst_estimates_snapshot_job,
     register_discover_ml_training_job,
@@ -141,6 +142,7 @@ EXPECTED_REGISTRATIONS = {
     "rss_refresh": {"trigger": "cron", "minute": "*/30"},
     "snapshot_paper_portfolios": {"trigger": "cron", "hour": 0, "minute": 0},
     "price_backfill_daily": {"trigger": "cron", "hour": 6, "minute": 30},
+    "crash_guard_daily": {"trigger": "cron", "hour": 7, "minute": 0},
     "bar_repull_weekly": {"trigger": "cron", "day_of_week": "sun", "hour": 5, "minute": 0},
     "scalable_sync": {"trigger": "interval", "hours": 1},
     "llm_mandate_a_review": {
@@ -224,6 +226,7 @@ def _drive_all_registrations(sched):
     returns["rss_refresh"] = register_rss_refresh_job(sched)
     returns["snapshot_paper_portfolios"] = register_snapshot_paper_portfolios_job(sched)
     returns["price_backfill_daily"] = register_price_backfill_daily_job(sched)
+    returns["crash_guard_daily"] = register_crash_guard_job(sched)
     returns["bar_repull_weekly"] = register_bar_repull_job(sched)
     returns["scalable_sync"] = register_scalable_sync_job(sched)
     returns["llm_portfolio_review_jobs"] = register_llm_portfolio_review_jobs(sched)

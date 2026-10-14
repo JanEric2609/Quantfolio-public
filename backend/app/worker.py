@@ -24,6 +24,7 @@ from app.decision.discover.jobs import (
     register_discovery_review_job,
 )
 from app.decision.discover.orchestrator import reap_stale_discover_runs
+from app.decision.crash_guard import register_crash_guard_job
 from app.decision.verification.jobs import (
     register_trust_daily_ledger_job,
     register_trust_weekly_ledger_job,
@@ -1046,6 +1047,7 @@ def build_scheduler() -> Any:
     register_regime_refit_job(scheduler)
     register_watchlist_price_checker_job(scheduler)
     register_daily_position_snapshot_job(scheduler)
+    register_crash_guard_job(scheduler)
     register_snapshot_paper_portfolios_job(scheduler)
     register_llm_portfolio_review_jobs(scheduler)
     register_llm_review_scoring_job(scheduler)
