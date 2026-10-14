@@ -189,3 +189,32 @@ def test_insufficient_length_rejected_when_span_claims_full(monkeypatch):
     # market_history clips rows to the requested window, so the stage sees the
     # post-cutoff bar count; pin the scaled floor value instead of the count.
     assert "< 694" in error
+
+
+def test_series_that_stopped_trading_is_rejected(monkeypatch):
+    """WBD on 2026-10-14: a full 5y history whose last close is 8 days old
+    (taken over, no new bars) must not be ranked on its old prices."""
+    db = _memory_db()
+    _mock_ingest_failure(monkeypatch, "possibly delisted")
+    n = 1330
+    dates = _business_days_back(n, end=date.today() - timedelta(days=8))
+    _seed_rows(db, "GONE", dates, [100.0 + i * 0.01 for i in range(n)])
+
+    scores, error = stage_history_ingest(db, "GONE")
+
+    assert scores is None
+    assert error is not None and error.startswith("history_ingest: last close")
+    assert "not trading" in error
+
+
+def test_long_weekend_does_not_reject(monkeypatch):
+    """A last close 4 days ago (a holiday weekend) still passes."""
+    db = _memory_db()
+    _mock_ingest_failure(monkeypatch)
+    n = 1330
+    dates = _business_days_back(n, end=date.today() - timedelta(days=4))
+    _seed_rows(db, "HOLIDAY", dates, [100.0 + i * 0.01 for i in range(n)])
+
+    scores, error = stage_history_ingest(db, "HOLIDAY")
+
+    assert error is None and scores is not None
