@@ -49,6 +49,38 @@ function PoolRank({ candidate, tiers }: { candidate: DiscoverCandidate; tiers?: 
   );
 }
 
+// Scalable FREE Broker (foundation/broker_fees.py): €0.99 per stock order,
+// buy and sell; about 0.10 % half spread each way (decision/trade_check.py).
+const ORDER_FEE_EUR = 0.99;
+const HALF_SPREAD = 0.001;
+const EXAMPLE_ORDER_EUR = 500;
+
+/**
+ * "Worth acting on?": the trade check's question for a real buy. A round trip
+ * costs fees and spread for sure; the pick earns its tier's edge only on
+ * average, and an edge is shown only once the tier's 90 % range of hit rates
+ * against your ETF sits above a coin flip.
+ */
+function WorthActing({ candidate, tiers }: { candidate: DiscoverCandidate; tiers?: TrustRankingSection["tiers"] }) {
+  const rank = candidate.pool_rank;
+  const size = candidate.pool_size;
+  const tier = rank != null && size ? tierOf(rank, size) : null;
+  const measured = tier && tiers && tiers.n_eff > 0 ? tiers.tiers.find((t) => t.tier === tier) : undefined;
+  const shown = measured?.range != null && measured.range[0] > 0.5;
+  const cost = 2 * ORDER_FEE_EUR + 2 * HALF_SPREAD * EXAMPLE_ORDER_EUR;
+  const costText = `buying €${EXAMPLE_ORDER_EUR} and selling again costs about €${cost.toFixed(2)} (${(
+    (100 * cost) / EXAMPLE_ORDER_EUR
+  ).toFixed(1)} %)`;
+  return (
+    <p className="text-xs text-text-secondary" data-testid="worth-acting">
+      <span className="font-medium text-text-primary">Worth acting on? </span>
+      {shown
+        ? `Possibly: this tier has beaten your ETF more often than not, even at the low end of its range; ${costText}, so the order must be large enough for that to stay small.`
+        : `Not yet: no edge is shown for this tier, and ${costText}. With no edge that cost is the expected result, so your ETF savings plan is the better default.`}
+    </p>
+  );
+}
+
 const SOURCE_LABELS: Record<string, string> = {
   screen_index: "Index screen",
   screen_etf: "ETF screen",
@@ -159,6 +191,7 @@ export function ShortlistCards({ candidates, onOpenDossier, tiers }: ShortlistCa
               <CardContent className="space-y-4">
                 <ScoreBar label="Signal score" value={conviction} hint="Composite ranking score from 0 to 1, built from trailing signals. Not a probability that the pick beats the market." />
                 <PoolRank candidate={candidate} tiers={tiers} />
+                <WorthActing candidate={candidate} tiers={tiers} />
 
                 <div className="flex items-center gap-3">
                   <Badge variant="secondary" className="flex items-center gap-1 text-xs">

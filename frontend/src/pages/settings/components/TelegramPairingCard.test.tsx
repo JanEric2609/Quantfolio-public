@@ -30,4 +30,22 @@ describe("TelegramPairingCard", () => {
 
     await waitFor(() => expect(screen.getByText("ABC123")).toBeInTheDocument());
   });
+
+  it("sends a test message once linked and shows the answer", async () => {
+    vi.spyOn(api, "getTelegramLinkStatus").mockResolvedValue({ linked: true, linked_at: "2026-07-25T10:00:00Z" });
+    const send = vi.spyOn(api, "sendTelegramTestMessage").mockResolvedValue({ sent: true, message: "Sent. Check Telegram." });
+    renderWithClient(<TelegramPairingCard />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /send test message/i }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Sent. Check Telegram."));
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers no test message before a chat is linked", async () => {
+    vi.spyOn(api, "getTelegramLinkStatus").mockResolvedValue({ linked: false, linked_at: null });
+    renderWithClient(<TelegramPairingCard />);
+    expect(await screen.findByText(/alerts reach only the bell/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /send test message/i })).not.toBeInTheDocument();
+  });
 });

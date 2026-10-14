@@ -1,0 +1,429 @@
+"""Is this trade worth it? The cost-versus-edge check, in shadow.
+
+Every order costs money for sure (fee, half the bid-ask spread, tax on a
+realised gain) and earns its source's edge only on average. The check asks
+one question per trade: does the edge this source has *shown* beat the cost?
+
+    edge  = (2p - 1) * m * notional
+    block when edge < cost
+
+``p`` is the chance the call beats MSCI World over its 21-trading-day horizon
+(a sell: that the sold name lags it), ``m`` the mean size of the excess
+return when it does or does not. ``p`` comes from, in this order:
+
+1. the call's calibrated conviction (``DiscoveryPrediction.conviction_calibrated``,
+   ADR 0018), when the advisor logged one for that ticker and day;
+2. the sleeve's own resolved trades, shrunk toward a coin flip by
+   :data:`PRIOR_DATES` pseudo-dates (a sleeve with ten trading days of
+   history moves ``p`` only a little);
+3. nothing: ``p = 0.5``, so no edge, and any cost blocks the trade.
+
+That third case is the honest default and the reason the check runs in
+**shadow** first (owner's decision, 2026-10-14): the paper books trade as
+before; each trade gets a :class:`PaperTradeCheck` row with the verdict, and
+after its horizon the row is marked with what the trade actually added
+against MSCI World net of cost. Adding the blocked trades' contributions back
+gives the NAV the book would have had with the check on; the owner decides
+after two to three months whether to enforce it.
+
+The counterfactual is benchmark-relative, the same definition of a hit the
+calibrator uses: a blocked buy's money is taken to sit in MSCI World instead,
+a blocked sell's position is kept. Each trade's contribution is
+
+    contribution = sign * notional * (r_asset - r_benchmark) - cost
+
+over the trade's horizon, which makes contributions additive across trades.
+It is an estimate: it ignores what a later trade did with the same shares.
+
+Tax: with a valid NV certificate (Control Center, Tax) a paper sale's gain is
+taken as tax-free; otherwise the flat KESt+Soli on the gain after
+Teilfreistellung (30 % for an equity ETF) is counted in full. That overstates
+the cost (the tax would be paid at some later sale anyway), so it is a bound,
+not a forecast. Estimates only, not tax advice.
+"""
+from __future__ import annotations
+
+import logging
+from collections import defaultdict
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
+from typing import Any
+
+import numpy as np
+from sqlalchemy.orm import Session
+
+from app.foundation.models.entities import (
+    DiscoveryPrediction,
+    PaperHolding,
+    PaperPortfolio,
+    PaperTrade,
+    PaperTradeCheck,
+)
+
+logger = logging.getLogger(__name__)
+
+HORIZON_TRADING_DAYS = 21
+#: Pseudo-dates of a coin flip the sleeve's own hit rate is shrunk toward.
+PRIOR_DATES = 20
+#: Typical size of a 21-day excess return when a sleeve has no history yet.
+DEFAULT_MEAN_ABS_EXCESS = 0.04
+#: Half the bid-ask spread paid on each order, by instrument kind.
+HALF_SPREAD_BPS = {"etf": 5.0, "stock": 10.0}
+#: Flat tax a realised gain pays without an NV certificate: KESt 25 % + Soli 5.5 %.
+FLAT_TAX_RATE = 0.25 * 1.055
+EQUITY_ETF_EXEMPT_SHARE = 0.30
+#: The user's own trades are not the system's; only managed sleeves are checked.
+MANUAL = "manual"
+#: How far back a first run looks for unchecked trades.
+BACKFILL_DAYS = 120
+
+
+@dataclass(frozen=True)
+class Edge:
+    p_hit: float | None
+    source: str  # "calibrated" | "track_record" | "none"
+    mean_abs_excess: float
+    detail: str
+
+
+@dataclass(frozen=True)
+class Verdict:
+    cost_eur: float
+    edge_eur: float
+    verdict: str  # "pass" | "block"
+    reason: str
+
+
+def assess(*, notional: float, cost_eur: float, edge: Edge) -> Verdict:
+    """Pure: the verdict on one trade of *notional* euros."""
+    p = edge.p_hit if edge.p_hit is not None else 0.5
+    edge_eur = (2.0 * p - 1.0) * edge.mean_abs_excess * notional
+    if edge_eur >= cost_eur:
+        reason = (
+            f"Expected edge €{edge_eur:,.2f} covers the cost €{cost_eur:,.2f} "
+            f"({edge.detail})."
+        )
+        return Verdict(cost_eur, edge_eur, "pass", reason)
+    if edge.p_hit is None or edge_eur <= 0:
+        why = f"no shown edge ({edge.detail})"
+    else:
+        why = f"expected edge €{edge_eur:,.2f} is below it ({edge.detail})"
+    return Verdict(cost_eur, edge_eur, "block", f"Costs €{cost_eur:,.2f}; {why}.")
+
+
+def _is_etf(asset_type: str | None) -> bool:
+    kind = (asset_type or "").lower()
+    return "etf" in kind or "fund" in kind
+
+
+def half_spread_eur(notional: float, asset_type: str | None) -> float:
+    bps = HALF_SPREAD_BPS["etf" if _is_etf(asset_type) else "stock"]
+    return notional * bps / 10_000.0
+
+
+def sale_tax_eur(gain_eur: float | None, *, etf: bool, nv_valid: bool) -> float:
+    """Tax a sale's realised gain pays now (0 under an NV certificate or for a loss)."""
+    if nv_valid or gain_eur is None or gain_eur <= 0:
+        return 0.0
+    taxable = gain_eur * (1.0 - EQUITY_ETF_EXEMPT_SHARE if etf else 1.0)
+    return taxable * FLAT_TAX_RATE
+
+
+def horizon_end(day: date) -> date:
+    return np.busday_offset(np.datetime64(day), HORIZON_TRADING_DAYS, roll="forward").astype(object)
+
+
+def _utc(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
+# ---------------------------------------------------------------------------
+# Edge
+# ---------------------------------------------------------------------------
+
+
+def _calibrated_p(db: Session, trade: PaperTrade) -> float | None:
+    """The advisor's calibrated conviction for this ticker and side on the trade's day."""
+    when = _utc(trade.date)
+    row = (
+        db.query(DiscoveryPrediction.conviction_calibrated)
+        .filter(
+            DiscoveryPrediction.portfolio_id == trade.portfolio_id,
+            DiscoveryPrediction.symbol == trade.ticker,
+            DiscoveryPrediction.direction == trade.side,
+            DiscoveryPrediction.conviction_calibrated.isnot(None),
+            DiscoveryPrediction.predicted_at >= when - timedelta(days=1),
+            DiscoveryPrediction.predicted_at <= when + timedelta(days=1),
+        )
+        .order_by(DiscoveryPrediction.predicted_at.desc())
+        .first()
+    )
+    return float(row[0]) if row is not None else None
+
+
+def track_record(db: Session, portfolio_id: str, before: date) -> tuple[float | None, int, float]:
+    """``(shrunk hit rate, distinct dates, mean |excess|)`` of the sleeve's resolved trades.
+
+    Only trades whose horizon ended before *before* count, so a verdict never
+    uses an outcome that was not known on its day. Trades of one day share one
+    market move, so each date counts once (its mean hit).
+    """
+    rows = (
+        db.query(PaperTradeCheck.traded_on, PaperTradeCheck.side,
+                 PaperTradeCheck.asset_return, PaperTradeCheck.benchmark_return)
+        .filter(
+            PaperTradeCheck.portfolio_id == portfolio_id,
+            PaperTradeCheck.resolved.is_(True),
+            PaperTradeCheck.horizon_end < before,
+            PaperTradeCheck.asset_return.isnot(None),
+            PaperTradeCheck.benchmark_return.isnot(None),
+        )
+        .all()
+    )
+    if not rows:
+        return None, 0, DEFAULT_MEAN_ABS_EXCESS
+    by_day: dict[date, list[float]] = defaultdict(list)
+    sizes: list[float] = []
+    for traded_on, side, r_asset, r_bench in rows:
+        excess = (1.0 if side == "buy" else -1.0) * (float(r_asset) - float(r_bench))
+        by_day[traded_on].append(1.0 if excess > 0 else 0.0)
+        sizes.append(abs(excess))
+    n = len(by_day)
+    hits = sum(sum(v) / len(v) for v in by_day.values())
+    p = (hits + 0.5 * PRIOR_DATES) / (n + PRIOR_DATES)
+    return p, n, float(np.mean(sizes)) if sizes else DEFAULT_MEAN_ABS_EXCESS
+
+
+def edge_for(db: Session, trade: PaperTrade, traded_on: date) -> Edge:
+    p_track, n_dates, mean_abs = track_record(db, trade.portfolio_id, traded_on)
+    calibrated = _calibrated_p(db, trade)
+    if calibrated is not None:
+        return Edge(calibrated, "calibrated", mean_abs, f"calibrated hit chance {calibrated:.0%}")
+    if p_track is not None:
+        return Edge(
+            p_track, "track_record", mean_abs,
+            f"{n_dates} resolved trading days, hit chance {p_track:.0%} after shrinkage",
+        )
+    return Edge(None, "none", mean_abs, "no resolved trades or calibrated calls yet")
+
+
+# ---------------------------------------------------------------------------
+# Cost
+# ---------------------------------------------------------------------------
+
+
+def _avg_cost_before(db: Session, trade: PaperTrade) -> float | None:
+    """Average cost of the units this sale sold, from the holding or the trade log."""
+    holding = (
+        db.query(PaperHolding)
+        .filter(PaperHolding.portfolio_id == trade.portfolio_id, PaperHolding.ticker == trade.ticker)
+        .first()
+    )
+    if holding is not None and holding.avg_buy_price:
+        # A sale leaves the average cost of what remains unchanged.
+        return float(holding.avg_buy_price)
+    buys = (
+        db.query(PaperTrade.quantity, PaperTrade.price)
+        .filter(
+            PaperTrade.portfolio_id == trade.portfolio_id,
+            PaperTrade.ticker == trade.ticker,
+            PaperTrade.side == "buy",
+            PaperTrade.date < trade.date,
+        )
+        .all()
+    )
+    qty = sum(float(q) for q, _ in buys)
+    if qty <= 0:
+        return None
+    return sum(float(q) * float(p) for q, p in buys) / qty
+
+
+def _nv_valid(db: Session, user_id: str, year: int) -> bool:
+    from app.foundation.tax_allowances import nv_status, settings_for_user
+
+    return bool(nv_status(settings_for_user(db, user_id), year)["valid_for_year"])
+
+
+# ---------------------------------------------------------------------------
+# Marking
+# ---------------------------------------------------------------------------
+
+
+def _close_on_or_after(closes: dict[str, float], day: date) -> tuple[str, float] | None:
+    for key in sorted(closes):
+        if key >= day.isoformat():
+            return key, closes[key]
+    return None
+
+
+def _close_on_or_before(closes: dict[str, float], day: date) -> tuple[str, float] | None:
+    keys = [k for k in sorted(closes) if k <= day.isoformat()]
+    return (keys[-1], closes[keys[-1]]) if keys else None
+
+
+def _period_return(closes: dict[str, float], start: date, end: date) -> tuple[float, str] | None:
+    first = _close_on_or_after(closes, start)
+    last = _close_on_or_before(closes, end)
+    if first is None or last is None or last[0] < first[0] or first[1] <= 0:
+        return None
+    return last[1] / first[1] - 1.0, last[0]
+
+
+def mark(check: PaperTradeCheck, asset: dict[str, float], bench: dict[str, float], today: date) -> None:
+    """Mark *check* to the latest closes; freeze it once its horizon has a close."""
+    end = min(check.horizon_end, today)
+    ra = _period_return(asset, check.traded_on, end)
+    rb = _period_return(bench, check.traded_on, end)
+    if ra is None or rb is None:
+        return
+    check.asset_return, check.benchmark_return = ra[0], rb[0]
+    sign = 1.0 if check.side == "buy" else -1.0
+    check.contribution_eur = sign * check.notional_eur * (ra[0] - rb[0]) - check.cost_eur
+    check.resolved = ra[1] >= check.horizon_end.isoformat() and rb[1] >= check.horizon_end.isoformat()
+
+
+# ---------------------------------------------------------------------------
+# The daily job
+# ---------------------------------------------------------------------------
+
+
+def _managed_portfolios(db: Session) -> list[PaperPortfolio]:
+    return db.query(PaperPortfolio).filter(PaperPortfolio.managed_by != MANUAL).all()
+
+
+def check_trade(db: Session, trade: PaperTrade, *, nv_valid: bool) -> PaperTradeCheck:
+    from app.foundation.instrument_taxonomy import resolve_holding_asset_type
+
+    traded_on = _utc(trade.date).date()
+    notional = float(trade.value)
+    asset_type = resolve_holding_asset_type(db, isin=None, symbol=trade.ticker, name=None)
+    etf = _is_etf(asset_type)
+    fee = float(trade.fee or 0)
+    spread = half_spread_eur(notional, asset_type)
+    tax = 0.0
+    if trade.side == "sell":
+        basis = _avg_cost_before(db, trade)
+        gain = (float(trade.price) - basis) * float(trade.quantity) if basis is not None else None
+        tax = sale_tax_eur(gain, etf=etf, nv_valid=nv_valid)
+    cost = fee + spread + tax
+    edge = edge_for(db, trade, traded_on)
+    verdict = assess(notional=notional, cost_eur=cost, edge=edge)
+    check = PaperTradeCheck(
+        trade_id=trade.id, portfolio_id=trade.portfolio_id, traded_on=traded_on,
+        ticker=trade.ticker, side=trade.side, notional_eur=notional,
+        fee_eur=fee, spread_eur=spread, tax_eur=tax, cost_eur=cost,
+        p_hit=edge.p_hit, p_source=edge.source, mean_abs_excess=edge.mean_abs_excess,
+        edge_eur=verdict.edge_eur, verdict=verdict.verdict, reason=verdict.reason,
+        horizon_end=horizon_end(traded_on),
+    )
+    db.add(check)
+    db.flush()
+    return check
+
+
+def run_daily(db: Session, today: date | None = None) -> dict[str, Any]:
+    """Check new trades of every managed sleeve, then mark the open checks."""
+    from app.foundation import eur_prices
+
+    today = today or datetime.now(UTC).date()
+    since = datetime.now(UTC) - timedelta(days=BACKFILL_DAYS)
+    checked = marked = 0
+    for portfolio in _managed_portfolios(db):
+        nv_by_year: dict[int, bool] = {}
+        trades = (
+            db.query(PaperTrade)
+            .outerjoin(PaperTradeCheck, PaperTradeCheck.trade_id == PaperTrade.id)
+            .filter(
+                PaperTrade.portfolio_id == portfolio.id,
+                PaperTradeCheck.id.is_(None),
+                PaperTrade.date >= since,
+            )
+            .order_by(PaperTrade.date)
+            .all()
+        )
+        for trade in trades:
+            year = _utc(trade.date).year
+            if year not in nv_by_year:
+                nv_by_year[year] = _nv_valid(db, portfolio.user_id, year)
+            check_trade(db, trade, nv_valid=nv_by_year[year])
+            checked += 1
+        open_checks = (
+            db.query(PaperTradeCheck)
+            .filter(PaperTradeCheck.portfolio_id == portfolio.id, PaperTradeCheck.resolved.is_(False))
+            .all()
+        )
+        if not open_checks:
+            continue
+        days = (today - min(c.traded_on for c in open_checks)).days + 10
+        bench = eur_prices.eur_closes(db, eur_prices.benchmark_ticker(db), days=days, allow_live=False)
+        closes: dict[str, dict[str, float]] = {}
+        for check in open_checks:
+            if check.ticker not in closes:
+                closes[check.ticker] = eur_prices.eur_closes(db, check.ticker, days=days, allow_live=False)
+            mark(check, closes[check.ticker], bench, today)
+            marked += 1
+    db.commit()
+    return {"checked": checked, "marked": marked}
+
+
+def summary(db: Session, portfolio_id: str, nav_eur: float | None = None) -> dict[str, Any]:
+    """The shadow result for one sleeve: what the check would have changed."""
+    rows = (
+        db.query(PaperTradeCheck)
+        .filter(PaperTradeCheck.portfolio_id == portfolio_id)
+        .order_by(PaperTradeCheck.traded_on.desc())
+        .all()
+    )
+    blocked = [r for r in rows if r.verdict == "block"]
+    passed = [r for r in rows if r.verdict == "pass"]
+
+    def total(items: list[PaperTradeCheck], attr: str) -> float:
+        return round(sum(float(getattr(r, attr) or 0.0) for r in items), 2)
+
+    blocked_contribution = total(blocked, "contribution_eur")
+    return {
+        "mode": "shadow",
+        "trades_checked": len(rows),
+        "would_block": len(blocked),
+        "cost_paid_eur": total(rows, "cost_eur"),
+        "cost_of_blocked_eur": total(blocked, "cost_eur"),
+        # What the blocked trades added against MSCI World, net of cost; the
+        # check would have given this up (negative: it would have saved it).
+        "blocked_contribution_eur": blocked_contribution,
+        "passed_contribution_eur": total(passed, "contribution_eur"),
+        "open": sum(1 for r in rows if not r.resolved),
+        "nav_eur": nav_eur,
+        "checked_nav_eur": round(nav_eur - blocked_contribution, 2) if nav_eur is not None else None,
+        "recent": [
+            {
+                "trade_id": r.trade_id, "traded_on": r.traded_on.isoformat(), "ticker": r.ticker,
+                "side": r.side, "notional_eur": round(r.notional_eur, 2), "cost_eur": round(r.cost_eur, 2),
+                "tax_eur": round(r.tax_eur, 2), "edge_eur": round(r.edge_eur, 2), "p_hit": r.p_hit,
+                "p_source": r.p_source, "verdict": r.verdict, "reason": r.reason,
+                "contribution_eur": None if r.contribution_eur is None else round(r.contribution_eur, 2),
+                "resolved": r.resolved,
+            }
+            for r in rows[:50]
+        ],
+        "estimate": True,
+        "not_tax_advice": True,
+    }
+
+
+def register_trade_check_job(scheduler: Any | None = None) -> str:
+    """Daily at 22:30 UTC, after the day's cycles and the closing prices."""
+    from app.foundation.jobs import register_cron_job
+
+    def _inner() -> None:
+        from app.foundation.core.db import SessionLocal
+
+        with SessionLocal() as db:
+            logger.info("trade_check_daily: %s", run_daily(db))
+
+    return register_cron_job("trade_check_daily", _inner, scheduler=scheduler, hour=22, minute=30)
+
+
+__all__ = [
+    "Edge", "Verdict", "assess", "edge_for", "half_spread_eur", "horizon_end", "mark",
+    "register_trade_check_job", "run_daily", "sale_tax_eur", "summary", "track_record",
+]

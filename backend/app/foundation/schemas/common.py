@@ -600,6 +600,11 @@ class TelegramLinkStatusOut(BaseModel):
     linked_at: str | None = None
 
 
+class TelegramTestMessageOut(BaseModel):
+    sent: bool
+    message: str
+
+
 # --- Budget router response models (audit-fixes-2026-08 todo 32) ---
 # Money fields are float, NOT Decimal: these routes historically serialized via
 # jsonable_encoder (Decimal -> float). A Decimal-typed field would retype the

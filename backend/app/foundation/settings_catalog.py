@@ -619,11 +619,12 @@ _reg(CatalogEntry("obsidian", "notes_alerts", "Bearer token",
     setup_steps=["In Obsidian, install the community plugin 'Local REST API'", "Enable it and set a bearer token",
                  "Paste the token and the REST URL here, then test"]))
 _reg(CatalogEntry("telegram", "notes_alerts", "Bot token",
-    "Log expenses by message, ask /balance and /summary, and receive budget alerts.",
+    "Receive the daily self-check and crash-guard alerts, log expenses by message, ask /balance and /summary.",
     doc_url="https://core.telegram.org/bots#how-do-i-create-a-bot",
     input_type="password", sensitive=True, connection="telegram",
     setup_steps=["Message @BotFather and run /newbot", "Paste the bot token here and save",
-                 "Generate a pairing code and send '/start CODE' to your bot"]))
+                 "Generate a pairing code below and send '/start CODE' to your bot",
+                 "Press 'Send test message' to confirm alerts arrive"]))
 _reg(CatalogEntry("telegram_mode", "notes_alerts", "How the bot receives messages",
     "Polling needs no public address: the worker asks Telegram for new messages. "
     "Webhook has Telegram call this server, which must be reachable over HTTPS.",
@@ -862,7 +863,7 @@ _conn(Connection("openai", "ai", "OpenAI", "Optional cloud fallback.", secret="o
 
 _conn(Connection("obsidian", "notes_alerts", "Obsidian", "Research notes in your vault.",
     secret="obsidian", secret_label="Bearer token", enabled_key="obsidian_enabled"))
-_conn(Connection("telegram", "notes_alerts", "Telegram bot", "Expense logging and budget alerts.",
+_conn(Connection("telegram", "notes_alerts", "Telegram bot", "Alerts from the daily self-check and crash guard; expense logging.",
     secret="telegram", secret_label="Bot token", panel="telegram_pairing"))
 _conn(Connection("smtp", "notes_alerts", "E-mail (SMTP)", "Alert and digest e-mails.",
     secret="smtp", secret_label="Password"))

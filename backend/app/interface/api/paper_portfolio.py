@@ -232,3 +232,51 @@ def paper_performance(portfolio_id: str, user: User = Depends(current_user), db:
         ],
         "method": "No external flows after the seed, so value / starting value - 1 is the time-weighted return.",
     }
+
+
+class TradeCheckRow(BaseModel):
+    trade_id: str
+    traded_on: str
+    ticker: str
+    side: str
+    notional_eur: float
+    cost_eur: float
+    tax_eur: float
+    edge_eur: float
+    p_hit: float | None = None
+    p_source: str
+    verdict: str
+    reason: str
+    contribution_eur: float | None = None
+    resolved: bool
+
+
+class TradeCheckSummary(BaseModel):
+    mode: str
+    trades_checked: int
+    would_block: int
+    cost_paid_eur: float
+    cost_of_blocked_eur: float
+    blocked_contribution_eur: float
+    passed_contribution_eur: float
+    open: int
+    nav_eur: float | None = None
+    checked_nav_eur: float | None = None
+    recent: list[TradeCheckRow]
+    estimate: bool = True
+    not_tax_advice: bool = True
+
+
+@router.get("/{portfolio_id}/trade-check", response_model=TradeCheckSummary)
+@safe_endpoint
+def paper_trade_check(portfolio_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """The trade check in shadow: which trades it would have blocked and the NAV with it on."""
+    from app.decision.trade_check import summary as trade_check_summary
+
+    _owned(db, portfolio_id, user)
+    try:
+        nav = get_summary(db, portfolio_id).get("total_value")
+    except Exception as exc:  # noqa: BLE001 - a pricing outage leaves the NAV out, not the check
+        logger.warning("trade-check: NAV unavailable for %s: %s", portfolio_id, exc)
+        nav = None
+    return trade_check_summary(db, portfolio_id, float(nav) if nav is not None else None)

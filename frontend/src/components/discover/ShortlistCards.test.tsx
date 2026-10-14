@@ -87,4 +87,20 @@ describe("ShortlistCards pool rank (ADR 0018 §6)", () => {
     render(<ShortlistCards candidates={[base]} onOpenDossier={() => {}} />);
     expect(screen.queryByTestId("pool-rank")).not.toBeInTheDocument();
   });
+  it("says whether a pick is worth acting on after costs", () => {
+    const tiers = (low: number) => ({
+      n_eff: 120,
+      base: { n_runs: 120, hit_rate: 0.5, range: [0.45, 0.55] as [number, number] },
+      tiers: [{ tier: "top" as const, n_runs: 120, hit_rate: 0.6, range: [low, 0.66] as [number, number] }],
+    });
+    const { rerender } = render(
+      <ShortlistCards candidates={[{ ...base, pool_rank: 3, pool_size: 187 }]} onOpenDossier={() => {}} tiers={tiers(0.48)} />,
+    );
+    expect(screen.getByTestId("worth-acting")).toHaveTextContent("Not yet: no edge is shown for this tier");
+    expect(screen.getByTestId("worth-acting")).toHaveTextContent("about €2.98 (0.6 %)");
+    rerender(
+      <ShortlistCards candidates={[{ ...base, pool_rank: 3, pool_size: 187 }]} onOpenDossier={() => {}} tiers={tiers(0.53)} />,
+    );
+    expect(screen.getByTestId("worth-acting")).toHaveTextContent("Possibly");
+  });
 });

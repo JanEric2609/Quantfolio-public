@@ -14349,6 +14349,24 @@
         "title": "TelegramPairingCodeOut",
         "type": "object"
       },
+      "TelegramTestMessageOut": {
+        "properties": {
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "sent": {
+            "title": "Sent",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sent",
+          "message"
+        ],
+        "title": "TelegramTestMessageOut",
+        "type": "object"
+      },
       "TestEmailRequest": {
         "properties": {
           "to_address": {
@@ -14917,6 +14935,184 @@
           "satellite_max_pct"
         ],
         "title": "TrackingErrorBudget",
+        "type": "object"
+      },
+      "TradeCheckRow": {
+        "properties": {
+          "contribution_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contribution Eur"
+          },
+          "cost_eur": {
+            "title": "Cost Eur",
+            "type": "number"
+          },
+          "edge_eur": {
+            "title": "Edge Eur",
+            "type": "number"
+          },
+          "notional_eur": {
+            "title": "Notional Eur",
+            "type": "number"
+          },
+          "p_hit": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Hit"
+          },
+          "p_source": {
+            "title": "P Source",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          },
+          "side": {
+            "title": "Side",
+            "type": "string"
+          },
+          "tax_eur": {
+            "title": "Tax Eur",
+            "type": "number"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "trade_id": {
+            "title": "Trade Id",
+            "type": "string"
+          },
+          "traded_on": {
+            "title": "Traded On",
+            "type": "string"
+          },
+          "verdict": {
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trade_id",
+          "traded_on",
+          "ticker",
+          "side",
+          "notional_eur",
+          "cost_eur",
+          "tax_eur",
+          "edge_eur",
+          "p_source",
+          "verdict",
+          "reason",
+          "resolved"
+        ],
+        "title": "TradeCheckRow",
+        "type": "object"
+      },
+      "TradeCheckSummary": {
+        "properties": {
+          "blocked_contribution_eur": {
+            "title": "Blocked Contribution Eur",
+            "type": "number"
+          },
+          "checked_nav_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked Nav Eur"
+          },
+          "cost_of_blocked_eur": {
+            "title": "Cost Of Blocked Eur",
+            "type": "number"
+          },
+          "cost_paid_eur": {
+            "title": "Cost Paid Eur",
+            "type": "number"
+          },
+          "estimate": {
+            "default": true,
+            "title": "Estimate",
+            "type": "boolean"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "nav_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nav Eur"
+          },
+          "not_tax_advice": {
+            "default": true,
+            "title": "Not Tax Advice",
+            "type": "boolean"
+          },
+          "open": {
+            "title": "Open",
+            "type": "integer"
+          },
+          "passed_contribution_eur": {
+            "title": "Passed Contribution Eur",
+            "type": "number"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/TradeCheckRow"
+            },
+            "title": "Recent",
+            "type": "array"
+          },
+          "trades_checked": {
+            "title": "Trades Checked",
+            "type": "integer"
+          },
+          "would_block": {
+            "title": "Would Block",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "mode",
+          "trades_checked",
+          "would_block",
+          "cost_paid_eur",
+          "cost_of_blocked_eur",
+          "blocked_contribution_eur",
+          "passed_contribution_eur",
+          "open",
+          "recent"
+        ],
+        "title": "TradeCheckSummary",
         "type": "object"
       },
       "TradeIn": {
@@ -25043,6 +25239,49 @@
         ]
       }
     },
+    "/api/paper-portfolio/{portfolio_id}/trade-check": {
+      "get": {
+        "description": "The trade check in shadow: which trades it would have blocked and the NAV with it on.",
+        "operationId": "paper_trade_check_api_paper_portfolio__portfolio_id__trade_check_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TradeCheckSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Paper Trade Check",
+        "tags": [
+          "paper-portfolio"
+        ]
+      }
+    },
     "/api/performance/composites": {
       "get": {
         "description": "List user's composites.",
@@ -31229,6 +31468,28 @@
           }
         },
         "summary": "Create Pairing Code",
+        "tags": [
+          "telegram"
+        ]
+      }
+    },
+    "/api/telegram/test-message": {
+      "post": {
+        "description": "Send one message to the caller's linked chat, so alerts are known to arrive.",
+        "operationId": "send_test_message_api_telegram_test_message_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelegramTestMessageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Send Test Message",
         "tags": [
           "telegram"
         ]
