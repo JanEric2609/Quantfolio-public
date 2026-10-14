@@ -171,6 +171,8 @@ def link_pairing_code(db: Session, code: str, chat_id: str) -> TelegramAccount |
         db.add(account)
     else:
         account.chat_id = chat_id
+        # A new link: the settings card watches this to see its code was used.
+        account.linked_at = datetime.now(UTC)
 
     db.delete(pairing)
     db.commit()

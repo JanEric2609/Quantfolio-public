@@ -28,13 +28,16 @@ the paper books are a model of the system's judgement and are charged the same w
    (zero under a valid NV certificate; otherwise flat KESt+Soli after Teilfreistellung, counted in full,
    which is an upper bound).
 2. **Edge.** `p` = chance the call beats MSCI World over 21 trading days (a sell: that the sold name
-   lags it). In order: the call's calibrated conviction (ADR 0018); else the sleeve's own resolved trades,
+   lags it). In order: the calibrated conviction (ADR 0018) of the call behind the trade, which the advisor
+   stores in the same cycle just after booking it (a call more than an hour later is another cycle's); else the sleeve's own resolved trades,
    one vote per date, shrunk toward 0.5 by 20 pseudo-dates; else none (`p = 0.5`, no edge). `m` is the
    sleeve's mean |21-day excess return| (4 % before it has history). Only outcomes known on the trade
    day are used.
 3. **Shadow.** The check never stops a paper trade. A daily job (22:30 UTC) writes one
    `paper_trade_checks` row per trade of every non-manual sleeve and marks it daily until its 21-day
-   horizon ends: `contribution = sign · notional · (r_asset − r_MSCI World) − cost`. The
+   horizon ends (or, with no close on the horizon day, 7 days after it, on the last closes there are):
+   `contribution = sign · notional · (r_asset − r_MSCI World) − cost`. A sale's tax uses the average cost
+   of the position just before it, replayed from the run's start. The
    counterfactual is benchmark-relative, the calibrator's own hit definition: a blocked buy's money sits
    in MSCI World, a blocked sell's position is kept. **Value with the check on = NAV − Σ contribution
    of blocked trades.** It ignores what later trades did with the same shares; it is an estimate.

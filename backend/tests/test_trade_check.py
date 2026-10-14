@@ -218,3 +218,86 @@ def test_summary_adds_back_the_blocked_trades(db, monkeypatch):
     assert out["checked_nav_eur"] == pytest.approx(10_500.0 - out["blocked_contribution_eur"])
     assert out["estimate"] is True and out["not_tax_advice"] is True
     assert out["recent"][0]["verdict"] == "block"
+
+
+def _sell_basis(db, sale):
+    return trade_check._avg_cost_before(db, sale)
+
+
+def test_basis_of_a_sale_after_a_full_sale_and_rebuy_is_the_rebuy(db):
+    sleeve = _sleeve(db, _user(db))
+    _trade(db, sleeve, qty="1", price="100", when=TRADE_AT)
+    _trade(db, sleeve, side="sell", qty="1", price="120", when=TRADE_AT + timedelta(days=1))
+    _trade(db, sleeve, qty="1", price="200", when=TRADE_AT + timedelta(days=2))
+    sale = _trade(db, sleeve, side="sell", qty="1", price="210", when=TRADE_AT + timedelta(days=3))
+    db.commit()
+    assert _sell_basis(db, sale) == pytest.approx(200.0)
+
+
+def test_basis_of_a_seeded_holding_ignores_buys_after_the_sale(db):
+    sleeve = _sleeve(db, _user(db))
+    # Seeded 10 @ 50 (no trade), bought 10 @ 70, sold 5, then bought 15 @ 90.
+    _trade(db, sleeve, qty="10", price="70", when=TRADE_AT)
+    sale = _trade(db, sleeve, side="sell", qty="5", price="80", when=TRADE_AT + timedelta(days=1))
+    _trade(db, sleeve, qty="15", price="90", when=TRADE_AT + timedelta(days=2))
+    db.add(PaperHolding(portfolio_id=sleeve.id, ticker="AAPL", name="Apple", quantity=Decimal("30"),
+                        avg_buy_price=Decimal(str((15 * 60 + 15 * 90) / 30)), currency="EUR"))
+    db.commit()
+    assert _sell_basis(db, sale) == pytest.approx(60.0)
+
+
+def test_a_call_from_a_later_cycle_is_not_used(db, monkeypatch):
+    user = _user(db)
+    sleeve = _sleeve(db, user)
+    _trade(db, sleeve)
+    for minutes, calibrated in ((2, 0.7), (60 * 20, 0.95)):
+        at = TRADE_AT + timedelta(minutes=minutes)
+        db.add(DiscoveryPrediction(
+            user_id=user.id, run_id=f"r{minutes}", symbol="AAPL", predicted_at=at, horizon_days=21,
+            resolve_at=at + timedelta(days=30), direction="buy", conviction=0.8,
+            conviction_calibrated=calibrated, portfolio_id=sleeve.id,
+        ))
+    db.commit()
+    _prices(monkeypatch, {})
+    trade_check.run_daily(db, today=date(2026, 9, 2))
+    [check] = db.query(PaperTradeCheck).all()
+    # The call stored minutes after the trade (same cycle) counts; the next day's does not.
+    assert check.p_source == "calibrated" and check.p_hit == 0.7
+
+
+def test_a_check_without_a_close_on_its_horizon_day_resolves_after_the_grace(db, monkeypatch):
+    sleeve = _sleeve(db, _user(db))
+    _trade(db, sleeve)
+    db.commit()
+    end = horizon_end(TRADE_DAY)
+    asset = {k: v for k, v in _closes(TRADE_DAY, 0.004).items() if k < end.isoformat()}
+    bench = {k: v for k, v in _closes(TRADE_DAY, 0.001).items() if k < end.isoformat()}
+    _prices(monkeypatch, {"AAPL": asset, "EUNL.DE": bench})
+
+    trade_check.run_daily(db, today=end + timedelta(days=2))
+    [check] = db.query(PaperTradeCheck).all()
+    assert not check.resolved
+    trade_check.run_daily(db, today=end + timedelta(days=trade_check.RESOLVE_GRACE_DAYS))
+    db.refresh(check)
+    assert check.resolved and check.asset_return is not None
+
+
+def test_a_reset_archives_the_whole_check(db, monkeypatch):
+    import json
+    from unittest.mock import patch
+
+    from app.decision.paper_portfolio import reset_portfolio
+    from app.foundation.models.entities import PaperPortfolioArchive
+
+    sleeve = _sleeve(db, _user(db))
+    _trade(db, sleeve, side="sell")
+    db.commit()
+    _prices(monkeypatch, {})
+    trade_check.run_daily(db, today=date(2026, 9, 2))
+    with patch("app.decision.paper_portfolio.market_quote", return_value={"price": 100.0}):
+        reset_portfolio(db, sleeve.id, reason="test")
+    [row] = json.loads(db.query(PaperPortfolioArchive).one().payload_json)["trade_checks"]
+    for key in ("fee_eur", "spread_eur", "tax_eur", "mean_abs_excess", "reason", "horizon_end",
+                "asset_return", "benchmark_return", "checked_at"):
+        assert key in row
+    assert row["spread_eur"] == pytest.approx(1.0) and row["reason"]

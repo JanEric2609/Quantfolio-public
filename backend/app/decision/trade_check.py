@@ -76,6 +76,14 @@ EQUITY_ETF_EXEMPT_SHARE = 0.30
 MANUAL = "manual"
 #: How far back a first run looks for unchecked trades.
 BACKFILL_DAYS = 120
+#: The advisor books a trade and then, in the same cycle, stores the call it
+#: came from; a call stored later than this belongs to another cycle.
+SAME_CYCLE = timedelta(hours=1)
+#: Calendar days after its horizon a check is frozen on the last closes there
+#: are (a holiday or a delisting leaves no close on the horizon day itself).
+RESOLVE_GRACE_DAYS = 7
+#: Units below this count as no position (float residue of Numeric quantities).
+_EMPTY = 1e-9
 
 
 @dataclass(frozen=True)
@@ -143,7 +151,12 @@ def _utc(value: datetime) -> datetime:
 
 
 def _calibrated_p(db: Session, trade: PaperTrade) -> float | None:
-    """The advisor's calibrated conviction for this ticker and side on the trade's day."""
+    """The calibrated conviction of the call behind this trade.
+
+    The advisor stores its call just after booking the trade, so the window
+    reaches :data:`SAME_CYCLE` past it; a later cycle's call was not known
+    when the trade was made.
+    """
     when = _utc(trade.date)
     row = (
         db.query(DiscoveryPrediction.conviction_calibrated)
@@ -153,7 +166,7 @@ def _calibrated_p(db: Session, trade: PaperTrade) -> float | None:
             DiscoveryPrediction.direction == trade.side,
             DiscoveryPrediction.conviction_calibrated.isnot(None),
             DiscoveryPrediction.predicted_at >= when - timedelta(days=1),
-            DiscoveryPrediction.predicted_at <= when + timedelta(days=1),
+            DiscoveryPrediction.predicted_at <= when + SAME_CYCLE,
         )
         .order_by(DiscoveryPrediction.predicted_at.desc())
         .first()
@@ -213,29 +226,53 @@ def edge_for(db: Session, trade: PaperTrade, traded_on: date) -> Edge:
 
 
 def _avg_cost_before(db: Session, trade: PaperTrade) -> float | None:
-    """Average cost of the units this sale sold, from the holding or the trade log."""
+    """Average cost of the units this sale sold, as it stood just before the sale.
+
+    Seeded holdings have no buy trade, so the position the run started with is
+    found by undoing every trade from the current holding; the trades up to
+    this sale are then replayed forward from there. ``None`` when the basis
+    cannot be known (a seeded position fully sold and rebought before it).
+    """
+    trades = (
+        db.query(PaperTrade)
+        .filter(PaperTrade.portfolio_id == trade.portfolio_id, PaperTrade.ticker == trade.ticker)
+        .order_by(PaperTrade.date, PaperTrade.created_at, PaperTrade.id)
+        .all()
+    )
     holding = (
         db.query(PaperHolding)
         .filter(PaperHolding.portfolio_id == trade.portfolio_id, PaperHolding.ticker == trade.ticker)
         .first()
     )
-    if holding is not None and holding.avg_buy_price:
-        # A sale leaves the average cost of what remains unchanged.
-        return float(holding.avg_buy_price)
-    buys = (
-        db.query(PaperTrade.quantity, PaperTrade.price)
-        .filter(
-            PaperTrade.portfolio_id == trade.portfolio_id,
-            PaperTrade.ticker == trade.ticker,
-            PaperTrade.side == "buy",
-            PaperTrade.date < trade.date,
-        )
-        .all()
-    )
-    qty = sum(float(q) for q, _ in buys)
-    if qty <= 0:
-        return None
-    return sum(float(q) * float(p) for q, p in buys) / qty
+    qty = float(holding.quantity) if holding is not None else 0.0
+    avg: float | None = float(holding.avg_buy_price) if holding is not None and holding.avg_buy_price else None
+    if qty <= _EMPTY:
+        qty, avg = 0.0, None
+    for past in reversed(trades):
+        q, price = float(past.quantity), float(past.price)
+        if past.side == "buy":
+            before = qty - q
+            avg = (qty * avg - q * price) / before if before > _EMPTY and avg is not None else None
+            qty = max(before, 0.0)
+        else:
+            if qty <= _EMPTY:
+                avg = None  # the cost of a position sold out is not in what remains
+            qty += q
+    for past in trades:
+        if past.id == trade.id:
+            return avg
+        q, price = float(past.quantity), float(past.price)
+        if past.side == "buy":
+            if qty <= _EMPTY:
+                avg = price
+            elif avg is not None:
+                avg = (qty * avg + q * price) / (qty + q)
+            qty += q
+        else:
+            qty -= q
+            if qty <= _EMPTY:
+                qty, avg = 0.0, None
+    return None
 
 
 def _nv_valid(db: Session, user_id: str, year: int) -> bool:
@@ -270,7 +307,7 @@ def _period_return(closes: dict[str, float], start: date, end: date) -> tuple[fl
 
 
 def mark(check: PaperTradeCheck, asset: dict[str, float], bench: dict[str, float], today: date) -> None:
-    """Mark *check* to the latest closes; freeze it once its horizon has a close."""
+    """Mark *check* to the latest closes; freeze it once its horizon has a close or the grace has passed."""
     end = min(check.horizon_end, today)
     ra = _period_return(asset, check.traded_on, end)
     rb = _period_return(bench, check.traded_on, end)
@@ -279,7 +316,8 @@ def mark(check: PaperTradeCheck, asset: dict[str, float], bench: dict[str, float
     check.asset_return, check.benchmark_return = ra[0], rb[0]
     sign = 1.0 if check.side == "buy" else -1.0
     check.contribution_eur = sign * check.notional_eur * (ra[0] - rb[0]) - check.cost_eur
-    check.resolved = ra[1] >= check.horizon_end.isoformat() and rb[1] >= check.horizon_end.isoformat()
+    reached = ra[1] >= check.horizon_end.isoformat() and rb[1] >= check.horizon_end.isoformat()
+    check.resolved = reached or today >= check.horizon_end + timedelta(days=RESOLVE_GRACE_DAYS)
 
 
 # ---------------------------------------------------------------------------
