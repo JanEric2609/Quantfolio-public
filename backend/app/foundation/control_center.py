@@ -481,9 +481,9 @@ def _business_days_between(start: date, end: date) -> int:
 
 def _price_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
     """Stale closes for the benchmark and every held instrument."""
-    from app.foundation.live_positions import combined_positions
+    from app.foundation.live_positions import combined_positions, manual_holdings_filter
     from app.foundation.market import history
-    from app.foundation.models.entities import User
+    from app.foundation.models.entities import Holding, User
 
     tickers = {PRICE_BENCHMARK}
     for (user_id,) in db.query(User.id).all():
@@ -491,6 +491,8 @@ def _price_items(db: Session, now: datetime, items: list[AttentionItem]) -> None
             tickers.update(p.ticker for p in combined_positions(db, user_id, include_unreconciled=True) if p.ticker)
         except Exception:
             logger.warning("Holdings unavailable for the price check", exc_info=True)
+    # Holdings entered by hand are not broker positions; their prices go stale the same way.
+    tickers.update(t for (t,) in db.query(Holding.ticker).filter(manual_holdings_filter()).distinct() if t)
     production = _is_postgres(db)
     stale: list[str] = []
     for ticker in sorted(tickers):
@@ -581,11 +583,13 @@ def _error_items(db: Session, now: datetime, items: list[AttentionItem]) -> None
     errors = recent_errors(db, since=timedelta(days=1), now=now)
     if not errors:
         return
-    total = sum(int(str(e["count"])) for e in errors)
-    top = "; ".join(f"{e['kind']} at {e['location']}" for e in errors[:3])
+    # A row's count is since it was first seen, not per day, so the title counts
+    # the distinct errors seen today and the detail labels the totals as such.
+    distinct = len(errors)
+    top = "; ".join(f"{e['kind']} at {e['location']} ({e['count']}× in all)" for e in errors[:3])
     items.append(AttentionItem(
         "app-errors", "warning",
-        f"{total} unexpected error{'s' if total > 1 else ''} in the last day",
-        f"{len(errors)} distinct: {top}" + (" …" if len(errors) > 3 else ""),
+        f"{distinct} unexpected error{'s' if distinct > 1 else ''} seen in the last day",
+        top + (" …" if distinct > 3 else ""),
         "/settings/status#errors", "View errors",
     ))

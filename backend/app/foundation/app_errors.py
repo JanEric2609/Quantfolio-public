@@ -17,6 +17,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,8 @@ MAX_DETAIL = 8_000
 # Rows not seen for this long are deleted by the self-check.
 RETENTION = timedelta(days=90)
 
-_VOLATILE = re.compile(r"0x[0-9a-f]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f-]{27,}|\d+", re.IGNORECASE)
+# A UUID first and whole, or a digit-led one is cut into digit runs and its hex letters stay.
+_VOLATILE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|0x[0-9a-f]+|\d+", re.IGNORECASE)
 
 
 def fingerprint(source: str, kind: str, location: str, message: str) -> str:
@@ -56,18 +58,29 @@ def record_error(
     message = (message or "")[:MAX_MESSAGE]
     location = (location or "")[:MAX_LOCATION]
     key = fingerprint(source, kind, location, message)
+    detail = (detail or None) and detail[-MAX_DETAIL:]
+
+    def bump() -> bool:
+        # count = count + 1 in the database, so two reports at once both count.
+        values: dict = {"count": AppError.count + 1, "last_seen": when}
+        if detail:
+            values["detail"] = detail
+        updated = (
+            db.query(AppError).filter(AppError.fingerprint == key).update(values, synchronize_session=False)
+        )
+        return bool(updated)
+
     try:
-        row = db.query(AppError).filter(AppError.fingerprint == key).one_or_none()
-        if row is None:
-            db.add(AppError(
-                fingerprint=key, source=source, kind=kind, message=message, location=location,
-                detail=(detail or None) and detail[-MAX_DETAIL:], count=1, first_seen=when, last_seen=when,
-            ))
-        else:
-            row.count = (row.count or 0) + 1
-            row.last_seen = when
-            if detail:
-                row.detail = detail[-MAX_DETAIL:]
+        if not bump():
+            try:
+                with db.begin_nested():
+                    db.add(AppError(
+                        fingerprint=key, source=source, kind=kind, message=message, location=location,
+                        detail=detail, count=1, first_seen=when, last_seen=when,
+                    ))
+            except IntegrityError:
+                # Another report inserted the same fingerprint first: count on its row.
+                bump()
         db.commit()
     except Exception:
         db.rollback()

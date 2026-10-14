@@ -24,7 +24,7 @@ class AppError(Base):
     """An unexpected error, grouped by fingerprint (one row per distinct error).
 
     Written by the API's catch-all handler (``source="api"``) and by the
-    browser through ``POST /api/client-errors`` (``source="client"``). The
+    browser through ``POST /api/errors/client`` (``source="client"``). The
     Control Center's attention list and the daily self-check read the rows
     seen in the last day. A repeat bumps ``count`` and ``last_seen`` instead
     of adding a row, so a loop that fails every minute stays one line.

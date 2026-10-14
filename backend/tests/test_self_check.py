@@ -161,6 +161,58 @@ def test_errors_of_the_last_day_are_an_attention_item(tmp_path, monkeypatch):
     assert "TypeError at /plan" in items["app-errors"]["detail"]
 
 
+def test_fingerprint_masks_a_whole_uuid():
+    a = "row 9f8e7d6c-1111-2222-3333-aaaa44444444 missing"
+    b = "row 9f8e7d6c-1111-2222-3333-bbbb44444444 missing"
+    assert fingerprint("api", "E", "GET /a", a) == fingerprint("api", "E", "GET /a", b)
+
+
+def test_a_repeat_counts_once_more_and_keeps_the_newest_detail():
+    db = _memory_db()
+    for i in range(3):
+        record_error(db, source="api", kind="E", message="m", location="GET /a", detail=f"trace {i}")
+    [row] = db.query(AppError).all()
+    assert row.count == 3 and row.detail == "trace 2"
+
+
+def test_the_error_item_counts_distinct_errors_not_lifetime_repeats(tmp_path, monkeypatch):
+    _quiet(monkeypatch)
+    _status_file(tmp_path, monkeypatch, status="ok", finished_at=datetime.now(UTC).isoformat())
+    db = _memory_db()
+    old = datetime.now(UTC) - timedelta(days=20)
+    for _ in range(100):
+        record_error(db, source="api", kind="E", message="m", location="GET /a", now=old)
+    record_error(db, source="api", kind="E", message="m", location="GET /a")
+    item = {i["id"]: i for i in attention_items(db)}["app-errors"]
+    assert item["title"] == "1 unexpected error seen in the last day"
+    assert "101× in all" in item["detail"]
+
+
+def test_a_manual_holding_gets_the_stale_price_check(tmp_path, monkeypatch):
+    from app.foundation.models.entities import Holding, Portfolio
+
+    monkeypatch.setattr(control_center, "_extract_items", lambda clock, items: None)
+    monkeypatch.setattr(control_center, "_disk_items", lambda items: None)
+    _status_file(tmp_path, monkeypatch, status="ok", finished_at=datetime.now(UTC).isoformat())
+    db = _memory_db()
+    user = User(username="u", password_hash="x", role="admin")
+    db.add(user)
+    db.commit()
+    portfolio = Portfolio(user_id=user.id, name="Main")
+    db.add(portfolio)
+    db.commit()
+    db.add(Holding(portfolio_id=portfolio.id, ticker="SAP.DE", name="SAP", quantity=1, avg_buy_price=1, source="manual"))
+    db.commit()
+    monkeypatch.setattr(
+        "app.foundation.market.history",
+        lambda db, ticker, days=30, allow_live=True: [
+            {"date": date.today() - timedelta(days=(12 if ticker == "SAP.DE" else 0)), "close": 100.0}
+        ],
+    )
+    items = {item["id"]: item for item in attention_items(db)}
+    assert "SAP.DE" in items["prices-stale"]["detail"]
+
+
 def test_old_errors_are_pruned_and_not_recent():
     db = _memory_db()
     old = datetime.now(UTC) - timedelta(days=120)
