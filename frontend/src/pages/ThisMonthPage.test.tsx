@@ -8,7 +8,10 @@ import type { MonthlyPlan, PlanSleeve } from "../lib/api";
 // A plain function, not vi.fn(): a spy's result bookkeeping reports the
 // deliberately rejected promise of the error-state test as a failure.
 let loadPlan: () => Promise<MonthlyPlan> = async () => plan;
-vi.mock("../lib/api", () => ({ getMonthlyPlan: () => loadPlan() }));
+vi.mock("../lib/api", () => ({
+  getMonthlyPlan: () => loadPlan(),
+  getCrashGuard: () => Promise.resolve({ active: false, market: { ticker: "EUNL.DE", drawdown: 0, level: "calm", level_label: "Calm" }, episodes: [], message: "", plan_note: null, behaviour: [] }),
+}));
 
 function sleeve(overrides: Partial<PlanSleeve>): PlanSleeve {
   return {

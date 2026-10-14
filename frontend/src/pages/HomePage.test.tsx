@@ -7,6 +7,10 @@ import type { AttentionItem, MonthlyPlan, PendingRecommendation, WealthSummary }
 import { HomePage } from "./HomePage";
 
 const mocks = vi.hoisted(() => ({
+  getCrashGuard: vi.fn().mockResolvedValue({
+    active: false, market: { ticker: "EUNL.DE", drawdown: 0, level: "calm", level_label: "Calm" },
+    episodes: [], message: "", plan_note: null, behaviour: [],
+  }),
   api: vi.fn(),
   getMacroRegime: vi.fn(),
   getMonthlyPlan: vi.fn(),

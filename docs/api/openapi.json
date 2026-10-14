@@ -1722,6 +1722,216 @@
         "title": "CorpOut",
         "type": "object"
       },
+      "CrashGuardEpisode": {
+        "properties": {
+          "depth": {
+            "title": "Depth",
+            "type": "number"
+          },
+          "months_to_recover": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months To Recover"
+          },
+          "months_to_trough": {
+            "title": "Months To Trough",
+            "type": "number"
+          },
+          "peak_date": {
+            "title": "Peak Date",
+            "type": "string"
+          },
+          "recovery_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Date"
+          },
+          "trough_date": {
+            "title": "Trough Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "peak_date",
+          "trough_date",
+          "depth",
+          "months_to_trough"
+        ],
+        "title": "CrashGuardEpisode",
+        "type": "object"
+      },
+      "CrashGuardFinding": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "detail"
+        ],
+        "title": "CrashGuardFinding",
+        "type": "object"
+      },
+      "CrashGuardMarket": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "close": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close"
+          },
+          "drawdown": {
+            "title": "Drawdown",
+            "type": "number"
+          },
+          "history_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History Start"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "level_label": {
+            "title": "Level Label",
+            "type": "string"
+          },
+          "peak": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peak"
+          },
+          "peak_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peak Date"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ticker",
+          "drawdown",
+          "level",
+          "level_label"
+        ],
+        "title": "CrashGuardMarket",
+        "type": "object"
+      },
+      "CrashGuardResponse": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "behaviour": {
+            "items": {
+              "$ref": "#/components/schemas/CrashGuardFinding"
+            },
+            "title": "Behaviour",
+            "type": "array"
+          },
+          "episodes": {
+            "items": {
+              "$ref": "#/components/schemas/CrashGuardEpisode"
+            },
+            "title": "Episodes",
+            "type": "array"
+          },
+          "market": {
+            "$ref": "#/components/schemas/CrashGuardMarket"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "plan_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Plan Note"
+          }
+        },
+        "required": [
+          "active",
+          "market",
+          "episodes",
+          "message",
+          "behaviour"
+        ],
+        "title": "CrashGuardResponse",
+        "type": "object"
+      },
       "CreateConfigRequest": {
         "properties": {
           "config_json": {
@@ -25173,6 +25383,28 @@
           }
         },
         "summary": "Snapshot Actions",
+        "tags": [
+          "plan"
+        ]
+      }
+    },
+    "/api/plan/crash-guard": {
+      "get": {
+        "description": "How far MSCI World is below its high, earlier falls in the stored history, and what to keep doing.",
+        "operationId": "crash_guard_state_api_plan_crash_guard_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CrashGuardResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Crash Guard State",
         "tags": [
           "plan"
         ]

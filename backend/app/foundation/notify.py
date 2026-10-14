@@ -205,3 +205,34 @@ def _format_nudge_email_body(nudge: Nudge) -> str:
         body = f"Details:\n{json.dumps(payload, indent=2)}"
 
     return header + body
+
+
+def alert_owners(
+    db: Session,
+    *,
+    source: str,
+    title: str,
+    telegram_text: str | None,
+    body: str | None = None,
+    severity: str = "warning",
+    href: str | None = None,
+    bell: bool = True,
+) -> bool:
+    """Tell every admin: a Telegram message to a linked chat and (``bell``) an in-app notification.
+
+    ``telegram_text`` None sends no Telegram message. Returns True when at
+    least one Telegram message went out. Used by the daily self-check and the
+    crash guard, whose alerts are about the whole installation, not one user.
+    """
+    from app.foundation.models.entities import TelegramAccount
+    from app.foundation.telegram_bot import send_telegram_message
+
+    sent = False
+    for admin in db.query(User).filter(User.role == "admin").all():
+        if telegram_text:
+            account = db.query(TelegramAccount).filter(TelegramAccount.user_id == admin.id).first()
+            if account is not None and account.chat_id:
+                sent = send_telegram_message(db, str(account.chat_id), telegram_text) or sent
+        if bell:
+            create_notification(db, admin.id, source, title, body=body, severity=severity, href=href)
+    return sent

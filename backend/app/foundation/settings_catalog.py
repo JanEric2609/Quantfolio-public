@@ -241,6 +241,10 @@ _reg(CatalogEntry("discover_investor_exclusions", "profile", "Exclusions",
     placeholder="tobacco, weapons, fossil fuels",
     section="Investor profile"))
 
+_reg(CatalogEntry("crash_plan_note", "profile", "My rule for a market fall",
+    "Write down now, while markets are calm, what you will do when they fall 20 % or more (for example: "
+    "keep the savings plan, sell nothing, top up from savings). The crash guard shows it back to you then.",
+    placeholder="Keep the savings plan running. Sell nothing. Look again in a year.", section="Crash guard"))
 _reg(CatalogEntry("monthly_contribution_eur", "profile", "Monthly contribution",
     "What you invest each month. 'This month' splits it across core, factor tilt and stock picks.",
     input_type="number", unit="eur", min=0, section="Monthly plan"))

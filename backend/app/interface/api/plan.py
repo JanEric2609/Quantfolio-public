@@ -271,3 +271,51 @@ def list_actions(
         query = query.filter(MonthlyPlanAction.month == month)
     query = query.order_by(MonthlyPlanAction.month.desc(), MonthlyPlanAction.sleeve)
     return [StoredPlanAction(**serialize(row)) for row in query.all()]
+
+
+class CrashGuardMarket(BaseModel):
+    ticker: str
+    as_of: str | None = None
+    close: float | None = None
+    peak: float | None = None
+    peak_date: str | None = None
+    drawdown: float
+    level: str
+    level_label: str
+    history_start: str | None = None
+
+
+class CrashGuardEpisode(BaseModel):
+    peak_date: str
+    trough_date: str
+    depth: float
+    months_to_trough: float
+    recovery_date: str | None = None
+    months_to_recover: float | None = None
+
+
+class CrashGuardFinding(BaseModel):
+    id: str
+    kind: str
+    title: str
+    detail: str
+
+
+class CrashGuardResponse(BaseModel):
+    active: bool
+    market: CrashGuardMarket
+    episodes: list[CrashGuardEpisode]
+    message: str
+    plan_note: str | None = None
+    behaviour: list[CrashGuardFinding]
+
+
+@router.get("/crash-guard", response_model=CrashGuardResponse)
+def crash_guard_state(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> CrashGuardResponse:
+    """How far MSCI World is below its high, earlier falls in the stored history, and what to keep doing."""
+    from app.decision.crash_guard import crash_guard
+
+    return CrashGuardResponse.model_validate(crash_guard(db, user.id))

@@ -233,6 +233,9 @@ DEFAULT_PUBLIC_SETTINGS: dict[str, Any] = {
     # allocation across core / factor tilt / stock picks; the caps are the
     # owner's "tight" tracking-error budget (audit 2026-09-24, section 7).
     "monthly_contribution_eur": 1000,
+    # The owner's own rule for a market fall, written in calm times; the crash
+    # guard (decision/crash_guard.py) shows it back when markets are down.
+    "crash_plan_note": "",
     # How new money is invested and where (decision/monthly_plan.py).
     "plan_contribution_mode": "savings_plan",
     # "auto" = the cheapest connected broker for each buy (Scalable when its

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { AlertTriangle, CalendarCheck, CheckCircle2, ChevronRight, Info, Lock, RefreshCw, Settings2 } from "lucide-react";
+import { CrashGuardBanner } from "../components/composed/CrashGuardBanner";
 import { PageHeader } from "../components/composed/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -429,6 +430,8 @@ export function ThisMonthPage() {
           </Button>
         }
       />
+
+      <CrashGuardBanner />
 
       <Card className={data.no_change ? "border-success/40" : undefined}>
         <CardHeader>
