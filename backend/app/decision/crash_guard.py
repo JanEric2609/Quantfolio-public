@@ -112,7 +112,8 @@ def find_episodes(closes: list[tuple[date, float]], min_depth: float = EPISODE_M
             continue
         if close < trough:
             trough_day, trough = day, close
-        if 1 - trough / peak >= min_depth:
+        # Rounded as in market_state_from, so a fall of exactly 10 % is an episode there and here.
+        if round(1 - trough / peak, 4) >= min_depth:
             in_fall = True
     if in_fall:
         episodes.append(Episode(
@@ -208,7 +209,7 @@ def behaviour(db: Session, user_id: str, state: MarketState) -> list[dict[str, A
     for plan in running_savings_plans(db, user_id, cfg):
         if plan["running"]:
             continue
-        reason = "paused" if plan["not_running_reason"] == "paused" else "has not run for weeks"
+        reason = "paused" if plan["not_running_reason"] == "paused" else "overdue"
         findings.append({
             "id": f"plan-{plan['broker']}-{plan['isin'] or plan['name']}",
             "kind": "savings_plan_stopped",
@@ -303,6 +304,20 @@ def run_daily(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
     seen: set[str] = set(previous.get("behaviour_seen") or [])
     sent: list[str] = []
 
+    # Back at the high: either today's close is the high, or a later high was set
+    # since the last run (a missed day, a backfill) and a new fall started from it.
+    new_high = bool(previous.get("peak_date")) and str(state.peak_date) > str(previous["peak_date"])
+    if worst_level != "calm" and (state.drawdown == 0.0 or new_high):
+        text = ("Quantfolio crash guard: MSCI World is back at its high. "
+                "Anyone who kept the plan running came through it whole.")
+        alert_owners(db, source="crash_guard", title="Markets back at their high", telegram_text=text,
+                     body=text, severity="info", href="/plan")
+        sent.append("recovered")
+        worst_level = "calm"
+        seen = set()
+    elif new_high:
+        seen = set()
+
     if LEVEL_ORDER[state.level] > LEVEL_ORDER.get(worst_level, 0):
         note = _note(db)
         text = f"Quantfolio crash guard: {state.level_label.lower()}.\n\n{_message(state)}"
@@ -312,14 +327,6 @@ def run_daily(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
                      telegram_text=text, body=_message(state), severity="warning", href="/plan")
         sent.append(f"level:{state.level}")
         worst_level = state.level
-    elif state.drawdown == 0.0 and worst_level != "calm":
-        text = ("Quantfolio crash guard: MSCI World is back at its high. "
-                "Anyone who kept the plan running came through it whole.")
-        alert_owners(db, source="crash_guard", title="Markets back at their high", telegram_text=text,
-                     body=text, severity="info", href="/plan")
-        sent.append("recovered")
-        worst_level = "calm"
-        seen = set()
 
     if state.level != "calm":
         for (user_id,) in db.query(User.id).filter(User.role == "admin").all():
@@ -333,7 +340,7 @@ def run_daily(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
                 sent.append(finding["id"])
 
     upsert_public_settings(db, {STATE_KEY: {
-        "worst_level": worst_level, "behaviour_seen": sorted(seen),
+        "worst_level": worst_level, "behaviour_seen": sorted(seen), "peak_date": state.peak_date,
         "level": state.level, "drawdown": state.drawdown, "checked_at": when.isoformat(),
     }})
     return {"level": state.level, "drawdown": state.drawdown, "sent": sent}

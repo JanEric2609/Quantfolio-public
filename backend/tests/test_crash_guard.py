@@ -252,3 +252,27 @@ def test_missing_prices_are_not_a_recovery(monkeypatch):
 
     assert len(sent) == 1 and "bear market" in sent[0]
     assert crash_guard._load_state(db)["worst_level"] == "bear"
+
+
+def test_a_fall_of_exactly_ten_percent_is_an_episode():
+    closes = _series([100, 90, 100])
+    assert market_state_from("X", closes[:2]).level == "correction"
+    [episode] = find_episodes(closes)
+    assert episode.depth == 0.10 and episode.recovery_date is not None
+
+
+def test_a_new_high_missed_between_runs_resets_the_alerts(monkeypatch):
+    db = _memory_db()
+    user = _user(db)
+    _with_telegram(db, user)
+    sent = _capture(monkeypatch)
+    now = datetime(2026, 10, 15, 7, tzinfo=UTC)
+
+    _patch_prices(monkeypatch, [100, 75])
+    crash_guard.run_daily(db, now=now)
+    # The run on the new high was missed; the market already fell 14 % from it.
+    _patch_prices(monkeypatch, [100, 75, 105, 90])
+    result = crash_guard.run_daily(db, now=now)
+
+    assert result["sent"] == ["recovered", "level:correction"]
+    assert "back at its high" in sent[1] and "correction" in sent[2]
