@@ -18,8 +18,10 @@ write_status() {
   local status="$1" detail="$2" file="${3:-}" bytes="${4:-0}"
   install -d -m 0755 "$(dirname "${STATUS_FILE}")"
   local tmp="${STATUS_FILE}.tmp"
+  # JSON string escaping: backslash first, then quotes; newlines and tabs become spaces.
+  detail="${detail//\\/\\\\}"; detail="${detail//\"/\\\"}"; detail="${detail//$'\n'/ }"; detail="${detail//$'\t'/ }"
   printf '{"status": "%s", "finished_at": "%s", "file": "%s", "bytes": %s, "detail": "%s"}\n' \
-    "${status}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${file}" "${bytes}" "${detail//\"/\'}" >"${tmp}"
+    "${status}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${file}" "${bytes}" "${detail}" >"${tmp}"
   chmod 0644 "${tmp}"
   mv -f "${tmp}" "${STATUS_FILE}"
 }
