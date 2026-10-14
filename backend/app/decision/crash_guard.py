@@ -166,15 +166,20 @@ def market_state(db: Session) -> MarketState:
 
 def _core_units_by_isin(
     db: Session, user_id: str, core_isins: set[str], since: date,
-) -> dict[str, tuple[str, dict[date, float]]]:
-    """Units held per core ISIN and day since *since*, with the position's name.
+) -> dict[str, tuple[str, float, float]]:
+    """Per core ISIN: name, the most units held on a book day since *since*, and the units held now.
 
     Per ISIN, not summed: units of two ETFs are not interchangeable, so selling
-    one while buying another must still read as a sale.
+    one while buying another must still read as a sale. "Now" is the synced
+    broker positions (``live_positions``, what the book snapshots record): a
+    fully sold position is dropped there and in the day's snapshot rather than
+    written as 0, so only a comparison with the current positions sees it, and
+    a day no sync ran leaves them, and so the comparison, unchanged.
     """
     from sqlalchemy import func
 
-    from app.foundation.models.entities import BookPositionSnapshot, PortfolioSnapshot
+    from app.foundation.live_positions import live_positions
+    from app.foundation.models.entities import BookPositionSnapshot
 
     rows = (
         db.query(
@@ -189,29 +194,17 @@ def _core_units_by_isin(
         .group_by(BookPositionSnapshot.isin, BookPositionSnapshot.snapshot_date)
         .all()
     )
-    out: dict[str, tuple[str, dict[date, float]]] = {}
-    for isin, day, name, qty in rows:
-        _, series = out.setdefault(isin, (name or isin, {}))
-        series[day] = float(qty or 0)
-    if not out:
-        return out
-    # A fully sold position is dropped from the day's rows, not written as 0, so
-    # "now" is the latest day the book was recorded at all (snapshot_book_positions
-    # writes the day's dkb_mirror row on every run, positions or not). A core ETF
-    # missing that day was sold; a day nothing ran has no row and changes nothing.
-    mirror = (
-        db.query(func.max(PortfolioSnapshot.date))
-        .filter(
-            PortfolioSnapshot.user_id == user_id,
-            PortfolioSnapshot.source == "dkb_mirror",
-            PortfolioSnapshot.date >= since,
-        )
-        .scalar()
-    )
-    latest = max([max(series) for _, series in out.values()] + ([mirror] if mirror else []))
-    for _, series in out.values():
-        series.setdefault(latest, 0.0)
-    return out
+    highs: dict[str, tuple[str, float]] = {}
+    for isin, _day, name, qty in rows:
+        label, high = highs.get(isin, (name or isin, 0.0))
+        highs[isin] = (label, max(high, float(qty or 0)))
+    if not highs:
+        return {}
+    now: dict[str, float] = {}
+    for pos in live_positions(db, user_id, include_unreconciled=True):
+        if pos.isin in highs:
+            now[pos.isin] = now.get(pos.isin, 0.0) + float(pos.quantity or 0)
+    return {isin: (name, high, now.get(isin, 0.0)) for isin, (name, high) in highs.items()}
 
 
 def behaviour(db: Session, user_id: str, state: MarketState) -> list[dict[str, Any]]:
@@ -233,9 +226,7 @@ def behaviour(db: Session, user_id: str, state: MarketState) -> list[dict[str, A
             "detail": "Buying through a fall is what makes the recovery count. A paused plan buys nothing at the lower prices.",
         })
     held = _core_units_by_isin(db, user_id, set(cfg["core_isins"]), date.fromisoformat(state.peak_date))
-    for isin, (name, units) in sorted(held.items()):
-        high = max(units.values())
-        now = units[max(units)]
+    for isin, (name, high, now) in sorted(held.items()):
         if high > 0 and (high - now) / high >= MIN_SOLD_SHARE:
             findings.append({
                 "id": f"core-sold-{isin}",

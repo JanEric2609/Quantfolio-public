@@ -78,6 +78,27 @@ def _patch_prices(monkeypatch, values, start=date(2026, 1, 1)):
     monkeypatch.setattr(crash_guard, "_closes", lambda db, ticker: closes)
 
 
+def _held_now(db, user, isin="IE00B4L5Y983", qty=100):
+    """The broker's current position, as the last sync left it."""
+    from app.foundation.models.entities import BrokerPosition
+
+    account = db.query(ConnectedAccount).filter(ConnectedAccount.user_id == user.id).first()
+    if account is None:
+        account = ConnectedAccount(user_id=user.id, source="scalable", name="Depot", account_type="depot")
+        db.add(account)
+        db.commit()
+    db.add(BrokerPosition(user_id=user.id, connected_account_id=account.id, source="scalable",
+                          isin=isin, name=isin, quantity=qty))
+    db.commit()
+
+
+def _snapshot(db, user, day, isin="IE00B4L5Y983", qty=100):
+    db.add(BookPositionSnapshot(
+        user_id=user.id, snapshot_date=day, source="scalable", account_id="a", isin=isin, name=isin, quantity=qty,
+    ))
+    db.commit()
+
+
 def test_a_paused_savings_plan_during_a_fall_is_flagged(monkeypatch):
     db = _memory_db()
     user = _user(db)
@@ -100,11 +121,8 @@ def test_core_units_sold_after_the_high_are_flagged(monkeypatch):
     user = _user(db)
     start = date(2026, 1, 1)
     for offset, qty in ((1, 100), (2, 100), (3, 60)):
-        db.add(BookPositionSnapshot(
-            user_id=user.id, snapshot_date=start + timedelta(days=offset), source="scalable",
-            account_id="a", isin="IE00B4L5Y983", name="Core", quantity=qty,
-        ))
-    db.commit()
+        _snapshot(db, user, start + timedelta(days=offset), qty=qty)
+    _held_now(db, user, qty=60)
     _patch_prices(monkeypatch, [100, 110, 90, 85], start)
     findings = crash_guard.crash_guard(db, user.id)["behaviour"]
     assert [f["kind"] for f in findings] == ["core_sold"]
@@ -199,27 +217,14 @@ def test_the_rule_goes_into_the_level_alert(monkeypatch):
     assert "Keep buying." in sent[0]
 
 
-def _book_day(db, user, day, core_qty=None):
-    """One run of snapshot_book_positions: the day's whole-book row, plus a core row while it is held."""
-    from app.foundation.models.entities import PortfolioSnapshot
-
-    db.add(PortfolioSnapshot(user_id=user.id, date=day, source="dkb_mirror"))
-    if core_qty is not None:
-        db.add(BookPositionSnapshot(
-            user_id=user.id, snapshot_date=day, source="scalable",
-            account_id="a", isin="IE00B4L5Y983", name="Core", quantity=core_qty,
-        ))
-    db.commit()
-
-
 def test_selling_the_whole_core_is_flagged(monkeypatch):
-    # A fully sold position is dropped from the day's rows, not written as 0.
+    # A fully sold position is gone from the broker's positions and the day's snapshot.
     db = _memory_db()
     user = _user(db)
     start = date(2026, 1, 1)
-    _book_day(db, user, start + timedelta(days=1), 100)
-    _book_day(db, user, start + timedelta(days=2), 100)
-    _book_day(db, user, start + timedelta(days=3))
+    _snapshot(db, user, start + timedelta(days=1))
+    _snapshot(db, user, start + timedelta(days=2))
+    _held_now(db, user, isin="IE00BKM4GZ66", qty=5)  # something else is still held
     _patch_prices(monkeypatch, [100, 110, 90, 85], start)
     findings = crash_guard.crash_guard(db, user.id)["behaviour"]
     assert [f["kind"] for f in findings] == ["core_sold"]
@@ -230,11 +235,26 @@ def test_a_day_without_a_sync_is_not_a_sale(monkeypatch):
     db = _memory_db()
     user = _user(db)
     start = date(2026, 1, 1)
-    _book_day(db, user, start + timedelta(days=1), 100)
-    _book_day(db, user, start + timedelta(days=2), 100)
+    _snapshot(db, user, start + timedelta(days=1))
+    _snapshot(db, user, start + timedelta(days=2))
+    _held_now(db, user)
     _patch_prices(monkeypatch, [100, 110, 90, 85, 84, 83], start)  # prices go on; the book was not recorded
     assert crash_guard.crash_guard(db, user.id)["behaviour"] == []
 
+
+def test_a_wealth_page_load_is_not_a_sale(monkeypatch):
+    # Loading Home writes the day's dkb_mirror PortfolioSnapshot without book rows (pullfrog on #19).
+    from app.foundation.models.entities import PortfolioSnapshot
+
+    db = _memory_db()
+    user = _user(db)
+    start = date(2026, 1, 1)
+    _snapshot(db, user, start + timedelta(days=1))
+    _held_now(db, user)
+    db.add(PortfolioSnapshot(user_id=user.id, date=start + timedelta(days=3), source="dkb_mirror"))
+    db.commit()
+    _patch_prices(monkeypatch, [100, 110, 90, 85], start)
+    assert crash_guard.crash_guard(db, user.id)["behaviour"] == []
 
 def test_missing_prices_are_not_a_recovery(monkeypatch):
     db = _memory_db()
@@ -287,11 +307,9 @@ def test_swapping_one_core_etf_for_another_is_still_a_sale(monkeypatch):
     for offset, world, em in ((1, 100, 0), (2, 50, 50)):
         for isin, qty in (("IE00B4L5Y983", world), ("IE00BKM4GZ66", em)):
             if qty:
-                db.add(BookPositionSnapshot(
-                    user_id=user.id, snapshot_date=start + timedelta(days=offset), source="scalable",
-                    account_id="a", isin=isin, name=isin, quantity=qty,
-                ))
-    db.commit()
+                _snapshot(db, user, start + timedelta(days=offset), isin=isin, qty=qty)
+    _held_now(db, user, "IE00B4L5Y983", 50)
+    _held_now(db, user, "IE00BKM4GZ66", 50)
     _patch_prices(monkeypatch, [100, 110, 90, 85], start)
     findings = crash_guard.crash_guard(db, user.id)["behaviour"]
     assert [f["id"] for f in findings] == ["core-sold-IE00B4L5Y983"]
