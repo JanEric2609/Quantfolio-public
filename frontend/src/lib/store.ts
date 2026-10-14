@@ -15,7 +15,7 @@ interface UiState {
   setSearchOpen(open: boolean): void;
   dkbUseTestPid: boolean;
   setDkbUseTestPid(v: boolean): void;
-  /** The sidebar's "Research tools" group (Quant Lab, Strategy lab, AI Chat) is collapsed unless this is on. */
+  /** The sidebar's "Research tools" group (Quant Lab, Strategy lab) is collapsed unless this is on. */
   showResearchTools: boolean;
   setShowResearchTools(v: boolean): void;
   /** Shared by every page with the All / DKB / Scalable filter. */

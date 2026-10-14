@@ -88,11 +88,15 @@ pct start <vmid>
 
 If multiple components are affected:
 
-### 1. Stop All Services
+### 1. Stop the App, Keep the Containers Running
+
+The restore below needs a shell in the app LXC (111) and PostgreSQL running in
+the database LXC (110), so stop only the Quantfolio services, as in
+`backup-restore.md`:
 
 ```bash
-# On Proxmox host
-pct stop 110 111 112 113
+# On the Proxmox host
+pct exec 111 -- systemctl stop quantfolio-worker quantfolio-api
 ```
 
 ### 2. Restore the Database from Backup
@@ -108,14 +112,10 @@ bash /opt/quantfolio/infra/scripts/restore-db.sh /var/backups/quantfolio/quantfo
 psql -h <DB_HOST> -U quantfolio_user -d quantfolio -c "SELECT COUNT(*) FROM portfolios;"
 ```
 
-### 4. Start Containers in Order
+### 4. Start the App Again
 
 ```bash
-pct start 110  # DB
-sleep 10
-pct start 112  # LLM
-pct start 111  # App
-pct start 113  # Web
+pct exec 111 -- systemctl start quantfolio-api quantfolio-worker
 ```
 
 ### 5. Run Healthcheck

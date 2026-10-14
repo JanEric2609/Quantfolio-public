@@ -141,17 +141,19 @@ def market_state_from(ticker: str, closes: list[tuple[date, float]]) -> MarketSt
 
 
 def _closes(db: Session, ticker: str) -> list[tuple[date, float]]:
-    from app.foundation.market import history
+    """The benchmark's closes in EUR: a configured benchmark quoted in another
+    currency would otherwise show FX moves as falls (a EUR listing passes through)."""
+    from app.foundation.eur_prices import eur_closes
 
-    rows = history(db, ticker, days=HISTORY_DAYS, allow_live=False)
-    out: list[tuple[date, float]] = []
-    for row in rows:
-        day, close = row.get("date"), row.get("close")
-        if day is None or close is None:
-            continue
-        out.append((day if isinstance(day, date) else date.fromisoformat(str(day)[:10]), float(close)))
-    out.sort(key=lambda item: item[0])
-    return out
+    closes = eur_closes(db, ticker, days=HISTORY_DAYS, allow_live=False)
+    return sorted((date.fromisoformat(day), close) for day, close in closes.items())
+
+
+def index_name(ticker: str | None) -> str:
+    """What the alerts call the benchmark: MSCI World for the default, else its ticker."""
+    from app.foundation.eur_prices import DEFAULT_BENCHMARK
+
+    return "MSCI World" if not ticker or ticker.upper() == DEFAULT_BENCHMARK else ticker
 
 
 def market_state(db: Session) -> MarketState:
@@ -245,7 +247,7 @@ def _message(state: MarketState) -> str:
     if state.level == "calm":
         return "Markets are within 10 % of their high. Nothing to do: keep the plan running."
     done = [e for e in state.episodes if e.recovery_date is not None]
-    lines = [f"MSCI World is {state.drawdown:.0%} below its high of {state.peak_date}."]
+    lines = [f"{index_name(state.ticker)} is {state.drawdown:.0%} below its high of {state.peak_date}."]
     if done:
         worst = max(done, key=lambda e: e.depth)
         longest = max(done, key=lambda e: e.months_to_recover or 0)
@@ -306,6 +308,10 @@ def run_daily(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
         logger.warning("Crash guard skipped: no closes for %s", state.ticker)
         return {"level": None, "drawdown": None, "sent": [], "skipped": "no_prices"}
     previous = _load_state(db)
+    if previous.get("ticker") and previous["ticker"] != state.ticker:
+        # The benchmark was changed: the stored level, peak and findings belong
+        # to the old index, so start over rather than compare across the two.
+        previous = {}
     worst_level = str(previous.get("worst_level") or "calm")
     seen: set[str] = set(previous.get("behaviour_seen") or [])
     sent: list[str] = []
@@ -314,7 +320,7 @@ def run_daily(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
     # since the last run (a missed day, a backfill) and a new fall started from it.
     new_high = bool(previous.get("peak_date")) and str(state.peak_date) > str(previous["peak_date"])
     if worst_level != "calm" and (state.drawdown == 0.0 or new_high):
-        text = ("Quantfolio crash guard: MSCI World is back at its high. "
+        text = (f"Quantfolio crash guard: {index_name(state.ticker)} is back at its high. "
                 "Anyone who kept the plan running came through it whole.")
         alert_owners(db, source="crash_guard", title="Markets back at their high", telegram_text=text,
                      body=text, severity="info", href="/plan")
@@ -329,7 +335,7 @@ def run_daily(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
         text = f"Quantfolio crash guard: {state.level_label.lower()}.\n\n{_message(state)}"
         if note:
             text += f"\n\nYour own rule, written in calm times:\n{note}"
-        alert_owners(db, source="crash_guard", title=f"{state.level_label}: MSCI World {state.drawdown:.0%} below its high",
+        alert_owners(db, source="crash_guard", title=f"{state.level_label}: {index_name(state.ticker)} {state.drawdown:.0%} below its high",
                      telegram_text=text, body=_message(state), severity="warning", href="/plan")
         sent.append(f"level:{state.level}")
         worst_level = state.level
@@ -348,7 +354,8 @@ def run_daily(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
                 sent.append(finding["id"])
 
     upsert_public_settings(db, {STATE_KEY: {
-        "worst_level": worst_level, "behaviour_seen": sorted(seen), "peak_date": state.peak_date,
+        "ticker": state.ticker, "worst_level": worst_level, "behaviour_seen": sorted(seen),
+        "peak_date": state.peak_date,
         "level": state.level, "drawdown": state.drawdown, "checked_at": when.isoformat(),
     }})
     return {"level": state.level, "drawdown": state.drawdown, "sent": sent}

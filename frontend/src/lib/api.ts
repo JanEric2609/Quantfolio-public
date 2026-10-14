@@ -1824,21 +1824,6 @@ export interface TrustCalls {
   horizon_days?: number | null;
 }
 
-export type ChatConversation = {
-  conversation_id: string;
-  title: string;
-  last_at: string;
-  message_count: number;
-};
-
-export type ChatMessageItem = {
-  id: string;
-  conversation_id?: string | null;
-  role: string;
-  content: string;
-  timestamp: string;
-};
-
 export interface QuantSavedScenario {
   id: string;
   name: string;

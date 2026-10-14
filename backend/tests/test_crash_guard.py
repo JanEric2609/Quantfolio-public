@@ -334,3 +334,51 @@ def test_one_admins_finding_does_not_silence_anothers(monkeypatch):
     seller["id"] = second.id  # the next day the other admin sells
     crash_guard.run_daily(db, now=now)
     assert sum("Core sold" in text for text in sent) == 2
+
+
+def test_the_benchmark_is_read_in_eur(monkeypatch):
+    calls = []
+
+    def fake_eur_closes(db, symbol, days=730, **kw):
+        calls.append((symbol, kw.get("allow_live")))
+        return {"2026-01-02": 90.0, "2026-01-01": 100.0}
+
+    monkeypatch.setattr("app.foundation.eur_prices.eur_closes", fake_eur_closes)
+    closes = crash_guard._closes(_memory_db(), "IWDA.L")
+    assert calls == [("IWDA.L", False)]
+    assert closes == [(date(2026, 1, 1), 100.0), (date(2026, 1, 2), 90.0)]
+
+
+def test_alerts_name_the_configured_benchmark(monkeypatch):
+    from app.foundation.settings import upsert_public_settings
+
+    db = _memory_db()
+    user = _user(db)
+    _with_telegram(db, user)
+    sent = _capture(monkeypatch)
+    _patch_prices(monkeypatch, [100, 85])
+    crash_guard.run_daily(db, now=datetime(2026, 10, 15, 7, tzinfo=UTC))
+    assert "MSCI World is 15% below" in sent[0]
+
+    upsert_public_settings(db, {"benchmark_ticker": "VWCE.DE"})
+    assert crash_guard.crash_guard(db, user.id)["message"].startswith("VWCE.DE is 15% below")
+
+
+def test_changing_the_benchmark_starts_the_alert_state_over(monkeypatch):
+    from app.foundation.settings import upsert_public_settings
+
+    db = _memory_db()
+    user = _user(db)
+    _with_telegram(db, user)
+    sent = _capture(monkeypatch)
+    now = datetime(2026, 10, 15, 7, tzinfo=UTC)
+
+    _patch_prices(monkeypatch, [100, 75])                  # MSCI World: bear market
+    crash_guard.run_daily(db, now=now)
+    upsert_public_settings(db, {"benchmark_ticker": "VWCE.DE"})
+    _patch_prices(monkeypatch, [100, 110, 80])             # the new index: also a bear market (27 %)
+    result = crash_guard.run_daily(db, now=now)
+
+    assert result["sent"] == ["level:bear"]                # its own alert, no false recovery
+    assert "VWCE.DE" in sent[-1]
+    assert crash_guard._load_state(db)["ticker"] == "VWCE.DE"
