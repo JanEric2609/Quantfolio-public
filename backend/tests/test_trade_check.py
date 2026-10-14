@@ -346,3 +346,35 @@ def test_a_backfill_judges_a_later_trade_with_the_earlier_outcome(db, monkeypatc
     first, second = db.query(PaperTradeCheck).order_by(PaperTradeCheck.traded_on).all()
     assert first.resolved
     assert second.p_source == "track_record"
+
+
+def test_a_check_whose_prices_stop_early_is_frozen_without_an_outcome(db, monkeypatch):
+    sleeve = _sleeve(db, _user(db))
+    _trade(db, sleeve)
+    db.commit()
+    asset = {k: v for k, v in _closes(TRADE_DAY, 0.004).items() if k <= "2026-09-08"}
+    series = {"AAPL": asset, "EUNL.DE": _closes(TRADE_DAY, 0.001)}
+    _prices(monkeypatch, series)
+
+    trade_check.run_daily(db, today=date(2026, 9, 10))
+    [check] = db.query(PaperTradeCheck).all()
+    assert check.asset_return is not None and not check.resolved
+    trade_check.run_daily(db, today=horizon_end(TRADE_DAY) + timedelta(days=trade_check.RESOLVE_GRACE_DAYS))
+    db.refresh(check)
+    assert check.resolved
+    assert check.asset_return is None and check.benchmark_return is None and check.contribution_eur is None
+
+
+def test_a_check_whose_prices_vanish_is_frozen_without_its_earlier_mark(db, monkeypatch):
+    sleeve = _sleeve(db, _user(db))
+    _trade(db, sleeve)
+    db.commit()
+    _prices(monkeypatch, {"AAPL": _closes(TRADE_DAY, 0.004), "EUNL.DE": _closes(TRADE_DAY, 0.001)})
+    trade_check.run_daily(db, today=date(2026, 9, 10))
+    [check] = db.query(PaperTradeCheck).all()
+    assert check.contribution_eur is not None and not check.resolved
+
+    _prices(monkeypatch, {})
+    trade_check.run_daily(db, today=horizon_end(TRADE_DAY) + timedelta(days=trade_check.RESOLVE_GRACE_DAYS))
+    db.refresh(check)
+    assert check.resolved and check.contribution_eur is None and check.asset_return is None

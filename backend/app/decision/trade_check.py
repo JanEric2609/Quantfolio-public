@@ -340,12 +340,15 @@ def _paired_returns(
 def mark(check: PaperTradeCheck, asset: dict[str, float], bench: dict[str, float], today: date) -> None:
     """Mark *check* to the latest closes; freeze it once its horizon has a close or the grace has passed.
 
-    Past the grace a check with no usable prices is frozen without an outcome:
-    it then counts neither in the track record nor in the result.
+    Past the grace a check whose prices stop more than ``START_SLACK_DAYS``
+    before its horizon (or never start) is frozen without an outcome: it then
+    counts neither in the track record nor in the result.
     """
     past_grace = today >= check.horizon_end + timedelta(days=RESOLVE_GRACE_DAYS)
     paired = _paired_returns(asset, bench, check.traded_on, min(check.horizon_end, today))
-    if paired is None:
+    earliest_end = (check.horizon_end - timedelta(days=START_SLACK_DAYS)).isoformat()
+    if paired is None or (past_grace and paired[2] < earliest_end):
+        check.asset_return = check.benchmark_return = check.contribution_eur = None
         check.resolved = past_grace
         return
     ra, rb, finish = paired

@@ -38,9 +38,9 @@ the paper books are a model of the system's judgement and are charged the same w
    horizon ends (or, with no close on the horizon day, 7 days after it, on the last closes there are):
    `contribution = sign · notional · (r_asset − r_MSCI World) − cost`. A sale's tax uses the average cost
    of the position just before it, replayed from the run's start. Both returns cover the same dates (a
-   series that starts more than 5 days late is not marked), and a backfill settles earlier checks before it
-   judges a later trade. The
-   counterfactual is benchmark-relative, the calibrator's own hit definition: a blocked buy's money sits
+   series that starts more than 5 days late is not marked; one whose prices stop more than 5 days before
+   the horizon is frozen after the grace without an outcome and counts nowhere), and a backfill settles
+   earlier checks before it judges a later trade. The counterfactual is benchmark-relative, the calibrator's own hit definition: a blocked buy's money sits
    in MSCI World, a blocked sell's position is kept. **Value with the check on = NAV − Σ contribution
    of blocked trades.** It ignores what later trades did with the same shares; it is an estimate.
 4. **Real money.** The Discover shortlist shows "Worth acting on?" per pick: "Possibly" only when the
