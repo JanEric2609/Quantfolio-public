@@ -82,6 +82,9 @@ SAME_CYCLE = timedelta(hours=1)
 #: Calendar days after its horizon a check is frozen on the last closes there
 #: are (a holiday or a delisting leaves no close on the horizon day itself).
 RESOLVE_GRACE_DAYS = 7
+#: A check is marked only when both prices start within this many calendar
+#: days of the trade (a longer gap would measure a different period).
+START_SLACK_DAYS = 5
 #: Units below this count as no position (float residue of Numeric quantities).
 _EMPTY = 1e-9
 
@@ -298,26 +301,58 @@ def _close_on_or_before(closes: dict[str, float], day: date) -> tuple[str, float
     return (keys[-1], closes[keys[-1]]) if keys else None
 
 
-def _period_return(closes: dict[str, float], start: date, end: date) -> tuple[float, str] | None:
-    first = _close_on_or_after(closes, start)
-    last = _close_on_or_before(closes, end)
-    if first is None or last is None or last[0] < first[0] or first[1] <= 0:
+def _first_key_from(closes: dict[str, float], day: str) -> str:
+    return min(k for k in closes if k >= day)
+
+
+def _last_key_to(closes: dict[str, float], day: str) -> str:
+    return max(k for k in closes if k <= day)
+
+
+def _paired_returns(
+    asset: dict[str, float], bench: dict[str, float], start: date, end: date,
+) -> tuple[float, float, str] | None:
+    """``(asset return, benchmark return, last date)`` over the same dates for both.
+
+    Both start at the first day each has a close on or after *start* (within
+    :data:`START_SLACK_DAYS`) and end at the last day both have one by *end*,
+    so a gap in one series never compares a short period with a full one.
+    """
+    first_a, first_b = _close_on_or_after(asset, start), _close_on_or_after(bench, start)
+    if first_a is None or first_b is None:
         return None
-    return last[1] / first[1] - 1.0, last[0]
+    latest_start = (start + timedelta(days=START_SLACK_DAYS)).isoformat()
+    if first_a[0] > latest_start or first_b[0] > latest_start:
+        return None
+    last_a, last_b = _close_on_or_before(asset, end), _close_on_or_before(bench, end)
+    if last_a is None or last_b is None:
+        return None
+    begin, finish = max(first_a[0], first_b[0]), min(last_a[0], last_b[0])
+    if finish < begin:
+        return None
+    start_a, start_b = asset[_first_key_from(asset, begin)], bench[_first_key_from(bench, begin)]
+    end_a, end_b = asset[_last_key_to(asset, finish)], bench[_last_key_to(bench, finish)]
+    if start_a <= 0 or start_b <= 0:
+        return None
+    return end_a / start_a - 1.0, end_b / start_b - 1.0, finish
 
 
 def mark(check: PaperTradeCheck, asset: dict[str, float], bench: dict[str, float], today: date) -> None:
-    """Mark *check* to the latest closes; freeze it once its horizon has a close or the grace has passed."""
-    end = min(check.horizon_end, today)
-    ra = _period_return(asset, check.traded_on, end)
-    rb = _period_return(bench, check.traded_on, end)
-    if ra is None or rb is None:
+    """Mark *check* to the latest closes; freeze it once its horizon has a close or the grace has passed.
+
+    Past the grace a check with no usable prices is frozen without an outcome:
+    it then counts neither in the track record nor in the result.
+    """
+    past_grace = today >= check.horizon_end + timedelta(days=RESOLVE_GRACE_DAYS)
+    paired = _paired_returns(asset, bench, check.traded_on, min(check.horizon_end, today))
+    if paired is None:
+        check.resolved = past_grace
         return
-    check.asset_return, check.benchmark_return = ra[0], rb[0]
+    ra, rb, finish = paired
+    check.asset_return, check.benchmark_return = ra, rb
     sign = 1.0 if check.side == "buy" else -1.0
-    check.contribution_eur = sign * check.notional_eur * (ra[0] - rb[0]) - check.cost_eur
-    reached = ra[1] >= check.horizon_end.isoformat() and rb[1] >= check.horizon_end.isoformat()
-    check.resolved = reached or today >= check.horizon_end + timedelta(days=RESOLVE_GRACE_DAYS)
+    check.contribution_eur = sign * check.notional_eur * (ra - rb) - check.cost_eur
+    check.resolved = finish >= check.horizon_end.isoformat() or past_grace
 
 
 # ---------------------------------------------------------------------------
@@ -360,7 +395,12 @@ def check_trade(db: Session, trade: PaperTrade, *, nv_valid: bool) -> PaperTrade
 
 
 def run_daily(db: Session, today: date | None = None) -> dict[str, Any]:
-    """Check new trades of every managed sleeve, then mark the open checks."""
+    """Check new trades of every managed sleeve, then mark the open checks.
+
+    Trades are checked oldest first, and before each one every earlier check
+    whose horizon has ended is marked, so a backfill sees the same track
+    record a daily run would have seen on that day.
+    """
     from app.foundation import eur_prices
 
     today = today or datetime.now(UTC).date()
@@ -379,27 +419,40 @@ def run_daily(db: Session, today: date | None = None) -> dict[str, Any]:
             .order_by(PaperTrade.date)
             .all()
         )
-        for trade in trades:
-            year = _utc(trade.date).year
-            if year not in nv_by_year:
-                nv_by_year[year] = _nv_valid(db, portfolio.user_id, year)
-            check_trade(db, trade, nv_valid=nv_by_year[year])
-            checked += 1
         open_checks = (
             db.query(PaperTradeCheck)
             .filter(PaperTradeCheck.portfolio_id == portfolio.id, PaperTradeCheck.resolved.is_(False))
             .all()
         )
-        if not open_checks:
+        if not trades and not open_checks:
             continue
-        days = (today - min(c.traded_on for c in open_checks)).days + 10
-        bench = eur_prices.eur_closes(db, eur_prices.benchmark_ticker(db), days=days, allow_live=False)
+        earliest = min([c.traded_on for c in open_checks] + [_utc(t.date).date() for t in trades])
+        days = (today - earliest).days + 10
         closes: dict[str, dict[str, float]] = {}
+
+        def series(ticker: str) -> dict[str, float]:
+            if ticker not in closes:
+                closes[ticker] = eur_prices.eur_closes(db, ticker, days=days, allow_live=False)
+            return closes[ticker]
+
+        bench = eur_prices.eur_closes(db, eur_prices.benchmark_ticker(db), days=days, allow_live=False)
+        for trade in trades:
+            traded_on = _utc(trade.date).date()
+            due = [c for c in open_checks if not c.resolved and c.horizon_end < traded_on]
+            for check in due:
+                mark(check, series(check.ticker), bench, today)
+                marked += 1
+            if due:
+                db.flush()
+            year = traded_on.year
+            if year not in nv_by_year:
+                nv_by_year[year] = _nv_valid(db, portfolio.user_id, year)
+            open_checks.append(check_trade(db, trade, nv_valid=nv_by_year[year]))
+            checked += 1
         for check in open_checks:
-            if check.ticker not in closes:
-                closes[check.ticker] = eur_prices.eur_closes(db, check.ticker, days=days, allow_live=False)
-            mark(check, closes[check.ticker], bench, today)
-            marked += 1
+            if not check.resolved:
+                mark(check, series(check.ticker), bench, today)
+                marked += 1
     db.commit()
     return {"checked": checked, "marked": marked}
 

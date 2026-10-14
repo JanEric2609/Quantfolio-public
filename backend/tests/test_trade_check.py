@@ -301,3 +301,48 @@ def test_a_reset_archives_the_whole_check(db, monkeypatch):
                 "asset_return", "benchmark_return", "checked_at"):
         assert key in row
     assert row["spread_eur"] == pytest.approx(1.0) and row["reason"]
+
+
+def test_a_late_starting_price_series_is_not_compared_with_a_full_period(db, monkeypatch):
+    sleeve = _sleeve(db, _user(db))
+    _trade(db, sleeve)
+    db.commit()
+    asset = {k: v for k, v in _closes(TRADE_DAY, 0.004).items() if k >= "2026-09-20"}
+    _prices(monkeypatch, {"AAPL": asset, "EUNL.DE": _closes(TRADE_DAY, 0.001)})
+
+    trade_check.run_daily(db, today=date(2026, 10, 2))
+    [check] = db.query(PaperTradeCheck).all()
+    assert check.asset_return is None and check.contribution_eur is None and not check.resolved
+    trade_check.run_daily(db, today=horizon_end(TRADE_DAY) + timedelta(days=trade_check.RESOLVE_GRACE_DAYS))
+    db.refresh(check)
+    # Frozen without an outcome, so it counts neither in the track record nor in the result.
+    assert check.resolved and check.contribution_eur is None
+
+
+def test_both_returns_end_on_the_last_day_both_have_a_close(db, monkeypatch):
+    sleeve = _sleeve(db, _user(db))
+    _trade(db, sleeve)
+    db.commit()
+    asset, full_bench = _closes(TRADE_DAY, 0.004), _closes(TRADE_DAY, 0.001)
+    bench = {k: v for k, v in full_bench.items() if k <= "2026-09-15"}
+    _prices(monkeypatch, {"AAPL": asset, "EUNL.DE": bench})
+
+    trade_check.run_daily(db, today=date(2026, 9, 25))
+    [check] = db.query(PaperTradeCheck).all()
+    assert check.asset_return == pytest.approx(asset["2026-09-15"] / asset["2026-09-01"] - 1)
+    assert check.benchmark_return == pytest.approx(bench["2026-09-15"] / bench["2026-09-01"] - 1)
+
+
+def test_a_backfill_judges_a_later_trade_with_the_earlier_outcome(db, monkeypatch):
+    sleeve = _sleeve(db, _user(db))
+    _trade(db, sleeve)
+    later = datetime.combine(horizon_end(TRADE_DAY) + timedelta(days=3), TRADE_AT.time(), tzinfo=UTC)
+    _trade(db, sleeve, ticker="MSFT", when=later)
+    db.commit()
+    _prices(monkeypatch, {"AAPL": _closes(TRADE_DAY, 0.004, days=90), "MSFT": _closes(TRADE_DAY, 0.002, days=90),
+                          "EUNL.DE": _closes(TRADE_DAY, 0.001, days=90)})
+
+    trade_check.run_daily(db, today=later.date() + timedelta(days=1))
+    first, second = db.query(PaperTradeCheck).order_by(PaperTradeCheck.traded_on).all()
+    assert first.resolved
+    assert second.p_source == "track_record"

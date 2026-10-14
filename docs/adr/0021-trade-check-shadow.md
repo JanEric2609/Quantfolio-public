@@ -37,7 +37,9 @@ the paper books are a model of the system's judgement and are charged the same w
    `paper_trade_checks` row per trade of every non-manual sleeve and marks it daily until its 21-day
    horizon ends (or, with no close on the horizon day, 7 days after it, on the last closes there are):
    `contribution = sign · notional · (r_asset − r_MSCI World) − cost`. A sale's tax uses the average cost
-   of the position just before it, replayed from the run's start. The
+   of the position just before it, replayed from the run's start. Both returns cover the same dates (a
+   series that starts more than 5 days late is not marked), and a backfill settles earlier checks before it
+   judges a later trade. The
    counterfactual is benchmark-relative, the calibrator's own hit definition: a blocked buy's money sits
    in MSCI World, a blocked sell's position is kept. **Value with the check on = NAV − Σ contribution
    of blocked trades.** It ignores what later trades did with the same shares; it is an estimate.
