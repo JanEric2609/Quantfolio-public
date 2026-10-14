@@ -164,27 +164,42 @@ def market_state(db: Session) -> MarketState:
 # --- what the investor did ------------------------------------------------------
 
 
-def _core_units_by_day(db: Session, user_id: str, core_isins: set[str], since: date) -> dict[date, float]:
+def _core_units_by_isin(
+    db: Session, user_id: str, core_isins: set[str], since: date,
+) -> dict[str, tuple[str, dict[date, float]]]:
+    """Units held per core ISIN and day since *since*, with the position's name.
+
+    Per ISIN, not summed: units of two ETFs are not interchangeable, so selling
+    one while buying another must still read as a sale.
+    """
     from sqlalchemy import func
 
     from app.foundation.models.entities import BookPositionSnapshot, PortfolioSnapshot
 
     rows = (
-        db.query(BookPositionSnapshot.snapshot_date, func.sum(BookPositionSnapshot.quantity))
+        db.query(
+            BookPositionSnapshot.isin, BookPositionSnapshot.snapshot_date,
+            func.max(BookPositionSnapshot.name), func.sum(BookPositionSnapshot.quantity),
+        )
         .filter(
             BookPositionSnapshot.user_id == user_id,
             BookPositionSnapshot.isin.in_(sorted(core_isins)),
             BookPositionSnapshot.snapshot_date >= since,
         )
-        .group_by(BookPositionSnapshot.snapshot_date)
+        .group_by(BookPositionSnapshot.isin, BookPositionSnapshot.snapshot_date)
         .all()
     )
-    units = {day: float(qty or 0) for day, qty in rows}
+    out: dict[str, tuple[str, dict[date, float]]] = {}
+    for isin, day, name, qty in rows:
+        _, series = out.setdefault(isin, (name or isin, {}))
+        series[day] = float(qty or 0)
+    if not out:
+        return out
     # A fully sold position is dropped from the day's rows, not written as 0, so
     # "now" is the latest day the book was recorded at all (snapshot_book_positions
-    # writes the day's dkb_mirror row on every run, positions or not). A core
+    # writes the day's dkb_mirror row on every run, positions or not). A core ETF
     # missing that day was sold; a day nothing ran has no row and changes nothing.
-    latest = (
+    mirror = (
         db.query(func.max(PortfolioSnapshot.date))
         .filter(
             PortfolioSnapshot.user_id == user_id,
@@ -193,9 +208,10 @@ def _core_units_by_day(db: Session, user_id: str, core_isins: set[str], since: d
         )
         .scalar()
     )
-    if units and latest is not None and latest > max(units):
-        units[latest] = 0.0
-    return units
+    latest = max([max(series) for _, series in out.values()] + ([mirror] if mirror else []))
+    for _, series in out.values():
+        series.setdefault(latest, 0.0)
+    return out
 
 
 def behaviour(db: Session, user_id: str, state: MarketState) -> list[dict[str, Any]]:
@@ -216,16 +232,15 @@ def behaviour(db: Session, user_id: str, state: MarketState) -> list[dict[str, A
             "title": f"Savings plan {reason}: {plan['name']} ({plan['broker_label']})",
             "detail": "Buying through a fall is what makes the recovery count. A paused plan buys nothing at the lower prices.",
         })
-    units = _core_units_by_day(db, user_id, set(cfg["core_isins"]), date.fromisoformat(state.peak_date))
-    if units:
-        days = sorted(units)
-        high = max(units[d] for d in days)
-        now = units[days[-1]]
+    held = _core_units_by_isin(db, user_id, set(cfg["core_isins"]), date.fromisoformat(state.peak_date))
+    for isin, (name, units) in sorted(held.items()):
+        high = max(units.values())
+        now = units[max(units)]
         if high > 0 and (high - now) / high >= MIN_SOLD_SHARE:
             findings.append({
-                "id": "core-sold",
+                "id": f"core-sold-{isin}",
                 "kind": "core_sold",
-                "title": f"Core ETF units sold during the fall ({(high - now) / high:.0%} of the position)",
+                "title": f"Core ETF units sold during the fall: {name} ({(high - now) / high:.0%} of the position)",
                 "detail": "Selling after a fall turns a paper loss into a real one and misses the way back. "
                           "If this was planned (a withdrawal, a rebalance), ignore this.",
             })
@@ -331,12 +346,14 @@ def run_daily(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
     if state.level != "calm":
         for (user_id,) in db.query(User.id).filter(User.role == "admin").all():
             for finding in behaviour(db, user_id, state):
-                if finding["id"] in seen:
+                # Per user: one admin's finding must not silence the same one for another.
+                key = f"{user_id}:{finding['id']}"
+                if key in seen:
                     continue
                 text = f"Quantfolio crash guard: {finding['title']}.\n\n{finding['detail']}"
                 alert_owners(db, source="crash_guard", title=finding["title"], telegram_text=text,
                              body=finding["detail"], severity="warning", href="/plan")
-                seen.add(finding["id"])
+                seen.add(key)
                 sent.append(finding["id"])
 
     upsert_public_settings(db, {STATE_KEY: {

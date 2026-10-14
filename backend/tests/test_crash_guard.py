@@ -276,3 +276,43 @@ def test_a_new_high_missed_between_runs_resets_the_alerts(monkeypatch):
 
     assert result["sent"] == ["recovered", "level:correction"]
     assert "back at its high" in sent[1] and "correction" in sent[2]
+
+
+def test_swapping_one_core_etf_for_another_is_still_a_sale(monkeypatch):
+    db = _memory_db()
+    user = _user(db)
+    monkeypatch.setattr("app.decision.monthly_plan.plan_settings",
+                        lambda db: {"core_isins": ["IE00B4L5Y983", "IE00BKM4GZ66"]})
+    start = date(2026, 1, 1)
+    for offset, world, em in ((1, 100, 0), (2, 50, 50)):
+        for isin, qty in (("IE00B4L5Y983", world), ("IE00BKM4GZ66", em)):
+            if qty:
+                db.add(BookPositionSnapshot(
+                    user_id=user.id, snapshot_date=start + timedelta(days=offset), source="scalable",
+                    account_id="a", isin=isin, name=isin, quantity=qty,
+                ))
+    db.commit()
+    _patch_prices(monkeypatch, [100, 110, 90, 85], start)
+    findings = crash_guard.crash_guard(db, user.id)["behaviour"]
+    assert [f["id"] for f in findings] == ["core-sold-IE00B4L5Y983"]
+    assert "50%" in findings[0]["title"]
+
+
+def test_one_admins_finding_does_not_silence_anothers(monkeypatch):
+    db = _memory_db()
+    first = _user(db)
+    second = User(username="second", password_hash="!", role="admin")
+    db.add(second)
+    db.commit()
+    _with_telegram(db, first)
+    sent = _capture(monkeypatch)
+    now = datetime(2026, 10, 15, 7, tzinfo=UTC)
+    seller = {"id": first.id}
+    finding = {"id": "core-sold-X", "kind": "core_sold", "title": "Core sold", "detail": "d"}
+    monkeypatch.setattr(crash_guard, "behaviour",
+                        lambda db, user_id, state: [finding] if user_id == seller["id"] else [])
+    _patch_prices(monkeypatch, [100, 85])
+    crash_guard.run_daily(db, now=now)
+    seller["id"] = second.id  # the next day the other admin sells
+    crash_guard.run_daily(db, now=now)
+    assert sum("Core sold" in text for text in sent) == 2
