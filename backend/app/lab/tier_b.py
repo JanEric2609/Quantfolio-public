@@ -1,8 +1,8 @@
 """Tier B: long-history tests of ETF overlays, pre-registered in ADR 0020 (plan 2026-10-12, D13 / WP12).
 
 Pure functions over monthly return series; the data are pulled by
-``scripts/tier_b_long_history.py``. Nothing here has been run on real data
-yet: ADR 0020 fixes the strategies, periods, costs and pass bars first.
+``scripts/tier_b_long_history.py``. ADR 0020 fixed the strategies, periods,
+costs and pass bars first; the one registered run (2026-10-14) passed none.
 
 Strategies (each one trial in ``trial_ledger``, context ``tier_b``):
 
@@ -13,10 +13,11 @@ Strategies (each one trial in ``trial_ledger``, context ``tier_b``):
   long-short or long-only factor returns against the market.
 
 Pass bar (all must hold): Newey-West t >= 2.0 on the net excess return in
-both out-of-sample regions, the same sign in-sample, and for B1 a max
+every out-of-sample region, the same sign in-sample, and for B1 a max
 drawdown at least 25 % smaller than buy-and-hold with net CAGR no more than
-1 pp/yr below it. Post-publication premia are scaled by
-``PUBLICATION_DECAY`` before the decision.
+1 pp/yr below it. Returns dated before a strategy's publication keep
+``1 - PUBLICATION_DECAY`` of their size (ADR 0020 amendment 2026-10-14);
+later months are real post-publication data and already carry any decay.
 """
 from __future__ import annotations
 
@@ -28,14 +29,18 @@ import numpy as np
 import pandas as pd
 
 from app.foundation.quant_metrics import newey_west_t_stat
+from app.lab.factor_premia.strategies import AFTER_TAX_FACTOR, IMPLEMENTATION_COST, PUBLICATION_DECAY
 
 #: German tax on a realised gain at a B1 switch, after 30 % Teilfreistellung
 #: (the same constant as ``lab.factor_premia.strategies.AFTER_TAX_FACTOR``).
 GAIN_TAX_RATE = 0.26375 * (1.0 - 0.30)
 #: One-way cost of a B1 switch (spread plus order cost), as a fraction.
 SWITCH_COST = 0.0010
-#: McLean-Pontiff decay of a published premium (``factor_premia.PUBLICATION_DECAY``).
-PUBLICATION_DECAY = 0.58
+#: Year each strategy was published. Returns dated earlier keep
+#: ``1 - PUBLICATION_DECAY`` (McLean & Pontiff: about 58 % of a premium is
+#: gone after publication). Faber 2007; Blitz & van Vliet 2007; Banz 1981;
+#: Fama & French 1992; Jegadeesh & Titman 1993.
+PUBLICATION_YEAR: dict[str, int] = {"B1": 2007, "B2": 2007, "B3": 1981, "B4": 1992, "B5": 1993}
 #: Newey-West lag for monthly data (about one year).
 NW_LAGS = 12
 
@@ -130,6 +135,33 @@ def nw_t(excess: pd.Series) -> float:
     return float(newey_west_t_stat(np.asarray(excess.dropna(), dtype=float), NW_LAGS))
 
 
+def publication_year(trial: str) -> int:
+    return PUBLICATION_YEAR[trial.split("_")[0]]
+
+
+def decay_before_publication(series: pd.Series, year: int) -> pd.Series:
+    """Scale the months dated before ``year`` by ``1 - PUBLICATION_DECAY``.
+
+    A plain rescaling of the whole series would leave the t-statistic
+    unchanged; only discounting the pre-publication part moves it.
+    """
+    idx = pd.PeriodIndex(series.index, freq="M")
+    factor = np.where(np.array([p.year for p in idx]) < year, 1.0 - PUBLICATION_DECAY, 1.0)
+    return series * factor
+
+
+def tilt_net(excess: pd.Series, *, taxed: bool = True) -> pd.Series:
+    """Net excess of a factor tilt (B2-B5) over the core, per month.
+
+    ``IMPLEMENTATION_COST`` (TER gap to the core plus in-fund trading, per
+    year) comes off first; the tilt and the core are taxed alike, so tax then
+    scales the excess by ``AFTER_TAX_FACTOR``. ``taxed=False`` is the
+    NV-Bescheinigung line.
+    """
+    net = excess - IMPLEMENTATION_COST / 12.0
+    return net * AFTER_TAX_FACTOR if taxed else net
+
+
 def window(series: pd.Series, period: tuple[str, str]) -> pd.Series:
     idx = pd.PeriodIndex(series.index, freq="M") if not isinstance(series.index, pd.PeriodIndex) else series.index
     s = pd.Series(series.to_numpy(), index=idx)
@@ -150,13 +182,15 @@ def evaluate(
     in_sample_excess: pd.Series,
     oos_excess: dict[str, pd.Series],
     *,
-    published: bool = True,
+    publication: int | None = None,
     b1: dict[str, float] | None = None,
 ) -> Verdict:
     """Apply ADR 0020's pass bar to one trial's net excess returns.
 
     ``oos_excess`` maps each out-of-sample region to its net excess series;
     at least two regions must be present and every one must clear t >= 2.0.
+    ``publication`` is the year the strategy was published (months before it
+    are decayed); ``None`` skips the decay.
     ``b1`` carries ``{"mdd", "mdd_bh", "cagr", "cagr_bh"}`` for the overlay.
     """
     reasons: list[str] = []
@@ -166,10 +200,10 @@ def evaluate(
     if len(oos_excess) < 2:
         reasons.append("fewer than two out-of-sample regions")
     for region, series in oos_excess.items():
-        decay = PUBLICATION_DECAY if published else 1.0
-        scaled = series * decay
+        scaled = series if publication is None else decay_before_publication(series, publication)
         t = nw_t(scaled)
         stats[f"t_{region}"] = round(t, 3)
+        stats[f"mean_pa_{region}"] = round(float(series.mean()) * 12.0, 5)
         if t < T_PASS:
             reasons.append(f"{region}: t {t:.2f} < {T_PASS}")
         if math.copysign(1.0, float(series.mean() or 0.0)) != math.copysign(1.0, mean_is or 0.0):
