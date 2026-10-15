@@ -20,9 +20,9 @@ owns the append-only evidence ledgers of ADR 0018:
    cards, ranking model and satellite from the stored evidence-gate run).
    Phase 3 adds the ACI range correction (`forecast_verification.aci_coverage`),
    the descriptive advisor-against-picks comparison
-   (`daily_tests.paired_comparison`) and `factor_study.py`: the §8 study, run
-   once per spec version on back-filled baskets (`trust_factor_study`), and the
-   `ideas_neutral` row it gates. It never rewrites a ledger row and shows no number without N and an interval.
+   (`daily_tests.paired_comparison`). The §8 factor study was withdrawn on
+   2026-10-14 (ADR 0018 amendment); its empty `trust_factor_study` table stays.
+   It never rewrites a ledger row and shows no number without N and an interval.
 2. **Portfolio → Risk** — `risk.py` (VaR, drawdown, Sharpe/Sortino from a
    cash-flow-free series of the *current* holdings' price history; HHI,
    look-through HHI, asset-type and currency exposure with ETF look-through,
