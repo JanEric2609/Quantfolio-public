@@ -3,7 +3,7 @@ import { Badge } from "../../components/ui/badge";
 import { Card } from "../../components/ui/card";
 import { LineChart } from "../../components/charts/LineChart";
 import { EvidenceChip } from "./EvidenceChip";
-import { FactorNeutralCard, PairedComparisonCard } from "./SecondaryRows";
+import { PairedComparisonCard } from "./SecondaryRows";
 import { MandatesCard, SelectionCard } from "./SelectionTests";
 import { STATE_META, assumptionLabel, fmtDay, fmtE, fmtPct, fmtPp, fmtYears, timeToKnowText } from "./trustFormat";
 
@@ -174,7 +174,6 @@ export function FamilyTests({ tests }: { tests: TrustDailyTests }) {
           .map((f) => (
             <FamilyCard key={f.family} family={f} start={tests.start} />
           ))}
-        {tests.factor_neutral ? <FactorNeutralCard fn={tests.factor_neutral} /> : null}
         {tests.paired ? <PairedComparisonCard paired={tests.paired} /> : null}
       </div>
       {tests.families.some((f) => f.alarm_only) ? (
