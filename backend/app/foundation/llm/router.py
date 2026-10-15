@@ -2,6 +2,8 @@
 
 import asyncio
 import itertools
+import sys
+import time
 import uuid
 import weakref
 from typing import Any
@@ -9,7 +11,7 @@ from typing import Any
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.foundation.llm.audit import record_llm_call
+from app.foundation.llm.audit import audit_completion
 from app.foundation.llm.base import Completion, LlmUnavailableError
 from app.foundation.llm.cloud_anthropic import AnthropicBackend
 from app.foundation.llm.cloud_openai import OpenAIBackend
@@ -69,29 +71,20 @@ async def _worker() -> None:
     queue = _get_queue()
     while True:
         priority, _seq, fut, db, backend, is_degraded, messages, opts, user_id = await queue.get()
+        started = time.monotonic()
         try:
             if fut.cancelled():
                 continue
-            completion = await backend.complete(
-                messages,
-                structured_output=opts.get("structured_output"),
-                timeout_s=opts.get("timeout_s", 60.0),
-            )
-            # Bug 4 fix: record audit event with degraded_quality flag when falling back
-            if is_degraded:
-                try:
-                    record_llm_call(
-                        db,
-                        backend="local_llama",
-                        model=backend.model,
-                        task_type=opts.get("task_type", "batch_research"),
-                        tokens_in=completion.tokens_in,
-                        tokens_out=completion.tokens_out,
-                        is_degraded=True,
-                        user_id=user_id,
-                    )
-                except Exception:
-                    pass  # never let audit failure break the completion path
+            try:
+                completion = await backend.complete(
+                    messages,
+                    structured_output=opts.get("structured_output"),
+                    timeout_s=opts.get("timeout_s", 60.0),
+                )
+            except Exception as exc:
+                _audit(db, backend, opts, messages, user_id, started, None, f"error:{type(exc).__name__}", is_degraded)
+                raise
+            _audit(db, backend, opts, messages, user_id, started, completion, "ok", is_degraded)
             if not fut.done():
                 fut.set_result(completion)
         except Exception as exc:
@@ -99,6 +92,29 @@ async def _worker() -> None:
                 fut.set_exception(exc)
         finally:
             queue.task_done()
+
+
+def _audit(
+    db: Session, backend: Any, opts: dict[str, Any], messages: list[dict[str, str]], user_id: str | None,
+    started: float, completion: Completion | None, outcome: str, is_degraded: bool,
+) -> None:
+    """One audit row per routed call (plan 2026-10-14, M7)."""
+    audit_completion(
+        db,
+        backend=type(backend).__name__,
+        model=str(getattr(backend, "model", "")),
+        caller=str(opts.get("caller") or "router"),
+        messages=messages,
+        sampling=None,
+        tokens_in=completion.tokens_in if completion is not None else None,
+        tokens_out=completion.tokens_out if completion is not None else None,
+        latency_ms=(time.monotonic() - started) * 1000,
+        outcome=outcome,
+        response_text=completion.content if completion is not None else None,
+        task_type=opts.get("task_type"),
+        user_id=user_id,
+        extra={"is_degraded": is_degraded},
+    )
 
 
 def _ensure_worker() -> None:
@@ -225,6 +241,8 @@ async def call(
         "structured_output": structured_output,
         "timeout_s": timeout_s,
         "task_type": task_type,
+        # The module that asked, for the audit row.
+        "caller": str(sys._getframe(1).f_globals.get("__name__", "router")),
     }
     priority = _PRIORITY.get(task_type, 99)
 
