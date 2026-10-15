@@ -294,7 +294,8 @@ def reset_portfolio(db: Session, portfolio_id: str, *, reason: str = "reset") ->
             "inception_at": inception.isoformat() if (inception := portfolio.inception_at) else None,
         },
         "holdings": _rows(holdings_q, ("id", "isin", "ticker", "name", "asset_type", "quantity", "avg_buy_price", "currency")),
-        "trades": _rows(trades_q, ("id", "date", "ticker", "side", "quantity", "price", "value", "fee",
+        "trades": _rows(trades_q, ("id", "date", "ticker", "isin", "asset_type", "side", "quantity", "price",
+                                   "value", "fee", "avg_cost",
                                    "confidence", "rationale", "ai_decision_id")),
         "trade_checks": _rows(checks_q, ("trade_id", "traded_on", "ticker", "side", "notional_eur", "fee_eur",
                                          "spread_eur", "tax_eur", "cost_eur", "p_hit", "p_source",
@@ -1113,6 +1114,9 @@ def execute_trade(
     trade_price = Decimal(str(price))
     value = qty * trade_price
     trade_fee_amount = Decimal(str(fee))
+    traded_isin: str | None = None
+    traded_type: str | None = None
+    sold_avg_cost: Decimal | None = None
 
     if side == "buy":
         cash = _current_cash_balance(portfolio, db)
@@ -1156,15 +1160,22 @@ def execute_trade(
             raise ValueError(
                 f"Fee {float(trade_fee_amount):.2f} exceeds sale proceeds {float(value):.2f}"
             )
+        traded_isin, traded_type = holding.isin, holding.asset_type
+        sold_avg_cost = holding.avg_buy_price
         holding.quantity -= qty
         if holding.quantity <= 0:
             db.delete(holding)
             holding = None
 
+    if holding is not None:
+        traded_isin, traded_type = holding.isin, holding.asset_type
     trade = PaperTrade(
         portfolio_id=portfolio_id,
         holding_id=holding.id if holding else None,
         ticker=ticker.upper(),
+        isin=traded_isin,
+        asset_type=traded_type,
+        avg_cost=sold_avg_cost,
         side=side,
         quantity=qty,
         price=trade_price,

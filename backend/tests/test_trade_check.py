@@ -10,6 +10,7 @@ from app.decision import trade_check
 from app.decision.trade_check import Edge, assess, horizon_end, sale_tax_eur, track_record
 from app.foundation.core.db import Base
 from app.foundation.models.entities import (
+    Asset,
     DiscoveryPrediction,
     PaperHolding,
     PaperPortfolio,
@@ -378,3 +379,77 @@ def test_a_check_whose_prices_vanish_is_frozen_without_its_earlier_mark(db, monk
     trade_check.run_daily(db, today=horizon_end(TRADE_DAY) + timedelta(days=trade_check.RESOLVE_GRACE_DAYS))
     db.refresh(check)
     assert check.resolved and check.contribution_eur is None and check.asset_return is None
+
+
+# --- M2 (plan 2026-10-14): the check knows what was traded --------------------
+
+
+def _etf_asset(db, symbol="CSPX.L"):
+    db.add(Asset(symbol=symbol, name="iShares Core S&P 500", asset_type="etf"))
+    db.flush()
+
+
+def test_a_sale_that_closes_an_etf_holding_is_costed_as_an_etf(db, monkeypatch):
+    from app.decision.paper_portfolio import execute_trade
+
+    monkeypatch.setattr("app.decision.paper_portfolio.resolve_instrument_name", lambda db, t, isin=None: t)
+    sleeve = _sleeve(db, _user(db))
+    _etf_asset(db)
+    db.commit()
+    execute_trade(db, sleeve.id, "CSPX.L", "buy", 10, 100.0)
+    sold = execute_trade(db, sleeve.id, "CSPX.L", "sell", 10, 120.0)
+    trade = db.get(PaperTrade, sold["id"])
+    assert trade.holding_id is None and trade.asset_type == "etf" and float(trade.avg_cost) == 100.0
+    # Without the stored type the ticker alone would read as a stock (the fixture's ladder).
+    db.query(Asset).delete()
+    db.commit()
+
+    check = trade_check.check_trade(db, trade, nv_valid=False)
+    assert check.spread_eur == pytest.approx(1200 * 5 / 10_000)
+    assert check.tax_eur == pytest.approx(200 * 0.7 * trade_check.FLAT_TAX_RATE)
+
+
+def test_a_stock_is_still_costed_as_a_stock(db):
+    sleeve = _sleeve(db, _user(db))
+    trade = _trade(db, sleeve, ticker="AAPL")
+    trade.asset_type = "stock"
+    check = trade_check.check_trade(db, trade, nv_valid=False)
+    assert check.spread_eur == pytest.approx(1000 * 10 / 10_000)
+
+
+def test_a_trade_without_a_stored_type_falls_back_to_the_asset_row(db, monkeypatch):
+    monkeypatch.setattr("app.decision.paper_portfolio.resolve_instrument_name", lambda db, t, isin=None: t)
+    sleeve = _sleeve(db, _user(db))
+    _etf_asset(db)
+    trade = _trade(db, sleeve, ticker="CSPX.L")
+    assert trade_check.traded_asset_type(db, trade) == "etf"
+    check = trade_check.check_trade(db, trade, nv_valid=False)
+    assert check.spread_eur == pytest.approx(1000 * 5 / 10_000)
+
+
+def test_a_bond_fund_pays_the_etf_spread_but_gets_no_exemption(db):
+    sleeve = _sleeve(db, _user(db))
+    _trade(db, sleeve, ticker="CBE3.L", qty="10", price="100", when=TRADE_AT)
+    sale = _trade(db, sleeve, ticker="CBE3.L", side="sell", qty="10", price="110",
+                  when=TRADE_AT + timedelta(days=1))
+    sale.asset_type = "bond"
+    check = trade_check.check_trade(db, sale, nv_valid=False)
+    assert check.spread_eur == pytest.approx(1100 * 5 / 10_000)
+    assert check.tax_eur == pytest.approx(100 * trade_check.FLAT_TAX_RATE)
+
+
+def test_recost_moves_a_check_to_the_traded_type_and_keeps_its_edge(db):
+    sleeve = _sleeve(db, _user(db))
+    trade = _trade(db, sleeve, ticker="CSPX.L")
+    check = trade_check.check_trade(db, trade, nv_valid=False)
+    assert check.spread_eur == pytest.approx(1.0)  # costed as a stock
+    edge_before = check.edge_eur
+    check.asset_return, check.benchmark_return = 0.05, 0.02
+
+    trade.asset_type = "etf"
+    assert trade_check.recost(db, check, trade, nv_valid=False) is True
+    assert check.spread_eur == pytest.approx(0.5)
+    assert check.cost_eur == pytest.approx(1.0 + 0.5)
+    assert check.edge_eur == pytest.approx(edge_before)
+    assert check.contribution_eur == pytest.approx(1000 * 0.03 - 1.5)
+    assert trade_check.recost(db, check, trade, nv_valid=False) is False
