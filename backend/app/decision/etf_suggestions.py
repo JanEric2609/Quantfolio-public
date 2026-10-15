@@ -28,6 +28,7 @@ from app.decision.monthly_plan_funds import (
     candidate_from_universe,
     score_fund,
 )
+from app.decision.plan_rules import bond_cost_note
 from app.foundation.etf_classes import (
     BOND_CLASSES,
     EQUITY_CLASSES,
@@ -224,6 +225,7 @@ def asset_class_suggestions(
         }
         if line == "bond":
             entry["duration_bucket"] = scope.bond_bucket
+            entry["evidence"] = bond_cost_note(target)
         if under and fund is not None:
             entry["fund"] = {"isin": fund.isin, "name": fund.name, "why": _fund_why(fund, held_by)}
             entry["amount_eur"] = round(gap / 100.0 * book_eur, 2)

@@ -19,7 +19,7 @@ import numpy as np
 import pytest
 from conftest import _memory_db
 
-from app.decision.discover.resolution import load_closes, resolve_due_predictions
+from app.decision.discover.resolution import RESOLUTION_GRACE_DAYS, load_closes, resolve_due_predictions
 from app.decision.discover.scoring import (
     MIN_IC_NAMES,
     hit_rate_interval,
@@ -164,7 +164,6 @@ def test_a_dollar_line_on_the_lse_is_converted_from_dollars():
     prices = {
         "IWDA.L": {ENTRY: 100.0, EXIT: 110.0},
         "USDEUR=X": {ENTRY: 0.90, EXIT: 0.81},
-        "GBPEUR=X": {ENTRY: 1.20, EXIT: 1.20},
         "EUNL.DE": {ENTRY: 80.0, EXIT: 80.0},
     }
     resolve_due_predictions(db, now=NOW, loader=_loader(prices))
@@ -174,17 +173,51 @@ def test_a_dollar_line_on_the_lse_is_converted_from_dollars():
     assert row.realised_return == pytest.approx(1.10 * 0.9 - 1.0)
 
 
-def test_missing_fx_keeps_the_local_return_and_says_so():
+def test_missing_fx_waits_then_keeps_the_local_return_and_flags_it():
     db = _memory_db()
     user = _user(db)
     _prediction(db, user, "AAPL")
 
     prices = {"AAPL": {ENTRY: 200.0, EXIT: 220.0}, "EUNL.DE": {ENTRY: 80.0, EXIT: 80.0}}
-    resolve_due_predictions(db, now=NOW, loader=_loader(prices))
+    assert resolve_due_predictions(db, now=NOW, loader=_loader(prices)) == []
+    row = db.query(DiscoveryPrediction).one()
+    assert row.outcome_status == "pending" and row.score_json["waiting"]["reason"] == "no_fx"
 
+    resolve_due_predictions(db, now=NOW + timedelta(days=RESOLUTION_GRACE_DAYS + 1), loader=_loader(prices))
     row = db.query(DiscoveryPrediction).one()
     assert row.realised_return == pytest.approx(0.10)
     assert row.score_json["outcome"]["return_currency"] == "USD"
+    assert row.score_json["outcome"]["fx_basis"] == "local_fallback"
+
+
+@pytest.mark.parametrize(
+    ("symbol", "unit", "pair", "rates", "expected"),
+    [
+        # Pence: the 1/100 cancels. GBP/EUR goes 1.20 -> 1.08 (the pound lost 10 %).
+        ("SHEL.L", "GBp", "USDGBP=X", (0.75, 0.75), 1.10 * (0.81 / 0.75) / (0.90 / 0.75) - 1.0),
+        ("NESN.SW", "CHF", "USDCHF=X", (0.80, 0.72), 1.10 * (0.81 / 0.72) / (0.90 / 0.80) - 1.0),
+    ],
+)
+def test_a_pound_and_a_franc_pick_are_scored_in_eur(symbol, unit, pair, rates, expected):
+    from app.foundation.data_backbone.listing_currency import record_listing_currency
+
+    db = _memory_db()
+    user = _user(db)
+    _prediction(db, user, symbol)
+    record_listing_currency(db, symbol, unit, "yfinance_metadata")
+    db.commit()
+
+    prices = {
+        symbol: {ENTRY: 2000.0, EXIT: 2200.0},
+        "USDEUR=X": {ENTRY: 0.90, EXIT: 0.81},
+        pair: {ENTRY: rates[0], EXIT: rates[1]},
+        "EUNL.DE": {ENTRY: 80.0, EXIT: 80.0},
+    }
+    resolve_due_predictions(db, now=NOW, loader=_loader(prices))
+
+    row = db.query(DiscoveryPrediction).one()
+    assert row.realised_return == pytest.approx(expected)
+    assert row.score_json["outcome"]["fx_basis"] == "eur"
 
 
 def test_waits_for_a_missing_horizon_close_then_gives_up_after_grace():

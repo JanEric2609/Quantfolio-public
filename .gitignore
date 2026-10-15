@@ -46,3 +46,6 @@ backend/tmp_wrds_extracts/
 .superpowers/
 .claude/settings.local.json
 backend/chart-error-page.html
+
+# Long-history datasets (JST Macrohistory is CC BY-NC-SA: never commit or export)
+data/long_history/

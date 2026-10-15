@@ -105,7 +105,7 @@ _LEVERAGED = re.compile(
     r"(\bleveraged\b|\binverse\b|\b[2-5]x\b|-[1-5]x\b|\bdaily short\b|\bshort daily\b|\bultra\b|\bbear\b)", re.I,
 )
 _MONEY_MARKET = re.compile(
-    r"(overnight|€str|\bestr\b|eonia|money market|geldmarkt|cash\b|\bt-bill|treasury bill|0-3 ?m|0-1 ?m)", re.I,
+    r"(overnight|€str|\bestr\b|eonia|money market|geldmarkt|\bcash\b(?!\s*flow)|\bt-bill|treasury bill|0-3 ?m|0-1 ?m)", re.I,
 )
 _GOLD = re.compile(r"\bgold\b", re.I)
 _GOLD_EQUITY = re.compile(r"(miner|mining|producer|explorer)", re.I)
@@ -127,7 +127,7 @@ _FACTOR = re.compile(
 )
 _SECTOR_THEME = re.compile(
     r"(technology|information tech|miners?\b|mining|\btech\b|health ?care|pharma|biotech|financials|\bbanks?\b|insurance|energy|"
-    r"utilities|clean|renewable|solar|wind|water|robot|automation|semiconductor|cyber|artificial intelligence|"
+    r"utilities|clean|renewable|solar|\bwind\b|\bwater\b|robot|automation|semiconductor|cyber|artificial intelligence|"
     r"\bai\b|defen[cs]e|aerospace|consumer|industrials|materials|real estate|reit|property|infrastructure|"
     r"blockchain|crypto|bitcoin|e-?sports|gaming|battery|hydrogen|lithium|cloud|digital|metaverse|"
     r"telecom|communication|food|agricultur|timber|uranium|nuclear|space|genomic|healthcare|innovation|"
