@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
+import time
 
 import logging
 from datetime import UTC, datetime
@@ -25,6 +27,7 @@ from app.foundation.llm.structured import (
     parse_structured_completion,
     unusable_reason,
 )
+from app.foundation.llm.audit import audit_completion
 from app.foundation.settings import llm_auth_headers, resolve_llm_base_url, resolve_llm_model
 
 logger = logging.getLogger(__name__)
@@ -280,6 +283,39 @@ def _local_llm_sync(
     timeout = httpx.Timeout(timeout_s, connect=5.0)
     auth = llm_auth_headers(db)
     auth_kwargs: dict[str, Any] = {"headers": auth} if auth else {}
+    # Who asked: the calling module, for the audit row (plan 2026-10-14, M7).
+    caller = str(sys._getframe(1).f_globals.get("__name__", "unknown"))
+    started = time.monotonic()
+    sink: dict[str, Any] = telemetry if telemetry is not None else {}
+    try:
+        stripped = _post_completion(base_url, payload, json_schema, timeout, auth_kwargs, sink)
+    except Exception as exc:
+        audit_completion(
+            db, backend="local_llama", model=model, caller=caller, messages=messages, sampling=payload,
+            tokens_in=None, tokens_out=None, latency_ms=(time.monotonic() - started) * 1000,
+            outcome=f"error:{type(exc).__name__}",
+        )
+        raise
+    info = sink
+    outcome = "truncated" if info.get("truncated") else ("schema_dropped" if info.get("schema_dropped") else "ok")
+    audit_completion(
+        db, backend="local_llama", model=model, caller=caller, messages=messages, sampling=payload,
+        tokens_in=info.get("prompt_tokens"), tokens_out=info.get("completion_tokens"),
+        latency_ms=(time.monotonic() - started) * 1000, outcome=outcome, response_text=stripped,
+        extra={"finish_reason": info.get("finish_reason"), "schema_constrained": json_schema is not None},
+    )
+    return stripped
+
+
+def _post_completion(
+    base_url: str,
+    payload: dict[str, Any],
+    json_schema: dict[str, Any] | None,
+    timeout: httpx.Timeout,
+    auth_kwargs: dict[str, Any],
+    telemetry: dict[str, Any] | None,
+) -> str:
+    """POST one chat completion; the response text with reasoning stripped."""
     response = httpx.post(f"{base_url}/chat/completions", json=payload, timeout=timeout, **auth_kwargs)
     if json_schema is not None and response.status_code in range(400, 500):
         logger.warning(

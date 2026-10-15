@@ -160,6 +160,8 @@ class EtfSuggestionLine(BaseModel):
     fund: EtfSuggestionFund | None = None
     amount_eur: float | None = None
     warning: str | None = None
+    #: The bond line's tested cost against 100 % equity (ADR 0022); history, not a forecast.
+    evidence: str | None = None
 
 
 class EtfInfoItem(BaseModel):
@@ -214,6 +216,8 @@ class MonthlyPlanResponse(BaseModel):
     not_investment_advice: bool
     suggested_funds: list[SuggestedFund] = []
     acc_dist_note: str = ""
+    #: Why the core is 100 % global equity (ADR 0022's long-history test).
+    mix_note: str = ""
     etf_suggestions: EtfSuggestions | None = None
 
 

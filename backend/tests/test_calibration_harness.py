@@ -57,3 +57,13 @@ def test_overlap_paths_are_not_recentred_on_their_own_mean():
     # Re-centring would make every path's mean exactly 0; persistent drifts keep them spread.
     assert means.std() > 1e-4
     assert abs(paths.std() - 0.01) < 0.001
+
+
+def test_noise_check_fails_few_clean_series_and_most_persistent_ones():
+    from app.decision.verification.daily_tests import NOISE_CHECK_LOOKS
+    from app.lab.calibration import noise_check_fail_rates
+
+    clean = noise_check_fail_rates("iid_normal", NOISE_CHECK_LOOKS, n_paths=2000, seed=3)
+    stressed = noise_check_fail_rates("overlap_21d", NOISE_CHECK_LOOKS, n_paths=500, seed=3)
+    assert clean["any_look"] < 0.08 and clean["first_look"] <= clean["any_look"]
+    assert stressed["any_look"] > 0.95

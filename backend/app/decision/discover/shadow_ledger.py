@@ -46,7 +46,10 @@ logger = logging.getLogger(__name__)
 #: 2026-10-12 release: total-return benchmarks by asset class in EUR (D3),
 #: no momentum rank for bonds/cash/gold (D4), revenue growth dropped for
 #: financials (D8), deterministic dossier direction (D7).
-COMPOSITE_FORMULA_VERSION = "adr0017.2-2026-10-12"
+#: 2026-10-14 (plan WP-A6): momentum and volatility in EUR (M4), portfolio fit
+#: at the book's real weights and dropped without a portfolio (M5). A cohort
+#: change that keeps the clock (ADR 0018 amendment of 2026-10-14, §7).
+COMPOSITE_FORMULA_VERSION = "adr0017.3-2026-10-14"
 #: 2: ETFs only for a plan line, one fund per index, held indices skipped (D4).
 UNIVERSE_RULE_VERSION = 2
 

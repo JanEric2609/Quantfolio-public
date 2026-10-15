@@ -13,6 +13,10 @@ from .base import Completion, LlmUnavailableError
 class AnthropicBackend:
     """Anthropic Claude client using Anthropic Messages API."""
 
+    name = "anthropic"
+    #: What every request sends (temperature is the API default).
+    sampling = {"max_tokens": 4096}
+
     def __init__(self, api_key: str, model: str = "claude-opus-4-8"):
         """Initialize the Anthropic backend.
 

@@ -250,6 +250,21 @@ class TimeGridOut(BaseModel):
     grid: list[TimeGridPointOut] = Field(default_factory=list)
 
 
+class NoiseLookOut(BaseModel):
+    day: int = Field(description="Observed days the look uses.")
+    cutoff: float
+    vr: float | None = Field(default=None, description="VR(21) of the first `day` observed values; null before then.")
+    failed: bool = False
+
+
+class NoiseCheckOut(BaseModel):
+    """ADR 0018 §11: serial correlation that would void the daily e-processes."""
+
+    status: Literal["pending", "passing", "passed", "failed"]
+    failed_at_day: int | None = None
+    looks: list[NoiseLookOut] = Field(default_factory=list)
+
+
 class SelectionTestOut(BaseModel):
     """S (picks against same-run, same-sector non-picks) and U (futility) on one series."""
 
@@ -276,7 +291,9 @@ class SelectionTestOut(BaseModel):
     n_fallback_days: int = 0
     rho1: float | None = Field(default=None, description="Lag-1 autocorrelation of the first 63 days (shown, never whitened).")
     rho1_flag: bool = False
-    state: Literal["too_early", "no_evidence", "skill", "harm", "not_worth_following"]
+    state: Literal["too_early", "no_evidence", "skill", "harm", "not_worth_following", "not_valid"]
+    provisional: bool = Field(default=False, description="A verdict reached before the noise check's last look.")
+    noise_check: NoiseCheckOut | None = None
     path: list[EPathPointOut] = Field(default_factory=list)
     time_to_know: TimeGridOut
 
@@ -295,7 +312,8 @@ class MandateTestOut(BaseModel):
     delta_21d: float
     threshold: float
     retire: bool = False
-    state: Literal["too_early", "no_evidence", "retire"]
+    state: Literal["too_early", "no_evidence", "retire", "retire_pending", "not_valid"]
+    noise_check: NoiseCheckOut | None = None
 
 
 class PairedPointOut(BaseModel):

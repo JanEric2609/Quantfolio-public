@@ -28,6 +28,7 @@ from app.decision.monthly_plan_funds import (
     candidate_from_universe,
     score_fund,
 )
+from app.decision.plan_rules import bond_cost_note
 from app.foundation.etf_classes import (
     BOND_CLASSES,
     EQUITY_CLASSES,
@@ -40,7 +41,7 @@ from app.foundation.etf_classes import (
 RULE_NOTE = "Rule-based, not a forecast: it fills a gap in your own plan."
 
 #: Plan line -> (asset classes it holds, curated sleeve per duration bucket or None).
-_BOND_SLEEVE_BY_BUCKET = {"short": "bond_short", "mid": "bond_mid", "long": "bond_mid"}
+_BOND_SLEEVE_BY_BUCKET = {"short": "bond_short", "mid": "bond_mid", "long": "bond_long"}
 LINE_LABELS = {"bond": "Bonds (EUR)", "cash": "Cash (money market)", "gold": "Gold"}
 
 #: Tax notes per line; every figure-free note still carries the flags (D4).
@@ -224,6 +225,7 @@ def asset_class_suggestions(
         }
         if line == "bond":
             entry["duration_bucket"] = scope.bond_bucket
+            entry["evidence"] = bond_cost_note(target)
         if under and fund is not None:
             entry["fund"] = {"isin": fund.isin, "name": fund.name, "why": _fund_why(fund, held_by)}
             entry["amount_eur"] = round(gap / 100.0 * book_eur, 2)
