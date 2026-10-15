@@ -6,6 +6,7 @@ import { Skeleton } from "../../components/ui/skeleton";
 import { ErrorState } from "../../components/composed/ErrorState";
 import { EvidenceChip } from "./EvidenceChip";
 import { FamilyTests } from "./FamilyTests";
+import { FundsPanel } from "./FundsPanel";
 import { HistoryPanel } from "./HistoryPanel";
 import { RiskBandsPanel } from "./RiskBandsPanel";
 import { RankingPanel } from "./RankingPanel";
@@ -193,6 +194,8 @@ export function VerdictTab() {
       <RiskBandsPanel />
 
       <HistoryPanel />
+
+      <FundsPanel />
 
       <TrustGlossary methodNote={data.method_note} verdict={data} />
     </div>

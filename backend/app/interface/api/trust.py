@@ -4,11 +4,13 @@ GET /api/trust/verdict — headline, three numbers and one evidence row per pred
 GET /api/trust/calls   — resolved calls, newest first, with the five worst misses
 GET /api/trust/ranking — descriptive shadow-ledger metrics of Discover's ranking (ADR 0018 §5)
 GET /api/trust/history — the historical panel: factor tilt, ranking model, satellite (simulated, not live)
+GET /api/trust/funds   — each held curated fund's tracking difference against its same-index peers
 GET /api/trust/risk-bands — risk forecasts stored before the fact and how they did (plan 2026-10-14, D3)
 
-Both read the immutable prediction ledgers for the signed-in user only. Every
-value is frozen at issue/resolution time; see ``decision/verification/trust.py``
-for the definitions.
+The verdict, calls and ranking read the immutable prediction ledgers for the
+signed-in user only; every value there is frozen at issue/resolution time (see
+``decision/verification/trust.py``). The funds row is not a ledger: it reads
+live synced positions and the monthly tracking-difference measurement.
 """
 from __future__ import annotations
 
@@ -640,6 +642,45 @@ class HistoryOut(BaseModel):
     haircut: HaircutOut
     not_covered: str
     disclosures: list[str]
+
+
+class FundPeerOut(BaseModel):
+    isin: str
+    name: str
+    td_pct: float
+
+
+class HeldFundOut(BaseModel):
+    isin: str
+    name: str
+    index: str
+    value: float
+    td_pct: float | None = Field(default=None, description="% a year against the same-index median; null when unmeasured.")
+    best_peer: FundPeerOut | None = None
+    gap_pct: float | None = None
+    flag: bool = False
+
+
+class FundsOut(BaseModel):
+    """Held curated funds against their same-index peers (plan 2026-10-14, C4 live check)."""
+
+    as_of: str | None = None
+    years: int
+    flag_pct: float
+    funds: list[HeldFundOut] = Field(default_factory=list)
+    n_other_positions: int = 0
+    note: str
+
+
+@router.get("/funds", response_model=FundsOut)
+def get_funds(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Each held curated fund's tracking difference against funds on the same index (descriptive, monthly)."""
+    from app.decision.fund_tracking import held_funds
+
+    return held_funds(db, user.id)
 
 
 @router.get("/verdict", response_model=VerdictOut)
