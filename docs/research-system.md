@@ -3,7 +3,7 @@
 QuantFolio includes a multi-agent research pipeline that produces structured
 analysis to assist — not replace — investment decision-making. All agents are
 LLM personas operating on the local AI endpoint configured in Control Center
-(default model `qwen3.6-35b-a3b`; see `docs/integrations.md`).
+(default model `qwen3.5-9b`; see `docs/integrations.md`).
 They have no ability to place trades, approve transactions, or modify portfolio
 state. Outputs are research aids only.
 

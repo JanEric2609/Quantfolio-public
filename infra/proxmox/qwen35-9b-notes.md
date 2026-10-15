@@ -55,12 +55,13 @@ the app + `--reasoning-budget 0`.
 | ≤ 2026-06 | Qwen3.6-35B-A3B (MoE) | `--cpu-moe`, needed 16 GB RAM, capped ctx 8K |
 | 2026-06 → 2026-08-25 | Qwen3-8B dense (UD-Q4_K_XL) | full GPU, 16K ctx |
 | 2026-08-25 → | **Qwen3.5-9B** (this doc) | full GPU, 32K ctx, schema-constrained output via app |
+| 2026-10-15 (benchmark only) | Qwen3.6-35B-A3B UD-Q4_K_M | `--n-cpu-moe 34`, transient unit; same accuracy, 4.5× slower: not adopted, file deleted (`docs/research/llm-benchmark-2026-10-15.md`) |
 
 ## Rollback assets (on LXC 112)
 
 - `/etc/systemd/system/quantfolio-llamacpp.service.bak-qwen3-8b` — pre-cutover unit (sha256 `7f9986b6…`)
 - `/etc/systemd/system/quantfolio-llamacpp.service.bak-qwen35-ctx16k` — post-cutover unit @16K ctx
-- `/var/lib/quantfolio/models/Qwen3-8B-UD-Q4_K_XL.gguf` (4.8 GB) — old weights
+- The Qwen3-8B weights were deleted on 2026-10-15 (owner's OK); re-download `unsloth/Qwen3-8B-GGUF` to roll back.
 
 ## Links
 

@@ -193,7 +193,7 @@ While cloud keys are invalid:
 
 | Task Type | Behavior |
 |-----------|----------|
-| **batch_research** | Falls back to local Qwen3.6-35B-A3B (slower, lower quality) |
+| **batch_research** | Falls back to the local Qwen3.5-9B (slower, lower quality) |
 | **interactive** | Stays on local LLM only (as designed) |
 | **routine** | Stays on local LLM only |
 

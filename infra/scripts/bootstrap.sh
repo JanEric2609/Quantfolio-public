@@ -270,7 +270,7 @@ cat << 'EOF'
 
 4. In quantfolio-llm container:
    [ ] llama.cpp built or downloaded
-   [ ] Qwen3.6-35B-A3B-UD-Q4_K_M.gguf downloaded to /var/lib/quantfolio/models/
+   [ ] Qwen3.5-9B-UD-Q4_K_XL.gguf downloaded to /var/lib/quantfolio/models/
    [ ] GPU passthrough verified (nvidia-smi shows GPU)
    [ ] quantfolio-llamacpp.service enabled
    [ ] curl http://<LLAMA_BIND_HOST>:8080/health returns 200; /etc/quantfolio/llama.env sets LLAMA_API_KEY

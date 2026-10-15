@@ -5,7 +5,7 @@
 ## Prerequisites
 
 - Proxmox VE 8.0+ host with IOMMU enabled (see `gpu-passthrough.md`)
-- Qwen3.6-35B-A3B-UD-Q4_K_M.gguf model file (~18-20 GB)
+- Qwen3.5-9B-UD-Q4_K_XL.gguf model file (~6 GB; `unsloth/Qwen3.5-9B-GGUF`)
 - Domain name (optional; self-signed works for LAN)
 - ~22-25 GB available storage on Proxmox
 
@@ -132,7 +132,7 @@
    cd /var/lib/quantfolio/models
    
    # Download model (example using Hugging Face CLI)
-   huggingface-cli download Qwen/Qwen3.6-35B-A3B-UD-Q4_K_M \
+   huggingface-cli download unsloth/Qwen3.5-9B-GGUF Qwen3.5-9B-UD-Q4_K_XL.gguf \
      --local-dir . --local-dir-use-symlinks False
    ```
 
