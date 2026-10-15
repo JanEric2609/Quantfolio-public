@@ -361,3 +361,67 @@ def test_the_skill_headline_names_the_cross_sector_fallback():
 
     assert _selection_scope({"n_fallback_days": 0}) == "same run, same sector"
     assert "3 trading days" in _selection_scope({"n_fallback_days": 3})
+
+
+# --- the noise check (ADR 0018 §11) ------------------------------------------------
+
+from app.foundation import forecast_verification as fv  # noqa: E402
+
+
+def _ar1(n: int, rho: float, sd: float, seed: int, mean: float = 0.0) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    out, prev = np.empty(n), 0.0
+    for t in range(n):
+        prev = rho * prev + rng.normal(0.0, sd * (1 - rho * rho) ** 0.5)
+        out[t] = mean + prev
+    return out
+
+
+def test_variance_ratio_is_one_for_uncorrelated_values_and_ignores_the_mean():
+    x = np.random.default_rng(1).normal(0.0, 0.01, 5000)
+    assert fv.variance_ratio(x) == pytest.approx(1.0, abs=0.15)
+    assert fv.variance_ratio(x + 0.05) == pytest.approx(fv.variance_ratio(x))
+    assert fv.variance_ratio(x[:41]) is None and fv.variance_ratio(np.zeros(100)) is None
+    # AR(1) 0.5: VR(21) near (1 + rho) / (1 - rho) = 3, less the end correction.
+    assert fv.variance_ratio(_ar1(5000, 0.5, 0.01, 2)) == pytest.approx(2.8, abs=0.4)
+
+
+def test_noise_check_looks_at_63_126_and_252_days():
+    x = list(np.random.default_rng(4).normal(0.0, 0.005, 300))
+    assert daily_tests.noise_check(x[:62])["status"] == "pending"
+    mid = daily_tests.noise_check(x[:130])
+    assert mid["status"] == "passing" and [lk["vr"] is None for lk in mid["looks"]] == [False, False, True]
+    full = daily_tests.noise_check(x)
+    assert full["status"] == "passed" and full["failed_at_day"] is None
+    # A look uses only the first n values: what comes later never changes it.
+    assert full["looks"][0]["vr"] == mid["looks"][0]["vr"]
+
+
+def test_a_persistent_series_fails_the_noise_check_and_its_verdicts_are_not_valid():
+    values = _ar1(300, 0.9, daily_tests.SELECTION_SIGMA_REF, 6, mean=-0.01 / 21)
+    out = daily_tests.selection_result(_rows("u", "selection", values))
+    assert out["noise_check"]["status"] == "failed" and out["noise_check"]["failed_at_day"] == 63
+    assert out["state"] == "not_valid" and not out["provisional"]
+
+
+def test_a_verdict_before_the_last_look_is_provisional():
+    rng = np.random.default_rng(8)
+    values = rng.normal(-0.004, daily_tests.SELECTION_SIGMA_REF, 150)
+    out = daily_tests.selection_result(_rows("u", "selection", values))
+    assert out["noise_check"]["status"] == "passing"
+    # Far below zero: harm (checked first) and futility both reject; either is provisional.
+    assert out["state"] == "harm" and out["e_futility"] >= daily_tests.FUTILITY_THRESHOLD
+    assert out["provisional"]
+
+
+def test_a_mandate_retires_only_after_its_noise_check_passes():
+    rng = np.random.default_rng(9)
+    values = rng.normal(-0.004, 0.004, 200)
+    out = {m["series"]: m for m in daily_tests.mandate_results({"mandate_a": _rows("u", "mandate_a", values)})}
+    a = out["mandate_a"]
+    assert a["noise_check"]["status"] == "passing"
+    assert a["state"] == "retire_pending" and not a["retire"]
+
+    persistent = _ar1(400, 0.9, 0.004, 10, mean=-0.004)
+    out = {m["series"]: m for m in daily_tests.mandate_results({"mandate_a": _rows("u", "mandate_a", persistent)})}
+    assert out["mandate_a"]["state"] == "not_valid" and not out["mandate_a"]["retire"]

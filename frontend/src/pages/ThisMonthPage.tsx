@@ -204,6 +204,7 @@ function EtfLines({ suggestions }: { suggestions: PlanEtfSuggestions }) {
             <p className="text-sm text-text-secondary">Within the band; nothing to do.</p>
           )}
           {line.warning && <p className="text-sm text-warn">{line.warning}</p>}
+          {line.evidence && <p className="text-sm text-text-secondary">{line.evidence}</p>}
           <p className="text-xs text-text-muted">Tax (estimate, not tax advice): {line.tax_note}</p>
         </div>
       ))}
@@ -521,6 +522,11 @@ export function ThisMonthPage() {
                 Already covered: {data.etf_suggestions.covered.map((c) => `${c.index} by ${c.held_by}`).join("; ")}.
               </p>
             )}
+          </Details>
+        )}
+        {data.mix_note && (
+          <Details title="Why 100 % equity?" summary="tested on 16 countries since 1870">
+            <p className="text-sm text-text-secondary">{data.mix_note}</p>
           </Details>
         )}
         {data.acc_dist_note && (

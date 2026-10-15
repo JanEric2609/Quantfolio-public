@@ -35,6 +35,10 @@ def _unsupported_listing(symbol: str) -> bool:
     return len(suffix) != 1
 
 
+#: Public name for callers outside the provider (the bar guard's confirmation step).
+unsupported_listing = _unsupported_listing
+
+
 class TiingoProvider(MarketDataProvider):
     """Global market data provider backed by Tiingo.
 
