@@ -126,6 +126,9 @@ def _overlap21(rng: np.random.Generator, n: int, days: int, mean: float, sd: flo
     The day's observation is the mean over the ~60 open picks of their daily
     active return; a pick's drift persists over its window, which is what
     makes overlapping membership autocorrelated. Scaled to ``sd``, mean ``mean``.
+    Each pick's drift is standard normal, so the mixture already has unit
+    variance; the path is never re-centred on its own realised mean (that
+    would use future days and remove the drifts' own sampling variation).
     """
     horizon = HORIZON_DAYS
     drift_share = 0.3  # share of the day's variance from the persistent pick drifts
@@ -138,7 +141,6 @@ def _overlap21(rng: np.random.Generator, n: int, days: int, mean: float, sd: flo
         last = t // 5 + 1
         d = drifts[:, first:last].mean(axis=1) if last > first else 0.0
         out[:, t] = np.sqrt(drift_share) * d * np.sqrt(max(last - first, 1)) + np.sqrt(1 - drift_share) * noise[:, t]
-    out = (out - out.mean(axis=1, keepdims=True)) / out.std(axis=1, keepdims=True)
     return mean + sd * out
 
 

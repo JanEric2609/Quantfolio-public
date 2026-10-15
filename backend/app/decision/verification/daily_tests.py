@@ -44,6 +44,7 @@ from app.decision.verification.daily_ledger import (
     SERIES_IDEAS,
     SERIES_RANKING,
     SERIES_SELECTION,
+    mandate_starts,
 )
 from app.foundation import forecast_verification as fv
 from app.foundation.models.entities import TrustDailyActiveReturn
@@ -229,6 +230,10 @@ FUTILITY_THRESHOLD = 1.0 / FDR_LEVEL
 MANDATE_DELTA_21D = 0.002
 #: M: sigma_ref is measured on these first observed days, then the test starts.
 MANDATE_SIGMA_DAYS = 63
+# A sleeve whose active return never moved in its first 63 days (it held the
+# benchmark) would get sigma = 0 and so no test at all; it is tested at this floor
+# instead (0.1 % per 21 days).
+MANDATE_SIGMA_FLOOR = 0.001 / math.sqrt(21)
 #: Clip as a multiple of the reference noise, as everywhere.
 CLIP_SIGMAS = 4.5
 SELECTION_QUESTION = "Do Discover's picks beat the stocks it could have picked instead (same run, same sector)?"
@@ -274,6 +279,7 @@ def selection_result(rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
     fallback = [int((r.detail_json or {}).get("n_fallback") or 0) for r in rows if r.day >= PRIMARY_TEST_START]
     measured = n >= MIN_DAYS_FOR_STATE
     sd = float(np.std(values, ddof=1)) if measured else SELECTION_SIGMA_REF
+    rho1 = fv.lag1_autocorrelation(values[:AR1_CHECK_DAYS]) if n >= AR1_CHECK_DAYS else None
     return {
         "family": "S",
         "series": SERIES_SELECTION,
@@ -296,19 +302,33 @@ def selection_result(rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
         "futility_threshold": FUTILITY_THRESHOLD,
         "futility_delta_21d": FUTILITY_DELTA_21D,
         "n_fallback_days": sum(1 for f in fallback if f > 0),
+        "rho1": rho1,
+        "rho1_flag": rho1 is not None and abs(rho1) > AR1_FLAG,
         "state": state,
         "path": _thin(days, skill.path, harm.path),
         "time_to_know": time_to_know_grid(sd, SELECTION_CLIP, measured),
     }
 
 
-def mandate_results(by_series: dict[str, list[TrustDailyActiveReturn]]) -> list[dict[str, Any]]:
-    """M: futility per mandate sleeve, e-BH over the two (K = 2)."""
+def mandate_results(
+    by_series: dict[str, list[TrustDailyActiveReturn]],
+    starts: dict[str, date] | None = None,
+) -> list[dict[str, Any]]:
+    """M: futility per mandate sleeve, e-BH over the two (K = 2).
+
+    ``starts`` holds each sleeve's current inception day: a reset starts a new
+    run, and only that run's days are tested (the ledger keeps the old ones).
+    """
     delta_d = MANDATE_DELTA_21D / HORIZON_DAYS
     out: list[dict[str, Any]] = []
     for series, mandate in MANDATE_SERIES.items():
-        days, values, _ = _observed(by_series.get(series, []))
-        sigma = float(np.std(values[:MANDATE_SIGMA_DAYS], ddof=1)) if len(values) > MANDATE_SIGMA_DAYS else None
+        start = (starts or {}).get(series)
+        rows = [r for r in by_series.get(series, []) if start is None or r.day > start]
+        days, values, _ = _observed(rows)
+        sigma = (
+            max(float(np.std(values[:MANDATE_SIGMA_DAYS], ddof=1)), MANDATE_SIGMA_FLOOR)
+            if len(values) > MANDATE_SIGMA_DAYS else None
+        )
         tested = values[MANDATE_SIGMA_DAYS:] if sigma else []
         clip = CLIP_SIGMAS * sigma if sigma else None
         e = _bet(tested, clip, shift=delta_d)[1].final if clip and tested else 1.0
@@ -477,7 +497,7 @@ def build_daily_tests(db: Session, user_id: str) -> dict[str, Any]:
         "horizon_days": HORIZON_DAYS,
         "families": [series_result(f, by_series[f.series]) for f in FAMILIES],
         "selection": selection_result(by_series[SERIES_SELECTION]),
-        "mandates": mandate_results(by_series),
+        "mandates": mandate_results(by_series, mandate_starts(db, user_id)),
         "paired": paired_comparison(by_series[SERIES_IDEAS], by_series[SERIES_ADVISOR]),
     }
 

@@ -4,6 +4,10 @@
 - 2,000 paths for the false-alarm rate, and 1,000 per edge.
 - Wall time 59 s; peak RSS 0.6 GB.
 - Raw output: `calibration-2026-10-14.json`.
+- **Re-run 2026-10-15** after review: the `overlap_21d` model had re-centred and re-scaled each
+  path on its own realised mean, which uses future days and removes part of the drifts'
+  sampling variation. It now uses its theoretical scale. The minimum detectable edge now uses
+  the time-to-verdict seed. Only the overlap column and M's 10-year edge changed.
 
 Every test is built from `decision/verification/daily_tests.py`'s own constants: clip, prior
 variance, bet cap, threshold and futility shift. This is not a trial. It makes no return claim,
@@ -13,12 +17,12 @@ and nothing goes into the trial ledger.
 
 | Test | Nominal | iid normal | t(4)-GARCH | regime switch | AR(1) 0.15 | overlap 21d |
 |---|---|---|---|---|---|---|
-| F1 skill | 2.5 % | 1.9 % | 1.5 % | 1.7 % | 5.9 % | 52 % |
-| F1 harm | 2.5 % | 1.4 % | 1.4 % | 1.4 % | 5.1 % | 52 % |
-| S skill | 2.5 % | 1.9 % | 1.5 % | 1.8 % | 6.0 % | 52 % |
-| S harm | 2.5 % | 1.5 % | 1.4 % | 1.5 % | 5.1 % | 52 % |
-| U futility | 5 % | 3.7 % | 3.1 % | 2.9 % | 8.5 % | 58 % |
-| M futility | 2.5 % | 1.5 % | 1.4 % | 1.4 % | 5.1 % | 52 % |
+| F1 skill | 2.5 % | 1.9 % | 1.5 % | 1.7 % | 5.9 % | 58 % |
+| F1 harm | 2.5 % | 1.4 % | 1.4 % | 1.4 % | 5.1 % | 56 % |
+| S skill | 2.5 % | 1.9 % | 1.5 % | 1.8 % | 6.0 % | 58 % |
+| S harm | 2.5 % | 1.5 % | 1.4 % | 1.5 % | 5.1 % | 56 % |
+| U futility | 5 % | 3.7 % | 3.1 % | 2.9 % | 8.5 % | 62 % |
+| M futility | 2.5 % | 1.5 % | 1.4 % | 1.4 % | 5.1 % | 56 % |
 
 "Nominal" is 1 / threshold per test (e ≥ 40, U e ≥ 20) before the K-family correction.
 
@@ -66,6 +70,6 @@ Median years and P(verdict within 10 years) at a true edge per 21 days:
 - **Minimum edge detected within 5 / 10 years (median):**
   - S: 1 % / 0.75 % per 21 days;
   - F1: 2 % / 1.5 %;
-  - M: 1.5 % / 1.5 %.
+  - M: 1.5 % / 1 % (the 1 % edge's median verdict is 9.7 years, right at the 10-year line).
 - **Matched controls work:** S needs half the edge F1 does, which is the 4× variance cut the
   audit measured.

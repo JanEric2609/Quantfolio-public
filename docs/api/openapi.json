@@ -11630,6 +11630,23 @@
             "title": "Question",
             "type": "string"
           },
+          "rho1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lag-1 autocorrelation of the first 63 days (shown, never whitened).",
+            "title": "Rho1"
+          },
+          "rho1_flag": {
+            "default": false,
+            "title": "Rho1 Flag",
+            "type": "boolean"
+          },
           "role": {
             "const": "primary",
             "default": "primary",

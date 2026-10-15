@@ -19,7 +19,7 @@
     "t4_garch": 0.0145,
     "ar1_0.15": 0.059,
     "regime_switching": 0.017,
-    "overlap_21d": 0.523
+    "overlap_21d": 0.5785
    },
    "time_to_verdict": {
     "iid_normal": {
@@ -105,7 +105,7 @@
     "t4_garch": 0.014,
     "ar1_0.15": 0.0515,
     "regime_switching": 0.014,
-    "overlap_21d": 0.5185
+    "overlap_21d": 0.562
    },
    "time_to_verdict": {
     "iid_normal": {
@@ -191,7 +191,7 @@
     "t4_garch": 0.0145,
     "ar1_0.15": 0.0605,
     "regime_switching": 0.0175,
-    "overlap_21d": 0.523
+    "overlap_21d": 0.5815
    },
    "time_to_verdict": {
     "iid_normal": {
@@ -277,7 +277,7 @@
     "t4_garch": 0.014,
     "ar1_0.15": 0.0505,
     "regime_switching": 0.0145,
-    "overlap_21d": 0.5215
+    "overlap_21d": 0.5625
    },
    "time_to_verdict": {
     "iid_normal": {
@@ -363,7 +363,7 @@
     "t4_garch": 0.031,
     "ar1_0.15": 0.085,
     "regime_switching": 0.0295,
-    "overlap_21d": 0.583
+    "overlap_21d": 0.618
    },
    "time_to_verdict": {
     "iid_normal": {
@@ -449,7 +449,7 @@
     "t4_garch": 0.014,
     "ar1_0.15": 0.0505,
     "regime_switching": 0.014,
-    "overlap_21d": 0.5215
+    "overlap_21d": 0.5625
    },
    "time_to_verdict": {
     "iid_normal": {
@@ -515,8 +515,9 @@
    },
    "min_detectable_edge_21d": {
     "5": 0.015,
-    "10": 0.015
+    "10": 0.01
    }
   }
- }
+ },
+ "rerun": "2026-10-15: overlap_21d no longer re-centred per path; the MDE uses the time-to-verdict seed"
 }

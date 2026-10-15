@@ -14,7 +14,8 @@ never touches the trial ledger.
 algebra as `foundation.forecast_verification.e_process_bernoulli`),
 `crossing_days`, `simulate` (iid normal, t(4)-GARCH(1,1), AR(1) 0.15,
 two-regime noise, F1-style overlapping membership), `type_i_error`,
-`time_to_verdict`, `minimum_detectable_edge`.
+`time_to_verdict`, `minimum_detectable_edge`, and `MODELS` (the noise models
+by name).
 
 ## Invariants
 

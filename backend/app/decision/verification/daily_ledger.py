@@ -329,6 +329,32 @@ def freeze_series(
     return written
 
 
+def _mandate_sleeve(db: Session, user_id: str, series: str) -> Any:
+    from app.foundation.models.entities import PaperPortfolio
+
+    return (
+        db.query(PaperPortfolio)
+        .filter(PaperPortfolio.user_id == user_id, PaperPortfolio.mandate == MANDATE_SERIES[series])
+        .order_by(PaperPortfolio.created_at)
+        .first()
+    )
+
+
+def mandate_starts(db: Session, user_id: str) -> dict[str, date]:
+    """Each mandate series' current run start (the sleeve's last reset).
+
+    The ledger keeps a reset sleeve's earlier days under the same key; the
+    tests only read the days after this.
+    """
+    out: dict[str, date] = {}
+    for series in MANDATE_SERIES:
+        sleeve = _mandate_sleeve(db, user_id, series)
+        start_at = (sleeve.inception_at or sleeve.created_at) if sleeve is not None else None
+        if start_at is not None:
+            out[series] = _utc_date(start_at)
+    return out
+
+
 def freeze_mandate_series(
     db: Session,
     user_id: str,
@@ -345,15 +371,10 @@ def freeze_mandate_series(
     most :data:`GRACE_TRADING_DAYS`, then freezes without an observation. Days
     before the sleeve's inception (its last reset) are never written.
     """
-    from app.foundation.models.entities import PaperPortfolio, PaperSnapshot
+    from app.foundation.models.entities import PaperSnapshot
 
     today = today or datetime.now(UTC).date()
-    sleeve = (
-        db.query(PaperPortfolio)
-        .filter(PaperPortfolio.user_id == user_id, PaperPortfolio.mandate == MANDATE_SERIES[series])
-        .order_by(PaperPortfolio.created_at)
-        .first()
-    )
+    sleeve = _mandate_sleeve(db, user_id, series)
     if sleeve is None:
         return 0
     start_at = sleeve.inception_at or sleeve.created_at
@@ -431,6 +452,14 @@ def ledger_users(db: Session) -> list[str]:
     return sorted(i for i in ids if i)
 
 
+def mandate_users(db: Session) -> list[str]:
+    """Users with a mandate sleeve, whether or not they have discovery records."""
+    from app.foundation.models.entities import PaperPortfolio
+
+    ids = {u for (u,) in db.query(PaperPortfolio.user_id).filter(PaperPortfolio.mandate.in_(tuple(MANDATE_SERIES.values()))).distinct().all()}
+    return sorted(i for i in ids if i)
+
+
 __all__ = [
     "GRACE_TRADING_DAYS",
     "MANDATE_SERIES",
@@ -440,6 +469,8 @@ __all__ = [
     "SERIES_MANDATE_B",
     "SERIES_SELECTION",
     "freeze_mandate_series",
+    "mandate_starts",
+    "mandate_users",
     "freeze_series",
     "freeze_user_series",
     "ledger_users",

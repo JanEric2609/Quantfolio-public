@@ -47,3 +47,13 @@ def test_a_large_edge_is_found_and_crossing_days_are_one_based():
     assert (days > 0).all() and days.min() >= 1
     t = time_to_verdict(F1_LIKE, "iid_normal", 0.02, 0.005, years=10, n_paths=100, seed=6)
     assert t["q50_years"] is not None and t["q50_years"] < 3 and t["p_within_10y"] == 1.0
+
+
+def test_overlap_paths_are_not_recentred_on_their_own_mean():
+    from app.lab.calibration import simulate
+
+    paths = simulate("overlap_21d", 400, 252, 0.0, 0.01, seed=3)
+    means = paths.mean(axis=1)
+    # Re-centring would make every path's mean exactly 0; persistent drifts keep them spread.
+    assert means.std() > 1e-4
+    assert abs(paths.std() - 0.01) < 0.001

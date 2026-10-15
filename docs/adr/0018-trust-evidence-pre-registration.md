@@ -83,6 +83,7 @@ Discover, the advisor, the mandates, or anything an LLM wrote.
 - **Start of the test (T0).** The primary e-processes start on **2026-10-12**, or on the
   first trading day after this ADR is merged if that is later. Ledger rows before T0 are
   kept and shown as "before pre-registration", but they never enter an e-value.
+  *Superseded by the amendment of 2026-10-14: T0 = 2026-10-15.*
 
 ### 3. The calendar-time daily ledger (F1, F3)
 
@@ -549,6 +550,11 @@ The test is §4 with a smaller reference noise:
 - **σ_ref** is measured on each series' first 63 observed days and then frozen.
   - The e-process starts on the 64th observed day, so σ_ref never uses data the test bets on.
   - C = 4.5 × σ_ref, the pseudo-variance is 0.0121 and the cap is 0.75/p0.
+  - σ_ref is at least 0.1 % per 21 days. A sleeve that held the benchmark for its first 63
+    days would otherwise get σ_ref = 0 and never be tested (added 2026-10-15, before any
+    mandate had 63 observed days).
+  - Only the sleeve's current run counts: a reset starts the series again from its new
+    inception day. The ledger keeps the earlier days.
 - **e-BH** runs over the two mandates, K = 2, with e ≥ 40 for one rejection.
 - **Retire rule.** A mandate whose futility hypothesis is rejected is **retired**:
   - its reviews and trades stop;
@@ -593,6 +599,9 @@ The test is §4 with a smaller reference noise:
 - The study and the `ideas_neutral` row are withdrawn. **No factor-neutral row will be
   built.**
 - The `trust_factor_study` table stays.
+- The code goes in its own change (private #344): the weekly job hook, the study module and
+  the page row are removed there. Until that merges, the hook stays wired but cannot
+  produce a row, because it needs back-filled runs that prod does not have.
 
 ### 9. A residual-slope family (gated)
 
@@ -614,6 +623,63 @@ The test is §4 with a smaller reference noise:
 - σ is the reference above until 63 days are observed, then the measured one.
 - Paths longer than 40 years show as "> 40 years".
 - Amendment 2026-10-07 item 4's simulator is unchanged apart from these inputs.
+
+### 11. The noise check (S, U and M)
+
+**Why.** The calibration of 2026-10-14 (`docs/research/calibration/calibration-2026-10-14.md`)
+found the tests hold under fat tails, volatility clustering and regimes, but not under
+serial correlation:
+- at a daily autocorrelation of 0.15, false alarms run about 2-2.5× the nominal rate;
+- when each pick's drift persists through its 21 days (the `overlap_21d` stress model),
+  52-58 %.
+
+The check below catches the second case. It cannot catch the first within a year, and the page
+says so.
+
+**The statistic.** VR(21) is the variance ratio of the series' daily values:
+- it is Lo and MacKinlay's overlapping 21-day estimator with the unbiased denominator;
+- `foundation.forecast_verification.variance_ratio` computes it;
+- the series' mean is subtracted, so the check uses the series' noise, never the sign or size of
+  its mean.
+
+**When and the cutoffs.** Each series (`selection`, `mandate_a`, `mandate_b`) is checked on its
+observed days from T0, at three looks:
+
+| Look (observed days) | Fails when VR(21) > |
+|---|---|
+| 63 | 3.0 |
+| 126 | 2.3 |
+| 252 | 1.8 |
+
+- Each look uses the series' first *n* observed days, so a look's value never changes once
+  it is reached.
+- The cutoffs come from 20,000 simulated paths per model of the 2026-10-14 harness. The
+  chance that a series fails at any of the three looks is:
+  - 4.9 % on iid normal noise, 6.1 % on t(4)-GARCH and 8.3 % on regime noise;
+  - 20 % at AR(1) 0.15;
+  - 99 % under `overlap_21d`, and 53 % of those paths already fail at day 63.
+- **The 1.3 cutoff the plan proposed was dropped.** With 63 days, one VR(21) estimate has a
+  standard error of about 0.6, so 1.3 fails a quarter of clean series.
+
+**What a failure does.**
+- A failed check is final for that series.
+- The page marks the series' verdicts **"not valid: serial correlation"**, and no S, U or M
+  verdict on it is acted on.
+- The series' test moves to non-overlapping observations, each one counted as a single
+  observation:
+  - for S and U: one Discover run every 21 trading days, scored on its picks' whole 21-day
+    pick-minus-control return;
+  - for M: consecutive 21-day sums of the mandate's daily active return.
+- The new test uses the same map, bettor and thresholds, with σ_ref × √21 as its reference
+  noise. It starts from the failing day, and the earlier e-values are discarded.
+- A further amendment fixes the code that builds it before its first value is read.
+
+**Before the last look.**
+- An S or U verdict reached before the series passes its day-252 look is shown as
+  **provisional**.
+- A mandate is retired only once its series has passed all three looks.
+  - M's e-process starts on day 64, and its median time to a verdict at a 2 % edge is about
+    2 years, so this costs nothing in practice.
 
 ## Consequences
 
