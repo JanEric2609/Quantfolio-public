@@ -132,23 +132,7 @@ def _sentiment_label(article: dict[str, Any]) -> str:
 
 
 def book_volatility(db, user_id: str) -> tuple[float, str]:
-    """Annual volatility of the book at today's weights and where it came from.
+    """Annual volatility of the book at today's weights and where it came from (``wealth_planner.book_volatility``)."""
+    from app.foundation.wealth_planner import book_volatility as _book_volatility
 
-    Ledoit-Wolf covariance of up to two years of EUR daily returns; the
-    long-run MSCI World figure until the book has a year of history.
-    """
-    import numpy as np
-
-    from app.foundation.allocation import portfolio_stats, shrunk_covariance
-    from app.foundation.quant import price_matrix_to_returns
-    from app.foundation.wealth_planner import DEFAULT_VOLATILITY
-
-    matrix, values, _diag = PortfolioPriceService(db, user_id).price_matrix()
-    if matrix:
-        rets = price_matrix_to_returns(matrix).tail(504)
-        total = sum(values.get(c, 0.0) for c in rets.columns)
-        if len(rets) >= 252 and total > 0:
-            cov, _shrink = shrunk_covariance(rets)
-            w = np.array([values.get(c, 0.0) / total for c in rets.columns])
-            return float(portfolio_stats(w, cov)["volatility"]), f"your book, {len(rets)} days of EUR returns (Ledoit-Wolf)"
-    return DEFAULT_VOLATILITY, "long-run MSCI World in EUR (less than a year of history)"
+    return _book_volatility(db, user_id)

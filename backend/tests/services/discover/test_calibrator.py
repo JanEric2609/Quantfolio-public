@@ -160,5 +160,5 @@ def test_the_slope_is_never_negative():
 
 
 def test_the_version_names_the_rule():
-    assert CALIBRATOR_VERSION["rule"] == 2 and CALIBRATOR_VERSION["min_n_eff"] == 100
+    assert CALIBRATOR_VERSION["rule"] == 3 and CALIBRATOR_VERSION["min_n_eff"] == 100
     assert CALIBRATOR_VERSION["hit"] == "excess>0"

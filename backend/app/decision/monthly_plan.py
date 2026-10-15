@@ -59,7 +59,9 @@ from app.foundation.live_positions import BROKER_SOURCES, live_positions, manual
 from app.foundation.models.entities import BrokerSyncLog, ConnectedAccount, DkbAccount, Holding, Portfolio
 from app.foundation.portfolio_utils import holding_market_value
 from app.foundation.settings import get_public_settings
+from app.decision.fund_tracking import stored_peer_td
 from app.decision.monthly_plan_funds import ACC_DIST_NOTE, suggest_all
+from app.decision.plan_rules import MIX_NOTE
 
 logger = logging.getLogger(__name__)
 
@@ -1198,7 +1200,8 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
         "notes": notes,
         "never_sells": not sales,
         "not_investment_advice": True,
-        "suggested_funds": suggest_all(cfg["tilt_isins"]),
+        "suggested_funds": suggest_all(cfg["tilt_isins"], stored_peer_td(db)),
         "acc_dist_note": ACC_DIST_NOTE,
+        "mix_note": MIX_NOTE,
         "etf_suggestions": _etf_suggestions(db, holdings, book, cfg),
     }

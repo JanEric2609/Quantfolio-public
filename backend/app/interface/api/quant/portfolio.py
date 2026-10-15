@@ -493,6 +493,44 @@ def portfolio_projection(
     return result
 
 
+@router.get("/portfolio/projection/long-history")
+def portfolio_projection_long_history(
+    years: int = Query(30, ge=1, le=60),
+    goal_eur: float | None = Query(None, gt=0, description="Goal in today's euros; defaults to the setting."),
+    contribution_eur: float | None = Query(None, ge=0, description="Monthly, in today's euros; defaults to the plan."),
+    start_value_eur: float | None = Query(None, ge=0, description="Defaults to the synced book's value."),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """The same plan drawn from 150 years of euro-area history instead of one model (plan 2026-10-14, D6)."""
+    from app.foundation.live_positions import combined_positions, live_positions
+    from app.foundation.settings import get_public_settings
+    from app.lab.long_history import load_histories, project_plan
+    from app.lab.plan_bands import book_mix
+
+    history = load_histories()
+    if history is None:
+        return {
+            "available": False,
+            "reason": "The long-history data (JST Macrohistory R.6) is not installed on this server.",
+            "estimate": True,
+            "not_tax_advice": True,
+        }
+    settings = get_public_settings(db)
+    start = (
+        float(sum((p.value for p in live_positions(db, user.id)), start=0))
+        if start_value_eur is None else start_value_eur
+    )
+    goal = goal_eur if goal_eur is not None else (float(settings["mc_goal_eur"]) if settings.get("mc_goal_eur") else None)
+    monthly = float(settings.get("monthly_contribution_eur") or 0) if contribution_eur is None else contribution_eur
+    # The same inventory as the start value: reconciled positions only.
+    mix = book_mix(combined_positions(db, user.id))
+    result = project_plan(history[0], history[1], start_value=start, monthly_contribution=monthly, years=years,
+                          mix=mix, goal=goal)
+    result["available"] = True
+    return result
+
+
 @router.get("/portfolio/real/summary", response_model=RealPortfolioMetricsResponse, response_model_exclude_unset=True)
 def real_portfolio_summary(
     benchmark: str | None = Query(None, description="Defaults to the configured benchmark (MSCI World in EUR)."),

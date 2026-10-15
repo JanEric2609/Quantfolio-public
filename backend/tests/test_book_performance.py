@@ -135,3 +135,29 @@ def test_a_broker_appearing_later_is_a_flow_not_return():
     perf = _run(db, user, {_day(0): 100.0, _day(1): 100.0}, bench={})
     assert perf["twr"] == pytest.approx(0.0)
     assert perf["net_contributions_eur"] == pytest.approx(500.0)
+
+
+def test_end_cuts_the_series_and_ignores_a_fund_bought_later():
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    _snap(db, user, 0, 10)
+    _snap(db, user, 3, 10)
+    # Bought on day 5, after the end: it has no price at all.
+    db.add(BookPositionSnapshot(
+        user_id=user.id, snapshot_date=D0 + timedelta(days=5), source="dkb", account_id="a1",
+        isin="IE0000000001", ticker=None, name="New fund", quantity=Decimal("1"), currency="EUR",
+    ))
+    db.commit()
+    prices = {_day(i): 100.0 + i for i in range(7)}
+
+    def closes(_db, symbol, days=730, **kw):
+        return prices if symbol == "EUNL.DE" else {}
+    with patch("app.foundation.eur_prices.eur_closes", side_effect=closes), \
+            patch("app.foundation.portfolio.isin_resolver._try_resolve_isin", return_value=None):
+        whole = book_performance.compute_book_performance(db, user.id, benchmark="BENCH")
+        cut = book_performance.compute_book_performance(db, user.id, benchmark="BENCH", end=D0 + timedelta(days=3))
+    assert whole["unpriced"] == ["IE0000000001"]
+    assert cut["unpriced"] == [] and cut["end"] == _day(3)
+    assert cut["twr"] == pytest.approx(103.0 / 100.0 - 1.0)

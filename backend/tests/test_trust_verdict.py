@@ -168,7 +168,7 @@ def test_empty_ledgers_are_too_early_everywhere_with_a_plain_headline():
 
     assert verdict["state"] == "too_early"
     assert verdict["headline"] == (
-        "Too early to tell: the pre-registered test starts on 2026-10-12; no trading day with open picks recorded yet."
+        "Too early to tell: the pre-registered test starts on 2026-10-15; no trading day with open picks recorded yet."
     )
     assert verdict["resolved_calls"] == 0
     assert verdict["skill"] is None
@@ -191,7 +191,7 @@ def test_empty_ledgers_are_too_early_everywhere_with_a_plain_headline():
     assert "ADR 0018" in verdict["method_note"] and "about 3,500" in verdict["legacy_method_note"]
 
     tests = verdict["daily_tests"]
-    assert tests["start"] == "2026-10-12" and tests["threshold"] == pytest.approx(40.0)
+    assert tests["start"] == "2026-10-15" and tests["threshold"] == pytest.approx(40.0)
     assert [(f["family"], f["series"], f["role"]) for f in tests["families"]] == [
         ("F1", "ideas", "primary"), ("F2", "ranking", "primary"), ("F3", "advisor", "secondary"),
     ]
@@ -213,15 +213,15 @@ def test_headline_counts_trading_days_and_states_the_time_to_know_range():
     db = _memory_db()
     user = _user(db)
     _seed_daily(db, user, "ideas", _daily(0.0, 12))
+    _seed_daily(db, user, "selection", _daily(0.0, 12))
 
     verdict = build_verdict(db, user.id, now=NOW)
     f1 = _family(verdict, "F1")
 
-    assert verdict["state"] == "too_early" and f1["n_days"] == 12
-    assert verdict["headline"].startswith(
-        "Too early to tell: 12 trading days so far; an edge of +1 % per 21 days would most likely show after about"
-    )
-    assert "10-90 % range" in verdict["headline"]
+    # The headline comes from the selection test (ADR 0018 amendment of 2026-10-14, §6, §10).
+    assert verdict["state"] == "too_early" and f1["n_days"] == 12 and f1["alarm_only"]
+    assert verdict["headline"].startswith("Too early to tell: 12 trading days so far. The comparison with MSCI World")
+    assert "Median time to a verdict at an edge per 21 days of 0.25 %" in verdict["headline"]
     assert f1["posterior"]["n"] == 12 and 0.0 < f1["posterior"]["p_positive"] < 1.0
     assert _type(verdict, "ideas")["state"] == "too_early" and _type(verdict, "ideas")["family"] == "F1"
 
@@ -281,11 +281,38 @@ def test_a_flat_daily_record_after_three_months_is_no_evidence():
     db = _memory_db()
     user = _user(db)
     _seed_daily(db, user, "ideas", _daily(0.0, 80, sd=0.01))
+    # Seed 7's first 63 draws have VR(21) 3.7, one of the 2 % of clean series the noise
+    # check fails at day 63 (ADR 0018 §11); this test is about the state, not that check.
+    _seed_daily(db, user, "selection", _daily(0.0, 80, sd=0.005, seed=8))
 
     verdict = build_verdict(db, user.id, now=NOW)
 
     assert _family(verdict, "F1")["state"] == "no_evidence"
-    assert verdict["headline"].startswith("No evidence yet that the picks beat your ETF: 80 trading days so far")
+    assert verdict["daily_tests"]["selection"]["state"] == "no_evidence"
+    assert verdict["headline"].startswith("No evidence yet either way: 80 trading days so far.")
+
+
+def test_a_futile_selection_edge_sets_the_headline():
+    db = _memory_db()
+    user = _user(db)
+    # No edge at all, with little noise: below the 0.6 % margin, but no harm.
+    _seed_daily(db, user, "selection", _daily(0.0, 1500, sd=0.002, seed=8))  # seed 7 fails the noise check
+
+    verdict = build_verdict(db, user.id, now=NOW)
+
+    assert verdict["daily_tests"]["selection"]["state"] == "not_worth_following"
+    assert verdict["headline"].startswith("Not worth following:")
+
+
+def test_f1_harm_still_raises_the_alarm_over_the_selection_test():
+    db = _memory_db()
+    user = _user(db)
+    _seed_daily(db, user, "ideas", _daily(-0.004, 300))
+    _seed_daily(db, user, "selection", _daily(0.0, 300, sd=0.005))
+
+    verdict = build_verdict(db, user.id, now=NOW)
+
+    assert verdict["headline"].startswith("Evidence of harm: Discover's picks have done worse than simply holding")
 
 
 def test_each_family_is_tested_on_its_own_and_only_the_picks_set_the_headline():
@@ -816,3 +843,19 @@ def test_time_to_know_follows_the_issue_cadence_weekly_ideas_daily_advisor():
     assert advisor["n_needed"] == 3503 and advisor["lag_h"] == 12  # 12 dates need 12 chains so far
     assert advisor["years_needed"] == pytest.approx(3503 / 252)
     assert verdict["n_needed"] == 868 and verdict["years_needed"] > 0  # the picks' own schedule
+
+
+def test_a_failed_noise_check_voids_the_selection_headline():
+    db = _memory_db()
+    user = _user(db)
+    rng = np.random.default_rng(3)
+    x, prev = [], 0.0
+    for _ in range(300):  # AR(1) 0.9: the daily values persist
+        prev = 0.9 * prev + rng.normal(0.0, 0.002)
+        x.append(prev - 0.001)
+    _seed_daily(db, user, "selection", x)
+
+    verdict = build_verdict(db, user.id, now=NOW)
+
+    assert verdict["daily_tests"]["selection"]["state"] == "not_valid"
+    assert verdict["headline"].startswith("No valid verdict: the selection series' daily values persist")

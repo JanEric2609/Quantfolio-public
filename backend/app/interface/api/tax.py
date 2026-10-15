@@ -11,6 +11,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.interface.api.params import YearField, YearQuery, between
@@ -348,7 +349,12 @@ def write_event(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    event = create_event(db, user.id, payload.model_dump())
+    try:
+        event = create_event(db, user.id, payload.model_dump())
+    except IntegrityError:
+        # source_ref is unique (an imported booking is stored once).
+        db.rollback()
+        raise HTTPException(status_code=409, detail="An event with this source_ref is already stored.") from None
     return _tax_response({"id": event.id})
 
 

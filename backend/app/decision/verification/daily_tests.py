@@ -37,13 +37,21 @@ from typing import Any
 import numpy as np
 from sqlalchemy.orm import Session
 
-from app.decision.verification.daily_ledger import SERIES, SERIES_ADVISOR, SERIES_IDEAS, SERIES_RANKING
+from app.decision.verification.daily_ledger import (
+    MANDATE_SERIES,
+    SERIES,
+    SERIES_ADVISOR,
+    SERIES_IDEAS,
+    SERIES_RANKING,
+    SERIES_SELECTION,
+    mandate_starts,
+)
 from app.foundation import forecast_verification as fv
 from app.foundation.models.entities import TrustDailyActiveReturn
 
-#: First day an observation may enter an e-value (ADR 0018 §2: 2026-10-12, or
-#: the first trading day after the ADR merges if that is later).
-PRIMARY_TEST_START = date(2026, 10, 12)
+#: First day an observation may enter an e-value (ADR 0018, amendment of
+#: 2026-10-12: the first trading day after the release and the paper reset).
+PRIMARY_TEST_START = date(2026, 10, 15)
 #: Reference daily standard deviation: 5 % per 21 days.
 SIGMA_REF = 0.05 / math.sqrt(21)
 #: Clip before betting: 4.5 x SIGMA_REF, rounded to 5 %.
@@ -81,6 +89,8 @@ class Family:
 
 
 FAMILIES = (
+    # F1 is an alarm since the amendment of 2026-10-14 (§6): it can catch harm
+    # or a large edge; the headline comes from S and U (``alarm_only``).
     Family("F1", SERIES_IDEAS, "primary", "Do Discover's picks, held as issued, beat your passive core ETF?"),
     Family("F2", SERIES_RANKING, "primary", "Does Discover's score sort winners from losers among every scored stock?"),
     Family("F3", SERIES_ADVISOR, "secondary", "Do the advisor's directional calls beat your passive core ETF?"),
@@ -202,6 +212,215 @@ def _state(n_days: int, skill: bool, harm: bool) -> str:
     return "too_early" if n_days < MIN_DAYS_FOR_STATE else "no_evidence"
 
 
+# ---------------------------------------------------------------------------
+# Selection (S), futility (U) and mandate futility (M): ADR 0018 amendment of
+# 2026-10-14, §1-§5. Fixed before any of these values was computed.
+# ---------------------------------------------------------------------------
+
+#: S and U: the measured matched-control noise, 2.3 % per 21 days.
+SELECTION_SIGMA_REF = 0.023 / math.sqrt(21)
+#: 4.5 x SELECTION_SIGMA_REF, rounded.
+SELECTION_CLIP = 0.0225
+#: U's margin: 0.4 % per 21 days net of costs = 0.6 % gross (two 10 bp half-
+#: spreads per 21-day turnover; Prime fees negligible; no tax under the NV).
+FUTILITY_DELTA_21D = 0.006
+#: One hypothesis: a rejection needs e >= 1 / alpha.
+FUTILITY_THRESHOLD = 1.0 / FDR_LEVEL
+#: M: what active management must add, 0.2 % per 21 days net.
+MANDATE_DELTA_21D = 0.002
+#: M: sigma_ref is measured on these first observed days, then the test starts.
+MANDATE_SIGMA_DAYS = 63
+# A sleeve whose active return never moved in its first 63 days (it held the
+# benchmark) would get sigma = 0 and so no test at all; it is tested at this floor
+# instead (0.1 % per 21 days).
+MANDATE_SIGMA_FLOOR = 0.001 / math.sqrt(21)
+#: Clip as a multiple of the reference noise, as everywhere.
+CLIP_SIGMAS = 4.5
+#: ADR 0018 §11, the noise check: (observed days, VR(21) cutoff) per look. A
+#: failed look is final; sized on the 2026-10-14 harness (about 5 % of clean
+#: series fail at any look, 99 % of overlap_21d series do).
+NOISE_CHECK_LOOKS = ((63, 3.0), (126, 2.3), (252, 1.8))
+SELECTION_QUESTION = "Do Discover's picks beat the stocks it could have picked instead (same run, same sector)?"
+FUTILITY_QUESTION = "Is the picks' selection edge too small to pay for trading them?"
+
+
+def _observed(rows: list[TrustDailyActiveReturn]) -> tuple[list[date], list[float], int]:
+    """(days, values, days before T0) of the observed rows from :data:`PRIMARY_TEST_START`."""
+    rows = sorted(rows, key=lambda r: r.day)
+    obs = [r for r in rows if r.value is not None and r.n_open > 0]
+    live = [r for r in obs if r.day >= PRIMARY_TEST_START]
+    return [r.day for r in live], [float(r.value) for r in live if r.value is not None], len(obs) - len(live)
+
+
+def _bet(values: list[float], clip: float, shift: float = 0.0) -> tuple[fv.EProcess, fv.EProcess]:
+    """(skill, harm) e-processes on ``clip(x - shift)`` mapped to [0, 1]."""
+    x = np.clip(np.asarray(values, dtype=float) - shift, -clip, clip)
+    y = (x + clip) / (2.0 * clip)
+    return (
+        fv.e_process_bernoulli(y, 0.5, PRIOR_VAR, cap_factor=BET_CAP),
+        fv.e_process_bernoulli(1.0 - y, 0.5, PRIOR_VAR, cap_factor=BET_CAP),
+    )
+
+
+def noise_check(values: list[float]) -> dict[str, Any]:
+    """ADR 0018 §11: VR(21) of the first *n* observed values at each look in :data:`NOISE_CHECK_LOOKS`.
+
+    ``status`` is ``pending`` before the first look, ``passing`` while the
+    looks reached so far are within their cutoffs, ``passed`` after all of
+    them and ``failed`` from the first look above its cutoff on.
+    """
+    looks = []
+    failed_at: int | None = None
+    for days, cutoff in NOISE_CHECK_LOOKS:
+        vr = fv.variance_ratio(values[:days], HORIZON_DAYS) if len(values) >= days else None
+        failed = vr is not None and vr > cutoff
+        if failed and failed_at is None:
+            failed_at = days
+        looks.append({"day": days, "cutoff": cutoff, "vr": vr, "failed": failed})
+    reached = [lk for lk in looks if lk["vr"] is not None]
+    if failed_at is not None:
+        status = "failed"
+    elif len(reached) == len(looks):
+        status = "passed"
+    else:
+        status = "passing" if reached else "pending"
+    return {"status": status, "failed_at_day": failed_at, "looks": looks}
+
+
+def selection_result(rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
+    """S (skill and harm, K = 2) and U (futility, K = 1) on the ``selection`` series."""
+    days, values, n_pre = _observed(rows)
+    n = len(values)
+    delta_d = FUTILITY_DELTA_21D / HORIZON_DAYS
+    skill, harm = _bet(values, SELECTION_CLIP)
+    _, futile = _bet(values, SELECTION_CLIP, shift=delta_d)
+    rejected = fv.e_bh([skill.final, harm.final], FDR_LEVEL)
+    futility = futile.final >= FUTILITY_THRESHOLD
+    noise = noise_check(values)
+    if noise["status"] == "failed":
+        state = "not_valid"
+    elif rejected[1]:
+        state = "harm"
+    elif rejected[0]:
+        state = "skill"
+    elif futility:
+        state = "not_worth_following"
+    else:
+        state = "too_early" if n < MIN_DAYS_FOR_STATE else "no_evidence"
+    ci = fv.mean_ci_hac(values, fv.newey_west_lag(n), 0.9) if values else None
+    fallback = [int((r.detail_json or {}).get("n_fallback") or 0) for r in rows if r.day >= PRIMARY_TEST_START]
+    measured = n >= MIN_DAYS_FOR_STATE
+    sd = float(np.std(values, ddof=1)) if measured else SELECTION_SIGMA_REF
+    rho1 = fv.lag1_autocorrelation(values[:AR1_CHECK_DAYS]) if n >= AR1_CHECK_DAYS else None
+    return {
+        "family": "S",
+        "series": SERIES_SELECTION,
+        "role": "primary",
+        "question": SELECTION_QUESTION,
+        "futility_question": FUTILITY_QUESTION,
+        "start": PRIMARY_TEST_START.isoformat(),
+        "n_days": n,
+        "n_days_pre_registration": n_pre,
+        "first_day": days[0].isoformat() if days else None,
+        "mean_21d": float(np.mean(values)) * HORIZON_DAYS if values else None,
+        "mean_ci_21d": [ci[0] * HORIZON_DAYS, ci[1] * HORIZON_DAYS] if ci else None,
+        "sd_daily": float(np.std(values, ddof=1)) if n >= 2 else None,
+        "clip": SELECTION_CLIP,
+        "sigma_ref": SELECTION_SIGMA_REF,
+        "e_skill": skill.final,
+        "e_harm": harm.final,
+        "e_futility": futile.final,
+        "threshold": THRESHOLD,
+        "futility_threshold": FUTILITY_THRESHOLD,
+        "futility_delta_21d": FUTILITY_DELTA_21D,
+        "n_fallback_days": sum(1 for f in fallback if f > 0),
+        "rho1": rho1,
+        "rho1_flag": rho1 is not None and abs(rho1) > AR1_FLAG,
+        "state": state,
+        # A verdict before the day-252 look has passed is provisional (§11).
+        "provisional": state in ("skill", "harm", "not_worth_following") and noise["status"] != "passed",
+        "noise_check": noise,
+        "path": _thin(days, skill.path, harm.path),
+        "time_to_know": time_to_know_grid(sd, SELECTION_CLIP, measured),
+    }
+
+
+def mandate_results(
+    by_series: dict[str, list[TrustDailyActiveReturn]],
+    starts: dict[str, date] | None = None,
+) -> list[dict[str, Any]]:
+    """M: futility per mandate sleeve, e-BH over the two (K = 2).
+
+    ``starts`` holds each sleeve's current inception day: a reset starts a new
+    run, and only that run's days are tested (the ledger keeps the old ones).
+    """
+    delta_d = MANDATE_DELTA_21D / HORIZON_DAYS
+    out: list[dict[str, Any]] = []
+    for series, mandate in MANDATE_SERIES.items():
+        start = (starts or {}).get(series)
+        rows = [r for r in by_series.get(series, []) if start is None or r.day > start]
+        days, values, _ = _observed(rows)
+        sigma = (
+            max(float(np.std(values[:MANDATE_SIGMA_DAYS], ddof=1)), MANDATE_SIGMA_FLOOR)
+            if len(values) > MANDATE_SIGMA_DAYS else None
+        )
+        tested = values[MANDATE_SIGMA_DAYS:] if sigma else []
+        clip = CLIP_SIGMAS * sigma if sigma else None
+        e = _bet(tested, clip, shift=delta_d)[1].final if clip and tested else 1.0
+        out.append({
+            "series": series,
+            "mandate": mandate,
+            "noise_check": noise_check(values),
+            "n_days": len(values),
+            "n_tested_days": len(tested),
+            "sigma_ref_daily": sigma,
+            "clip": clip,
+            "mean_21d": float(np.mean(values)) * HORIZON_DAYS if values else None,
+            "e_futility": e,
+            "delta_21d": MANDATE_DELTA_21D,
+        })
+    # A series whose noise check failed enters e-BH with no evidence (§11).
+    rejected = fv.e_bh(
+        [1.0 if m["noise_check"]["status"] == "failed" else m["e_futility"] for m in out], FDR_LEVEL
+    )
+    for m, r in zip(out, rejected):
+        status = m["noise_check"]["status"]
+        m["threshold"] = THRESHOLD
+        # A mandate retires only after its series has passed all three looks.
+        m["retire"] = bool(r) and status == "passed"
+        if status == "failed":
+            m["state"] = "not_valid"
+        elif r:
+            m["state"] = "retire" if m["retire"] else "retire_pending"
+        else:
+            m["state"] = "too_early" if m["n_tested_days"] == 0 else "no_evidence"
+    return out
+
+
+def time_to_know_grid(sd_daily: float, clip: float, measured: bool) -> dict[str, Any]:
+    """Median years to a verdict at edges of 0.25 / 0.5 / 1 % per 21 days (amendment §10)."""
+    within = tuple(y * TRADING_DAYS_PER_YEAR for y in WITHIN_YEARS)
+    sd = max(round(sd_daily, 4), 0.0001)
+    grid = []
+    for edge in TIME_GRID_21D:
+        r = fv.days_to_verdict(
+            round((edge / HORIZON_DAYS) / sd, 6), sd, clip, THRESHOLD,
+            prior_var=PRIOR_VAR, cap_factor=BET_CAP, within=within,
+        )
+        years = _years(r.q50)
+        grid.append({
+            "edge_21d": edge,
+            "q50_years": years,
+            "beyond_40y": years is None or years > GRID_MAX_YEARS,
+        })
+    return {"sd_daily": sd, "sd_measured": measured, "grid": grid}
+
+
+#: Edges of the time-to-know grid, per 21 days; longer than this reads "> 40 years".
+TIME_GRID_21D = (0.0025, 0.005, 0.01)
+GRID_MAX_YEARS = 40
+
+
 def series_result(family: Family, rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
     """Test, posterior and forecast for one family from its frozen rows."""
     rows = sorted(rows, key=lambda r: r.day)
@@ -230,6 +449,7 @@ def series_result(family: Family, rows: list[TrustDailyActiveReturn]) -> dict[st
         "family": family.key,
         "series": family.series,
         "role": family.role,
+        "alarm_only": family.series == SERIES_IDEAS,
         "question": family.question,
         "start": PRIMARY_TEST_START.isoformat(),
         "n_days": n,
@@ -322,6 +542,8 @@ def build_daily_tests(db: Session, user_id: str) -> dict[str, Any]:
         "min_days_for_state": MIN_DAYS_FOR_STATE,
         "horizon_days": HORIZON_DAYS,
         "families": [series_result(f, by_series[f.series]) for f in FAMILIES],
+        "selection": selection_result(by_series[SERIES_SELECTION]),
+        "mandates": mandate_results(by_series, mandate_starts(db, user_id)),
         "paired": paired_comparison(by_series[SERIES_IDEAS], by_series[SERIES_ADVISOR]),
     }
 
@@ -330,9 +552,14 @@ __all__ = [
     "CLIP",
     "FAMILIES",
     "MIN_DAYS_FOR_STATE",
+    "NOISE_CHECK_LOOKS",
     "PRIMARY_TEST_START",
     "THRESHOLD",
     "build_daily_tests",
+    "mandate_results",
+    "noise_check",
     "paired_comparison",
+    "selection_result",
     "series_result",
+    "time_to_know_grid",
 ]

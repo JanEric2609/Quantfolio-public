@@ -122,14 +122,39 @@ def assess(*, notional: float, cost_eur: float, edge: Edge) -> Verdict:
     return Verdict(cost_eur, edge_eur, "block", f"Costs €{cost_eur:,.2f}; {why}.")
 
 
+#: Paper asset types that are funds (``instrument_taxonomy.to_paper_asset_type``).
+_FUND_KINDS = ("etf", "fund", "bond", "money_market")
+
+
 def _is_etf(asset_type: str | None) -> bool:
+    """A fund of any kind: it pays the ETF spread."""
     kind = (asset_type or "").lower()
-    return "etf" in kind or "fund" in kind
+    return any(k in kind for k in _FUND_KINDS)
+
+
+def _is_equity_fund(asset_type: str | None) -> bool:
+    """A fund that gets the 30 % Teilfreistellung. Bond and money-market funds
+    get none, so they are taxed in full (the safe direction, as in ``fund_class``)."""
+    kind = (asset_type or "").lower()
+    return _is_etf(kind) and "bond" not in kind and "money" not in kind
 
 
 def half_spread_eur(notional: float, asset_type: str | None) -> float:
     bps = HALF_SPREAD_BPS["etf" if _is_etf(asset_type) else "stock"]
     return notional * bps / 10_000.0
+
+
+def traded_asset_type(db: Session, trade: PaperTrade) -> str:
+    """What the trade traded: recorded at execution, else its holding, else the
+    same evidence ladder that typed the holding (plan 2026-10-14, M2)."""
+    from app.decision.paper_portfolio import resolve_paper_asset_type
+
+    if trade.asset_type:
+        return trade.asset_type
+    if trade.holding is not None and trade.holding.asset_type:
+        return trade.holding.asset_type
+    isin = trade.isin or (trade.holding.isin if trade.holding is not None else None)
+    return resolve_paper_asset_type(db, trade.ticker, isin=isin)
 
 
 def sale_tax_eur(gain_eur: float | None, *, etf: bool, nv_valid: bool) -> float:
@@ -235,7 +260,10 @@ def _avg_cost_before(db: Session, trade: PaperTrade) -> float | None:
     found by undoing every trade from the current holding; the trades up to
     this sale are then replayed forward from there. ``None`` when the basis
     cannot be known (a seeded position fully sold and rebought before it).
+    A sale booked since migration 0138 carries its basis, which wins.
     """
+    if trade.side == "sell" and trade.avg_cost is not None:
+        return float(trade.avg_cost)
     trades = (
         db.query(PaperTrade)
         .filter(PaperTrade.portfolio_id == trade.portfolio_id, PaperTrade.ticker == trade.ticker)
@@ -367,20 +395,24 @@ def _managed_portfolios(db: Session) -> list[PaperPortfolio]:
     return db.query(PaperPortfolio).filter(PaperPortfolio.managed_by != MANUAL).all()
 
 
-def check_trade(db: Session, trade: PaperTrade, *, nv_valid: bool) -> PaperTradeCheck:
-    from app.foundation.instrument_taxonomy import resolve_holding_asset_type
-
-    traded_on = _utc(trade.date).date()
+def trade_costs(db: Session, trade: PaperTrade, *, nv_valid: bool) -> tuple[float, float, float]:
+    """The trade's fee, half-spread and sale tax in EUR."""
     notional = float(trade.value)
-    asset_type = resolve_holding_asset_type(db, isin=None, symbol=trade.ticker, name=None)
-    etf = _is_etf(asset_type)
+    asset_type = traded_asset_type(db, trade)
     fee = float(trade.fee or 0)
     spread = half_spread_eur(notional, asset_type)
     tax = 0.0
     if trade.side == "sell":
         basis = _avg_cost_before(db, trade)
         gain = (float(trade.price) - basis) * float(trade.quantity) if basis is not None else None
-        tax = sale_tax_eur(gain, etf=etf, nv_valid=nv_valid)
+        tax = sale_tax_eur(gain, etf=_is_equity_fund(asset_type), nv_valid=nv_valid)
+    return fee, spread, tax
+
+
+def check_trade(db: Session, trade: PaperTrade, *, nv_valid: bool) -> PaperTradeCheck:
+    traded_on = _utc(trade.date).date()
+    notional = float(trade.value)
+    fee, spread, tax = trade_costs(db, trade, nv_valid=nv_valid)
     cost = fee + spread + tax
     edge = edge_for(db, trade, traded_on)
     verdict = assess(notional=notional, cost_eur=cost, edge=edge)
@@ -395,6 +427,38 @@ def check_trade(db: Session, trade: PaperTrade, *, nv_valid: bool) -> PaperTrade
     db.add(check)
     db.flush()
     return check
+
+
+def recost(db: Session, check: PaperTradeCheck, trade: PaperTrade, *, nv_valid: bool) -> bool:
+    """Re-cost a stored check with the trade's asset type (plan 2026-10-14, M2).
+
+    The edge stays as it was stored at the check: only the fee, spread and tax
+    are recomputed, then the verdict and, once marked, the contribution.
+    Returns whether anything changed.
+    """
+    fee, spread, tax = trade_costs(db, trade, nv_valid=nv_valid)
+    if (
+        trade.side == "sell" and trade.avg_cost is None and check.tax_eur and not nv_valid
+        and _avg_cost_before(db, trade) is None
+    ):
+        # A sale from before 0138: its basis is rebuilt by replaying the trade log
+        # from today's holding, which a later full exit can make unknowable. The
+        # check's tax came from the basis known then, so it is kept. With a valid
+        # NV certificate no sale is taxed, so there is nothing to keep.
+        tax = float(check.tax_eur)
+    if abs(spread - check.spread_eur) < 0.005 and abs(tax - check.tax_eur) < 0.005:
+        return False
+    cost = fee + spread + tax
+    reason = check.reason or ""
+    detail = reason[reason.rfind("(") + 1:reason.rfind(")")] if "(" in reason else check.p_source
+    edge = Edge(check.p_hit, check.p_source, check.mean_abs_excess, detail)
+    verdict = assess(notional=check.notional_eur, cost_eur=cost, edge=edge)
+    check.fee_eur, check.spread_eur, check.tax_eur, check.cost_eur = fee, spread, tax, cost
+    check.edge_eur, check.verdict, check.reason = verdict.edge_eur, verdict.verdict, verdict.reason
+    if check.asset_return is not None and check.benchmark_return is not None:
+        sign = 1.0 if check.side == "buy" else -1.0
+        check.contribution_eur = sign * check.notional_eur * (check.asset_return - check.benchmark_return) - cost
+    return True
 
 
 def run_daily(db: Session, today: date | None = None) -> dict[str, Any]:
@@ -505,7 +569,7 @@ def summary(db: Session, portfolio_id: str, nav_eur: float | None = None) -> dic
 
 
 def register_trade_check_job(scheduler: Any | None = None) -> str:
-    """Daily at 22:30 UTC, after the day's cycles and the closing prices."""
+    """Daily at 22:30 UTC, after the day's cycles and the closing prices; then the risk forecasts (D3) and plan bands (D6)."""
     from app.foundation.jobs import register_cron_job
 
     def _inner() -> None:
@@ -513,6 +577,23 @@ def register_trade_check_job(scheduler: Any | None = None) -> str:
 
         with SessionLocal() as db:
             logger.info("trade_check_daily: %s", run_daily(db))
+        # The day's risk forecasts and their scores (plan 2026-10-14, D3) share this slot: both need
+        # the closing prices, and the worker's pool is sized for the job count.
+        try:
+            from app.lab.risk_forecast import run_forecasts
+
+            with SessionLocal() as db:
+                logger.info("risk_forecasts: %s", run_forecasts(db))
+        except Exception:
+            logger.exception("risk_forecasts: run failed")
+        # The plan's monthly one-year bands and their scores (D6) ride the same slot for the same reasons.
+        try:
+            from app.lab.plan_bands import run_plan_bands
+
+            with SessionLocal() as db:
+                logger.info("plan_bands: %s", run_plan_bands(db))
+        except Exception:
+            logger.exception("plan_bands: run failed")
 
     return register_cron_job("trade_check_daily", _inner, scheduler=scheduler, hour=22, minute=30)
 

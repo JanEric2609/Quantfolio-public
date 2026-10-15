@@ -5,9 +5,9 @@ import { FanChart } from "../../../components/charts/FanChart";
 import { Skeleton } from "../../../components/ui/skeleton";
 import { SummaryStrip } from "../components/SummaryStrip";
 import type { MetricItem } from "../components/SummaryStrip";
-import { useProjection } from "../hooks/useProjection";
+import { useLongHistoryProjection, useProjection } from "../hooks/useProjection";
 import { useGoals } from "../hooks/useGoals";
-import type { Goal } from "../../../lib/api";
+import type { Goal, LongHistoryProjection } from "../../../lib/api";
 
 const eur = (v?: number | null) => (v == null ? "-" : formatCurrency(v, "EUR", { digits: 0 }));
 const pct = (v?: number | null, digits = 1) => formatPercent(v, { digits });
@@ -22,6 +22,61 @@ const yearsUntil = (date?: string | null): number | undefined => {
   const ms = Date.parse(date) - Date.now();
   return Number.isFinite(ms) ? Math.max(1, Math.round(ms / (365.25 * 24 * 3600 * 1000))) : undefined;
 };
+
+/** The plan drawn from history instead of one model: before and after tax, and after a bad first decade. */
+function LongHistoryCard({ data, years }: { data: LongHistoryProjection; years: number }) {
+  if (!data.available || !data.terminal || !data.after_tax || !data.bad_start || !data.assumptions || !data.inputs) {
+    return (
+      <section className="rounded-md p-3 text-xs text-text-secondary bg-surface" data-testid="long-history">
+        <h2 className="mb-1 text-sm font-semibold text-text-primary">Checked against history</h2>
+        <p>{data.reason ?? "Not available."}</p>
+      </section>
+    );
+  }
+  const t = data.terminal;
+  const a = data.assumptions;
+  const mix = data.inputs.mix;
+  return (
+    <section className="rounded-md p-3 text-xs text-text-secondary bg-surface space-y-1" data-testid="long-history">
+      <h2 className="text-sm font-semibold text-text-primary">Checked against history</h2>
+      <p>
+        The same plan replayed on {a.years_of_history.toLocaleString("de-DE")} years of {a.homes.length} euro-area
+        countries since 1870, in blocks of about {a.mean_block_years} years, for your mix ({pct(mix.equity, 0)} equity,{" "}
+        {pct(mix.bond, 0)} bonds, {pct(mix.cash, 0)} money market). Equity returns are cut by {pct(a.haircut, 0)} of their
+        historical premium, as in ADR 0022.
+      </p>
+      <ul className="list-disc space-y-0.5 pl-4">
+        <li>
+          In {years} years: median {eur(t.median)}, bad case (5th percentile) {eur(t.p5)}; {pct(t.p_below_contributed, 0)} of
+          paths end below the {eur(t.contributed)} you put in.
+        </li>
+        <li>
+          After selling everything at the end and paying the flat tax on the nominal gain: median {eur(data.after_tax.median)}
+          {" "}(tax about {eur(data.after_tax.median_tax)}), bad case {eur(data.after_tax.p5)}.
+        </li>
+        <li>
+          If the first {data.bad_start.first_years} years go as badly as the worst tenth: median {eur(data.bad_start.median)},
+          bad case {eur(data.bad_start.p5)}.
+        </li>
+        {data.all_countries && (
+          <li>
+            All {data.all_countries.homes} countries instead: median {eur(data.all_countries.median)}, bad case{" "}
+            {eur(data.all_countries.p5)}.
+          </li>
+        )}
+        {data.goal && (
+          <li>
+            Chance of the goal: {pct(data.goal.probability, 0)} before tax, {pct(data.goal.probability_after_tax, 0)} after.
+          </li>
+        )}
+      </ul>
+      <p className="text-text-muted">
+        Source: {a.source}. Yearly steps; the Vorabpauschale counts against the final tax and is not shown separately.
+        Estimate, not a forecast, tax advice or advice.
+      </p>
+    </section>
+  );
+}
 
 /**
  * Where the book could be in N years, in today's euros: a fan of 10,000
@@ -66,6 +121,7 @@ export function ScenariosView() {
     contribution: num(contribution),
     realReturn: rr != null ? rr / 100 : undefined,
   });
+  const history = useLongHistoryProjection({ years, goal: num(goal), contribution: num(contribution) });
   const d = proj.data;
   const fan = d?.fan ?? [];
   const g = d?.goal;
@@ -183,6 +239,8 @@ export function ScenariosView() {
             <p className="text-text-muted">Estimate, not a forecast or advice. Taxes and fees are not deducted.</p>
           </section>
         )}
+
+        {history.data && <LongHistoryCard data={history.data} years={years} />}
       </div>
     </div>
   );

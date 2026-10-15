@@ -1049,6 +1049,40 @@ export interface PortfolioProjection {
   estimate: true;
 }
 
+/** GET /api/quant/portfolio/projection/long-history: the same plan drawn from 150 years of history (plan D6). */
+export interface LongHistoryProjection {
+  available: boolean;
+  reason?: string;
+  inputs?: {
+    start_value_eur: number;
+    monthly_contribution_eur: number;
+    years: number;
+    mix: { equity: number; bond: number; cash: number };
+    paths: number;
+    seed: number;
+    goal_eur: number | null;
+  };
+  fan?: PortfolioProjection["fan"];
+  terminal?: { median: number; mean: number; p5: number; p95: number; contributed: number; p_below_contributed: number };
+  after_tax?: { median: number; p5: number; p95: number; median_tax: number };
+  bad_start?: { first_years: number; median: number; p5: number };
+  all_countries?: { homes: number; median: number; p5: number; p95: number };
+  goal?: { goal_eur: number; probability: number; probability_after_tax: number };
+  assumptions?: {
+    homes: string[];
+    years_of_history: number;
+    haircut: number;
+    mean_block_years: number;
+    tax_rate: number;
+    equity_exempt: number;
+    allowance_eur: number;
+    source: string;
+    model_version: string;
+  };
+  estimate: true;
+  not_tax_advice: true;
+}
+
 /** GET /api/quant/portfolio/real/performance: the book's time-weighted unit value. */
 export interface BookPerformance {
   available: boolean;
@@ -1611,6 +1645,8 @@ export interface TrustFamilyTest {
   family: TrustFamilyKey;
   series: "ideas" | "ranking" | "advisor";
   role: "primary" | "secondary";
+  /** F1 since ADR 0018's amendment of 2026-10-14: shown as an alarm (harm or a large edge). */
+  alarm_only?: boolean;
   question: string;
   start: string;
   n_days: number;
@@ -1649,8 +1685,73 @@ export interface TrustDailyTests {
   min_days_for_state: number;
   horizon_days: number;
   families: TrustFamilyTest[];
+  selection?: TrustSelectionTest | null;
+  mandates?: TrustMandateTest[];
   paired?: TrustPairedComparison | null;
   factor_neutral?: TrustFactorNeutral | null;
+}
+
+/** Median years to a verdict at stated edges per 21 days (ADR 0018 amendment of 2026-10-14, §10). */
+export interface TrustTimeGrid {
+  sd_daily: number;
+  sd_measured?: boolean;
+  grid: { edge_21d: number; q50_years: number | null; beyond_40y?: boolean }[];
+}
+
+/** ADR 0018 §11: VR(21) at 63, 126 and 252 observed days; a failed look voids the series' verdicts. */
+export interface TrustNoiseCheck {
+  status: "pending" | "passing" | "passed" | "failed";
+  failed_at_day: number | null;
+  looks: { day: number; cutoff: number; vr: number | null; failed: boolean }[];
+}
+
+/** S (picks vs same-run, same-sector non-picks) and U (futility) on one series. */
+export interface TrustSelectionTest {
+  family: "S";
+  series: "selection";
+  role: "primary";
+  question: string;
+  futility_question: string;
+  start: string;
+  n_days: number;
+  n_days_pre_registration?: number;
+  first_day: string | null;
+  mean_21d: number | null;
+  mean_ci_21d: [number, number] | null;
+  sd_daily?: number | null;
+  clip: number;
+  sigma_ref: number;
+  e_skill: number;
+  e_harm: number;
+  e_futility: number;
+  threshold: number;
+  futility_threshold: number;
+  futility_delta_21d: number;
+  n_fallback_days?: number;
+  rho1?: number | null;
+  rho1_flag?: boolean;
+  state: "too_early" | "no_evidence" | "skill" | "harm" | "not_worth_following" | "not_valid";
+  provisional?: boolean;
+  noise_check?: TrustNoiseCheck | null;
+  path: { day: string; e_skill: number; e_harm: number }[];
+  time_to_know: TrustTimeGrid;
+}
+
+/** M: is a mandate worth running? A rejection retires it. */
+export interface TrustMandateTest {
+  series: "mandate_a" | "mandate_b";
+  mandate: string;
+  n_days: number;
+  n_tested_days: number;
+  sigma_ref_daily: number | null;
+  clip: number | null;
+  mean_21d: number | null;
+  e_futility: number;
+  delta_21d: number;
+  threshold: number;
+  retire?: boolean;
+  state: "too_early" | "no_evidence" | "retire" | "retire_pending" | "not_valid";
+  noise_check?: TrustNoiseCheck | null;
 }
 
 /** Advisor minus Discover picks on the days both had open calls; descriptive only. */
@@ -1710,6 +1811,27 @@ export interface TrustTierRate {
   n_runs: number;
   hit_rate: number | null;
   range: [number, number] | null;
+}
+
+/** Held curated funds against their same-index peers (GET /api/trust/funds; plan 2026-10-14, C4). */
+export interface TrustHeldFund {
+  isin: string;
+  name: string;
+  index: string;
+  value: number;
+  td_pct: number | null;
+  best_peer: { isin: string; name: string; td_pct: number } | null;
+  gap_pct: number | null;
+  flag: boolean;
+}
+
+export interface TrustFunds {
+  as_of: string | null;
+  years: number;
+  flag_pct: number;
+  funds: TrustHeldFund[];
+  n_other_positions: number;
+  note: string;
 }
 
 export interface TrustRankingSection {
@@ -1773,6 +1895,66 @@ export interface TrustRankingModelRow {
   recent_ic_mean: number | null;
   recent_long_short_annual: number | null;
   dsr: number | null;
+}
+
+/** One horizon of a risk forecast and its scores so far (GET /api/trust/risk-bands). Fractions; losses positive. */
+export interface TrustRiskBandHorizon {
+  horizon_days: number;
+  forecast_day: string;
+  sigma: number;
+  var95: number;
+  es975: number;
+  unpriced_share?: number;
+  n_scored: number;
+  breaches: number;
+  coverage_low?: number | null;
+  coverage_high?: number | null;
+  e_var: number;
+  e_es: number;
+}
+
+export interface TrustRiskBandTarget {
+  target: string;
+  label: string;
+  horizons: TrustRiskBandHorizon[];
+}
+
+export interface TrustRiskBands {
+  targets: TrustRiskBandTarget[];
+  note: string;
+}
+
+/** GET /api/trust/plan-bands: the plan's one-year bands, stored monthly before the fact (plan D6). */
+export interface TrustPlanBandModel {
+  model: "planner" | "long_history";
+  label: string;
+  latest: {
+    forecast_day: string;
+    end_day: string;
+    p10: number;
+    p50: number;
+    p90: number;
+    start_value: number;
+    monthly_contribution: number;
+    value_p10: number;
+    value_p50: number;
+    value_p90: number;
+  };
+  n_bands: number;
+  n_scored: number;
+  inside: number;
+  below: number;
+  above: number;
+  n_independent: number;
+  coverage_low?: number | null;
+  coverage_high?: number | null;
+  first_check?: string | null;
+}
+
+export interface TrustPlanBands {
+  models: TrustPlanBandModel[];
+  note: string;
+  estimate: boolean;
 }
 
 export interface TrustHistory {
@@ -3105,6 +3287,8 @@ export interface MonthlyPlan {
   not_investment_advice: boolean;
   suggested_funds?: SuggestedFund[];
   acc_dist_note?: string;
+  /** Why the core is 100 % global equity (ADR 0022's long-history test). */
+  mix_note?: string;
   /** Bond, cash and gold lines from the owner's targets (rule-based, not a forecast). */
   etf_suggestions?: PlanEtfSuggestions | null;
 }
@@ -3122,6 +3306,8 @@ export interface PlanEtfSuggestionLine {
   fund?: { isin: string; name: string; why: string } | null;
   amount_eur?: number | null;
   warning?: string | null;
+  /** The bond line's tested cost against 100 % equity (ADR 0022); history, not a forecast. */
+  evidence?: string | null;
 }
 
 export interface PlanEtfSuggestions {
@@ -3831,6 +4017,9 @@ export interface CrashGuardEpisode {
 
 export interface CrashGuardState {
   active: boolean;
+  /** The last close is more than 3 trading days old: no level is judged on it. */
+  stale?: boolean;
+  stale_since?: string | null;
   market: {
     ticker: string;
     as_of: string | null;

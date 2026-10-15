@@ -139,7 +139,8 @@ def test_portfolio_fit_failopen_when_no_overlap():
     assert reject is None or "insufficient aligned observations" not in (reject or "")
     if reject is None:
         assert scores is not None
-        assert scores["fit_score"] == 0.5
+        # Too little overlap is no evidence: dropped, not a neutral 0.5 (plan 2026-10-14, M5).
+        assert scores["fit_score"] is None
 
 
 def test_momentum_quality_breach_is_advisory_not_reject():

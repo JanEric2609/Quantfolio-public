@@ -22,13 +22,16 @@
       "app.lab.alphacrafter",
       "app.lab.attribution",
       "app.lab.backtest_vbt",
+      "app.lab.calibration",
       "app.lab.evidence_gate",
       "app.lab.factor_premia",
       "app.lab.performance_ledger",
+      "app.lab.plan_bands",
       "app.lab.pooled_model",
       "app.lab.quant_lab",
       "app.lab.ranking_replay",
       "app.lab.regime",
+      "app.lab.risk_forecast",
       "app.lab.satellite"
     ],
     [

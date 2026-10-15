@@ -86,13 +86,15 @@ def _price_lookup(series: dict[str, float]):
     return keys, at
 
 
-def _load_holdings(db: Session, user_id: str, start: date | None):
+def _load_holdings(db: Session, user_id: str, start: date | None, end: date | None = None):
     """({day: {isin: qty}}, {isin: meta}, {day: {isin: broker price}}) from the snapshots."""
     from app.foundation.models.entities import BookPositionSnapshot
 
     query = db.query(BookPositionSnapshot).filter(BookPositionSnapshot.user_id == user_id)
     if start is not None:
         query = query.filter(BookPositionSnapshot.snapshot_date >= start - timedelta(days=MAX_PRICE_CARRY_DAYS))
+    if end is not None:
+        query = query.filter(BookPositionSnapshot.snapshot_date <= end)
     by_day: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     broker_price: dict[str, dict[str, float]] = defaultdict(dict)
     meta: dict[str, dict[str, Any]] = {}
@@ -134,18 +136,22 @@ def _dividends_by_day(db: Session, user_id: str, start: str, isins: set[str] | N
 
 def compute_book_performance(
     db: Session, user_id: str, *, benchmark: str | None = None, start: date | None = None,
+    end: date | None = None,
 ) -> dict[str, Any]:
-    """Unit value, value, flows, TWR, IRR and a rebased EUR benchmark of the book."""
+    """Unit value, value, flows, TWR, IRR and a rebased EUR benchmark of the book.
+
+    *end* (default today) cuts the series, the holdings and the price checks at that day.
+    """
     from app.foundation.eur_prices import benchmark_ticker, eur_closes
     from app.foundation.portfolio.isin_resolver import _try_resolve_isin
 
-    holdings, meta, broker_price = _load_holdings(db, user_id, start)
+    holdings, meta, broker_price = _load_holdings(db, user_id, start, end)
     base: dict[str, Any] = {"available": False, "currency": "EUR", "series": [], "estimate": True}
     if len(holdings) < 1:
         return {**base, "reason": "No position snapshots yet. They are taken after every sync and at 20:00 UTC."}
     snap_days = sorted(holdings)
     first = max(snap_days[0], start.isoformat()) if start else snap_days[0]
-    today = date.today().isoformat()
+    today = min(date.today(), end).isoformat() if end else date.today().isoformat()
 
     rate_cache: dict[str, dict[str, float] | None] = {}
     span_days = (date.today() - date.fromisoformat(first)).days + 15
