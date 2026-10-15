@@ -3172,6 +3172,8 @@ export interface MonthlyPlan {
   not_investment_advice: boolean;
   suggested_funds?: SuggestedFund[];
   acc_dist_note?: string;
+  /** Why the core is 100 % global equity (ADR 0022's long-history test). */
+  mix_note?: string;
   /** Bond, cash and gold lines from the owner's targets (rule-based, not a forecast). */
   etf_suggestions?: PlanEtfSuggestions | null;
 }
@@ -3189,6 +3191,8 @@ export interface PlanEtfSuggestionLine {
   fund?: { isin: string; name: string; why: string } | null;
   amount_eur?: number | null;
   warning?: string | null;
+  /** The bond line's tested cost against 100 % equity (ADR 0022); history, not a forecast. */
+  evidence?: string | null;
 }
 
 export interface PlanEtfSuggestions {
