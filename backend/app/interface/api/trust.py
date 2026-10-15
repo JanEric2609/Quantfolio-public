@@ -4,12 +4,14 @@ GET /api/trust/verdict — headline, three numbers and one evidence row per pred
 GET /api/trust/calls   — resolved calls, newest first, with the five worst misses
 GET /api/trust/ranking — descriptive shadow-ledger metrics of Discover's ranking (ADR 0018 §5)
 GET /api/trust/history — the historical panel: factor tilt, ranking model, satellite (simulated, not live)
+GET /api/trust/funds   — each held curated fund's tracking difference against its same-index peers
 GET /api/trust/risk-bands — risk forecasts stored before the fact and how they did (plan 2026-10-14, D3)
 GET /api/trust/plan-bands — the plan's one-year bands, stored monthly before the fact (plan 2026-10-14, D6)
 
-Both read the immutable prediction ledgers for the signed-in user only. Every
-value is frozen at issue/resolution time; see ``decision/verification/trust.py``
-for the definitions.
+The verdict, calls and ranking read the immutable prediction ledgers for the
+signed-in user only; every value there is frozen at issue/resolution time (see
+``decision/verification/trust.py``). The funds row is not a ledger: it reads
+live synced positions and the monthly tracking-difference measurement.
 """
 from __future__ import annotations
 
@@ -207,6 +209,10 @@ class FamilyTestOut(BaseModel):
     family: Literal["F1", "F2", "F3"]
     series: Literal["ideas", "ranking", "advisor"]
     role: Literal["primary", "secondary"]
+    alarm_only: bool = Field(
+        default=False,
+        description="Shown only when it crosses: harm or a large edge (ADR 0018 amendment of 2026-10-14, §6).",
+    )
     question: str
     start: str
     n_days: int = Field(description="Trading days with something open since the start; each is one observation.")
@@ -232,6 +238,68 @@ class FamilyTestOut(BaseModel):
     path: list[EPathPointOut] = Field(default_factory=list)
     posterior: PosteriorOut | None = None
     time_to_know: TimeToKnowOut
+
+
+class TimeGridPointOut(BaseModel):
+    edge_21d: float
+    q50_years: float | None = None
+    beyond_40y: bool = False
+
+
+class TimeGridOut(BaseModel):
+    """Median years to a verdict at stated edges (ADR 0018 amendment of 2026-10-14, §10)."""
+
+    sd_daily: float
+    sd_measured: bool = False
+    grid: list[TimeGridPointOut] = Field(default_factory=list)
+
+
+class SelectionTestOut(BaseModel):
+    """S (picks against same-run, same-sector non-picks) and U (futility) on one series."""
+
+    family: Literal["S"] = "S"
+    series: Literal["selection"] = "selection"
+    role: Literal["primary"] = "primary"
+    question: str
+    futility_question: str
+    start: str
+    n_days: int
+    n_days_pre_registration: int = 0
+    first_day: str | None = None
+    mean_21d: float | None = None
+    mean_ci_21d: list[float] | None = None
+    sd_daily: float | None = None
+    clip: float
+    sigma_ref: float
+    e_skill: float
+    e_harm: float
+    e_futility: float
+    threshold: float
+    futility_threshold: float
+    futility_delta_21d: float = Field(description="U's margin per 21 days, gross of costs.")
+    n_fallback_days: int = 0
+    rho1: float | None = Field(default=None, description="Lag-1 autocorrelation of the first 63 days (shown, never whitened).")
+    rho1_flag: bool = False
+    state: Literal["too_early", "no_evidence", "skill", "harm", "not_worth_following"]
+    path: list[EPathPointOut] = Field(default_factory=list)
+    time_to_know: TimeGridOut
+
+
+class MandateTestOut(BaseModel):
+    """M: is the mandate worth running? A rejection retires it."""
+
+    series: Literal["mandate_a", "mandate_b"]
+    mandate: str
+    n_days: int
+    n_tested_days: int = Field(description="Days after the first 63, which only set the reference noise.")
+    sigma_ref_daily: float | None = None
+    clip: float | None = None
+    mean_21d: float | None = None
+    e_futility: float
+    delta_21d: float
+    threshold: float
+    retire: bool = False
+    state: Literal["too_early", "no_evidence", "retire"]
 
 
 class PairedPointOut(BaseModel):
@@ -302,8 +370,13 @@ class DailyTestsOut(BaseModel):
     min_days_for_state: int
     horizon_days: int
     families: list[FamilyTestOut]
+    selection: SelectionTestOut | None = None
+    mandates: list[MandateTestOut] = Field(default_factory=list)
     paired: PairedComparisonOut | None = None
-    factor_neutral: FactorNeutralOut | None = None
+    factor_neutral: FactorNeutralOut | None = Field(
+        default=None,
+        description="Withdrawn on 2026-10-14 (ADR 0018 amendment, §8): always null. Kept for old clients.",
+    )
 
 
 class VerdictOut(BaseModel):
@@ -553,6 +626,45 @@ class HistoryOut(BaseModel):
     haircut: HaircutOut
     not_covered: str
     disclosures: list[str]
+
+
+class FundPeerOut(BaseModel):
+    isin: str
+    name: str
+    td_pct: float
+
+
+class HeldFundOut(BaseModel):
+    isin: str
+    name: str
+    index: str
+    value: float
+    td_pct: float | None = Field(default=None, description="% a year against the same-index median; null when unmeasured.")
+    best_peer: FundPeerOut | None = None
+    gap_pct: float | None = None
+    flag: bool = False
+
+
+class FundsOut(BaseModel):
+    """Held curated funds against their same-index peers (plan 2026-10-14, C4 live check)."""
+
+    as_of: str | None = None
+    years: int
+    flag_pct: float
+    funds: list[HeldFundOut] = Field(default_factory=list)
+    n_other_positions: int = 0
+    note: str
+
+
+@router.get("/funds", response_model=FundsOut)
+def get_funds(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Each held curated fund's tracking difference against funds on the same index (descriptive, monthly)."""
+    from app.decision.fund_tracking import held_funds
+
+    return held_funds(db, user.id)
 
 
 @router.get("/verdict", response_model=VerdictOut)

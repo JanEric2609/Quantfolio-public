@@ -152,3 +152,48 @@ def test_tracking_difference_never_picks_between_indexes():
         favoured = suggest_fund("tilt", peer_td={c.isin: 5.0})
         index = next(x.index for x in CANDIDATES if x.isin == favoured.isin)
         assert index == next(x.index for x in CANDIDATES if x.isin == plain.isin)
+
+
+# --- the Trust page's "funds" row --------------------------------------------------
+
+
+def _hold(db, user_id, isin, qty=10, price=100.0):
+    from decimal import Decimal
+
+    from app.foundation.models.entities import BrokerPosition, ConnectedAccount
+
+    account = db.query(ConnectedAccount).filter(ConnectedAccount.user_id == user_id).first()
+    if account is None:
+        account = ConnectedAccount(user_id=user_id, source="scalable", name="Depot", account_type="depot")
+        db.add(account)
+        db.commit()
+    db.add(BrokerPosition(user_id=user_id, connected_account_id=account.id, source="scalable", isin=isin, name=isin,
+                          quantity=Decimal(qty), current_price=Decimal(str(price)),
+                          current_value=Decimal(str(qty * price))))
+    db.commit()
+
+
+def test_held_funds_compare_each_curated_fund_with_its_best_peer():
+    from app.foundation.models.entities import User
+    from app.foundation.settings import upsert_public_settings
+
+    db = _memory_db()
+    user = User(username="f", password_hash="x")
+    db.add(user)
+    db.commit()
+    assert fund_tracking.held_funds(db, user.id)["funds"] == []
+
+    _hold(db, user.id, "IE00B4L5Y983", price=110.0)   # iShares MSCI World, trails its peer by 0.2 % a year
+    _hold(db, user.id, "IE00BK5BQT80")                # FTSE All-World: no measured peer
+    _hold(db, user.id, "US0378331005")                # a stock: not compared
+    upsert_public_settings(db, {fund_tracking.SETTING_KEY: {
+        "as_of": "2026-10-01", "years": 3, "td_pct": {"IE00B4L5Y983": -0.1, "IE00BJ0KDQ92": 0.1},
+    }})
+
+    out = fund_tracking.held_funds(db, user.id, today=date(2026, 10, 15))
+    assert out["as_of"] == "2026-10-01" and out["n_other_positions"] == 1
+    world, all_world = out["funds"]
+    assert world["isin"] == "IE00B4L5Y983" and world["td_pct"] == -0.1
+    assert world["best_peer"]["isin"] == "IE00BJ0KDQ92" and world["gap_pct"] == pytest.approx(0.2)
+    assert world["flag"] is True
+    assert all_world["td_pct"] is None and all_world["best_peer"] is None and all_world["flag"] is False

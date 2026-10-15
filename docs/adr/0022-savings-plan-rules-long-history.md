@@ -85,7 +85,8 @@ before it is run.
     only scales the plot.
 - **Horizons:** **30 years (primary)**, with 10 and 20 years reported.
   - **Owner input:** the app's horizon setting is still its default. The pass bar is judged at
-    30 years. A different primary horizon is a new amendment, made before any rerun.
+    30 years; the owner confirmed the 30-year horizon on 2026-10-15. A different primary horizon
+    is a new amendment, made before any rerun.
 - **Bootstrap:**
   - A stationary block bootstrap (Politis & Romano 1994) of whole country-years, so all assets
     of a year move together. The mean block is 10 years.
@@ -154,7 +155,8 @@ before it is run.
 
 **No rule passes. R0 (100 % global equity) stays the plan's rule.**
 - No rule meets even the first check: every pooled Δ is negative.
-- The six `trial_ledger` rows (context `plan_rules`, all failed) are written once the owner gives the OK.
+- The six `trial_ledger` rows (context `plan_rules`: R0 `baseline_kept`, R1-R5 `failed`) were written on
+  prod on 2026-10-15 with the owner's OK.
 
 ### Table (30 years, γ = 5, primary costs, pooled over the 16 home countries)
 

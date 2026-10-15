@@ -1,6 +1,7 @@
 # 0018 — Trust Evidence Pre-Registration: Calendar-Time Tests, a Shadow Ledger, Provenance
 
-**Status:** Accepted (Phases 1–3 implemented; see the amendments of 2026-10-07 and 2026-10-08)
+**Status:** Accepted (Phases 1–3 implemented; see the amendments of 2026-10-07, 2026-10-08,
+2026-10-12 and 2026-10-14)
 **Date:** 2026-10-07
 **Context source:** the 2026-10-07 research on the "Can I trust it?" banner ("1 rebalance
 dates so far … about 4,100 dates (roughly 16 years)"), and the follow-up plan "honest
@@ -82,6 +83,7 @@ Discover, the advisor, the mandates, or anything an LLM wrote.
 - **Start of the test (T0).** The primary e-processes start on **2026-10-12**, or on the
   first trading day after this ADR is merged if that is later. Ledger rows before T0 are
   kept and shown as "before pre-registration", but they never enter an e-value.
+  *Superseded by the amendment of 2026-10-12: T0 = 2026-10-15.*
 
 ### 3. The calendar-time daily ledger (F1, F3)
 
@@ -401,7 +403,7 @@ never run (the first run is the Saturday job of 2026-10-10), so
 `trust_factor_study` was empty and no fit or R² had been computed. Spec v1 is
 therefore still unrecorded, and the version number stays 1.
 
-## Amendment of 2026-10-12 (release after the prod audit) — draft, T0 to be set by the owner
+## Amendment of 2026-10-12 (release after the prod audit)
 
 Observed when this was written (prod audit 2026-10-12): over 24 trading days against
 EUNL.DE the "ideas" sleeve stood at about −4.6 % and the advisor at about −4.4 %; 46
@@ -424,12 +426,260 @@ What changes, in one release (plan `docs/plan-audit-fixes-2026-10-12.md`, D12):
 Because every one of these changes what the ledgers measure, the primary e-processes
 restart:
 
-- **New T0 = `YYYY-MM-DD`** — the first trading day after the release is deployed and the
-  five paper sleeves are archived and reset through the existing reset. *The owner fills in
-  the date when the reset has run.*
+- **New T0 = 2026-10-15** — the first trading day after the release was deployed
+  (2026-10-14) and the five paper sleeves were archived and reset through the existing
+  reset (the evening of 2026-10-14). `daily_tests.PRIMARY_TEST_START` carries the date.
 - Ledger rows before the new T0 stay as they are (never edited or deleted) and are
   reported as the pre-release cohort; they do not enter the primary tests.
 - Tests, metrics, thresholds and priors are otherwise unchanged.
+
+## Amendment of 2026-10-14 (selection, futility, mandates)
+
+Observed when this was written (audit of 2026-10-14, plan `docs/plan-audit-2026-10-14.md`):
+- The F1 series had 2 trading days after the original T0, both before the new T0.
+- No selection, futility or mandate value had been computed for any day.
+- From pre-T0 data only, the audit measured the noise these tests are sized on:
+  - picks against MSCI World: 4.64 % per 21 days;
+  - picks against the same run's same-sector non-picks: 2.28 % per 21 days.
+  The figures came from the 223 evaluable stocks of the 2026-10-14 run over 533 days in EUR.
+- On the 2019-2025 replay the composite's monthly rank IC was 0.032 (t 1.61) with an IC
+  standard deviation of 0.213.
+
+None of the choices below could have been informed by an outcome they judge. The selection
+series can be rebuilt from the new T0 later, because `discover_candidate_snapshot` is frozen at
+issue. This amendment must therefore be merged before any code computes a selection, futility
+or mandate value on data from T0 on, not before the first close.
+
+**Why.** At a realistic edge (3-6 % a year), F1 needs decades. Two other questions can be
+answered sooner:
+- Comparing the picks with the stocks Discover could have picked removes the market, region,
+  FX and most of the sector noise. That makes the test about 4× faster, and it tests what
+  Discover controls: its selection.
+- "Is the edge too small to be worth following?" is a futility question. It reaches a verdict
+  well before "is it better?" does.
+
+### 1. Families
+
+| Family | Question | Series | Hypotheses | e-BH | One rejection needs | Role |
+|---|---|---|---|---|---|---|
+| **S Selection** | Do the picks beat the same run's sector-matched non-picks? | `selection` | skill, harm | K = 2, α = 5 % | e ≥ 40 | **primary**; sets the headline together with U |
+| **U Futility** | Is the picks' selection edge below what pays for costs? | `selection` (shifted by δ) | futility | K = 1, α = 5 % | e ≥ 20 | **primary**: "worth following?" |
+| **F1 Ideas vs ETF** | Do the picks beat MSCI World? | `ideas` | skill, harm | K = 2, α = 5 % | e ≥ 40 | **alarm only** (see §6 below) |
+| **F2 Ranking** | unchanged | `ranking` | skill, harm | K = 2 | e ≥ 40 | primary, own row |
+| **F3 Advisor** | unchanged | `advisor` | skill, harm | K = 2 | e ≥ 40 | secondary |
+| **M Mandates** | Is each mandate worth running? | `mandate_a`, `mandate_b` | futility per mandate | K = 2, α = 5 % | e ≥ 40 | retire rule |
+
+- Each family is its own e-BH set. No family's e-values are combined with another's, and the
+  page never adds S, U and F1 up into one claim.
+- §2's "Mandates still get no verdict" is replaced by family M. A mandate can now be judged
+  not worth running. It still cannot be judged skilled, because a stated expectation has no
+  naive benchmark for skill.
+
+### 2. The `selection` series (S and U), frozen rule
+
+- **Source:**
+  - one Discover run's `discover_candidate_snapshot` rows with `instrument_group = 'stock'`
+    and `evaluable = true`;
+  - the run's issue date *d* is the UTC date of its snapshot.
+- **Picks and controls:**
+  - picks are the rows with `picked = true`;
+  - a pick's controls are the same run's non-picks in the same `sector`;
+  - shortlisted and sector-capped non-picks count as controls.
+- **Fallback:**
+  - when a pick's sector has fewer than 3 controls, its controls are all evaluable non-picks
+    of the run;
+  - the day counts these picks as `n_fallback`, and the page shows it.
+- **Control return:**
+  - the equal-weighted mean of the controls' EUR returns that day;
+  - each control is carried like a member in §3. A control that stops trading earns 0 for
+    the rest of the window and is never dropped.
+- **The day's observation:**
+  - r_s = (1/N) Σ (r_pick,s − r_control,s) over the N open picks;
+  - the benchmark cancels, so r_s does not depend on the passive core.
+- **Unchanged from F1 (§3):**
+  - membership (*d* < *s* ≤ the 21st trading day after *d*) and entry at close(*d*);
+  - the calendar of the passive core's EUR closes;
+  - EUR restatement through `foundation.eur_prices` and carried prices (`n_stale`);
+  - freezing: written once, a 5-trading-day grace, and days with no members kept with
+    `n_open = 0`.
+- **ETFs** are not in the series. Discover's ETF lane recommends plan lines and is judged
+  under ADR 0019 and the plan's rule tests, not here.
+
+### 3. The selection test (S)
+
+The test is §4 with a smaller reference noise:
+- **σ_ref:** 2.3 % per 21 days, the measured figure, so 0.50 % daily.
+- **Clip:** C = 4.5 × σ_ref = **2.25 %** daily.
+- **Map:** y_s = (clip(r_s, ±C) + C)/(2C), with p0 = 0.5.
+- **Bettor:** aGRAPA with pseudo-variance **0.0121** and bet cap 0.75/p0.
+- **Order of e-values:** skill bets on y_s and harm on 1 − y_s, then e-BH with K = 2.
+- **Autocorrelation:** as amended on 2026-10-07. The lag-1 autocorrelation of the first 63
+  days is measured once and shown. Nothing is whitened.
+
+### 4. The futility test (U)
+
+- **Null:** H0: E[x_s | F_{s−1}] ≥ δ_d. Rejecting it says "the selection edge is below δ".
+- **Bet:** the bettor bets on δ_d − x_s.
+  - u_s = clip(r_s − δ_d, ±C) and y_s = (u_s + C)/(2C);
+  - the e-process bets on 1 − y_s with the same bettor, pseudo-variance and cap as S;
+  - it is one hypothesis, so a rejection needs e ≥ 1/α = 20.
+- **Margin δ:** **0.4 % per 21 days net of costs** (about 5 % a year). It is converted to the
+  gross selection series with the ADR 0021 trade-check cost model:
+  - the picks turn over once per 21-day window, a buy and a sell at a 10 bp half-spread each:
+    0.2 %;
+  - order fees are negligible at Scalable Prime;
+  - tax is 0 while the NV certificate holds.
+  - So **δ_gross = 0.6 % per 21 days**, and δ_d = 0.6 %/21 ≈ 0.0286 % per day.
+  - The figure is fixed here. It is not re-derived when the tax position changes; a new
+    figure would be a new amendment.
+- **On the page, a rejection reads:** "The picks' selection edge is below what pays for costs:
+  not worth following." No rejection after many years reads "not shown to be too small", never
+  "worth following".
+
+### 5. Mandate futility (M)
+
+- **Series** `mandate_a` and `mandate_b`:
+  - each mandate sleeve's daily active return, its NAV's daily return minus that of its own
+    passive benchmark (the same start held in the passive core);
+  - the NAV is in EUR, after fees and dividends, with cash accruing €STR;
+  - frozen like §3.
+- **Null:** H0: E[x_s | F_{s−1}] ≥ δ_m, with **δ_m = 0.2 % per 21 days net** (about 2.4 % a
+  year). That is what active management has to add to justify the attention it takes.
+  - The NAV is already net of costs, so there is no gross conversion.
+  - The e-process bets on δ_m/21 − x_s, the same construction as U.
+- **σ_ref** is measured on each series' first 63 observed days and then frozen.
+  - The e-process starts on the 64th observed day, so σ_ref never uses data the test bets on.
+  - C = 4.5 × σ_ref, the pseudo-variance is 0.0121 and the cap is 0.75/p0.
+  - σ_ref is at least 0.1 % per 21 days. A sleeve that held the benchmark for its first 63
+    days would otherwise get σ_ref = 0 and never be tested (added 2026-10-15, before any
+    mandate had 63 observed days).
+  - Only the sleeve's current run counts: a reset starts the series again from its new
+    inception day. The ledger keeps the earlier days.
+- **e-BH** runs over the two mandates, K = 2, with e ≥ 40 for one rejection.
+- **Retire rule.** A mandate whose futility hypothesis is rejected is **retired**:
+  - its reviews and trades stop;
+  - its NAV is still marked;
+  - the owner gets one Telegram message;
+  - the page shows the verdict.
+  - A retirement is never reversed by later data. Restarting a mandate is a new mandate under
+    a new amendment.
+
+### 6. F1 becomes an alarm, and the headline
+
+- F1 is computed exactly as before.
+- It shows in the headline only when it crosses: harm, or skill (an edge large enough to
+  beat MSCI World on its own). Otherwise it sits under "alarms".
+- The headline comes from S and U.
+- The basket's tilt against MSCI World is **reported, not tested**: its tracking error and
+  how much of it is sector, style and FX exposure. This is a risk budget for the owner, not
+  a hypothesis.
+
+### 7. Scoring changes after T0 keep the clock
+
+- The nulls are conditional: every day's mean, given the past, is at most 0 (or at least δ).
+  That holds whatever strategy produced the day, as long as the strategy is fixed before the
+  day starts. So the e-processes stay valid when Discover's scoring changes.
+- **From the new T0 on, a cohort change does not restart the primary e-processes.**
+  - A cohort change is any bump of `COMPOSITE_FORMULA_VERSION` or `UNIVERSE_RULE_VERSION`,
+    as with the fixes planned in WP-A6.
+  - It is recorded in `provenance_json` as before.
+  - Per-cohort rows stay descriptive (§10).
+- A verdict therefore speaks for "Discover as it was run since T0", and the page says so.
+- **Exception:** a change to the frozen rule above, to δ, δ_m or to any test parameter is not a
+  cohort change. It needs a new amendment that states what had been observed.
+
+### 8. The factor-neutral row (§8) is superseded
+
+- The selection family does the factor study's job with about 2.5× the variance reduction
+  (4.1× against 1.6× faster), from day one, and without a back-filled panel.
+- As of 2026-10-14 the study had never run:
+  - prod has no back-filled runs;
+  - `IQQ0.DE` has no stored bars;
+  - `trust_factor_study` is empty.
+- The study and the `ideas_neutral` row are withdrawn. **No factor-neutral row will be
+  built.**
+- The `trust_factor_study` table stays.
+- The code goes in its own change (private #344): the weekly job hook, the study module and
+  the page row are removed there. Until that merges, the hook stays wired but cannot
+  produce a row, because it needs back-filled runs that prod does not have.
+
+### 9. A residual-slope family (gated)
+
+- The sector/style diagnostic (plan WP-B1) runs once on the 2019-2025 replay and is recorded
+  as one `trial_ledger` row with context `diagnostic`.
+  - Each month it regresses the composite on sector dummies and style z-scores, then takes the
+    residual's rank IC.
+- **Gate:**
+  - if the monthly residual IC standard deviation is **≤ 0.12**, an "R Residual slope" family
+    may be pre-registered, in a further amendment before its live data is computed;
+  - otherwise there is no R family.
+- The residual mean IC is reported as descriptive only. The gate uses the standard deviation
+  alone.
+
+### 10. Time to know
+
+- The single "years" figure becomes a grid per family: the median years to a verdict at edges
+  of 0.25, 0.5 and 1 % per 21 days.
+- σ is the reference above until 63 days are observed, then the measured one.
+- Paths longer than 40 years show as "> 40 years".
+- Amendment 2026-10-07 item 4's simulator is unchanged apart from these inputs.
+
+### 11. The noise check (S, U and M)
+
+**Why.** The calibration of 2026-10-14 (`docs/research/calibration/calibration-2026-10-14.md`)
+found the tests hold under fat tails, volatility clustering and regimes, but not under
+serial correlation:
+- at a daily autocorrelation of 0.15, false alarms run about 2-2.5× the nominal rate;
+- when each pick's drift persists through its 21 days (the `overlap_21d` stress model),
+  52-58 %.
+
+The check below catches the second case. It cannot catch the first within a year, and the page
+says so.
+
+**The statistic.** VR(21) is the variance ratio of the series' daily values:
+- it is Lo and MacKinlay's overlapping 21-day estimator with the unbiased denominator;
+- `foundation.forecast_verification.variance_ratio` computes it;
+- the series' mean is subtracted, so the check uses the series' noise, never the sign or size of
+  its mean.
+
+**When and the cutoffs.** Each series (`selection`, `mandate_a`, `mandate_b`) is checked on its
+observed days from T0, at three looks:
+
+| Look (observed days) | Fails when VR(21) > |
+|---|---|
+| 63 | 3.0 |
+| 126 | 2.3 |
+| 252 | 1.8 |
+
+- Each look uses the series' first *n* observed days, so a look's value never changes once
+  it is reached.
+- The cutoffs come from 20,000 simulated paths per model of the 2026-10-14 harness. The
+  chance that a series fails at any of the three looks is:
+  - 4.9 % on iid normal noise, 6.1 % on t(4)-GARCH and 8.3 % on regime noise;
+  - 20 % at AR(1) 0.15;
+  - 99 % under `overlap_21d`, and 53 % of those paths already fail at day 63.
+- **The 1.3 cutoff the plan proposed was dropped.** With 63 days, one VR(21) estimate has a
+  standard error of about 0.6, so 1.3 fails a quarter of clean series.
+
+**What a failure does.**
+- A failed check is final for that series.
+- The page marks the series' verdicts **"not valid: serial correlation"**, and no S, U or M
+  verdict on it is acted on.
+- The series' test moves to non-overlapping observations, each one counted as a single
+  observation:
+  - for S and U: one Discover run every 21 trading days, scored on its picks' whole 21-day
+    pick-minus-control return;
+  - for M: consecutive 21-day sums of the mandate's daily active return.
+- The new test uses the same map, bettor and thresholds, with σ_ref × √21 as its reference
+  noise. It starts from the failing day, and the earlier e-values are discarded.
+- A further amendment fixes the code that builds it before its first value is read.
+
+**Before the last look.**
+- An S or U verdict reached before the series passes its day-252 look is shown as
+  **provisional**.
+- A mandate is retired only once its series has passed all three looks.
+  - M's e-process starts on day 64, and its median time to a verdict at a 2 % edge is about
+    2 years, so this costs nothing in practice.
 
 ## Consequences
 
