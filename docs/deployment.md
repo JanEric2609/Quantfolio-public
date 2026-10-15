@@ -8,7 +8,7 @@ QuantFolio runs as a **canonical production deployment on four Debian 12 LXC con
 |---|---:|---|---|---|
 | db | 110 | quantfolio-db | <DB_HOST>:5432 | PostgreSQL 16 + TimescaleDB + pgvector |
 | app | 111 | quantfolio-api | <APP_HOST>:8000 | FastAPI API (`quantfolio-api` unit) + scheduler (`quantfolio-worker` unit) |
-| llm | 112 | quantfolio-llm | <LLM_HOST>:8080 | llama.cpp with `Qwen3.6-35B-A3B` model; OpenAI-compatible at `/v1` endpoint; systemd unit `quantfolio-llamacpp` |
+| llm | 112 | quantfolio-llm | <LLM_HOST>:8080 | llama.cpp with `Qwen3.5-9B-UD-Q4_K_XL` (full GPU offload, RTX 3070 8 GB; container RAM 24 GB); OpenAI-compatible at `/v1` endpoint; systemd unit `quantfolio-llamacpp` |
 | web | 113 | quantfolio-web | <WEB_HOST> | Caddy reverse proxy + static frontend; proxies to app upstream `<APP_HOST>:8000` |
 
 ## Per-LXC Setup
@@ -31,7 +31,7 @@ The FastAPI API server and APScheduler job runner. Houses both the `quantfolio-a
 
 ### LLM (quantfolio-llm)
 
-llama.cpp compiled with optional NVIDIA GPU support. Serves model `Qwen3.6-35B-A3B` at `http://<LLM_HOST>:8080` with an OpenAI-compatible API at the `/v1` endpoint. Systemd unit is `quantfolio-llamacpp`.
+llama.cpp compiled with optional NVIDIA GPU support. Serves `Qwen3.5-9B-UD-Q4_K_XL`, fully offloaded to the GPU, at `http://<LLM_HOST>:8080` with an OpenAI-compatible API at the `/v1` endpoint. Systemd unit is `quantfolio-llamacpp`. The `Qwen3.6-35B-A3B` MoE is a benchmark candidate (plan 2026-10-14, WP-D5), not the served model; the container's RAM was raised from 16 to 24 GB on 2026-10-14 for it.
 
 **See** `infra/runbooks/deploy.md` Stage 2 for CMake build, model download, and service setup.
 

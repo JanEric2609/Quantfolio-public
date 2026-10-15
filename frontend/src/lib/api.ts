@@ -3898,6 +3898,9 @@ export interface CrashGuardEpisode {
 
 export interface CrashGuardState {
   active: boolean;
+  /** The last close is more than 3 trading days old: no level is judged on it. */
+  stale?: boolean;
+  stale_since?: string | null;
   market: {
     ticker: string;
     as_of: string | null;
