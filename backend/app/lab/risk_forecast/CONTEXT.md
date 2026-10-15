@@ -16,7 +16,11 @@ and `MODEL_VERSION`.
   maximum likelihood.
 - **Quantiles:** a split-conformal correction. The models are fitted on the first two thirds of
   about 3 years. The last third's non-overlapping h-day returns, each standardised by the forecast
-  made before it, give the empirical quantile and tail mean.
+  made before it, give the empirical quantile and tail mean. That set is centred on the first two
+  thirds' mean only.
+- **21 days:** 3 years leave about 12 non-overlapping 21-day windows, fewer than the 20 required,
+  so the 21-day bands use the one-day standardised residuals scaled by the 21-day sigma.
+- **Units:** an h-day return is the sum of the daily returns, in the forecast and in the score.
 - **Versioning:** bump `MODEL_VERSION` with any change; it is stored on every row.
 
 **Scoring** (`backtest.py`): the e-backtests of Wang, Wang & Ziegel (2022, arXiv 2209.00991).

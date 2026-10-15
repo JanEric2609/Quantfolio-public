@@ -16,6 +16,12 @@ the *h*-day returns of the last third are standardised by the forecasts made
 before them. VaR and ES are those standardised returns' empirical quantile
 and tail mean, scaled by the forecast fitted on the whole history. The mean
 return is taken as 0, which is conservative for a loss forecast.
+
+With about 3 years of history the last third holds about 12 non-overlapping
+21-day windows, fewer than the 20 a quantile needs, so the 21-day bands use the
+one-day standardised residuals scaled by the 21-day sigma (``n_calibration``
+then counts one-day residuals). An h-day return here is the sum of the daily
+returns, the unit the variance forecasts are in.
 """
 from __future__ import annotations
 
@@ -169,13 +175,17 @@ def forecast(returns: np.ndarray, h: int) -> RiskForecast | None:
     r = r[np.isfinite(r)]
     if len(r) < MIN_OBS:
         return None
-    r = r - float(np.mean(r))
     split = (2 * len(r)) // 3
-    g_fit, h_fit = fit_garch_t(r[:split]), fit_har(r[:split], h)
-    z = _standardised(r, h, split, g_fit, h_fit)
+    # The calibration set is standardised by models that saw only the first two
+    # thirds, so it is centred on their mean too: the later returns must not
+    # move the earlier residuals.
+    rc = r - float(np.mean(r[:split]))
+    g_fit, h_fit = fit_garch_t(rc[:split]), fit_har(rc[:split], h)
+    z = _standardised(rc, h, split, g_fit, h_fit)
     if len(z) < 20:
-        g1, h1 = g_fit, fit_har(r[:split], 1)
-        z = _standardised(r, 1, split, g1, h1)
+        g1, h1 = g_fit, fit_har(rc[:split], 1)
+        z = _standardised(rc, 1, split, g1, h1)
+    r = r - float(np.mean(r))
     garch, har = fit_garch_t(r), fit_har(r, h)
     sigma = math.sqrt(h_variance(r, h, garch, har))
     q05, q025 = np.quantile(z, [0.05, 0.025])

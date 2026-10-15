@@ -417,3 +417,19 @@ def test_an_old_or_ordinary_day_is_not_quoted(monkeypatch):
     _band_row(db, date(2026, 1, 6), loss=0.012)  # within the band
     assert crash_guard.market_state(db).band["beyond"] is False
     assert "risk band" not in crash_guard.crash_guard(db, db.query(User).first().id)["message"]
+
+
+def test_a_failed_band_query_leaves_the_session_usable(monkeypatch):
+    db = _memory_db()
+    _patch_prices(monkeypatch, [100.0] * 5 + [85.0])
+    rolled: list[bool] = []
+    real_rollback = db.rollback
+    monkeypatch.setattr(db, "rollback", lambda: rolled.append(True) or real_rollback())
+
+    def broken(*a, **kw):
+        raise RuntimeError("risk_forecasts missing")
+
+    monkeypatch.setattr("app.lab.risk_forecast.latest_day_against_band", broken)
+    out = crash_guard.crash_guard(db, _user(db).id)
+    assert rolled and "risk band" not in out["message"]
+    assert "band" not in out["market"]

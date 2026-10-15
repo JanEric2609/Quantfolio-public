@@ -74,8 +74,13 @@ class _Closes:
         return series[max(series)] if series else None
 
 
-def _normalise(values: dict[str, float]) -> dict[str, float]:
-    total = sum(v for v in values.values() if v > 0)
+def _shares(values: dict[str, float], unpriced: float) -> dict[str, float]:
+    """Each priced line's share of the whole target, unpriced value included.
+
+    The unpriced share gets no weight, so it moves the target by 0 a day
+    rather than being spread over the priced lines.
+    """
+    total = sum(v for v in values.values() if v > 0) + max(unpriced, 0.0)
     return {k: v / total for k, v in values.items() if v > 0} if total > 0 else {}
 
 
@@ -99,7 +104,7 @@ def paper_targets(db: Session, closes: _Closes) -> list[Target]:
         if cash > 0:
             values["cash"] = cash
         total = sum(values.values()) + unpriced
-        weights = _normalise(values)
+        weights = _shares(values, unpriced)
         if weights:
             out.append(Target(f"paper:{p.id}", p.name, p.user_id, weights,
                               unpriced=unpriced / total if total > 0 else 0.0))
@@ -112,7 +117,8 @@ def book_targets(db: Session, closes: _Closes) -> list[Target]:
     out = []
     for (user_id,) in db.query(User.id).all():
         positions = combined_positions(db, user_id, include_unreconciled=True)
-        if not positions:
+        cash = synced_cash(db, user_id)[0]
+        if not positions and float(cash) <= 0:
             continue
         values: dict[str, float] = {}
         unpriced = 0.0
@@ -124,11 +130,10 @@ def book_targets(db: Session, closes: _Closes) -> list[Target]:
                 unpriced += value
                 continue
             values[pos.ticker.upper()] = values.get(pos.ticker.upper(), 0.0) + value
-        cash = synced_cash(db, user_id)[0]
         if float(cash) > 0:
             values["cash"] = float(cash)
         total = sum(values.values()) + unpriced
-        weights = _normalise(values)
+        weights = _shares(values, unpriced)
         if weights:
             out.append(Target(f"book:{user_id}", "Real book", user_id, weights,
                               unpriced=unpriced / total if total > 0 else 0.0))
@@ -223,7 +228,8 @@ def score_due(db: Session, closes: _Closes, calendar: list[str]) -> int:
         window = calendar[i:i + f.horizon_days + 1]
         weights = {k: float(v) for k, v in (f.weights_json or {}).items() if k != "unpriced"}
         daily = portfolio_returns(weights, closes, window)
-        realized = float(np.prod(1.0 + daily) - 1.0)
+        # A sum of daily returns, the unit the forecast's variance is in (not compounded).
+        realized = float(np.sum(daily))
         loss = -realized
         db.add(RiskForecastScore(
             forecast_id=f.id, end_day=date.fromisoformat(window[-1]), realized_return=realized, loss=loss,

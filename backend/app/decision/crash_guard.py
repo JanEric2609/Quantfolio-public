@@ -174,6 +174,9 @@ def _band(db: Session, state: MarketState) -> dict[str, Any] | None:
     try:
         band = latest_day_against_band(db, f"benchmark:{state.ticker}")
     except Exception:  # noqa: BLE001 - the band is a sentence; the guard must still run
+        # A failed query aborts the transaction on Postgres. Nothing has been
+        # written yet where market_state() is called, so roll back and go on.
+        db.rollback()
         logger.warning("Crash guard: risk band unavailable", exc_info=True)
         return None
     return band if band and band["day"] == state.as_of else None
@@ -291,7 +294,8 @@ def crash_guard(db: Session, user_id: str) -> dict[str, Any]:
     state = market_state(db)
     note = str(get_public_settings(db).get("crash_plan_note") or "").strip()
     return {
-        "market": {k: v for k, v in asdict(state).items() if k != "episodes"},
+        # The band reaches the client only as the message's sentence.
+        "market": {k: v for k, v in asdict(state).items() if k not in ("episodes", "band")},
         "episodes": [asdict(e) for e in state.episodes],
         "message": _message(state),
         "plan_note": note or None,
