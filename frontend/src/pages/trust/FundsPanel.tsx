@@ -51,6 +51,7 @@ function Panel({ data }: { data: TrustFunds }) {
       </div>
       <p className="text-xs text-text-muted">
         {data.as_of ? `Measured ${fmtDay(data.as_of)} over ${data.years} years. ` : "Not measured yet: the first figures come with the monthly refresh. "}
+        {`A fund more than ${data.flag_pct} % a year behind its best same-index peer is flagged. `}
         {data.n_other_positions > 0 ? `${data.n_other_positions} other positions are not compared. ` : ""}
         {data.note}
       </p>

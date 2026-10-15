@@ -161,11 +161,17 @@ before it is run.
 | Rule | Δ vs R0 | 95 % interval | countries Δ > 0 | 1870-1949 | 1950-2020 | no Japan / no Germany / no war years | no tax | no haircut | P(wealth < contributions) | max drawdown, median / 90th pct | passes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | R0 | — | | | | | | | | 11.3 % | 48 % / 67 % | |
-| R1 home 50 / intl 50 | −7.0 % | −11.0 % to +11.1 % | 8 | −23.1 % | −18.6 % | +3.8 % / −28.6 % / −4.4 % | −6.8 % | −0.8 % | 12.0 % | 46 % / 68 % | no |
+| R1 home 50 / intl 50 | −7.0 % | −11.0 % to +11.1 % | 8 | −23.1 % | −18.6 % | +3.8 % / −28.6 % / −4.4 % | −6.8 % | −0.8 % | 12.0 % | 47 % / 69 % | no |
 | R2 80 / 20 bonds | −5.4 % | −6.6 % to +5.1 % | 11 | −11.7 % | +6.8 % | +0.9 % / −10.2 % / +10.3 % | −5.4 % | −12.2 % | 10.6 % | 39 % / 64 % | no |
 | R3 60 / 40 bonds | −14.2 % | −15.8 % to +3.0 % | 9 | −24.3 % | +3.3 % | −5.1 % / −23.6 % / +11.2 % | −14.0 % | −25.7 % | 11.7 % | 31 % / 65 % | no |
 | R4 glide path | −13.9 % | −15.7 % to +5.3 % | 11 | −19.6 % | +7.5 % | −3.1 % / −18.1 % / +10.6 % | −13.8 % | −21.3 % | 10.3 % | 46 % / 66 % | no |
 | R5 bill sleeve | −13.1 % | −15.2 % to +5.5 % | 13 | −11.8 % | +2.3 % | +1.0 % / −10.3 % / +2.9 % | −13.1 % | −20.1 % | 11.2 % | 48 % / 67 % | no |
+
+**Correction of 2026-10-15 (drawdowns only).** The drawdown index left out the year's trading
+costs and tax, so a year whose return just offset them showed no fall. It now measures each year
+from the wealth before those deductions. Re-run on the same code otherwise, seed and data
+(`plan_rules_2026-10-15_dd_fix.json`, local): every Δ, interval, count and verdict is identical;
+the drawdowns move by at most 0.2 points, and only R1's rounded figures change (46 % / 68 % before).
 
 **Other reported quantities:**
 - **10 and 20 years, γ = 5:**

@@ -4,10 +4,12 @@ GET /api/trust/verdict — headline, three numbers and one evidence row per pred
 GET /api/trust/calls   — resolved calls, newest first, with the five worst misses
 GET /api/trust/ranking — descriptive shadow-ledger metrics of Discover's ranking (ADR 0018 §5)
 GET /api/trust/history — the historical panel: factor tilt, ranking model, satellite (simulated, not live)
+GET /api/trust/funds   — each held curated fund's tracking difference against its same-index peers
 
-Both read the immutable prediction ledgers for the signed-in user only. Every
-value is frozen at issue/resolution time; see ``decision/verification/trust.py``
-for the definitions.
+The verdict, calls and ranking read the immutable prediction ledgers for the
+signed-in user only; every value there is frozen at issue/resolution time (see
+``decision/verification/trust.py``). The funds row is not a ledger: it reads
+live synced positions and the monthly tracking-difference measurement.
 """
 from __future__ import annotations
 
