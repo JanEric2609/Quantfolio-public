@@ -10068,6 +10068,131 @@
         "title": "RiskAssessmentOut",
         "type": "object"
       },
+      "RiskBandHorizonOut": {
+        "properties": {
+          "breaches": {
+            "title": "Breaches",
+            "type": "integer"
+          },
+          "coverage_high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage High"
+          },
+          "coverage_low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Low"
+          },
+          "e_es": {
+            "title": "E Es",
+            "type": "number"
+          },
+          "e_var": {
+            "title": "E Var",
+            "type": "number"
+          },
+          "es975": {
+            "title": "Es975",
+            "type": "number"
+          },
+          "forecast_day": {
+            "title": "Forecast Day",
+            "type": "string"
+          },
+          "horizon_days": {
+            "title": "Horizon Days",
+            "type": "integer"
+          },
+          "n_scored": {
+            "title": "N Scored",
+            "type": "integer"
+          },
+          "sigma": {
+            "title": "Sigma",
+            "type": "number"
+          },
+          "unpriced_share": {
+            "default": 0.0,
+            "title": "Unpriced Share",
+            "type": "number"
+          },
+          "var95": {
+            "title": "Var95",
+            "type": "number"
+          }
+        },
+        "required": [
+          "horizon_days",
+          "forecast_day",
+          "sigma",
+          "var95",
+          "es975",
+          "n_scored",
+          "breaches",
+          "e_var",
+          "e_es"
+        ],
+        "title": "RiskBandHorizonOut",
+        "type": "object"
+      },
+      "RiskBandTargetOut": {
+        "properties": {
+          "horizons": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RiskBandHorizonOut"
+            },
+            "title": "Horizons",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "label"
+        ],
+        "title": "RiskBandTargetOut",
+        "type": "object"
+      },
+      "RiskBandsOut": {
+        "properties": {
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "targets": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RiskBandTargetOut"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "title": "RiskBandsOut",
+        "type": "object"
+      },
       "RiskProfileIn": {
         "properties": {
           "risk_profile": {
@@ -31668,6 +31793,28 @@
           }
         },
         "summary": "Get Ranking",
+        "tags": [
+          "trust"
+        ]
+      }
+    },
+    "/api/trust/risk-bands": {
+      "get": {
+        "description": "The latest 1- and 21-day risk forecasts per sleeve, book and benchmark, and their scores so far.",
+        "operationId": "get_risk_bands_api_trust_risk_bands_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskBandsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Risk Bands",
         "tags": [
           "trust"
         ]

@@ -1775,6 +1775,33 @@ export interface TrustRankingModelRow {
   dsr: number | null;
 }
 
+/** One horizon of a risk forecast and its scores so far (GET /api/trust/risk-bands). Fractions; losses positive. */
+export interface TrustRiskBandHorizon {
+  horizon_days: number;
+  forecast_day: string;
+  sigma: number;
+  var95: number;
+  es975: number;
+  unpriced_share?: number;
+  n_scored: number;
+  breaches: number;
+  coverage_low?: number | null;
+  coverage_high?: number | null;
+  e_var: number;
+  e_es: number;
+}
+
+export interface TrustRiskBandTarget {
+  target: string;
+  label: string;
+  horizons: TrustRiskBandHorizon[];
+}
+
+export interface TrustRiskBands {
+  targets: TrustRiskBandTarget[];
+  note: string;
+}
+
 export interface TrustHistory {
   title: string;
   tilt_cards: TrustTiltCard[];

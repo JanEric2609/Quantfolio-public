@@ -4,6 +4,7 @@ GET /api/trust/verdict — headline, three numbers and one evidence row per pred
 GET /api/trust/calls   — resolved calls, newest first, with the five worst misses
 GET /api/trust/ranking — descriptive shadow-ledger metrics of Discover's ranking (ADR 0018 §5)
 GET /api/trust/history — the historical panel: factor tilt, ranking model, satellite (simulated, not live)
+GET /api/trust/risk-bands — risk forecasts stored before the fact and how they did (plan 2026-10-14, D3)
 
 Both read the immutable prediction ledgers for the signed-in user only. Every
 value is frozen at issue/resolution time; see ``decision/verification/trust.py``
@@ -23,6 +24,7 @@ from app.foundation.auth import current_user
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import User
 from app.interface.api.params import ROWS_BOUND
+from app.lab.risk_forecast import summary as risk_summary
 
 router = APIRouter(prefix="/api/trust", tags=["trust"])
 
@@ -589,3 +591,48 @@ def get_history(
 ) -> dict[str, Any]:
     """What decades of past data say (simulated, not live); it tests none of the live calls."""
     return build_history(db)
+
+
+class RiskBandHorizonOut(BaseModel):
+    horizon_days: int
+    forecast_day: str
+    #: Fractions of the target's value; losses positive.
+    sigma: float
+    var95: float
+    es975: float
+    #: Share of the value without stored prices (counted as flat, which understates risk).
+    unpriced_share: float = 0.0
+    #: Scored forecasts used (non-overlapping windows) and how many lost more than VaR 95 %.
+    n_scored: int
+    breaches: int
+    coverage_low: float | None = None
+    coverage_high: float | None = None
+    #: E-backtest values (Wang, Wang & Ziegel); 20 or more rejects "the forecasts are right" at 5 %.
+    e_var: float
+    e_es: float
+
+
+class RiskBandTargetOut(BaseModel):
+    target: str
+    label: str
+    horizons: list[RiskBandHorizonOut] = []
+
+
+class RiskBandsOut(BaseModel):
+    targets: list[RiskBandTargetOut] = []
+    note: str = ""
+
+
+RISK_BANDS_NOTE = (
+    "Forecasts are stored before the fact and scored once the horizon has passed. At 95 % about 1 day in "
+    "20 should lose more than the VaR; an e-value of 20 or more says the bands are too narrow."
+)
+
+
+@router.get("/risk-bands", response_model=RiskBandsOut)
+def get_risk_bands(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """The latest 1- and 21-day risk forecasts per sleeve, book and benchmark, and their scores so far."""
+    return {"targets": risk_summary(db, user.id), "note": RISK_BANDS_NOTE}
