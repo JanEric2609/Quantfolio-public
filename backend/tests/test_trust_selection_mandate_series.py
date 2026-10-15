@@ -13,6 +13,7 @@ from app.decision.verification import daily_ledger
 from app.foundation.core.db import Base
 from app.foundation.models.entities import (
     DiscoverCandidateSnapshot,
+    JobRun,
     PaperPortfolio,
     PaperSnapshot,
     TrustDailyActiveReturn,
@@ -153,10 +154,13 @@ def _sleeve(db, uid, mandate, inception: date) -> PaperPortfolio:
     return p
 
 
-def _navs(db, sleeve, navs: dict[date, float]):
+def _navs(db, sleeve, navs: dict[date, float], *, written: dict[date, datetime] | None = None):
+    """End-of-day rows, written by the 00:00 job on the next day unless ``written`` says otherwise."""
     for d, v in navs.items():
+        at = (written or {}).get(d) or datetime.combine(d + timedelta(days=1), datetime.min.time(), tzinfo=UTC)
         db.add(PaperSnapshot(portfolio_id=sleeve.id, date=d, total_value=Decimal(str(round(v, 2))),
-                             cash_balance=Decimal("0"), securities_value=Decimal(str(round(v, 2)))))
+                             cash_balance=Decimal("0"), securities_value=Decimal(str(round(v, 2))),
+                             created_at=at))
     db.commit()
 
 
@@ -192,6 +196,39 @@ def test_a_missing_snapshot_waits_then_freezes_empty():
     db.commit()
     gap = db.query(TrustDailyActiveReturn).filter_by(day=DAYS[3]).one()
     assert gap.value is None and gap.n_open == 0 and gap.detail_json["missing"] == "snapshot"
+
+
+def test_a_same_day_live_quote_snapshot_is_never_frozen_as_the_close():
+    db = _memory_db()
+    uid = _user(db)
+    sleeve = _sleeve(db, uid, "A", DAYS[0])
+    # DAYS[3]'s row is the 10:00 advisor cycle's live-quote row; the 00:00 job failed to rewrite it.
+    cycle = datetime.combine(DAYS[3], datetime.min.time(), tzinfo=UTC) + timedelta(hours=10)
+    _navs(db, sleeve, {d: 10_000.0 for d in DAYS[:12]}, written={DAYS[3]: cycle})
+    prices = FakePrices({BENCH: _geometric(DAYS[:12], 0.0)})
+    daily_ledger.freeze_series(db, uid, "mandate_a", today=DAYS[5], loader=prices)
+    db.commit()
+    assert sorted(r.day for r in db.query(TrustDailyActiveReturn).all()) == DAYS[1:3]  # waits
+    daily_ledger.freeze_series(db, uid, "mandate_a", today=DAYS[11], loader=prices)
+    db.commit()
+    for day in DAYS[3:5]:  # both returns that touch the provisional row
+        row = db.query(TrustDailyActiveReturn).filter_by(day=day).one()
+        assert row.value is None and row.detail_json["missing"] == "snapshot_provisional"
+
+
+def test_a_successful_midnight_run_makes_the_rewritten_row_end_of_day():
+    db = _memory_db()
+    uid = _user(db)
+    sleeve = _sleeve(db, uid, "A", DAYS[0])
+    cycle = datetime.combine(DAYS[3], datetime.min.time(), tzinfo=UTC) + timedelta(hours=10)
+    _navs(db, sleeve, {d: 10_000.0 for d in DAYS[:6]}, written={DAYS[3]: cycle})
+    db.add(JobRun(job_name="snapshot_paper_portfolios", status="success",
+                  started_at=datetime.combine(DAYS[3] + timedelta(days=1), datetime.min.time(), tzinfo=UTC)))
+    db.commit()
+    prices = FakePrices({BENCH: _geometric(DAYS[:6], 0.0)})
+    daily_ledger.freeze_series(db, uid, "mandate_a", today=DAYS[5], loader=prices)
+    db.commit()
+    assert db.query(TrustDailyActiveReturn).filter_by(day=DAYS[3]).one().value == pytest.approx(0.0)
 
 
 # --- the tests (S, U, M) and the retire rule -------------------------------------
