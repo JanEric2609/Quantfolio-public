@@ -88,9 +88,9 @@ _RETRY_EXCERPT_CHARS = 800
 DOSSIER_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        # direction and horizon_months are deterministic (plan 2026-10-12,
-        # D7): the system sets them after validation, like conviction.
-        "conviction": {"type": "number", "minimum": 0, "maximum": 1},
+        # direction, horizon_months and conviction are set by the system after
+        # validation (plan 2026-10-12, D7); asking the model for a conviction it
+        # never keeps only spent tokens (plan 2026-10-14, E4).
         # minLength closes the same gap fixed in advisor/llm_decision.py's
         # thesis field (audit-fixes-2026-08 todo 6): without it, the grammar
         # has no reason to refuse "" for a required string field.
@@ -124,7 +124,7 @@ DOSSIER_JSON_SCHEMA: dict[str, Any] = {
     # a 3-month forecast — see docs/archive/plans/unified-portfolio-engine-implementation.md
     # Phase 3).
     "required": [
-        "conviction", "thesis", "key_risks",
+        "thesis", "key_risks",
     ],
 }
 

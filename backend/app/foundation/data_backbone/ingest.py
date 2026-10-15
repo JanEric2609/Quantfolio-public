@@ -229,6 +229,9 @@ class DataIngester:
         others = [
             name for name in ProviderRegistry._PRICE_HISTORY_PROVIDER_ORDER
             if name != pinned and name != candidates[0].provider
+            # Tiingo lists no European listings: asking it for a .DE or .L symbol
+            # spends its 50-an-hour budget on a certain miss (plan 2026-10-14, E3).
+            and not (name == "tiingo" and "." in symbol)
         ]
         start = (min(q.ts for q in candidates) - pd.Timedelta(days=3)).date().isoformat()
         end = (max(q.ts for q in candidates) + pd.Timedelta(days=3)).date().isoformat()
