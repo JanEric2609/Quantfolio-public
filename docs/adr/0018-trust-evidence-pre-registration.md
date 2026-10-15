@@ -83,6 +83,7 @@ Discover, the advisor, the mandates, or anything an LLM wrote.
 - **Start of the test (T0).** The primary e-processes start on **2026-10-12**, or on the
   first trading day after this ADR is merged if that is later. Ledger rows before T0 are
   kept and shown as "before pre-registration", but they never enter an e-value.
+  *Superseded by the amendment of 2026-10-14: T0 = 2026-10-15.*
 
 ### 3. The calendar-time daily ledger (F1, F3)
 
@@ -593,6 +594,9 @@ The test is §4 with a smaller reference noise:
 - The study and the `ideas_neutral` row are withdrawn. **No factor-neutral row will be
   built.**
 - The `trust_factor_study` table stays.
+- The code goes in its own change (private #344): the weekly job hook, the study module and
+  the page row are removed there. Until that merges, the hook stays wired but cannot
+  produce a row, because it needs back-filled runs that prod does not have.
 
 ### 9. A residual-slope family (gated)
 
