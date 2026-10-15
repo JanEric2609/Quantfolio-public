@@ -18,7 +18,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class FundCandidate:
-    sleeve: str  # "core" | "tilt" | "bond_short" | "bond_mid" | "bond_aggregate" | "cash" | "gold" | "universe"
+    sleeve: str  # "core" | "tilt" | "bond_short" | "bond_mid" | "bond_long" | "bond_aggregate" | "cash" | "gold" | "universe"
     isin: str
     name: str
     index: str
@@ -58,6 +58,10 @@ CANDIDATES: tuple[FundCandidate, ...] = (
                   note="No Xetra listing; trades in EUR on the LSE (CBE3) and Euronext Amsterdam."),
     FundCandidate("bond_mid", "IE00B4WXJJ64", "iShares Core € Govt Bond (Dist)", "Euro Govt",
                   0.07, 5.4, "sampled", 0.0, False, False, note="Distributing; all maturities (about 7y duration)."),
+    # Verified 2026-10-14 (Deutsche Börse, finanzfluss, trackingdifferences): Xetra IBCM,
+    # Bloomberg Euro Govt 7-10Y, physical sampled, about EUR 1 bn (plan 2026-10-14, L1).
+    FundCandidate("bond_long", "IE00B1FZS806", "iShares € Govt Bond 7-10yr (Dist)", "Euro Govt 7-10Y",
+                  0.15, 1.0, "sampled", 0.0, False, False, note="Distributing; 7-10 year euro government bonds."),
     FundCandidate("bond_aggregate", "IE00BDBRDM35", "iShares Core Global Aggregate Bond EUR Hedged (Acc)",
                   "Bloomberg Global Aggregate (EUR hedged)", 0.10, 2.5, "sampled", 0.0, False, False),
     FundCandidate("cash", "LU0290358497", "Xtrackers II EUR Overnight Rate Swap 1C", "€STR",
@@ -71,7 +75,7 @@ CANDIDATES: tuple[FundCandidate, ...] = (
 )
 
 #: Sleeves that are asset-class lines rather than equity sleeves.
-ASSET_CLASS_SLEEVES = ("bond_short", "bond_mid", "bond_aggregate", "cash", "gold")
+ASSET_CLASS_SLEEVES = ("bond_short", "bond_mid", "bond_long", "bond_aggregate", "cash", "gold")
 
 #: ADR 0019 §2 weights. Higher is better; each component scores 0-1.
 W_TER = 0.40
