@@ -117,3 +117,20 @@ def test_call_metadata_is_kept_180_days():
     assert prune_call_metadata(db, now=now) == 1
     db.commit()
     assert sorted(r.message for r in db.query(AuditLog).all()) == ["new", "other"]
+
+
+def test_a_routed_call_records_the_answering_model_its_label_and_sampling():
+    from app.foundation.llm.base import Completion
+    from app.foundation.llm.local_llama import LocalLlamaBackend
+    from app.foundation.llm.router import _audit
+
+    db = _memory_db()
+    backend = LocalLlamaBackend("http://llm.invalid/v1", model="configured")
+    done = Completion(content="hi", model="Qwen3.5-9B", tokens_in=3, tokens_out=1, backend="local_llama")
+    _audit(db, backend, {}, [{"role": "user", "content": "q"}], None, 0.0, done, "ok", False)
+    _audit(db, backend, {}, [{"role": "user", "content": "q"}], None, 0.0, None, "error:Timeout", False)
+    db.commit()
+    rows = [json.loads(r.payload_json) for r in db.query(AuditLog).all()]
+    assert sorted(r["model"] for r in rows) == ["Qwen3.5-9B", "configured"]
+    assert {r["backend"] for r in rows} == {"local_llama"}
+    assert all(r["sampling"]["temperature"] == LocalLlamaBackend.sampling["temperature"] for r in rows)

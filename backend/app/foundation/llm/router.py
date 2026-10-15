@@ -101,11 +101,13 @@ def _audit(
     """One audit row per routed call (plan 2026-10-14, M7)."""
     audit_completion(
         db,
-        backend=type(backend).__name__,
-        model=str(getattr(backend, "model", "")),
+        # One label per backend across both audit paths (the local path writes "local_llama").
+        backend=completion.backend if completion is not None else str(getattr(backend, "name", type(backend).__name__)),
+        # The model that answered, as the response names it; the configured one on failure.
+        model=completion.model if completion is not None else str(getattr(backend, "model", "")),
         caller=str(opts.get("caller") or "router"),
         messages=messages,
-        sampling=None,
+        sampling=getattr(backend, "sampling", None),
         tokens_in=completion.tokens_in if completion is not None else None,
         tokens_out=completion.tokens_out if completion is not None else None,
         latency_ms=(time.monotonic() - started) * 1000,
