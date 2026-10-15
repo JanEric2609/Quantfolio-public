@@ -3,7 +3,7 @@ import { Badge } from "../../components/ui/badge";
 import { Card } from "../../components/ui/card";
 import { LineChart } from "../../components/charts/LineChart";
 import { EvidenceChip } from "./EvidenceChip";
-import { FactorNeutralCard, PairedComparisonCard } from "./SecondaryRows";
+import { PairedComparisonCard } from "./SecondaryRows";
 import { STATE_META, assumptionLabel, fmtDay, fmtE, fmtPct, fmtPp, fmtYears, timeToKnowText } from "./trustFormat";
 
 const TITLES: Record<TrustFamilyTest["family"], string> = {
@@ -167,7 +167,6 @@ export function FamilyTests({ tests }: { tests: TrustDailyTests }) {
         {tests.families.map((f) => (
           <FamilyCard key={f.family} family={f} start={tests.start} />
         ))}
-        {tests.factor_neutral ? <FactorNeutralCard fn={tests.factor_neutral} /> : null}
         {tests.paired ? <PairedComparisonCard paired={tests.paired} /> : null}
       </div>
     </section>

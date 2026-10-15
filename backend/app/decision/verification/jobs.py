@@ -6,9 +6,7 @@
   nothing else keeps current.
 * ``trust_weekly_ledger`` — Saturdays at 03:40 UTC, when Friday's closes are
   final: resolves the shadow ledger's candidate outcomes and freezes the
-  ``ranking`` series. It then records the factor study (ADR 0018 §8) once
-  there is enough back-filled data, and freezes the factor-neutral row only
-  if the study said ``build``. One price pass over the open cohorts' ~300 names a week,
+  ``ranking`` series. One price pass over the open cohorts' ~300 names a week,
   about the load of one Discover run, instead of every night.
 
 Both are idempotent catch-ups: a missed night is filled in by the next run,
@@ -43,25 +41,6 @@ def run_daily_ledger() -> dict[str, dict[str, int]]:
         db.close()
 
 
-def _run_factor_study(db: Any) -> dict[str, Any]:
-    """ADR 0018 §8: record the study once it can be, then freeze the gated row."""
-    from app.decision.verification.daily_ledger import ledger_users
-    from app.decision.verification.factor_study import freeze_neutral_series, run_factor_study
-
-    out: dict[str, Any] = {}
-    for user_id in ledger_users(db):
-        try:
-            study = run_factor_study(db, user_id, refresh_factors=True)
-            written = freeze_neutral_series(db, user_id, refresh_factors=True)
-            db.commit()
-            out[user_id] = {"study": study.get("status"), "decision": study.get("decision"), "neutral_days": written}
-        except Exception:
-            db.rollback()
-            logger.exception("trust_weekly_ledger: factor study failed for user %s", user_id)
-            out[user_id] = {"study": "failed"}
-    return out
-
-
 def run_weekly_ledger() -> dict[str, Any]:
     from app.decision.verification.candidate_outcomes import resolve_candidate_outcomes
     from app.decision.verification.daily_ledger import SERIES_RANKING, freeze_user_series, ledger_users
@@ -80,7 +59,9 @@ def run_weekly_ledger() -> dict[str, Any]:
             user_id: freeze_user_series(db, user_id, (SERIES_RANKING,), refresh=True)
             for user_id in ledger_users(db)
         }
-        return {"candidate_outcomes": outcomes, "ranking": ranking, "factor_study": _run_factor_study(db)}
+        # The factor study (ADR 0018 §8) was withdrawn on 2026-10-14: the
+        # selection family against matched non-picks does its job.
+        return {"candidate_outcomes": outcomes, "ranking": ranking}
     finally:
         db.close()
 
