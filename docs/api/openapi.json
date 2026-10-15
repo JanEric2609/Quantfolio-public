@@ -2921,6 +2921,17 @@
             ],
             "title": "Duration Bucket"
           },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
+          },
           "fund": {
             "anyOf": [
               {
@@ -6588,6 +6599,11 @@
           "min_order_eur": {
             "title": "Min Order Eur",
             "type": "number"
+          },
+          "mix_note": {
+            "default": "",
+            "title": "Mix Note",
+            "type": "string"
           },
           "month": {
             "title": "Month",
