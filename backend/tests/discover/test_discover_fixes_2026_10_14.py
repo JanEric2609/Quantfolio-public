@@ -133,3 +133,11 @@ def test_book_weights_come_from_the_synced_positions(monkeypatch):
     monkeypatch.setattr("app.foundation.live_positions.combined_positions", lambda *a, **k: positions)
     weights = pipeline_mod._book_weights(_memory_db(), "u", ["EUNL.DE", "SAP.DE"])
     assert weights == pytest.approx({"EUNL.DE": 0.9, "SAP.DE": 0.1})
+
+
+def test_book_weights_read_the_price_matrix_inventory(monkeypatch):
+    seen: list[dict] = []
+    monkeypatch.setattr("app.foundation.live_positions.combined_positions",
+                        lambda *a, **k: seen.append(k) or [])
+    assert pipeline_mod._book_weights(_memory_db(), "u", ["SAP.DE"]) is None
+    assert seen == [{}]  # reconciled positions only, like build_real_price_matrix

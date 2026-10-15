@@ -1748,11 +1748,16 @@ def _held_etf_tickers(db: Session, user_id: str) -> list[str]:
 
 
 def _book_weights(db: Session, user_id: str, tickers: list[str]) -> dict[str, float] | None:
-    """Each held ticker's share of the book's value (``live_positions``), or None."""
+    """Each held ticker's share of the book's value (``live_positions``), or None.
+
+    The same inventory as ``build_real_price_matrix``: reconciled positions
+    only. A held line without a value (no current value and no price) gets no
+    weight here, so the "value" basis covers only the valued lines.
+    """
     from app.foundation.live_positions import combined_positions
 
     values: dict[str, float] = {}
-    for pos in combined_positions(db, user_id, include_unreconciled=True):
+    for pos in combined_positions(db, user_id):
         ticker = (pos.ticker or "").upper()
         if ticker in tickers and pos.value and float(pos.value) > 0:
             values[ticker] = values.get(ticker, 0.0) + float(pos.value)
@@ -1828,8 +1833,8 @@ def stage_portfolio_fit(
     common = cand_rets.index.intersection(port_weighted.index)  # type: ignore[union-attr]
     if len(common) < _FIT_MIN_WEEKS:
         # Fail open: too little overlap is a data-availability problem, not a
-        # quality signal. Return a neutral fit so the candidate still reaches the
-        # LLM rather than being silently dropped.
+        # quality signal. No fit score (it drops out of the composite), and the
+        # candidate still reaches the LLM rather than being silently dropped.
         return {
             "correlation": None,
             "overlap": None,
