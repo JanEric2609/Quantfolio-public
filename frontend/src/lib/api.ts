@@ -1611,6 +1611,8 @@ export interface TrustFamilyTest {
   family: TrustFamilyKey;
   series: "ideas" | "ranking" | "advisor";
   role: "primary" | "secondary";
+  /** F1 since ADR 0018's amendment of 2026-10-14: shown as an alarm (harm or a large edge). */
+  alarm_only?: boolean;
   question: string;
   start: string;
   n_days: number;
@@ -1649,8 +1651,63 @@ export interface TrustDailyTests {
   min_days_for_state: number;
   horizon_days: number;
   families: TrustFamilyTest[];
+  selection?: TrustSelectionTest | null;
+  mandates?: TrustMandateTest[];
   paired?: TrustPairedComparison | null;
   factor_neutral?: TrustFactorNeutral | null;
+}
+
+/** Median years to a verdict at stated edges per 21 days (ADR 0018 amendment of 2026-10-14, §10). */
+export interface TrustTimeGrid {
+  sd_daily: number;
+  sd_measured?: boolean;
+  grid: { edge_21d: number; q50_years: number | null; beyond_40y?: boolean }[];
+}
+
+/** S (picks vs same-run, same-sector non-picks) and U (futility) on one series. */
+export interface TrustSelectionTest {
+  family: "S";
+  series: "selection";
+  role: "primary";
+  question: string;
+  futility_question: string;
+  start: string;
+  n_days: number;
+  n_days_pre_registration?: number;
+  first_day: string | null;
+  mean_21d: number | null;
+  mean_ci_21d: [number, number] | null;
+  sd_daily?: number | null;
+  clip: number;
+  sigma_ref: number;
+  e_skill: number;
+  e_harm: number;
+  e_futility: number;
+  threshold: number;
+  futility_threshold: number;
+  futility_delta_21d: number;
+  n_fallback_days?: number;
+  rho1?: number | null;
+  rho1_flag?: boolean;
+  state: "too_early" | "no_evidence" | "skill" | "harm" | "not_worth_following";
+  path: { day: string; e_skill: number; e_harm: number }[];
+  time_to_know: TrustTimeGrid;
+}
+
+/** M: is a mandate worth running? A rejection retires it. */
+export interface TrustMandateTest {
+  series: "mandate_a" | "mandate_b";
+  mandate: string;
+  n_days: number;
+  n_tested_days: number;
+  sigma_ref_daily: number | null;
+  clip: number | null;
+  mean_21d: number | null;
+  e_futility: number;
+  delta_21d: number;
+  threshold: number;
+  retire?: boolean;
+  state: "too_early" | "no_evidence" | "retire";
 }
 
 /** Advisor minus Discover picks on the days both had open calls; descriptive only. */
@@ -1794,6 +1851,33 @@ export interface TrustRankingModelRow {
   recent_ic_mean: number | null;
   recent_long_short_annual: number | null;
   dsr: number | null;
+}
+
+/** One horizon of a risk forecast and its scores so far (GET /api/trust/risk-bands). Fractions; losses positive. */
+export interface TrustRiskBandHorizon {
+  horizon_days: number;
+  forecast_day: string;
+  sigma: number;
+  var95: number;
+  es975: number;
+  unpriced_share?: number;
+  n_scored: number;
+  breaches: number;
+  coverage_low?: number | null;
+  coverage_high?: number | null;
+  e_var: number;
+  e_es: number;
+}
+
+export interface TrustRiskBandTarget {
+  target: string;
+  label: string;
+  horizons: TrustRiskBandHorizon[];
+}
+
+export interface TrustRiskBands {
+  targets: TrustRiskBandTarget[];
+  note: string;
 }
 
 export interface TrustHistory {

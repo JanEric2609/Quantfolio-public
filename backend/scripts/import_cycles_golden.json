@@ -29,6 +29,7 @@
       "app.lab.quant_lab",
       "app.lab.ranking_replay",
       "app.lab.regime",
+      "app.lab.risk_forecast",
       "app.lab.satellite"
     ],
     [

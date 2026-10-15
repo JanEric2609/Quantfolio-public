@@ -100,6 +100,7 @@ from .paper_portfolio import (
     PaperTradeCheck as PaperTradeCheck,
 )
 from .metrics_snapshot import MetricsSnapshot as MetricsSnapshot
+from .risk_forecast import RiskForecastEntry as RiskForecastEntry, RiskForecastScore as RiskForecastScore
 from .performance import (
     Composite as Composite,
     CompositeMembership as CompositeMembership,

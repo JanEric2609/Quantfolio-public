@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, type TrustCalls, type TrustFunds, type TrustHistory, type TrustRanking, type TrustTypeKey, type TrustVerdict } from "../../lib/api";
+import { api, type TrustCalls, type TrustFunds, type TrustHistory, type TrustRanking, type TrustRiskBands, type TrustTypeKey, type TrustVerdict } from "../../lib/api";
 
 export const trustVerdictKey = ["trust", "verdict"] as const;
 
@@ -47,6 +47,15 @@ export function useTrustHistory() {
   return useQuery({
     queryKey: ["trust", "history"],
     queryFn: () => api<TrustHistory>("/api/trust/history"),
+    staleTime: 10 * 60_000,
+  });
+}
+
+/** Risk forecasts stored before the fact and how they did (GET /api/trust/risk-bands). */
+export function useTrustRiskBands() {
+  return useQuery({
+    queryKey: ["trust", "risk-bands"],
+    queryFn: () => api<TrustRiskBands>("/api/trust/risk-bands"),
     staleTime: 10 * 60_000,
   });
 }

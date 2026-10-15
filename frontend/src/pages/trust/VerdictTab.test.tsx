@@ -500,7 +500,7 @@ describe("VerdictTab", () => {
     expect(screen.getByTestId("aci-waiting")).toHaveTextContent("starts after 30 matured weeks; 4 so far");
   });
 
-  it("shows the factor study and the advisor-vs-picks comparison as descriptive cards", async () => {
+  it("shows the advisor-vs-picks comparison as a descriptive card", async () => {
     renderTab(
       makeVerdict({
         daily_tests: {
@@ -518,11 +518,6 @@ describe("VerdictTab", () => {
             enough_days: true,
             path: [],
           },
-          factor_neutral: {
-            study: { status: "waiting", spec_version: 1, n_backfilled_picks: 12 },
-            row: null,
-            gate: { build: 0.3, drop: 0.15, min_oos_days: 126, min_fit_days: 126 },
-          },
         },
       }),
     );
@@ -530,9 +525,41 @@ describe("VerdictTab", () => {
       "On 70 common trading days the advisor was −0.40 pp per 21 days against the picks",
     );
     expect(screen.getByTestId("paired-comparison")).toHaveTextContent("ahead on 47 % of days");
-    expect(screen.getByTestId("factor-neutral")).toHaveTextContent(
-      "needs 252 trading days of back-filled baskets (12 back-filled picks so far)",
+    expect(screen.queryByTestId("factor-neutral")).not.toBeInTheDocument();
+  });
+
+  it("leads with the selection test, lists the mandates and moves F1 under alarms", async () => {
+    const base = makeTests();
+    renderTab(
+      makeVerdict({
+        daily_tests: {
+          ...base,
+          families: base.families.map((f) => (f.family === "F1" ? { ...f, alarm_only: true, sd_daily: 0.01 } : f)),
+          selection: {
+            family: "S", series: "selection", role: "primary",
+            question: "Do Discover's picks beat the stocks it could have picked instead (same run, same sector)?",
+            futility_question: "Is the picks' selection edge too small to pay for trading them?",
+            start: "2026-10-15", n_days: 0, first_day: null, mean_21d: null, mean_ci_21d: null,
+            clip: 0.0225, sigma_ref: 0.005, e_skill: 1, e_harm: 1, e_futility: 1, threshold: 40,
+            futility_threshold: 20, futility_delta_21d: 0.006, state: "too_early", path: [],
+            time_to_know: { sd_daily: 0.005, grid: [
+              { edge_21d: 0.0025, q50_years: null, beyond_40y: true },
+              { edge_21d: 0.005, q50_years: 12.3 },
+              { edge_21d: 0.01, q50_years: 3.4 },
+            ] },
+          },
+          mandates: [
+            { series: "mandate_a", mandate: "A", n_days: 10, n_tested_days: 0, sigma_ref_daily: null, clip: null,
+              mean_21d: -0.01, e_futility: 1, delta_21d: 0.002, threshold: 40, state: "too_early" },
+          ],
+        },
+      }),
     );
+    expect(await screen.findByTestId("family-S")).toHaveTextContent("Too early");
+    expect(screen.getByTestId("selection-grid")).toHaveTextContent("0.25 %: > 40 years · 0.5 %: about 12 years · 1 %: about 3.4 years");
+    expect(screen.getByTestId("family-S")).toHaveTextContent("16 % a year apart from MSCI World");
+    expect(screen.getByTestId("mandates")).toHaveTextContent("Mandate A: Measuring its noise");
+    expect(within(screen.getByTestId("trust-alarms")).getByTestId("family-F1")).toBeInTheDocument();
   });
 
   it("shows a glossary and the method note at the bottom", async () => {

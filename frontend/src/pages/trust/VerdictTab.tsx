@@ -8,6 +8,7 @@ import { EvidenceChip } from "./EvidenceChip";
 import { FamilyTests } from "./FamilyTests";
 import { FundsPanel } from "./FundsPanel";
 import { HistoryPanel } from "./HistoryPanel";
+import { RiskBandsPanel } from "./RiskBandsPanel";
 import { RankingPanel } from "./RankingPanel";
 import { ReliabilityPlot } from "./ReliabilityPlot";
 import { TrustGlossary } from "./TrustGlossary";
@@ -189,6 +190,8 @@ export function VerdictTab() {
           model's own confidence, not a probability.
         </p>
       </section>
+
+      <RiskBandsPanel />
 
       <HistoryPanel />
 
