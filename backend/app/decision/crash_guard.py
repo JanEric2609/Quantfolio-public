@@ -47,6 +47,9 @@ HISTORY_DAYS = 365 * 30
 STATE_KEY = "crash_guard_state_json"
 # Units sold below this share of the core position are rounding, not a sale.
 MIN_SOLD_SHARE = 0.01
+#: Closes older than this many trading days are stale: no level or recovery
+#: message is judged on them (plan 2026-10-14, M10).
+STALE_TRADING_DAYS = 3
 
 
 @dataclass
@@ -264,12 +267,25 @@ def _message(state: MarketState) -> str:
     return " ".join(lines)
 
 
+def stale_days(state: MarketState, today: date) -> int | None:
+    """Trading days since the last close, or None without one."""
+    if not state.as_of:
+        return None
+    import numpy as np
+
+    last = date.fromisoformat(state.as_of[:10])
+    return int(np.busday_count(last, today)) if today > last else 0
+
+
 def crash_guard(db: Session, user_id: str) -> dict[str, Any]:
     from app.foundation.settings import get_public_settings
 
     state = market_state(db)
     note = str(get_public_settings(db).get("crash_plan_note") or "").strip()
+    lag = stale_days(state, datetime.now(UTC).date())
     return {
+        "stale": lag is not None and lag > STALE_TRADING_DAYS,
+        "stale_since": state.as_of if lag is not None and lag > STALE_TRADING_DAYS else None,
         "market": {k: v for k, v in asdict(state).items() if k != "episodes"},
         "episodes": [asdict(e) for e in state.episodes],
         "message": _message(state),
@@ -308,6 +324,21 @@ def run_daily(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
         logger.warning("Crash guard skipped: no closes for %s", state.ticker)
         return {"level": None, "drawdown": None, "sent": [], "skipped": "no_prices"}
     previous = _load_state(db)
+    lag = stale_days(state, when.date())
+    if lag is not None and lag > STALE_TRADING_DAYS:
+        # Old closes say nothing about today: during a fall they would read
+        # "calm". One alert per stale episode, no level or recovery message.
+        sent: list[str] = []
+        if previous.get("stale_since") != state.as_of:
+            text = (f"Quantfolio crash guard: no fresh prices for {index_name(state.ticker)} since "
+                    f"{state.as_of}. The crash guard cannot judge the market until they return.")
+            alert_owners(db, source="crash_guard", title=f"Crash guard: prices stale since {state.as_of}",
+                         telegram_text=text, body=text, severity="warning", href="/plan")
+            sent.append("stale")
+        upsert_public_settings(db, {STATE_KEY: {
+            **previous, "stale_since": state.as_of, "checked_at": when.isoformat(),
+        }})
+        return {"level": None, "drawdown": state.drawdown, "sent": sent, "skipped": "stale"}
     if previous.get("ticker") and previous["ticker"] != state.ticker:
         # The benchmark was changed: the stored level, peak and findings belong
         # to the old index, so start over rather than compare across the two.

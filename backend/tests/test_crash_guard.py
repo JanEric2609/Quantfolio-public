@@ -73,7 +73,10 @@ def _user(db, role="admin"):
     return user
 
 
-def _patch_prices(monkeypatch, values, start=date(2026, 1, 1)):
+def _patch_prices(monkeypatch, values, start=None):
+    # By default the last close is 2026-10-14, the day before the runs' clock:
+    # older closes are stale and judged as such (plan 2026-10-14, M10).
+    start = start or date(2026, 10, 14) - timedelta(days=len(values) - 1)
     closes = _series(values, start)
     monkeypatch.setattr(crash_guard, "_closes", lambda db, ticker: closes)
 
@@ -288,10 +291,11 @@ def test_a_new_high_missed_between_runs_resets_the_alerts(monkeypatch):
     sent = _capture(monkeypatch)
     now = datetime(2026, 10, 15, 7, tzinfo=UTC)
 
-    _patch_prices(monkeypatch, [100, 75])
+    start = date(2026, 10, 11)
+    _patch_prices(monkeypatch, [100, 75], start)
     crash_guard.run_daily(db, now=now)
     # The run on the new high was missed; the market already fell 14 % from it.
-    _patch_prices(monkeypatch, [100, 75, 105, 90])
+    _patch_prices(monkeypatch, [100, 75, 105, 90], start)
     result = crash_guard.run_daily(db, now=now)
 
     assert result["sent"] == ["recovered", "level:correction"]
@@ -382,3 +386,34 @@ def test_changing_the_benchmark_starts_the_alert_state_over(monkeypatch):
     assert result["sent"] == ["level:bear"]                # its own alert, no false recovery
     assert "VWCE.DE" in sent[-1]
     assert crash_guard._load_state(db)["ticker"] == "VWCE.DE"
+
+
+def test_stale_prices_alert_once_as_stale_not_calm(monkeypatch):
+    db = _memory_db()
+    user = _user(db)
+    _with_telegram(db, user)
+    sent = _capture(monkeypatch)
+    now = datetime(2026, 10, 15, 7, tzinfo=UTC)
+
+    _patch_prices(monkeypatch, [100, 88])                       # correction, fresh
+    crash_guard.run_daily(db, now=now)
+    # The feed stops on 2026-10-08 while markets fall: 5 trading days old.
+    _patch_prices(monkeypatch, [100, 100], start=date(2026, 10, 7))
+    out = crash_guard.run_daily(db, now=now)
+    assert out["skipped"] == "stale"
+    crash_guard.run_daily(db, now=now)                          # still stale: no second alert
+    assert len(sent) == 2
+    assert "correction" in sent[0] and "no fresh prices" in sent[1]
+    assert "back at its high" not in " ".join(sent)
+
+    _patch_prices(monkeypatch, [100, 88, 79])                   # fresh again: judged as usual
+    crash_guard.run_daily(db, now=now)
+    assert "bear market" in sent[-1]
+
+
+def test_the_api_state_says_when_prices_are_stale(monkeypatch):
+    db = _memory_db()
+    user = _user(db)
+    _patch_prices(monkeypatch, [100, 99], start=date(2020, 1, 1))
+    out = crash_guard.crash_guard(db, user.id)
+    assert out["stale"] is True and out["stale_since"] == "2020-01-02"
