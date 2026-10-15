@@ -293,3 +293,36 @@ def test_a_hundredfold_jump_without_an_event_stays_a_split():
     history = {"ok": True, "provider": "yfinance", "data": _rows([1000.0, 1004.0, 10.05, 10.1], "2025-12-11")}
     result = _ingester(db, history, splits=[]).ingest_bar_prices("P500.DE", days=10)
     assert result["split_verdict"] == "split" and result["split_unadjusted"]
+
+
+
+# Bound at import, before conftest's autouse fixture stubs the lookup for every test.
+from app.foundation.data_backbone.ingest import _fetch_split_events as _real_fetch_split_events  # noqa: E402
+
+
+def test_stuck_split_lookups_are_bounded(monkeypatch):
+    import sys
+    import threading
+    from types import SimpleNamespace
+
+    from app.foundation.data_backbone import ingest
+
+    release = threading.Event()
+    calls: list[str] = []
+
+    class Ticker:
+        def __init__(self, symbol):
+            calls.append(symbol)
+
+        @property
+        def splits(self):
+            release.wait(5)  # a yfinance call that hangs past the deadline
+
+    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(Ticker=Ticker))
+    monkeypatch.setattr(ingest, "SPLIT_EVENT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(ingest, "_split_lookups", threading.BoundedSemaphore(2))
+    try:
+        assert [_real_fetch_split_events(s) for s in ("A", "B", "C", "D")] == [None] * 4
+        assert calls == ["A", "B"]  # two stuck lookups; the next ones were not started
+    finally:
+        release.set()
