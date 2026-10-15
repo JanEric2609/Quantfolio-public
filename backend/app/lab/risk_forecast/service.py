@@ -239,6 +239,25 @@ def score_due(db: Session, closes: _Closes, calendar: list[str]) -> int:
     return n
 
 
+def latest_day_against_band(db: Session, target: str) -> dict[str, Any] | None:
+    """*target*'s latest scored 1-day forecast: that day's loss against its 97.5 % VaR, or None.
+
+    The 97.5 % band is the deepest quantile that is stored and scored; a
+    99 % quantile from about 250 calibration residuals would rest on 2 or 3 of them.
+    """
+    row = (
+        db.query(RiskForecastEntry, RiskForecastScore)
+        .join(RiskForecastScore, RiskForecastScore.forecast_id == RiskForecastEntry.id)
+        .filter(RiskForecastEntry.target == target, RiskForecastEntry.horizon_days == 1)
+        .order_by(RiskForecastScore.end_day.desc())
+        .first()
+    )
+    if row is None:
+        return None
+    f, s = row
+    return {"day": s.end_day.isoformat(), "loss": s.loss, "var975": f.var975, "beyond": s.loss > f.var975}
+
+
 def non_overlapping(scored: list[tuple[RiskForecastEntry, RiskForecastScore]]
                     ) -> list[tuple[RiskForecastEntry, RiskForecastScore]]:
     """Scored forecasts (by forecast day) whose windows do not overlap, greedily from the first."""

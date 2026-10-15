@@ -388,6 +388,57 @@ def test_changing_the_benchmark_starts_the_alert_state_over(monkeypatch):
     assert crash_guard._load_state(db)["ticker"] == "VWCE.DE"
 
 
+def _band_row(db, day, loss, var975=0.02, ticker="EUNL.DE"):
+    from app.foundation.models.entities import RiskForecastEntry, RiskForecastScore
+
+    f = RiskForecastEntry(target=f"benchmark:{ticker}", label="Benchmark", forecast_day=day - timedelta(days=1),
+                          horizon_days=1, model_version="t", model_hash="t", sigma=0.01, var95=0.016,
+                          var975=var975, es975=0.025, n_obs=700, n_calibration=230, weights_json={ticker: 1.0})
+    db.add(f)
+    db.flush()
+    db.add(RiskForecastScore(forecast_id=f.id, end_day=day, realized_return=-loss, loss=loss,
+                             var95_breach=loss > 0.016, var_e=0.0, es_e=0.0))
+    db.commit()
+
+
+def test_a_fall_beyond_the_risk_band_is_quoted(monkeypatch):
+    db = _memory_db()
+    _patch_prices(monkeypatch, [100.0] * 5 + [85.0], start=date(2026, 1, 1))
+    last = date(2026, 1, 6)
+    assert crash_guard.market_state(db).as_of == last.isoformat()
+
+    _band_row(db, last, loss=0.031)
+    out = crash_guard.crash_guard(db, _user(db).id)
+    assert "beyond the app's own 97.5 % risk band (2.0%)" in out["message"]
+    assert "3.1%" in out["message"]
+
+
+def test_an_old_or_ordinary_day_is_not_quoted(monkeypatch):
+    db = _memory_db()
+    _patch_prices(monkeypatch, [100.0] * 5 + [85.0], start=date(2026, 1, 1))
+    _band_row(db, date(2026, 1, 5), loss=0.05)  # scored, but not on the latest close
+    assert "risk band" not in crash_guard.crash_guard(db, _user(db).id)["message"]
+    _band_row(db, date(2026, 1, 6), loss=0.012)  # within the band
+    assert crash_guard.market_state(db).band["beyond"] is False
+    assert "risk band" not in crash_guard.crash_guard(db, db.query(User).first().id)["message"]
+
+
+def test_a_failed_band_query_leaves_the_session_usable(monkeypatch):
+    db = _memory_db()
+    _patch_prices(monkeypatch, [100.0] * 5 + [85.0], start=date(2026, 1, 1))
+    rolled: list[bool] = []
+    real_rollback = db.rollback
+    monkeypatch.setattr(db, "rollback", lambda: rolled.append(True) or real_rollback())
+
+    def broken(*a, **kw):
+        raise RuntimeError("risk_forecasts missing")
+
+    monkeypatch.setattr("app.lab.risk_forecast.latest_day_against_band", broken)
+    out = crash_guard.crash_guard(db, _user(db).id)
+    assert rolled and "risk band" not in out["message"]
+    assert "band" not in out["market"]
+
+
 def test_stale_prices_alert_once_as_stale_not_calm(monkeypatch):
     db = _memory_db()
     user = _user(db)

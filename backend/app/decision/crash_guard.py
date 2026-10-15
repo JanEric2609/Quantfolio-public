@@ -76,6 +76,8 @@ class MarketState:
     level_label: str
     history_start: str | None
     episodes: list[Episode] = field(default_factory=list)
+    #: The latest close's loss against the app's own 1-day 97.5 % VaR (plan D3), when scored.
+    band: dict[str, Any] | None = None
 
 
 def _months(a: date, b: date) -> float:
@@ -163,7 +165,24 @@ def market_state(db: Session) -> MarketState:
     from app.foundation.eur_prices import benchmark_ticker
 
     ticker = benchmark_ticker(db)
-    return market_state_from(ticker, _closes(db, ticker))
+    state = market_state_from(ticker, _closes(db, ticker))
+    state.band = _band(db, state)
+    return state
+
+
+def _band(db: Session, state: MarketState) -> dict[str, Any] | None:
+    """The benchmark's 1-day risk forecast scored on the latest close, or None (no forecast for that day)."""
+    from app.lab.risk_forecast import latest_day_against_band
+
+    try:
+        band = latest_day_against_band(db, f"benchmark:{state.ticker}")
+    except Exception:  # noqa: BLE001 - the band is a sentence; the guard must still run
+        # A failed query aborts the transaction on Postgres. Nothing has been
+        # written yet where market_state() is called, so roll back and go on.
+        db.rollback()
+        logger.warning("Crash guard: risk band unavailable", exc_info=True)
+        return None
+    return band if band and band["day"] == state.as_of else None
 
 
 # --- what the investor did ------------------------------------------------------
@@ -260,6 +279,11 @@ def _message(state: MarketState) -> str:
             f"the deepest was {worst.depth:.0%} ({worst.peak_date[:7]}), the slowest way back took "
             f"{longest.months_to_recover:.0f} months."
         )
+    if state.band and state.band["beyond"]:
+        lines.append(
+            f"The last day's fall of {state.band['loss']:.1%} was beyond the app's own 97.5 % risk band "
+            f"({state.band['var975']:.1%}): a day like this is expected about once in 40 trading days."
+        )
     lines.append(
         "Your plan does not change: keep the savings plan running, do not sell the core. "
         "New money now buys more units for the same euros."
@@ -286,7 +310,8 @@ def crash_guard(db: Session, user_id: str) -> dict[str, Any]:
     return {
         "stale": lag is not None and lag > STALE_TRADING_DAYS,
         "stale_since": state.as_of if lag is not None and lag > STALE_TRADING_DAYS else None,
-        "market": {k: v for k, v in asdict(state).items() if k != "episodes"},
+        # The band reaches the client only as the message's sentence.
+        "market": {k: v for k, v in asdict(state).items() if k not in ("episodes", "band")},
         "episodes": [asdict(e) for e in state.episodes],
         "message": _message(state),
         "plan_note": note or None,
