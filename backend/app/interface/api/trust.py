@@ -5,6 +5,7 @@ GET /api/trust/calls   — resolved calls, newest first, with the five worst mis
 GET /api/trust/ranking — descriptive shadow-ledger metrics of Discover's ranking (ADR 0018 §5)
 GET /api/trust/history — the historical panel: factor tilt, ranking model, satellite (simulated, not live)
 GET /api/trust/risk-bands — risk forecasts stored before the fact and how they did (plan 2026-10-14, D3)
+GET /api/trust/plan-bands — the plan's one-year bands, stored monthly before the fact (plan 2026-10-14, D6)
 
 Both read the immutable prediction ledgers for the signed-in user only. Every
 value is frozen at issue/resolution time; see ``decision/verification/trust.py``
@@ -24,6 +25,7 @@ from app.foundation.auth import current_user
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import User
 from app.interface.api.params import ROWS_BOUND
+from app.lab.plan_bands import summary as plan_band_summary
 from app.lab.risk_forecast import summary as risk_summary
 
 router = APIRouter(prefix="/api/trust", tags=["trust"])
@@ -636,3 +638,58 @@ def get_risk_bands(
 ) -> dict[str, Any]:
     """The latest 1- and 21-day risk forecasts per sleeve, book and benchmark, and their scores so far."""
     return {"targets": risk_summary(db, user.id), "note": RISK_BANDS_NOTE}
+
+
+class PlanBandOut(BaseModel):
+    forecast_day: str
+    end_day: str
+    #: The book's real return over the year, as fractions.
+    p10: float
+    p50: float
+    p90: float
+    start_value: float
+    monthly_contribution: float
+    #: The book's value in a year in today's euros, the planned contributions included.
+    value_p10: float
+    value_p50: float
+    value_p90: float
+
+
+class PlanBandModelOut(BaseModel):
+    model: Literal["planner", "long_history"]
+    label: str
+    latest: PlanBandOut
+    n_bands: int
+    n_scored: int
+    inside: int
+    below: int
+    above: int
+    #: Scored bands whose years do not overlap; the coverage interval uses only these.
+    n_independent: int
+    coverage_low: float | None = None
+    coverage_high: float | None = None
+    #: The end of the earliest band not yet scored.
+    first_check: str | None = None
+
+
+class PlanBandsOut(BaseModel):
+    models: list[PlanBandModelOut] = []
+    note: str = ""
+    estimate: bool = True
+
+
+PLAN_BANDS_NOTE = (
+    "Each month the app stores where your book's real return should land over the next year, at 10, 50 and 90 %, "
+    "before the year starts. A year later it is checked against the book's time-weighted return less euro-area "
+    "inflation: about 8 in 10 should land inside. Monthly bands for one-year horizons overlap, so the interval "
+    "counts only years that do not overlap."
+)
+
+
+@router.get("/plan-bands", response_model=PlanBandsOut)
+def get_plan_bands(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """The latest one-year plan band per model and how the scored ones did."""
+    return {"models": plan_band_summary(db, user.id), "note": PLAN_BANDS_NOTE, "estimate": True}

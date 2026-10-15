@@ -1049,6 +1049,40 @@ export interface PortfolioProjection {
   estimate: true;
 }
 
+/** GET /api/quant/portfolio/projection/long-history: the same plan drawn from 150 years of history (plan D6). */
+export interface LongHistoryProjection {
+  available: boolean;
+  reason?: string;
+  inputs?: {
+    start_value_eur: number;
+    monthly_contribution_eur: number;
+    years: number;
+    mix: { equity: number; bond: number; cash: number };
+    paths: number;
+    seed: number;
+    goal_eur: number | null;
+  };
+  fan?: PortfolioProjection["fan"];
+  terminal?: { median: number; mean: number; p5: number; p95: number; contributed: number; p_below_contributed: number };
+  after_tax?: { median: number; p5: number; p95: number; median_tax: number };
+  bad_start?: { first_years: number; median: number; p5: number };
+  all_countries?: { homes: number; median: number; p5: number; p95: number };
+  goal?: { goal_eur: number; probability: number; probability_after_tax: number };
+  assumptions?: {
+    homes: string[];
+    years_of_history: number;
+    haircut: number;
+    mean_block_years: number;
+    tax_rate: number;
+    equity_exempt: number;
+    allowance_eur: number;
+    source: string;
+    model_version: string;
+  };
+  estimate: true;
+  not_tax_advice: true;
+}
+
 /** GET /api/quant/portfolio/real/performance: the book's time-weighted unit value. */
 export interface BookPerformance {
   available: boolean;
@@ -1800,6 +1834,39 @@ export interface TrustRiskBandTarget {
 export interface TrustRiskBands {
   targets: TrustRiskBandTarget[];
   note: string;
+}
+
+/** GET /api/trust/plan-bands: the plan's one-year bands, stored monthly before the fact (plan D6). */
+export interface TrustPlanBandModel {
+  model: "planner" | "long_history";
+  label: string;
+  latest: {
+    forecast_day: string;
+    end_day: string;
+    p10: number;
+    p50: number;
+    p90: number;
+    start_value: number;
+    monthly_contribution: number;
+    value_p10: number;
+    value_p50: number;
+    value_p90: number;
+  };
+  n_bands: number;
+  n_scored: number;
+  inside: number;
+  below: number;
+  above: number;
+  n_independent: number;
+  coverage_low?: number | null;
+  coverage_high?: number | null;
+  first_check?: string | null;
+}
+
+export interface TrustPlanBands {
+  models: TrustPlanBandModel[];
+  note: string;
+  estimate: boolean;
 }
 
 export interface TrustHistory {
@@ -3132,6 +3199,8 @@ export interface MonthlyPlan {
   not_investment_advice: boolean;
   suggested_funds?: SuggestedFund[];
   acc_dist_note?: string;
+  /** Why the core is 100 % global equity (ADR 0022's long-history test). */
+  mix_note?: string;
   /** Bond, cash and gold lines from the owner's targets (rule-based, not a forecast). */
   etf_suggestions?: PlanEtfSuggestions | null;
 }
@@ -3149,6 +3218,8 @@ export interface PlanEtfSuggestionLine {
   fund?: { isin: string; name: string; why: string } | null;
   amount_eur?: number | null;
   warning?: string | null;
+  /** The bond line's tested cost against 100 % equity (ADR 0022); history, not a forecast. */
+  evidence?: string | null;
 }
 
 export interface PlanEtfSuggestions {

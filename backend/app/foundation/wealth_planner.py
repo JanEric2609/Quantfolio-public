@@ -135,3 +135,40 @@ def project(p: PlanInputs) -> dict[str, Any]:
         goal["median_reaches_in_years"] = None if reach is None else reach / 12.0
         out["goal"] = goal
     return out
+
+
+def book_volatility(db: Any, user_id: str) -> tuple[float, str]:
+    """Annual volatility of the book at today's weights and where it came from.
+
+    Ledoit-Wolf covariance of up to two years of EUR daily returns; the
+    long-run MSCI World figure until the book has a year of history.
+    """
+    from app.foundation.allocation import portfolio_stats, shrunk_covariance
+    from app.foundation.portfolio_price_service import PortfolioPriceService
+    from app.foundation.quant import price_matrix_to_returns
+
+    matrix, values, _diag = PortfolioPriceService(db, user_id).price_matrix()
+    if matrix:
+        rets = price_matrix_to_returns(matrix).tail(504)
+        total = sum(values.get(c, 0.0) for c in rets.columns)
+        if len(rets) >= 252 and total > 0:
+            cov, _shrink = shrunk_covariance(rets)
+            w = np.array([values.get(c, 0.0) / total for c in rets.columns])
+            return float(portfolio_stats(w, cov)["volatility"]), f"your book, {len(rets)} days of EUR returns (Ledoit-Wolf)"
+    return DEFAULT_VOLATILITY, "long-run MSCI World in EUR (less than a year of history)"
+
+
+def return_band(real_return: float, volatility: float, *, nu: float = DEFAULT_NU,
+                calibration_years: float = DEFAULT_CALIBRATION_YEARS, percentiles: tuple[int, ...] = (10, 50, 90),
+                paths: int = 20_000, seed: int = 7) -> dict[int, float]:
+    """Quantiles of the next year's real return under :func:`project`'s model, drift uncertainty included.
+
+    The Trust page stores this band each month before the year starts and
+    scores it against the book's real time-weighted return (plan 2026-10-14, D6).
+    """
+    rng = np.random.default_rng(seed)
+    z = _shocks(rng, (paths, 12), nu)
+    sigma_mu = volatility / math.sqrt(calibration_years) if calibration_years > 0 else 0.0
+    drift = math.log1p(real_return) + sigma_mu * rng.standard_normal(paths)
+    growth = np.exp(drift + volatility / math.sqrt(12.0) * z.sum(axis=1)) - 1.0
+    return {p: float(v) for p, v in zip(percentiles, np.percentile(growth, percentiles))}

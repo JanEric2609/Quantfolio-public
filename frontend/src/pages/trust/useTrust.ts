@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, type TrustCalls, type TrustHistory, type TrustRanking, type TrustRiskBands, type TrustTypeKey, type TrustVerdict } from "../../lib/api";
+import { api, type TrustCalls, type TrustHistory, type TrustPlanBands, type TrustRanking, type TrustRiskBands, type TrustTypeKey, type TrustVerdict } from "../../lib/api";
 
 export const trustVerdictKey = ["trust", "verdict"] as const;
 
@@ -47,6 +47,14 @@ export function useTrustRiskBands() {
   return useQuery({
     queryKey: ["trust", "risk-bands"],
     queryFn: () => api<TrustRiskBands>("/api/trust/risk-bands"),
+    staleTime: 10 * 60_000,
+  });
+}
+
+export function useTrustPlanBands() {
+  return useQuery({
+    queryKey: ["trust", "plan-bands"],
+    queryFn: () => api<TrustPlanBands>("/api/trust/plan-bands"),
     staleTime: 10 * 60_000,
   });
 }

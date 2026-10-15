@@ -25,6 +25,7 @@
       "app.lab.evidence_gate",
       "app.lab.factor_premia",
       "app.lab.performance_ledger",
+      "app.lab.plan_bands",
       "app.lab.pooled_model",
       "app.lab.quant_lab",
       "app.lab.ranking_replay",

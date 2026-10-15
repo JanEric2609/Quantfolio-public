@@ -7,6 +7,7 @@ import { ErrorState } from "../../components/composed/ErrorState";
 import { EvidenceChip } from "./EvidenceChip";
 import { FamilyTests } from "./FamilyTests";
 import { HistoryPanel } from "./HistoryPanel";
+import { PlanBandsPanel } from "./PlanBandsPanel";
 import { RiskBandsPanel } from "./RiskBandsPanel";
 import { RankingPanel } from "./RankingPanel";
 import { ReliabilityPlot } from "./ReliabilityPlot";
@@ -191,6 +192,7 @@ export function VerdictTab() {
       </section>
 
       <RiskBandsPanel />
+      <PlanBandsPanel />
 
       <HistoryPanel />
 

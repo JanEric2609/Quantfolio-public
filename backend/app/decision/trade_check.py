@@ -560,7 +560,7 @@ def summary(db: Session, portfolio_id: str, nav_eur: float | None = None) -> dic
 
 
 def register_trade_check_job(scheduler: Any | None = None) -> str:
-    """Daily at 22:30 UTC, after the day's cycles and the closing prices; then the risk forecasts (D3)."""
+    """Daily at 22:30 UTC, after the day's cycles and the closing prices; then the risk forecasts (D3) and plan bands (D6)."""
     from app.foundation.jobs import register_cron_job
 
     def _inner() -> None:
@@ -577,6 +577,14 @@ def register_trade_check_job(scheduler: Any | None = None) -> str:
                 logger.info("risk_forecasts: %s", run_forecasts(db))
         except Exception:
             logger.exception("risk_forecasts: run failed")
+        # The plan's monthly one-year bands and their scores (D6) ride the same slot for the same reasons.
+        try:
+            from app.lab.plan_bands import run_plan_bands
+
+            with SessionLocal() as db:
+                logger.info("plan_bands: %s", run_plan_bands(db))
+        except Exception:
+            logger.exception("plan_bands: run failed")
 
     return register_cron_job("trade_check_daily", _inner, scheduler=scheduler, hour=22, minute=30)
 
