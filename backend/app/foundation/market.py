@@ -430,8 +430,9 @@ def macro_indicators(db: Session) -> list[dict[str, Any]]:
     )
     if not rows:
         return []
-    fresh = _is_fresh(max(row.fetched_at for row in rows), MACRO_TTL)
-    return [_macro_to_dict(row, stale=not fresh) for row in rows]
+    # Per series: one fresh series must not hide another whose refresh has
+    # been failing for weeks (plan 2026-10-14, L3).
+    return [_macro_to_dict(row, stale=not _is_fresh(row.fetched_at, MACRO_TTL)) for row in rows]
 
 
 def _is_valid_close(value: Any) -> bool:

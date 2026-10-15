@@ -103,10 +103,12 @@ def test_second_provider_confirmation_tolerance():
     assert not confirms(117.9, None)
 
 
-def _ingester(db, history: dict, confirm: dict | None = None) -> DataIngester:
+def _ingester(db, history: dict, confirm: dict | None = None, splits: list | None = None) -> DataIngester:
     ingester = DataIngester.__new__(DataIngester)
     ingester.db = db
     ingester.registry = MagicMock()
+    # The provider's split events, never fetched live in a test (None = unreadable).
+    ingester.split_events = lambda symbol: splits  # type: ignore[method-assign]
 
     def _history(symbol, start=None, end=None, days=None, provider=None):
         if provider not in (None, history["provider"]) and confirm is not None:
@@ -238,3 +240,107 @@ def test_tiingo_confirms_us_share_classes_but_not_european_listings():
         ingester._confirm_quarantined(symbol, "yfinance", [bar])
     assert ("BRK.B", "tiingo") in asked and ("600519.SS", "tiingo") in asked
     assert ("SAP.DE", "tiingo") not in asked
+
+
+def _stored_closes(db, symbol: str) -> list[float]:
+    rows = db.execute(text("SELECT close FROM bar_prices WHERE symbol = :s ORDER BY ts"), {"s": symbol}).all()
+    return [float(r[0]) for r in rows]
+
+
+def test_a_spike_caught_on_the_incremental_overlap_leaves_bar_prices():
+    # Plan 2026-10-14, H3: the spike is stored first (no reversal yet); the
+    # next fetch starts one day back, so it returns as a "new" bar.
+    db = _etf_db()
+    first = {"ok": True, "provider": "yfinance", "data": _rows([100.0, 100.5, 117.9], "2025-10-22")}
+    _ingester(db, first, confirm={"ok": False}).ingest_bar_prices("SGAS.DE", days=10)
+    assert _stored_closes(db, "SGAS.DE") == [100.0, 100.5, 117.9]
+
+    overlap = {"ok": True, "provider": "yfinance", "data": _rows([117.9, 102.6, 102.9], "2025-10-24")}
+    result = _ingester(db, overlap, confirm={"ok": False}).ingest_bar_prices("SGAS.DE", days=3)
+    assert result["quarantined"] == 1
+    assert _stored_closes(db, "SGAS.DE") == [100.0, 100.5, 102.6, 102.9]
+
+
+def test_a_quarantined_fresh_bar_does_not_delete_a_different_stored_bar():
+    from app.foundation.data_backbone.bar_guard import QuarantinedBar
+
+    db = _etf_db()
+    history = {"ok": True, "provider": "yfinance", "data": _rows([100.0, 100.5], "2025-10-22")}
+    ingester = _ingester(db, history, confirm={"ok": False})
+    ingester.ingest_bar_prices("SGAS.DE", days=10)
+    day = pd.Timestamp("2025-10-23")
+    # Another provider's bar for the same day, off the pinned scale.
+    ingester._write_quarantine("SGAS.DE", [QuarantinedBar(day, None, None, None, 130.0, "eod", "provider_scale")])
+    db.commit()
+    assert _stored_closes(db, "SGAS.DE") == [100.0, 100.5]
+
+
+# --- M1 (plan 2026-10-14): a crash is not a split -------------------------------
+
+
+def test_a_fifty_percent_crash_without_a_split_event_stays_in():
+    db = _memory_db()
+    history = {"ok": True, "provider": "yfinance", "data": _rows([40.0, 40.4, 20.1, 19.8, 20.3], "2025-12-11")}
+    result = _ingester(db, history, splits=[]).ingest_bar_prices("XYZ", days=10)
+    assert result["repull"] and result["split_verdict"] == "real_move" and not result["split_unadjusted"]
+    pin = db.get(BarSeriesMeta, "XYZ")
+    assert pin.quarantine_reason is None and pin.notes.startswith("real_move")
+    assert _stored_closes(db, "XYZ") == [40.0, 40.4, 20.1, 19.8, 20.3]
+
+
+def test_a_listed_split_is_still_caught():
+    db = _memory_db()
+    # yfinance lists the 100:1 split as factor 100 on the day.
+    splits = [(pd.Timestamp("2025-12-15"), 100.0)]
+    history = {"ok": True, "provider": "yfinance", "data": _rows([1000.0, 1004.0, 10.05, 10.1], "2025-12-11")}
+    result = _ingester(db, history, splits=splits).ingest_bar_prices("P500.DE", days=10)
+    assert result["split_verdict"] == "split" and result["split_unadjusted"]
+    assert db.get(BarSeriesMeta, "P500.DE").quarantine_reason == "split_unadjusted"
+
+
+def test_a_two_for_one_split_listed_near_the_day_is_a_split():
+    db = _memory_db()
+    splits = [(pd.Timestamp("2025-12-12"), 2.0)]  # two sessions before the jump
+    history = {"ok": True, "provider": "yfinance", "data": _rows([40.0, 40.4, 20.1, 19.8, 20.3], "2025-12-11")}
+    result = _ingester(db, history, splits=splits).ingest_bar_prices("XYZ", days=10)
+    assert result["split_verdict"] == "split"
+
+
+def test_a_hundredfold_jump_without_an_event_stays_a_split():
+    db = _memory_db()
+    history = {"ok": True, "provider": "yfinance", "data": _rows([1000.0, 1004.0, 10.05, 10.1], "2025-12-11")}
+    result = _ingester(db, history, splits=[]).ingest_bar_prices("P500.DE", days=10)
+    assert result["split_verdict"] == "split" and result["split_unadjusted"]
+
+
+
+# Bound at import, before conftest's autouse fixture stubs the lookup for every test.
+from app.foundation.data_backbone.ingest import _fetch_split_events as _real_fetch_split_events  # noqa: E402
+
+
+def test_stuck_split_lookups_are_bounded(monkeypatch):
+    import sys
+    import threading
+    from types import SimpleNamespace
+
+    from app.foundation.data_backbone import ingest
+
+    release = threading.Event()
+    calls: list[str] = []
+
+    class Ticker:
+        def __init__(self, symbol):
+            calls.append(symbol)
+
+        @property
+        def splits(self):
+            release.wait(5)  # a yfinance call that hangs past the deadline
+
+    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(Ticker=Ticker))
+    monkeypatch.setattr(ingest, "SPLIT_EVENT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(ingest, "_split_lookups", threading.BoundedSemaphore(2))
+    try:
+        assert [_real_fetch_split_events(s) for s in ("A", "B", "C", "D")] == [None] * 4
+        assert calls == ["A", "B"]  # two stuck lookups; the next ones were not started
+    finally:
+        release.set()

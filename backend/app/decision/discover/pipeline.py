@@ -243,7 +243,7 @@ def _benchmark_symbols() -> list[str]:
 
     bond_refs = [
         REFERENCE_FUNDS[k].symbol
-        for k in ("bond_govt_eur_short", "bond_govt_eur_mid", "bond_aggregate_eur_hedged")
+        for k in ("bond_govt_eur_short", "bond_govt_eur_mid", "bond_govt_eur_long", "bond_aggregate_eur_hedged")
     ]
     return _ordered_unique(
         [_BENCHMARK_EUROPE, _BENCHMARK_US, _BENCHMARK_GLOBAL_ETF, _BENCHMARK_JAPAN, *bond_refs]
