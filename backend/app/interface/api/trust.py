@@ -385,7 +385,10 @@ class DailyTestsOut(BaseModel):
     selection: SelectionTestOut | None = None
     mandates: list[MandateTestOut] = Field(default_factory=list)
     paired: PairedComparisonOut | None = None
-    factor_neutral: FactorNeutralOut | None = None
+    factor_neutral: FactorNeutralOut | None = Field(
+        default=None,
+        description="Withdrawn on 2026-10-14 (ADR 0018 amendment, §8): always null. Kept for old clients.",
+    )
 
 
 class VerdictOut(BaseModel):

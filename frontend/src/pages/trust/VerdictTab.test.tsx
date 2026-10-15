@@ -500,7 +500,7 @@ describe("VerdictTab", () => {
     expect(screen.getByTestId("aci-waiting")).toHaveTextContent("starts after 30 matured weeks; 4 so far");
   });
 
-  it("shows the factor study and the advisor-vs-picks comparison as descriptive cards", async () => {
+  it("shows the advisor-vs-picks comparison as a descriptive card", async () => {
     renderTab(
       makeVerdict({
         daily_tests: {
@@ -518,11 +518,6 @@ describe("VerdictTab", () => {
             enough_days: true,
             path: [],
           },
-          factor_neutral: {
-            study: { status: "waiting", spec_version: 1, n_backfilled_picks: 12 },
-            row: null,
-            gate: { build: 0.3, drop: 0.15, min_oos_days: 126, min_fit_days: 126 },
-          },
         },
       }),
     );
@@ -530,9 +525,7 @@ describe("VerdictTab", () => {
       "On 70 common trading days the advisor was −0.40 pp per 21 days against the picks",
     );
     expect(screen.getByTestId("paired-comparison")).toHaveTextContent("ahead on 47 % of days");
-    expect(screen.getByTestId("factor-neutral")).toHaveTextContent(
-      "needs 252 trading days of back-filled baskets (12 back-filled picks so far)",
-    );
+    expect(screen.queryByTestId("factor-neutral")).not.toBeInTheDocument();
   });
 
   it("leads with the selection test, lists the mandates and moves F1 under alarms", async () => {

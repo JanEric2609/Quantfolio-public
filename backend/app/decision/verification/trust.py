@@ -63,7 +63,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.decision.verification import daily_tests, factor_study
+from app.decision.verification import daily_tests
 from app.decision.verification.benchmark import passive_core_symbol
 from app.foundation import forecast_verification as fv
 from app.foundation.models.entities import (
@@ -823,7 +823,6 @@ def build_verdict(db: Session, user_id: str, *, now: datetime | None = None) -> 
     by_type, benchmark = _collect(db, user_id, now)
     stats = [_type_stats(by_type[key]) for key in TYPE_KEYS]
     tests = daily_tests.build_daily_tests(db, user_id)
-    tests["factor_neutral"] = factor_study.factor_neutral_summary(db, user_id)
     n_tests = _apply_states(stats, tests)
     f1 = _primary(tests)
 

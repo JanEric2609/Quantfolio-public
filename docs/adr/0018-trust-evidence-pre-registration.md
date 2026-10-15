@@ -83,7 +83,7 @@ Discover, the advisor, the mandates, or anything an LLM wrote.
 - **Start of the test (T0).** The primary e-processes start on **2026-10-12**, or on the
   first trading day after this ADR is merged if that is later. Ledger rows before T0 are
   kept and shown as "before pre-registration", but they never enter an e-value.
-  *Superseded by the amendment of 2026-10-14: T0 = 2026-10-15.*
+  *Superseded by the amendment of 2026-10-12: T0 = 2026-10-15.*
 
 ### 3. The calendar-time daily ledger (F1, F3)
 

@@ -2012,7 +2012,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Withdrawn on 2026-10-14 (ADR 0018 amendment, \u00a78): always null. Kept for old clients."
           },
           "families": {
             "items": {
