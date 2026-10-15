@@ -47,6 +47,9 @@ HISTORY_DAYS = 365 * 30
 STATE_KEY = "crash_guard_state_json"
 # Units sold below this share of the core position are rounding, not a sale.
 MIN_SOLD_SHARE = 0.01
+#: Closes older than this many trading days are stale: no level or recovery
+#: message is judged on them (plan 2026-10-14, M10).
+STALE_TRADING_DAYS = 3
 
 
 @dataclass
@@ -73,6 +76,8 @@ class MarketState:
     level_label: str
     history_start: str | None
     episodes: list[Episode] = field(default_factory=list)
+    #: The latest close's loss against the app's own 1-day 97.5 % VaR (plan D3), when scored.
+    band: dict[str, Any] | None = None
 
 
 def _months(a: date, b: date) -> float:
@@ -160,7 +165,24 @@ def market_state(db: Session) -> MarketState:
     from app.foundation.eur_prices import benchmark_ticker
 
     ticker = benchmark_ticker(db)
-    return market_state_from(ticker, _closes(db, ticker))
+    state = market_state_from(ticker, _closes(db, ticker))
+    state.band = _band(db, state)
+    return state
+
+
+def _band(db: Session, state: MarketState) -> dict[str, Any] | None:
+    """The benchmark's 1-day risk forecast scored on the latest close, or None (no forecast for that day)."""
+    from app.lab.risk_forecast import latest_day_against_band
+
+    try:
+        band = latest_day_against_band(db, f"benchmark:{state.ticker}")
+    except Exception:  # noqa: BLE001 - the band is a sentence; the guard must still run
+        # A failed query aborts the transaction on Postgres. Nothing has been
+        # written yet where market_state() is called, so roll back and go on.
+        db.rollback()
+        logger.warning("Crash guard: risk band unavailable", exc_info=True)
+        return None
+    return band if band and band["day"] == state.as_of else None
 
 
 # --- what the investor did ------------------------------------------------------
@@ -257,6 +279,11 @@ def _message(state: MarketState) -> str:
             f"the deepest was {worst.depth:.0%} ({worst.peak_date[:7]}), the slowest way back took "
             f"{longest.months_to_recover:.0f} months."
         )
+    if state.band and state.band["beyond"]:
+        lines.append(
+            f"The last day's fall of {state.band['loss']:.1%} was beyond the app's own 97.5 % risk band "
+            f"({state.band['var975']:.1%}): a day like this is expected about once in 40 trading days."
+        )
     lines.append(
         "Your plan does not change: keep the savings plan running, do not sell the core. "
         "New money now buys more units for the same euros."
@@ -264,13 +291,27 @@ def _message(state: MarketState) -> str:
     return " ".join(lines)
 
 
+def stale_days(state: MarketState, today: date) -> int | None:
+    """Trading days since the last close, or None without one."""
+    if not state.as_of:
+        return None
+    import numpy as np
+
+    last = date.fromisoformat(state.as_of[:10])
+    return int(np.busday_count(last, today)) if today > last else 0
+
+
 def crash_guard(db: Session, user_id: str) -> dict[str, Any]:
     from app.foundation.settings import get_public_settings
 
     state = market_state(db)
     note = str(get_public_settings(db).get("crash_plan_note") or "").strip()
+    lag = stale_days(state, datetime.now(UTC).date())
     return {
-        "market": {k: v for k, v in asdict(state).items() if k != "episodes"},
+        "stale": lag is not None and lag > STALE_TRADING_DAYS,
+        "stale_since": state.as_of if lag is not None and lag > STALE_TRADING_DAYS else None,
+        # The band reaches the client only as the message's sentence.
+        "market": {k: v for k, v in asdict(state).items() if k not in ("episodes", "band")},
         "episodes": [asdict(e) for e in state.episodes],
         "message": _message(state),
         "plan_note": note or None,
@@ -309,9 +350,28 @@ def run_daily(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
         return {"level": None, "drawdown": None, "sent": [], "skipped": "no_prices"}
     previous = _load_state(db)
     if previous.get("ticker") and previous["ticker"] != state.ticker:
-        # The benchmark was changed: the stored level, peak and findings belong
-        # to the old index, so start over rather than compare across the two.
+        # The benchmark was changed: the stored level, peak, findings and stale
+        # episode belong to the old index, so start over rather than compare across the two.
         previous = {}
+    lag = stale_days(state, when.date())
+    if lag is not None and lag > STALE_TRADING_DAYS:
+        # Old closes say nothing about today: during a fall they would read
+        # "calm". One alert per stale episode (it ends with the next fresh run,
+        # which writes the state without ``stale_since``), even while a lagging
+        # feed keeps adding old days; no level or recovery message.
+        sent: list[str] = []
+        since = previous.get("stale_since")
+        if not since:
+            since = state.as_of
+            text = (f"Quantfolio crash guard: no fresh prices for {index_name(state.ticker)} since "
+                    f"{state.as_of}. The crash guard cannot judge the market until they return.")
+            alert_owners(db, source="crash_guard", title=f"Crash guard: prices stale since {state.as_of}",
+                         telegram_text=text, body=text, severity="warning", href="/plan")
+            sent.append("stale")
+        upsert_public_settings(db, {STATE_KEY: {
+            **previous, "ticker": state.ticker, "stale_since": since, "checked_at": when.isoformat(),
+        }})
+        return {"level": None, "drawdown": state.drawdown, "sent": sent, "skipped": "stale"}
     worst_level = str(previous.get("worst_level") or "calm")
     seen: set[str] = set(previous.get("behaviour_seen") or [])
     sent: list[str] = []

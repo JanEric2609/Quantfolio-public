@@ -28,6 +28,9 @@ What is in here, and the reference each piece follows:
   basket excess return per date, clipped and betted on).
 * :func:`issue_days_needed` / :func:`issue_days_needed_mean` — simulated median issue days until the verdict
   would say "skill" at a true hit rate ``p1``. Shown as "time to know".
+* :func:`variance_ratio` — Lo & MacKinlay's (1988) overlapping variance ratio,
+  the noise check of ADR 0018 §11 (serial correlation that would void the
+  daily e-processes).
   :func:`calls_needed` is the classical fixed-sample z-test number, kept for
   reference only.
 * :func:`spiegelhalter_z` and :func:`reliability_bins` — calibration checks
@@ -682,6 +685,29 @@ def e_process_mean(
     if chains is not None:
         return e_process_chains(1.0 - y if harm else y, chains, 0.5, pv)
     return e_process_lag_h_harm(y, 0.5, h, pv) if harm else e_process_lag_h(y, 0.5, h, pv)
+
+
+def variance_ratio(x: Sequence[float] | np.ndarray, q: int = 21) -> float | None:
+    """VR(q): the variance of overlapping *q*-day sums over *q* times the daily variance.
+
+    Lo & MacKinlay (1988), eq. (12a)-(13): overlapping sums and the unbiased
+    denominator ``m = q (n - q + 1)(1 - q / n)``. Each row's own mean is
+    subtracted, so the ratio says nothing about the mean. 1 for serially
+    uncorrelated values; above 1 when they persist. None below ``2 q`` values
+    or with zero variance.
+    """
+    a = np.asarray(x, dtype=float)
+    n = a.size
+    if n < 2 * q:
+        return None
+    mu = float(a.mean())
+    var1 = float(np.sum((a - mu) ** 2)) / (n - 1)
+    if var1 <= 0:
+        return None
+    c = np.concatenate([[0.0], np.cumsum(a)])
+    sums = c[q:] - c[:-q]
+    m = q * (n - q + 1) * (1.0 - q / n)
+    return float(np.sum((sums - q * mu) ** 2) / m / var1)
 
 
 MIN_UNITS_FOR_CADENCE = 5

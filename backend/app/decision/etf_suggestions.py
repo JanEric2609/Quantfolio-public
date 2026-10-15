@@ -41,7 +41,7 @@ from app.foundation.etf_classes import (
 RULE_NOTE = "Rule-based, not a forecast: it fills a gap in your own plan."
 
 #: Plan line -> (asset classes it holds, curated sleeve per duration bucket or None).
-_BOND_SLEEVE_BY_BUCKET = {"short": "bond_short", "mid": "bond_mid", "long": "bond_mid"}
+_BOND_SLEEVE_BY_BUCKET = {"short": "bond_short", "mid": "bond_mid", "long": "bond_long"}
 LINE_LABELS = {"bond": "Bonds (EUR)", "cash": "Cash (money market)", "gold": "Gold"}
 
 #: Tax notes per line; every figure-free note still carries the flags (D4).
