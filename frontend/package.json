@@ -71,5 +71,10 @@
     "vite": "^8.3.1",
     "vite-plugin-pwa": "^1.3.0",
     "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "@tailwindcss/typography": {
+      "postcss-selector-parser": "7.1.6"
+    }
   }
 }
