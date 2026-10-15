@@ -224,6 +224,24 @@ def test_a_truncated_repull_keeps_the_stored_series():
     assert db.get(BarSeriesMeta, "AVB").last_full_repull_at is None
 
 
+def test_tiingo_confirms_us_share_classes_but_not_european_listings():
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    from app.foundation.data_backbone.ingest import DataIngester
+
+    asked: list[tuple[str, str]] = []
+    ingester = DataIngester.__new__(DataIngester)
+    ingester.registry = SimpleNamespace(
+        get_price_history=lambda symbol, start, end, provider: asked.append((symbol, provider)) or {"ok": False})
+    bar = SimpleNamespace(reason="spike_reversal", provider="yfinance", ts=pd.Timestamp("2026-10-01"))
+    for symbol in ("BRK.B", "600519.SS", "SAP.DE"):
+        ingester._confirm_quarantined(symbol, "yfinance", [bar])
+    assert ("BRK.B", "tiingo") in asked and ("600519.SS", "tiingo") in asked
+    assert ("SAP.DE", "tiingo") not in asked
+
+
 def _stored_closes(db, symbol: str) -> list[float]:
     rows = db.execute(text("SELECT close FROM bar_prices WHERE symbol = :s ORDER BY ts"), {"s": symbol}).all()
     return [float(r[0]) for r in rows]
