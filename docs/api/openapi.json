@@ -1920,6 +1920,23 @@
               }
             ],
             "title": "Plan Note"
+          },
+          "stale": {
+            "default": false,
+            "description": "The last close is more than 3 trading days old.",
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "stale_since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale Since"
           }
         },
         "required": [
@@ -2012,7 +2029,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Withdrawn on 2026-10-14 (ADR 0018 amendment, \u00a78): always null. Kept for old clients."
           },
           "families": {
             "items": {
@@ -2028,6 +2046,13 @@
           "horizon_days": {
             "title": "Horizon Days",
             "type": "integer"
+          },
+          "mandates": {
+            "items": {
+              "$ref": "#/components/schemas/MandateTestOut"
+            },
+            "title": "Mandates",
+            "type": "array"
           },
           "min_days_for_state": {
             "title": "Min Days For State",
@@ -2046,6 +2071,16 @@
           "prior_var": {
             "title": "Prior Var",
             "type": "number"
+          },
+          "selection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SelectionTestOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "sigma_ref": {
             "title": "Sigma Ref",
@@ -2920,6 +2955,17 @@
               }
             ],
             "title": "Duration Bucket"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence"
           },
           "fund": {
             "anyOf": [
@@ -3898,6 +3944,12 @@
       },
       "FamilyTestOut": {
         "properties": {
+          "alarm_only": {
+            "default": false,
+            "description": "Shown only when it crosses: harm or a large edge (ADR 0018 amendment of 2026-10-14, \u00a76).",
+            "title": "Alarm Only",
+            "type": "boolean"
+          },
           "e_harm": {
             "title": "E Harm",
             "type": "number"
@@ -5943,6 +5995,115 @@
         "title": "LedgerSnapshotRequest",
         "type": "object"
       },
+      "MandateTestOut": {
+        "description": "M: is the mandate worth running? A rejection retires it.",
+        "properties": {
+          "clip": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clip"
+          },
+          "delta_21d": {
+            "title": "Delta 21D",
+            "type": "number"
+          },
+          "e_futility": {
+            "title": "E Futility",
+            "type": "number"
+          },
+          "mandate": {
+            "title": "Mandate",
+            "type": "string"
+          },
+          "mean_21d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean 21D"
+          },
+          "n_days": {
+            "title": "N Days",
+            "type": "integer"
+          },
+          "n_tested_days": {
+            "description": "Days after the first 63, which only set the reference noise.",
+            "title": "N Tested Days",
+            "type": "integer"
+          },
+          "noise_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoiseCheckOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retire": {
+            "default": false,
+            "title": "Retire",
+            "type": "boolean"
+          },
+          "series": {
+            "enum": [
+              "mandate_a",
+              "mandate_b"
+            ],
+            "title": "Series",
+            "type": "string"
+          },
+          "sigma_ref_daily": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sigma Ref Daily"
+          },
+          "state": {
+            "enum": [
+              "too_early",
+              "no_evidence",
+              "retire",
+              "retire_pending",
+              "not_valid"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "threshold": {
+            "title": "Threshold",
+            "type": "number"
+          }
+        },
+        "required": [
+          "series",
+          "mandate",
+          "n_days",
+          "n_tested_days",
+          "e_futility",
+          "delta_21d",
+          "threshold",
+          "state"
+        ],
+        "title": "MandateTestOut",
+        "type": "object"
+      },
       "MarkPaidRequest": {
         "properties": {
           "create_expense": {
@@ -6589,6 +6750,11 @@
             "title": "Min Order Eur",
             "type": "number"
           },
+          "mix_note": {
+            "default": "",
+            "title": "Mix Note",
+            "type": "string"
+          },
           "month": {
             "title": "Month",
             "type": "string"
@@ -6700,6 +6866,80 @@
           "sinking_funds"
         ],
         "title": "MonthlyReviewOut",
+        "type": "object"
+      },
+      "NoiseCheckOut": {
+        "description": "ADR 0018 \u00a711: serial correlation that would void the daily e-processes.",
+        "properties": {
+          "failed_at_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed At Day"
+          },
+          "looks": {
+            "items": {
+              "$ref": "#/components/schemas/NoiseLookOut"
+            },
+            "title": "Looks",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "passing",
+              "passed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "NoiseCheckOut",
+        "type": "object"
+      },
+      "NoiseLookOut": {
+        "properties": {
+          "cutoff": {
+            "title": "Cutoff",
+            "type": "number"
+          },
+          "day": {
+            "description": "Observed days the look uses.",
+            "title": "Day",
+            "type": "integer"
+          },
+          "failed": {
+            "default": false,
+            "title": "Failed",
+            "type": "boolean"
+          },
+          "vr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "VR(21) of the first `day` observed values; null before then.",
+            "title": "Vr"
+          }
+        },
+        "required": [
+          "day",
+          "cutoff"
+        ],
+        "title": "NoiseLookOut",
         "type": "object"
       },
       "ObsidianQueryRequest": {
@@ -10068,6 +10308,131 @@
         "title": "RiskAssessmentOut",
         "type": "object"
       },
+      "RiskBandHorizonOut": {
+        "properties": {
+          "breaches": {
+            "title": "Breaches",
+            "type": "integer"
+          },
+          "coverage_high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage High"
+          },
+          "coverage_low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Low"
+          },
+          "e_es": {
+            "title": "E Es",
+            "type": "number"
+          },
+          "e_var": {
+            "title": "E Var",
+            "type": "number"
+          },
+          "es975": {
+            "title": "Es975",
+            "type": "number"
+          },
+          "forecast_day": {
+            "title": "Forecast Day",
+            "type": "string"
+          },
+          "horizon_days": {
+            "title": "Horizon Days",
+            "type": "integer"
+          },
+          "n_scored": {
+            "title": "N Scored",
+            "type": "integer"
+          },
+          "sigma": {
+            "title": "Sigma",
+            "type": "number"
+          },
+          "unpriced_share": {
+            "default": 0.0,
+            "title": "Unpriced Share",
+            "type": "number"
+          },
+          "var95": {
+            "title": "Var95",
+            "type": "number"
+          }
+        },
+        "required": [
+          "horizon_days",
+          "forecast_day",
+          "sigma",
+          "var95",
+          "es975",
+          "n_scored",
+          "breaches",
+          "e_var",
+          "e_es"
+        ],
+        "title": "RiskBandHorizonOut",
+        "type": "object"
+      },
+      "RiskBandTargetOut": {
+        "properties": {
+          "horizons": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RiskBandHorizonOut"
+            },
+            "title": "Horizons",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "label"
+        ],
+        "title": "RiskBandTargetOut",
+        "type": "object"
+      },
+      "RiskBandsOut": {
+        "properties": {
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "targets": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RiskBandTargetOut"
+            },
+            "title": "Targets",
+            "type": "array"
+          }
+        },
+        "title": "RiskBandsOut",
+        "type": "object"
+      },
       "RiskProfileIn": {
         "properties": {
           "risk_profile": {
@@ -11409,6 +11774,208 @@
           "timestamp"
         ],
         "title": "ScreenerRunResponse",
+        "type": "object"
+      },
+      "SelectionTestOut": {
+        "description": "S (picks against same-run, same-sector non-picks) and U (futility) on one series.",
+        "properties": {
+          "clip": {
+            "title": "Clip",
+            "type": "number"
+          },
+          "e_futility": {
+            "title": "E Futility",
+            "type": "number"
+          },
+          "e_harm": {
+            "title": "E Harm",
+            "type": "number"
+          },
+          "e_skill": {
+            "title": "E Skill",
+            "type": "number"
+          },
+          "family": {
+            "const": "S",
+            "default": "S",
+            "title": "Family",
+            "type": "string"
+          },
+          "first_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Day"
+          },
+          "futility_delta_21d": {
+            "description": "U's margin per 21 days, gross of costs.",
+            "title": "Futility Delta 21D",
+            "type": "number"
+          },
+          "futility_question": {
+            "title": "Futility Question",
+            "type": "string"
+          },
+          "futility_threshold": {
+            "title": "Futility Threshold",
+            "type": "number"
+          },
+          "mean_21d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean 21D"
+          },
+          "mean_ci_21d": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Ci 21D"
+          },
+          "n_days": {
+            "title": "N Days",
+            "type": "integer"
+          },
+          "n_days_pre_registration": {
+            "default": 0,
+            "title": "N Days Pre Registration",
+            "type": "integer"
+          },
+          "n_fallback_days": {
+            "default": 0,
+            "title": "N Fallback Days",
+            "type": "integer"
+          },
+          "noise_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoiseCheckOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "path": {
+            "items": {
+              "$ref": "#/components/schemas/EPathPointOut"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "provisional": {
+            "default": false,
+            "description": "A verdict reached before the noise check's last look.",
+            "title": "Provisional",
+            "type": "boolean"
+          },
+          "question": {
+            "title": "Question",
+            "type": "string"
+          },
+          "rho1": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lag-1 autocorrelation of the first 63 days (shown, never whitened).",
+            "title": "Rho1"
+          },
+          "rho1_flag": {
+            "default": false,
+            "title": "Rho1 Flag",
+            "type": "boolean"
+          },
+          "role": {
+            "const": "primary",
+            "default": "primary",
+            "title": "Role",
+            "type": "string"
+          },
+          "sd_daily": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sd Daily"
+          },
+          "series": {
+            "const": "selection",
+            "default": "selection",
+            "title": "Series",
+            "type": "string"
+          },
+          "sigma_ref": {
+            "title": "Sigma Ref",
+            "type": "number"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "too_early",
+              "no_evidence",
+              "skill",
+              "harm",
+              "not_worth_following",
+              "not_valid"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "threshold": {
+            "title": "Threshold",
+            "type": "number"
+          },
+          "time_to_know": {
+            "$ref": "#/components/schemas/TimeGridOut"
+          }
+        },
+        "required": [
+          "question",
+          "futility_question",
+          "start",
+          "n_days",
+          "clip",
+          "sigma_ref",
+          "e_skill",
+          "e_harm",
+          "e_futility",
+          "threshold",
+          "futility_threshold",
+          "futility_delta_21d",
+          "state",
+          "time_to_know"
+        ],
+        "title": "SelectionTestOut",
         "type": "object"
       },
       "SelfCheckOut": {
@@ -14761,6 +15328,61 @@
           "note"
         ],
         "title": "TiltReviewOut",
+        "type": "object"
+      },
+      "TimeGridOut": {
+        "description": "Median years to a verdict at stated edges (ADR 0018 amendment of 2026-10-14, \u00a710).",
+        "properties": {
+          "grid": {
+            "items": {
+              "$ref": "#/components/schemas/TimeGridPointOut"
+            },
+            "title": "Grid",
+            "type": "array"
+          },
+          "sd_daily": {
+            "title": "Sd Daily",
+            "type": "number"
+          },
+          "sd_measured": {
+            "default": false,
+            "title": "Sd Measured",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sd_daily"
+        ],
+        "title": "TimeGridOut",
+        "type": "object"
+      },
+      "TimeGridPointOut": {
+        "properties": {
+          "beyond_40y": {
+            "default": false,
+            "title": "Beyond 40Y",
+            "type": "boolean"
+          },
+          "edge_21d": {
+            "title": "Edge 21D",
+            "type": "number"
+          },
+          "q50_years": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q50 Years"
+          }
+        },
+        "required": [
+          "edge_21d"
+        ],
+        "title": "TimeGridPointOut",
         "type": "object"
       },
       "TimeToKnowOut": {
@@ -31668,6 +32290,28 @@
           }
         },
         "summary": "Get Ranking",
+        "tags": [
+          "trust"
+        ]
+      }
+    },
+    "/api/trust/risk-bands": {
+      "get": {
+        "description": "The latest 1- and 21-day risk forecasts per sleeve, book and benchmark, and their scores so far.",
+        "operationId": "get_risk_bands_api_trust_risk_bands_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskBandsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Risk Bands",
         "tags": [
           "trust"
         ]

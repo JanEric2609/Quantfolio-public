@@ -16,15 +16,15 @@ function pct(value: number) {
 
 /**
  * Shown on Home and This month while MSCI World is 10 % or more below its high,
- * or when a savings plan stopped or core units were sold during a fall. Calm
- * markets render nothing.
+ * when a savings plan stopped or core units were sold during a fall, or when
+ * the prices are too old to tell. Calm markets render nothing.
  */
 export function CrashGuardBanner() {
   const guard = useQuery({ queryKey: ["plan", "crash-guard"], queryFn: getCrashGuard, staleTime: 15 * 60_000 });
   const data = guard.data;
   // A partial or failed answer renders nothing: this banner must never take the page down.
   if (!data?.market || !Array.isArray(data.behaviour) || !Array.isArray(data.episodes)) return null;
-  if (!data.active && data.behaviour.length === 0) return null;
+  if (!data.active && data.behaviour.length === 0 && !data.stale) return null;
   return <CrashGuardCard data={data} />;
 }
 
@@ -40,8 +40,17 @@ export function CrashGuardCard({ data }: { data: CrashGuardState }) {
         <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
         <div className="space-y-1">
           <h2 id="crash-guard-title" className="text-base font-semibold text-text-primary">
-            {data.active ? `${market.level_label}: markets are ${pct(market.drawdown)} below their high` : "Your plan needs a look"}
+            {data.stale
+              ? `No fresh market prices since ${data.stale_since ?? market.as_of ?? "a while"}`
+              : data.active
+                ? `${market.level_label}: markets are ${pct(market.drawdown)} below their high`
+                : "Your plan needs a look"}
           </h2>
+          {data.stale ? (
+            <p className="text-text-secondary" data-testid="crash-guard-stale">
+              The crash guard cannot judge the market on old prices. What follows is as of the last close.
+            </p>
+          ) : null}
           <p className="text-text-secondary">{data.message}</p>
         </div>
       </div>

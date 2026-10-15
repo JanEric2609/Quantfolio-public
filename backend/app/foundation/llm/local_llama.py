@@ -17,6 +17,10 @@ _SCHEMA_REPAIR_INSTRUCTION = (
 )
 
 
+#: Completion budget of the generic path (chat, research, budget agents).
+DEFAULT_MAX_TOKENS = 4096
+
+
 def _build_completion_kwargs(structured_output: type[BaseModel] | None) -> dict[str, Any]:
     """Build chat.completions.create kwargs except messages/model/timeout.
 
@@ -29,6 +33,9 @@ def _build_completion_kwargs(structured_output: type[BaseModel] | None) -> dict[
     kwargs: dict[str, Any] = {
         "temperature": QWEN_SAMPLING["temperature"],
         "top_p": QWEN_SAMPLING["top_p"],
+        # A completion budget on every call: without one a runaway answer runs
+        # to the server's context limit (plan 2026-10-14, E4).
+        "max_tokens": DEFAULT_MAX_TOKENS,
         "extra_body": {"top_k": QWEN_SAMPLING["top_k"]},
     }
     if structured_output is not None:
@@ -61,6 +68,11 @@ def _is_schema_rejection(exc: BaseException) -> bool:
 
 class LocalLlamaBackend:
     """OpenAI-compatible llama.cpp client."""
+
+    #: The label audit rows and ``Completion.backend`` use.
+    name = "local_llama"
+    #: What every request sends (the audit row records it).
+    sampling = {k: QWEN_SAMPLING[k] for k in ("temperature", "top_p", "top_k")}
 
     def __init__(self, base_url: str, model: str = "qwen3.5-9b", api_key: str | None = None):
         """Initialize the local llama backend.

@@ -99,6 +99,14 @@ class PaperTrade(Base):
         ForeignKey("paper_holdings.id", ondelete="SET NULL"), nullable=True
     )
     ticker: Mapped[str] = mapped_column(String(32))
+    # What was traded, recorded at execution: a sell that closes a position
+    # deletes the holding, so the trade check could no longer tell an ETF
+    # from a stock (plan 2026-10-14, M2).
+    isin: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    asset_type: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    # A sale's cost basis: the holding's average buy price just before it. A
+    # seeded position has no buy trade, so once sold out it cannot be rebuilt.
+    avg_cost: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
     side: Mapped[str] = mapped_column(String(4))
     quantity: Mapped[Decimal] = mapped_column(Numeric(20, 8))
     price: Mapped[Decimal] = mapped_column(Numeric(20, 6))

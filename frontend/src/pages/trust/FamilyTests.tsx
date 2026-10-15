@@ -3,7 +3,8 @@ import { Badge } from "../../components/ui/badge";
 import { Card } from "../../components/ui/card";
 import { LineChart } from "../../components/charts/LineChart";
 import { EvidenceChip } from "./EvidenceChip";
-import { FactorNeutralCard, PairedComparisonCard } from "./SecondaryRows";
+import { PairedComparisonCard } from "./SecondaryRows";
+import { MandatesCard, SelectionCard } from "./SelectionTests";
 import { STATE_META, assumptionLabel, fmtDay, fmtE, fmtPct, fmtPp, fmtYears, timeToKnowText } from "./trustFormat";
 
 const TITLES: Record<TrustFamilyTest["family"], string> = {
@@ -164,12 +165,32 @@ export function FamilyTests({ tests }: { tests: TrustDailyTests }) {
         </p>
       </div>
       <div className="grid gap-3 xl:grid-cols-2">
-        {tests.families.map((f) => (
-          <FamilyCard key={f.family} family={f} start={tests.start} />
-        ))}
-        {tests.factor_neutral ? <FactorNeutralCard fn={tests.factor_neutral} /> : null}
+        {tests.selection ? (
+          <SelectionCard sel={tests.selection} f1={tests.families.find((f) => f.family === "F1")} />
+        ) : null}
+        {tests.mandates?.length ? <MandatesCard mandates={tests.mandates} /> : null}
+        {tests.families
+          .filter((f) => !f.alarm_only)
+          .map((f) => (
+            <FamilyCard key={f.family} family={f} start={tests.start} />
+          ))}
         {tests.paired ? <PairedComparisonCard paired={tests.paired} /> : null}
       </div>
+      {tests.families.some((f) => f.alarm_only) ? (
+        <div className="space-y-2" data-testid="trust-alarms">
+          <h3 className="text-sm font-semibold text-text-primary">Alarms</h3>
+          <p className="text-xs text-text-secondary">
+            These speak only when they cross: harm, or an edge large enough to beat MSCI World on its own.
+          </p>
+          <div className="grid gap-3 xl:grid-cols-2">
+            {tests.families
+              .filter((f) => f.alarm_only)
+              .map((f) => (
+                <FamilyCard key={f.family} family={f} start={tests.start} />
+              ))}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

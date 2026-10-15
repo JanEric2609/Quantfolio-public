@@ -251,3 +251,45 @@ prod in `data/ranking_replay/exam-v2/`. The `momentum`, `risk` and
 
 The bug fixes move the composite t from 1.608 to 1.613. The verdict is
 unchanged: **no**, with the consequences given under the v1 result.
+
+## Amendment 3 (2026-10-14): tracking difference and domicile in the fund rule
+
+From the 2026-10-14 audit plan (`docs/plan-audit-2026-10-14.md`, C4; finding M6). The weights
+are the plan's defaults, accepted by the owner on 2026-10-14.
+
+The fee alone does not tell a saver what a fund costs. What the fund actually returned against
+funds tracking the same index does, along with the US withholding tax its domicile pays. Decision
+2's table becomes:
+
+| Criterion | Weight | Measure |
+|---|---|---|
+| Yearly fee (TER) | 25 % | Cheaper wins, linearly over 0.05-0.50 % |
+| Tracking difference against peers | 20 % | See below |
+| Fund size | 15 % | Larger wins (log scale, caps at €10 bn) |
+| Replication | 10 % | Full physical = 1, sampled = 0.5, synthetic = 0 |
+| Xetra trading volume | 15 % | Higher average daily volume wins (log scale) |
+| Savings plan at DKB or Scalable | 10 % | Available = 1, else 0 |
+| Domicile | 5 % | See below |
+
+**Tracking difference against peers.**
+- **Measure:** the fund's annualised return over 3 years from its stored closes, minus the
+  median of the curated funds tracking the same index.
+  - Every curated fund with a peer accumulates, so the price return is the total return.
+- **Score:** 0.5 + 0.5 × TD / 0.15 %, clipped to 0-1.
+- **No figure:** a fund without a same-index peer, or without 3 full years of closes, scores
+  the neutral 0.5.
+- **Refresh:** the worker's monthly `index_currency_weights` job (3rd, 05:15 UTC) measures it
+  (`decision/fund_tracking.py`). The plan reads the stored result and fetches nothing per
+  request.
+- **Why-line:** when a figure exists, the why-line states it.
+
+**Domicile.**
+- **Score:** a non-Irish equity fund with at least 30 % US equity scores 0; every other fund
+  scores 1.
+  - "At least 30 % US" is matched on index words: World, All-World, ACWI, S&P 500, USA, Nasdaq
+    or North America, and not "ex US".
+- **Reason:** such a fund pays about 0.14 % a year more US withholding tax than an Irish one.
+  The why-line says so.
+
+Bond, cash and gold lines have no same-index peer among the curated candidates. They score 0.5
+on tracking difference, and 1 on domicile.
