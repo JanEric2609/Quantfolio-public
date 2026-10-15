@@ -89,3 +89,12 @@ def test_the_haircut_only_lowers_equity():
 def test_the_certainty_equivalent_punishes_spread():
     w = np.array([50.0, 150.0])
     assert certainty_equivalent(w, 5.0) < certainty_equivalent(w, 1.0) < 100.0
+
+
+def test_trading_costs_count_in_the_drawdown():
+    # Flat markets: the only fall is what rebalancing new money into bonds costs.
+    returns = np.zeros((1, 5))
+    idx = np.zeros((3, 10), dtype=int)
+    costly = PlanCosts(ter=(0, 0, 0, 0, 0), trade_cost=0.05, taxed=False)
+    assert simulate_rule(returns, idx, "R3", 10, costly)["max_dd"].min() > 0.0
+    assert simulate_rule(returns, idx, "R3", 10, FREE)["max_dd"].max() == pytest.approx(0.0)

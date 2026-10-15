@@ -84,6 +84,9 @@ W_SIZE = 0.15
 W_REPLICATION = 0.10
 W_VOLUME = 0.15
 W_PLAN = 0.10
+#: Every curated equity fund is Irish today, so this only reorders the
+#: info-only best-per-index list; it ranks a curated suggestion once a non-Irish
+#: US-heavy fund is curated.
 W_DOMICILE = 0.05
 
 #: Tracking difference against peers, in % a year, that scores 0 or 1; unknown scores 0.5.
@@ -203,6 +206,25 @@ ACC_DIST_NOTE = (
 )
 
 
+def _rank(sleeve: str, peer_td: Mapping[str, float] | None) -> list[FundCandidate]:
+    """The sleeve's candidates, best first.
+
+    Tracking difference is measured against funds of the same index, so it
+    ranks within an index only: each index's best fund is picked with it, then
+    those winners are compared without it (a tilt sleeve mixes several factor
+    indexes, and only some of them have two curated funds).
+    """
+    pool = [c for c in CANDIDATES if c.sleeve == sleeve]
+    by_index: dict[str, list[FundCandidate]] = {}
+    for c in pool:
+        by_index.setdefault(c.index, []).append(c)
+    for members in by_index.values():
+        members.sort(key=lambda c: (-score_fund(c, peer_td), c.isin))
+    winners = sorted((m[0] for m in by_index.values()), key=lambda c: (-score_fund(c), c.isin))
+    order = {c.index: i for i, c in enumerate(winners)}
+    return sorted(pool, key=lambda c: (order[c.index], -score_fund(c, peer_td), c.isin))
+
+
 def suggest_fund(sleeve: str, override_isins: set[str] | None = None,
                  peer_td: Mapping[str, float] | None = None) -> FundSuggestion:
     """The suggested fund for *sleeve* with its one-line reason; *peer_td* as in :func:`score_fund`."""
@@ -211,10 +233,7 @@ def suggest_fund(sleeve: str, override_isins: set[str] | None = None,
             sleeve="satellite", isin=None, name="Single stocks",
             why="No fund: the satellite holds single stocks, unlocked only by the evidence gate.",
         )
-    ranked = sorted(
-        (c for c in CANDIDATES if c.sleeve == sleeve),
-        key=lambda c: (-score_fund(c, peer_td), c.isin),
-    )
+    ranked = _rank(sleeve, peer_td)
     td = peer_td or {}
     ordered = sorted((override_isins or set()))
     if ordered:
