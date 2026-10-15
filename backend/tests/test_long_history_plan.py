@@ -67,6 +67,17 @@ def test_rebalancing_gains_above_the_allowance_are_taxed():
     assert taxed["wealth"][0] < free["wealth"][0]
 
 
+def test_paying_costs_lowers_the_basis_with_the_holdings():
+    # No returns, so there is never a gain: the basis must stay what is held, net of costs.
+    returns = np.zeros((1, 5))
+    idx = np.zeros((1, 10), dtype=int)
+    costs = PlanCosts(ter=(0, 0, 0, 0, 0), trade_cost=0.01, taxed=False)
+    for rule in ("R1", "R3", "R4"):
+        out = simulate_rule(returns, idx, rule, 10, costs)
+        assert out["wealth"][0] < 12.0 * 10
+        assert out["basis"][0] == pytest.approx(out["wealth"][0])
+
+
 def test_r5_holds_the_withdrawal_in_bills_in_its_last_five_years():
     returns = np.zeros((1, 5))
     returns[0, BILL] = 0.0
