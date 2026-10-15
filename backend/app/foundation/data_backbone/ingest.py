@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 import logging
+import math
 import threading
 from typing import Any, cast
 
@@ -92,6 +93,15 @@ def _fetch_split_events(symbol: str) -> Any:
         logger.debug("split events unavailable for %s", symbol, exc_info=box["error"])
         return None
     return box.get("events")
+
+
+def _finite(value: Any) -> float:
+    """``value`` as a float; 0.0 for None, NaN or anything unreadable."""
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return out if math.isfinite(out) else 0.0
 
 
 class DataIngester:
@@ -322,11 +332,14 @@ class DataIngester:
             params_list.append({
                 "symbol": row["symbol"],
                 "ts": ts_val,
-                "open": float(row.get("open") or 0),
-                "high": float(row.get("high") or 0),
-                "low": float(row.get("low") or 0),
-                "close": float(row.get("close") or 0),
-                "volume": int(row.get("volume") or 0),
+                "open": _finite(row.get("open")),
+                "high": _finite(row.get("high")),
+                "low": _finite(row.get("low")),
+                "close": _finite(row.get("close")),
+                # NaN is truthy, so ``or 0`` let int(nan) raise and roll back the
+                # symbol's whole batch (plan 2026-10-14, L2). The column is NOT
+                # NULL: an unknown volume is 0, as a missing one already was.
+                "volume": int(_finite(row.get("volume"))),
                 "currency": row["currency"],
                 "provider": row.get("provider") or provider,
             })
