@@ -60,9 +60,14 @@ _SUFFIX_CALENDARS: dict[str, str] = {
 
 _GOLD_KEYWORDS = ("gold", "xetra-gold", "physical gold", "goldbarren")
 _GOLD_TICKERS = frozenset({"4GLD.DE", "EWG2.DE", "PPFB.DE", "SGLN.L", "IGLN.L", "PHAU.L", "XAD5.DE", "GLD", "IAU"})
-#: ETFs that may have no ``Asset`` row: the benchmarks Discover ingests.
-_KNOWN_ETFS = frozenset({"SPY", "URTH", "VGK", "EWJ", "VWCE.DE", "VWRA.L", "IWDA.AS", "SXR8.DE", "EUNL.DE",
-                         "CBE3.L", "EUNH.DE", "EUNA.DE", "XEON.DE"})
+#: ETFs that may have no ``Asset`` row: the benchmarks Discover ingests, with
+#: their class. The bond and cash lines get the bond limit, not the equity one
+#: (plan 2026-10-14, M11).
+_KNOWN_FUNDS = {
+    "SPY": "etf", "URTH": "etf", "VGK": "etf", "EWJ": "etf", "VWCE.DE": "etf", "VWRA.L": "etf",
+    "IWDA.AS": "etf", "SXR8.DE": "etf", "EUNL.DE": "etf",
+    "CBE3.L": "bond", "EUNH.DE": "bond", "EUNA.DE": "bond", "IBCM.DE": "bond", "XEON.DE": "money_market",
+}
 
 
 @dataclass(frozen=True)
@@ -298,8 +303,8 @@ def guard_class_for(db: Any, symbol: str) -> str:
             asset_type = (asset.asset_type or "").lower()
     except Exception:  # noqa: BLE001
         logger.debug("bar_guard: Asset lookup failed for %s", symbol, exc_info=True)
-    if not asset_type and sym in _KNOWN_ETFS:
-        asset_type = "etf"
+    if sym in _KNOWN_FUNDS and asset_type in ("", "etf", "fund"):
+        asset_type = _KNOWN_FUNDS[sym]
     if any(k in name for k in _GOLD_KEYWORDS):
         return "gold"
     if asset_type in ("money_market", "bond"):

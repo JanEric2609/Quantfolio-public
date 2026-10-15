@@ -73,7 +73,10 @@ def _user(db, role="admin"):
     return user
 
 
-def _patch_prices(monkeypatch, values, start=date(2026, 1, 1)):
+def _patch_prices(monkeypatch, values, start=None):
+    # By default the last close is 2026-10-14, the day before the runs' clock:
+    # older closes are stale and judged as such (plan 2026-10-14, M10).
+    start = start or date(2026, 10, 14) - timedelta(days=len(values) - 1)
     closes = _series(values, start)
     monkeypatch.setattr(crash_guard, "_closes", lambda db, ticker: closes)
 
@@ -288,10 +291,11 @@ def test_a_new_high_missed_between_runs_resets_the_alerts(monkeypatch):
     sent = _capture(monkeypatch)
     now = datetime(2026, 10, 15, 7, tzinfo=UTC)
 
-    _patch_prices(monkeypatch, [100, 75])
+    start = date(2026, 10, 11)
+    _patch_prices(monkeypatch, [100, 75], start)
     crash_guard.run_daily(db, now=now)
     # The run on the new high was missed; the market already fell 14 % from it.
-    _patch_prices(monkeypatch, [100, 75, 105, 90])
+    _patch_prices(monkeypatch, [100, 75, 105, 90], start)
     result = crash_guard.run_daily(db, now=now)
 
     assert result["sent"] == ["recovered", "level:correction"]
@@ -399,7 +403,7 @@ def _band_row(db, day, loss, var975=0.02, ticker="EUNL.DE"):
 
 def test_a_fall_beyond_the_risk_band_is_quoted(monkeypatch):
     db = _memory_db()
-    _patch_prices(monkeypatch, [100.0] * 5 + [85.0])
+    _patch_prices(monkeypatch, [100.0] * 5 + [85.0], start=date(2026, 1, 1))
     last = date(2026, 1, 6)
     assert crash_guard.market_state(db).as_of == last.isoformat()
 
@@ -411,7 +415,7 @@ def test_a_fall_beyond_the_risk_band_is_quoted(monkeypatch):
 
 def test_an_old_or_ordinary_day_is_not_quoted(monkeypatch):
     db = _memory_db()
-    _patch_prices(monkeypatch, [100.0] * 5 + [85.0])
+    _patch_prices(monkeypatch, [100.0] * 5 + [85.0], start=date(2026, 1, 1))
     _band_row(db, date(2026, 1, 5), loss=0.05)  # scored, but not on the latest close
     assert "risk band" not in crash_guard.crash_guard(db, _user(db).id)["message"]
     _band_row(db, date(2026, 1, 6), loss=0.012)  # within the band
@@ -421,7 +425,7 @@ def test_an_old_or_ordinary_day_is_not_quoted(monkeypatch):
 
 def test_a_failed_band_query_leaves_the_session_usable(monkeypatch):
     db = _memory_db()
-    _patch_prices(monkeypatch, [100.0] * 5 + [85.0])
+    _patch_prices(monkeypatch, [100.0] * 5 + [85.0], start=date(2026, 1, 1))
     rolled: list[bool] = []
     real_rollback = db.rollback
     monkeypatch.setattr(db, "rollback", lambda: rolled.append(True) or real_rollback())
@@ -433,3 +437,65 @@ def test_a_failed_band_query_leaves_the_session_usable(monkeypatch):
     out = crash_guard.crash_guard(db, _user(db).id)
     assert rolled and "risk band" not in out["message"]
     assert "band" not in out["market"]
+
+
+def test_stale_prices_alert_once_as_stale_not_calm(monkeypatch):
+    db = _memory_db()
+    user = _user(db)
+    _with_telegram(db, user)
+    sent = _capture(monkeypatch)
+    now = datetime(2026, 10, 15, 7, tzinfo=UTC)
+
+    _patch_prices(monkeypatch, [100, 88])                       # correction, fresh
+    crash_guard.run_daily(db, now=now)
+    # The feed stops on 2026-10-08 while markets fall: 5 trading days old.
+    _patch_prices(monkeypatch, [100, 100], start=date(2026, 10, 7))
+    out = crash_guard.run_daily(db, now=now)
+    assert out["skipped"] == "stale"
+    crash_guard.run_daily(db, now=now)                          # still stale: no second alert
+    assert len(sent) == 2
+    assert "correction" in sent[0] and "no fresh prices" in sent[1]
+    assert "back at its high" not in " ".join(sent)
+
+    _patch_prices(monkeypatch, [100, 88, 79])                   # fresh again: judged as usual
+    crash_guard.run_daily(db, now=now)
+    assert "bear market" in sent[-1]
+
+
+def test_the_api_state_says_when_prices_are_stale(monkeypatch):
+    db = _memory_db()
+    user = _user(db)
+    _patch_prices(monkeypatch, [100, 99], start=date(2020, 1, 1))
+    out = crash_guard.crash_guard(db, user.id)
+    assert out["stale"] is True and out["stale_since"] == "2020-01-02"
+
+
+def test_a_lagging_feed_that_keeps_adding_old_days_alerts_once(monkeypatch):
+    db = _memory_db()
+    user = _user(db)
+    _with_telegram(db, user)
+    sent = _capture(monkeypatch)
+    # Five business days behind on each run, one new bar a day.
+    for run_day, last in ((date(2026, 10, 15), date(2026, 10, 8)), (date(2026, 10, 16), date(2026, 10, 9)),
+                          (date(2026, 10, 19), date(2026, 10, 12))):
+        _patch_prices(monkeypatch, [100, 100], start=last - timedelta(days=1))
+        assert crash_guard.run_daily(db, now=datetime.combine(run_day, datetime.min.time(), tzinfo=UTC)
+                                     .replace(hour=7))["skipped"] == "stale"
+    assert len(sent) == 1 and "no fresh prices" in sent[0]
+    assert crash_guard._load_state(db)["stale_since"] == "2026-10-08"
+
+
+def test_a_new_benchmark_gets_its_own_stale_alert(monkeypatch):
+    from app.foundation.settings import upsert_public_settings
+
+    db = _memory_db()
+    user = _user(db)
+    _with_telegram(db, user)
+    sent = _capture(monkeypatch)
+    now = datetime(2026, 10, 15, 7, tzinfo=UTC)
+    _patch_prices(monkeypatch, [100, 100], start=date(2026, 10, 7))
+    crash_guard.run_daily(db, now=now)
+    upsert_public_settings(db, {"benchmark_ticker": "VWCE.DE"})
+    crash_guard.run_daily(db, now=now)
+    assert len(sent) == 2 and all("no fresh prices" in s for s in sent)
+    assert crash_guard._load_state(db)["ticker"] == "VWCE.DE"

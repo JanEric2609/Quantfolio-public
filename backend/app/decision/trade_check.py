@@ -438,12 +438,13 @@ def recost(db: Session, check: PaperTradeCheck, trade: PaperTrade, *, nv_valid: 
     """
     fee, spread, tax = trade_costs(db, trade, nv_valid=nv_valid)
     if (
-        trade.side == "sell" and trade.avg_cost is None and check.tax_eur
+        trade.side == "sell" and trade.avg_cost is None and check.tax_eur and not nv_valid
         and _avg_cost_before(db, trade) is None
     ):
         # A sale from before 0138: its basis is rebuilt by replaying the trade log
         # from today's holding, which a later full exit can make unknowable. The
-        # check's tax came from the basis known then, so it is kept.
+        # check's tax came from the basis known then, so it is kept. With a valid
+        # NV certificate no sale is taxed, so there is nothing to keep.
         tax = float(check.tax_eur)
     if abs(spread - check.spread_eur) < 0.005 and abs(tax - check.tax_eur) < 0.005:
         return False
