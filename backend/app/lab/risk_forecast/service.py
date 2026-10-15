@@ -105,7 +105,7 @@ def paper_targets(db: Session, closes: _Closes) -> list[Target]:
             values["cash"] = cash
         total = sum(values.values()) + unpriced
         weights = _shares(values, unpriced)
-        if weights:
+        if weights or unpriced > 0:  # all unpriced: a flat band, shown as 100 % unpriced
             out.append(Target(f"paper:{p.id}", p.name, p.user_id, weights,
                               unpriced=unpriced / total if total > 0 else 0.0))
     return out
@@ -134,7 +134,7 @@ def book_targets(db: Session, closes: _Closes) -> list[Target]:
             values["cash"] = float(cash)
         total = sum(values.values()) + unpriced
         weights = _shares(values, unpriced)
-        if weights:
+        if weights or unpriced > 0:  # all unpriced: a flat band, shown as 100 % unpriced
             out.append(Target(f"book:{user_id}", "Real book", user_id, weights,
                               unpriced=unpriced / total if total > 0 else 0.0))
     return out
