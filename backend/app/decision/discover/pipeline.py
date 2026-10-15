@@ -262,8 +262,58 @@ def _ordered_unique(symbols: list[str]) -> list[str]:
     return ordered
 
 
+#: The last stored bar may be this many days old for an incremental fetch.
+_PREINGEST_FRESH_DAYS = 10
+#: The first stored bar may start this many days after the window's start.
+_PREINGEST_EDGE_DAYS = 7
+
+
+def _naive_utc(value: Any) -> datetime:
+    ts = value if isinstance(value, datetime) else pd.Timestamp(value).to_pydatetime()
+    if not isinstance(ts, datetime):  # NaT: the caller falls back to the full window
+        raise ValueError(f"not a timestamp: {value!r}")
+    return ts.astimezone(UTC).replace(tzinfo=None) if ts.tzinfo is not None else ts
+
+
+def _preingest_start(db: Session, symbol: str, now: datetime | None = None) -> str | None:
+    """The day to fetch from when only the missing days are needed, else None (fetch the whole window).
+
+    Plan 2026-10-14, E2. Incremental only when all of these hold:
+
+    * the series had a full re-pull within ``REPULL_MAX_AGE_DAYS`` + 1 (the
+      Sunday job), so its history is on the provider's current scale;
+    * it covers the 5-year window;
+    * its last bar is at most ``_PREINGEST_FRESH_DAYS`` old.
+
+    The fetch starts one day before the last stored bar, the overlap the
+    daily path already handles (the bar guard compares it with the stored tail).
+    """
+    from sqlalchemy import text
+
+    from app.foundation.data_backbone.series_repull import REPULL_MAX_AGE_DAYS
+    from app.foundation.models.entities import BarSeriesMeta
+
+    now = _naive_utc(now or datetime.now(UTC))
+    meta = db.get(BarSeriesMeta, symbol)
+    if meta is None or meta.last_full_repull_at is None or meta.quarantine_reason:
+        return None
+    if now - _naive_utc(meta.last_full_repull_at) > timedelta(days=REPULL_MAX_AGE_DAYS + 1):
+        return None
+    first, last = db.execute(
+        text("SELECT min(ts), max(ts) FROM bar_prices WHERE symbol = :symbol"), {"symbol": symbol},
+    ).one()
+    if first is None or last is None:
+        return None
+    if _naive_utc(first) > now - timedelta(days=_PREINGEST_DAYS - _PREINGEST_EDGE_DAYS):
+        return None
+    if now - _naive_utc(last) > timedelta(days=_PREINGEST_FRESH_DAYS):
+        return None
+    return (_naive_utc(last) - timedelta(days=1)).date().isoformat()
+
+
 def _preingest_one(symbol: str) -> tuple[str, bool]:
-    """Ingest 5 years of bar prices for *symbol* using a private DB session.
+    """Ingest bar prices for *symbol* using a private DB session: the missing days
+    when :func:`_preingest_start` allows it, else 5 years.
 
     Each call opens and closes its own session so it is safe to run in a
     ThreadPoolExecutor alongside other workers.  Returns (symbol, success).
@@ -271,7 +321,16 @@ def _preingest_one(symbol: str) -> tuple[str, bool]:
     db = SessionLocal()
     try:
         ingester = DataIngester(db)
-        result = ingester.ingest_bar_prices(symbol, days=_PREINGEST_DAYS)
+        try:
+            start = _preingest_start(db, symbol)
+        except Exception:  # noqa: BLE001 - a failed check falls back to the full window
+            logger.debug("pre-ingest: incremental check failed for %s", symbol, exc_info=True)
+            db.rollback()
+            start = None
+        if start is not None:
+            result = ingester.ingest_bar_prices(symbol, start_date=start)
+        else:
+            result = ingester.ingest_bar_prices(symbol, days=_PREINGEST_DAYS)
         return symbol, bool(result.get("success"))
     except Exception:
         logger.debug("pre-ingest failed for %s", symbol, exc_info=True)
