@@ -453,3 +453,18 @@ def test_recost_moves_a_check_to_the_traded_type_and_keeps_its_edge(db):
     assert check.edge_eur == pytest.approx(edge_before)
     assert check.contribution_eur == pytest.approx(1000 * 0.03 - 1.5)
     assert trade_check.recost(db, check, trade, nv_valid=False) is False
+
+
+def test_recost_keeps_a_legacy_sales_tax_when_its_basis_is_gone(db, monkeypatch):
+    sleeve = _sleeve(db, _user(db))
+    _trade(db, sleeve, ticker="CSPX.L", qty="10", price="100", when=TRADE_AT)
+    sale = _trade(db, sleeve, ticker="CSPX.L", side="sell", qty="4", price="120",
+                  when=TRADE_AT + timedelta(days=1))
+    check = trade_check.check_trade(db, sale, nv_valid=False)
+    tax_then = check.tax_eur
+    assert tax_then > 0 and sale.avg_cost is None
+    # The position was closed later: replaying from today's holding finds no basis.
+    monkeypatch.setattr(trade_check, "_avg_cost_before", lambda db, trade: None)
+    sale.asset_type = "etf"
+    assert trade_check.recost(db, check, sale, nv_valid=False) is True  # the spread still moves
+    assert check.tax_eur == pytest.approx(tax_then)
