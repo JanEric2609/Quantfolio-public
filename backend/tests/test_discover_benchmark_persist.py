@@ -15,6 +15,7 @@ from __future__ import annotations
 import threading
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -61,6 +62,12 @@ def _test_db():
             )
         )
     return engine, sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+@pytest.fixture(autouse=True)
+def _full_window(monkeypatch):
+    """These tests are about which symbols are warmed, not the window: no DB lookup (E2 has its own tests)."""
+    monkeypatch.setattr(pipeline, "_preingest_start", lambda db, symbol: None)
 
 
 def _recorder(requested: list[str], fail_symbols: set[str] | None = None) -> type:
