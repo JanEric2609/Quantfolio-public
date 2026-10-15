@@ -333,6 +333,7 @@ def test_news_candidates_pass_the_same_size_and_volume_floors():
     db.commit()
     _seed_fundamentals(db, "BIGNEWS", market_cap=5e9, volume=2e6)
     _seed_fundamentals(db, "TINYNEWS", market_cap=3e7, volume=5e3)
-    with patch.object(universe_mod, "_search_symbol_fallback", return_value=None):
+    with patch.object(universe_mod, "_search_symbol_fallback", return_value=None), \
+            patch.object(universe_mod, "_eur_per_unit", lambda db, ccy, cache: _RATES.get(ccy)):
         news = {c["symbol"] for c in _build(db, user) if c["source"] == "news_sentiment"}
     assert news == {"BIGNEWS"}

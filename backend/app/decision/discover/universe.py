@@ -687,12 +687,15 @@ def build_universe(
     missing = [t for t in news_tickers if t not in news_fund]
     if missing:
         fetched: dict[str, dict[str, Any]] = {}
-        for t in missing:
-            try:
-                fetched[t] = _fetch_live_fundamentals_no_db(t, registry)[1]
-            except Exception:  # noqa: BLE001 - an unknown size fails the floor below
-                logger.debug("Live fundamentals failed for news ticker %s", t, exc_info=True)
-                fetched[t] = {}
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            news_futures = {executor.submit(_fetch_live_fundamentals_no_db, t, registry): t for t in missing}
+            for future in as_completed(news_futures):
+                t = news_futures[future]
+                try:
+                    fetched[t] = future.result()[1]
+                except Exception:  # noqa: BLE001 - an unknown size fails the floor below
+                    logger.debug("Live fundamentals failed for news ticker %s", t, exc_info=True)
+                    fetched[t] = {}
         _persist_fundamentals_batch(db, fetched)
         news_fund.update(fetched)
 
