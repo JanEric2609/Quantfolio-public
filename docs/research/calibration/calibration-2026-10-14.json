@@ -1,0 +1,522 @@
+{
+ "date": "2026-10-14",
+ "paths": 2000,
+ "tests": {
+  "F1 skill": {
+   "spec": {
+    "name": "F1 skill",
+    "clip": 0.05,
+    "prior_var": 0.0121,
+    "cap_factor": 0.75,
+    "threshold": 40.0,
+    "direction": "skill",
+    "shift": 0.0
+   },
+   "sd_daily": 0.010910894511799621,
+   "sd_21d": 0.05000000000000001,
+   "type_i_20y": {
+    "iid_normal": 0.019,
+    "t4_garch": 0.0145,
+    "ar1_0.15": 0.059,
+    "regime_switching": 0.017,
+    "overlap_21d": 0.523
+   },
+   "time_to_verdict": {
+    "iid_normal": {
+     "0.0025": {
+      "q10_years": null,
+      "q50_years": null,
+      "q90_years": null,
+      "p_within_5y": 0.021,
+      "p_within_10y": 0.025
+     },
+     "0.005": {
+      "q10_years": 19.48,
+      "q50_years": null,
+      "q90_years": null,
+      "p_within_5y": 0.043,
+      "p_within_10y": 0.065
+     },
+     "0.01": {
+      "q10_years": 4.17,
+      "q50_years": 19.49,
+      "q90_years": 42.46,
+      "p_within_5y": 0.115,
+      "p_within_10y": 0.245
+     },
+     "0.02": {
+      "q10_years": 0.94,
+      "q50_years": 4.56,
+      "q90_years": 10.12,
+      "p_within_5y": 0.552,
+      "p_within_10y": 0.894
+     }
+    },
+    "t4_garch": {
+     "0.0025": {
+      "q10_years": null,
+      "q50_years": null,
+      "q90_years": null,
+      "p_within_5y": 0.035,
+      "p_within_10y": 0.04
+     },
+     "0.005": {
+      "q10_years": 14.69,
+      "q50_years": null,
+      "q90_years": null,
+      "p_within_5y": 0.061,
+      "p_within_10y": 0.081
+     },
+     "0.01": {
+      "q10_years": 2.14,
+      "q50_years": 15.22,
+      "q90_years": 34.51,
+      "p_within_5y": 0.193,
+      "p_within_10y": 0.339
+     },
+     "0.02": {
+      "q10_years": 0.81,
+      "q50_years": 2.89,
+      "q90_years": 7.87,
+      "p_within_5y": 0.726,
+      "p_within_10y": 0.961
+     }
+    }
+   },
+   "min_detectable_edge_21d": {
+    "5": 0.02,
+    "10": 0.015
+   }
+  },
+  "F1 harm": {
+   "spec": {
+    "name": "F1 harm",
+    "clip": 0.05,
+    "prior_var": 0.0121,
+    "cap_factor": 0.75,
+    "threshold": 40.0,
+    "direction": "harm",
+    "shift": 0.0
+   },
+   "sd_daily": 0.010910894511799621,
+   "sd_21d": 0.05000000000000001,
+   "type_i_20y": {
+    "iid_normal": 0.014,
+    "t4_garch": 0.014,
+    "ar1_0.15": 0.0515,
+    "regime_switching": 0.014,
+    "overlap_21d": 0.5185
+   },
+   "time_to_verdict": {
+    "iid_normal": {
+     "0.0025": {
+      "q10_years": null,
+      "q50_years": null,
+      "q90_years": null,
+      "p_within_5y": 0.021,
+      "p_within_10y": 0.026
+     },
+     "0.005": {
+      "q10_years": 17.3,
+      "q50_years": null,
+      "q90_years": null,
+      "p_within_5y": 0.044,
+      "p_within_10y": 0.06
+     },
+     "0.01": {
+      "q10_years": 3.79,
+      "q50_years": 19.27,
+      "q90_years": 45.29,
+      "p_within_5y": 0.132,
+      "p_within_10y": 0.249
+     },
+     "0.02": {
+      "q10_years": 1.02,
+      "q50_years": 4.31,
+      "q90_years": 10.04,
+      "p_within_5y": 0.558,
+      "p_within_10y": 0.895
+     }
+    },
+    "t4_garch": {
+     "0.0025": {
+      "q10_years": null,
+      "q50_years": null,
+      "q90_years": null,
+      "p_within_5y": 0.023,
+      "p_within_10y": 0.031
+     },
+     "0.005": {
+      "q10_years": 13.63,
+      "q50_years": null,
+      "q90_years": null,
+      "p_within_5y": 0.047,
+      "p_within_10y": 0.074
+     },
+     "0.01": {
+      "q10_years": 2.41,
+      "q50_years": 14.47,
+      "q90_years": 34.82,
+      "p_within_5y": 0.172,
+      "p_within_10y": 0.345
+     },
+     "0.02": {
+      "q10_years": 0.84,
+      "q50_years": 2.97,
+      "q90_years": 8.22,
+      "p_within_5y": 0.704,
+      "p_within_10y": 0.95
+     }
+    }
+   },
+   "min_detectable_edge_21d": {
+    "5": 0.02,
+    "10": 0.015
+   }
+  },
+  "S skill": {
+   "spec": {
+    "name": "S skill",
+    "clip": 0.0225,
+    "prior_var": 0.0121,
+    "cap_factor": 0.75,
+    "threshold": 40.0,
+    "direction": "skill",
+    "shift": 0.0
+   },
+   "sd_daily": 0.005019011475427825,
+   "sd_21d": 0.023,
+   "type_i_20y": {
+    "iid_normal": 0.019,
+    "t4_garch": 0.0145,
+    "ar1_0.15": 0.0605,
+    "regime_switching": 0.0175,
+    "overlap_21d": 0.523
+   },
+   "time_to_verdict": {
+    "iid_normal": {
+     "0.0025": {
+      "q10_years": 16.99,
+      "q50_years": null,
+      "q90_years": null,
+      "p_within_5y": 0.046,
+      "p_within_10y": 0.071
+     },
+     "0.005": {
+      "q10_years": 3.45,
+      "q50_years": 16.41,
+      "q90_years": 35.84,
+      "p_within_5y": 0.144,
+      "p_within_10y": 0.308
+     },
+     "0.01": {
+      "q10_years": 0.87,
+      "q50_years": 3.83,
+      "q90_years": 8.39,
+      "p_within_5y": 0.632,
+      "p_within_10y": 0.94
+     },
+     "0.02": {
+      "q10_years": 0.39,
+      "q50_years": 0.87,
+      "q90_years": 1.97,
+      "p_within_5y": 1.0,
+      "p_within_10y": 1.0
+     }
+    },
+    "t4_garch": {
+     "0.0025": {
+      "q10_years": 11.04,
+      "q50_years": 55.3,
+      "q90_years": null,
+      "p_within_5y": 0.068,
+      "p_within_10y": 0.095
+     },
+     "0.005": {
+      "q10_years": 1.77,
+      "q50_years": 12.63,
+      "q90_years": 28.51,
+      "p_within_5y": 0.228,
+      "p_within_10y": 0.394
+     },
+     "0.01": {
+      "q10_years": 0.73,
+      "q50_years": 2.37,
+      "q90_years": 6.65,
+      "p_within_5y": 0.803,
+      "p_within_10y": 0.979
+     },
+     "0.02": {
+      "q10_years": 0.38,
+      "q50_years": 0.69,
+      "q90_years": 1.62,
+      "p_within_5y": 0.999,
+      "p_within_10y": 1.0
+     }
+    }
+   },
+   "min_detectable_edge_21d": {
+    "5": 0.01,
+    "10": 0.0075
+   }
+  },
+  "S harm": {
+   "spec": {
+    "name": "S harm",
+    "clip": 0.0225,
+    "prior_var": 0.0121,
+    "cap_factor": 0.75,
+    "threshold": 40.0,
+    "direction": "harm",
+    "shift": 0.0
+   },
+   "sd_daily": 0.005019011475427825,
+   "sd_21d": 0.023,
+   "type_i_20y": {
+    "iid_normal": 0.0145,
+    "t4_garch": 0.014,
+    "ar1_0.15": 0.0505,
+    "regime_switching": 0.0145,
+    "overlap_21d": 0.5215
+   },
+   "time_to_verdict": {
+    "iid_normal": {
+     "0.0025": {
+      "q10_years": 14.65,
+      "q50_years": null,
+      "q90_years": null,
+      "p_within_5y": 0.051,
+      "p_within_10y": 0.068
+     },
+     "0.005": {
+      "q10_years": 3.18,
+      "q50_years": 15.93,
+      "q90_years": 37.6,
+      "p_within_5y": 0.154,
+      "p_within_10y": 0.302
+     },
+     "0.01": {
+      "q10_years": 0.85,
+      "q50_years": 3.63,
+      "q90_years": 8.64,
+      "p_within_5y": 0.646,
+      "p_within_10y": 0.944
+     },
+     "0.02": {
+      "q10_years": 0.37,
+      "q50_years": 0.83,
+      "q90_years": 1.91,
+      "p_within_5y": 1.0,
+      "p_within_10y": 1.0
+     }
+    },
+    "t4_garch": {
+     "0.0025": {
+      "q10_years": 12.26,
+      "q50_years": 57.55,
+      "q90_years": null,
+      "p_within_5y": 0.053,
+      "p_within_10y": 0.083
+     },
+     "0.005": {
+      "q10_years": 2.09,
+      "q50_years": 12.06,
+      "q90_years": 29.07,
+      "p_within_5y": 0.208,
+      "p_within_10y": 0.419
+     },
+     "0.01": {
+      "q10_years": 0.75,
+      "q50_years": 2.37,
+      "q90_years": 6.92,
+      "p_within_5y": 0.783,
+      "p_within_10y": 0.972
+     },
+     "0.02": {
+      "q10_years": 0.38,
+      "q50_years": 0.69,
+      "q90_years": 1.64,
+      "p_within_5y": 0.998,
+      "p_within_10y": 1.0
+     }
+    }
+   },
+   "min_detectable_edge_21d": {
+    "5": 0.01,
+    "10": 0.0075
+   }
+  },
+  "U futility": {
+   "spec": {
+    "name": "U futility",
+    "clip": 0.0225,
+    "prior_var": 0.0121,
+    "cap_factor": 0.75,
+    "threshold": 20.0,
+    "direction": "futility",
+    "shift": 0.00028571428571428574
+   },
+   "sd_daily": 0.005019011475427825,
+   "sd_21d": 0.023,
+   "type_i_20y": {
+    "iid_normal": 0.037,
+    "t4_garch": 0.031,
+    "ar1_0.15": 0.085,
+    "regime_switching": 0.0295,
+    "overlap_21d": 0.583
+   },
+   "time_to_verdict": {
+    "iid_normal": {
+     "0.0025": {
+      "q10_years": 8.86,
+      "q50_years": 58.51,
+      "q90_years": null,
+      "p_within_5y": 0.079,
+      "p_within_10y": 0.11
+     },
+     "0.005": {
+      "q10_years": 1.61,
+      "q50_years": 12.48,
+      "q90_years": 31.52,
+      "p_within_5y": 0.22,
+      "p_within_10y": 0.414
+     },
+     "0.01": {
+      "q10_years": 0.59,
+      "q50_years": 2.84,
+      "q90_years": 7.62,
+      "p_within_5y": 0.729,
+      "p_within_10y": 0.964
+     },
+     "0.02": {
+      "q10_years": 0.29,
+      "q50_years": 0.67,
+      "q90_years": 1.65,
+      "p_within_5y": 1.0,
+      "p_within_10y": 1.0
+     }
+    },
+    "t4_garch": {
+     "0.0025": {
+      "q10_years": 5.87,
+      "q50_years": 44.87,
+      "q90_years": null,
+      "p_within_5y": 0.095,
+      "p_within_10y": 0.139
+     },
+     "0.005": {
+      "q10_years": 1.29,
+      "q50_years": 9.72,
+      "q90_years": 25.29,
+      "p_within_5y": 0.289,
+      "p_within_10y": 0.511
+     },
+     "0.01": {
+      "q10_years": 0.56,
+      "q50_years": 1.9,
+      "q90_years": 6.06,
+      "p_within_5y": 0.841,
+      "p_within_10y": 0.986
+     },
+     "0.02": {
+      "q10_years": 0.28,
+      "q50_years": 0.57,
+      "q90_years": 1.45,
+      "p_within_5y": 0.998,
+      "p_within_10y": 1.0
+     }
+    }
+   },
+   "min_detectable_edge_21d": {
+    "5": 0.01,
+    "10": 0.0075
+   }
+  },
+  "M futility": {
+   "spec": {
+    "name": "M futility",
+    "clip": 0.036000000000000004,
+    "prior_var": 0.0121,
+    "cap_factor": 0.75,
+    "threshold": 40.0,
+    "direction": "futility",
+    "shift": 9.523809523809524e-05
+   },
+   "sd_daily": 0.008,
+   "sd_21d": 0.03666060555964672,
+   "type_i_20y": {
+    "iid_normal": 0.0145,
+    "t4_garch": 0.014,
+    "ar1_0.15": 0.0505,
+    "regime_switching": 0.014,
+    "overlap_21d": 0.5215
+   },
+   "time_to_verdict": {
+    "iid_normal": {
+     "0.0025": {
+      "q10_years": 36.91,
+      "q50_years": null,
+      "q90_years": null,
+      "p_within_5y": 0.029,
+      "p_within_10y": 0.037
+     },
+     "0.005": {
+      "q10_years": 9.71,
+      "q50_years": 43.61,
+      "q90_years": null,
+      "p_within_5y": 0.06,
+      "p_within_10y": 0.102
+     },
+     "0.01": {
+      "q10_years": 1.78,
+      "q50_years": 9.66,
+      "q90_years": 22.23,
+      "p_within_5y": 0.259,
+      "p_within_10y": 0.51
+     },
+     "0.02": {
+      "q10_years": 0.63,
+      "q50_years": 2.2,
+      "q90_years": 5.18,
+      "p_within_5y": 0.892,
+      "p_within_10y": 0.993
+     }
+    },
+    "t4_garch": {
+     "0.0025": {
+      "q10_years": 40.19,
+      "q50_years": null,
+      "q90_years": null,
+      "p_within_5y": 0.029,
+      "p_within_10y": 0.041
+     },
+     "0.005": {
+      "q10_years": 6.93,
+      "q50_years": 33.52,
+      "q90_years": null,
+      "p_within_5y": 0.082,
+      "p_within_10y": 0.14
+     },
+     "0.01": {
+      "q10_years": 1.37,
+      "q50_years": 7.35,
+      "q90_years": 18.11,
+      "p_within_5y": 0.35,
+      "p_within_10y": 0.64
+     },
+     "0.02": {
+      "q10_years": 0.59,
+      "q50_years": 1.54,
+      "q90_years": 4.41,
+      "p_within_5y": 0.926,
+      "p_within_10y": 0.998
+     }
+    }
+   },
+   "min_detectable_edge_21d": {
+    "5": 0.015,
+    "10": 0.015
+   }
+  }
+ }
+}
