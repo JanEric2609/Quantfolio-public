@@ -59,7 +59,7 @@ CALIBRATOR_VERSION = {
     "embargo_trading_days": EMBARGO_TRADING_DAYS,
     "slope_prior_sd": SLOPE_PRIOR_SD,
     "min_spread": MIN_SPREAD,
-    "rule": 2,
+    "rule": 3,
 }
 
 

@@ -9,8 +9,9 @@ For every resolved or delisted row without ``outcome.fx_basis``, this restates
 the stored local return in EUR over the stored entry and exit dates (crossing
 through USD), recomputes the realised and excess return against the stored
 benchmark return, keeps the old numbers under ``score_json.before_fx_fix`` and
-sets ``fx_basis``. Rows already in EUR (EUR or USD listings) only get
-``fx_basis = "eur"``. ``discovery_prediction``'s outcome columns are not
+sets ``fx_basis``. The row's ``hit`` and ``brier`` are recomputed from the new
+excess; its ``rank_ic`` belongs to the whole cross-section and is left as it
+was. Rows already in EUR (EUR or USD listings) only get ``fx_basis = "eur"``. ``discovery_prediction``'s outcome columns are not
 issue-time columns, so the append-only trigger allows this.
 
 Dry run by default. Writing to prod needs the owner's OK.
@@ -23,7 +24,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -39,13 +40,23 @@ def main() -> None:
     args = parser.parse_args()
 
     db = SessionLocal()
+    # Prices load in their own session: ``market.history`` commits what it
+    # fetches, and on the main session that would also commit the re-scored
+    # rows, dry run or not.
+    price_db = SessionLocal()
     try:
-        series = _Series(db, load_closes, 365 * 2)
         rows = (
             db.query(DiscoveryPrediction)
             .filter(DiscoveryPrediction.outcome_status.in_(("resolved", "delisted")))
             .all()
         )
+        entries = [
+            date.fromisoformat(e) for p in rows
+            if (e := ((p.score_json or {}).get("outcome") or {}).get("entry_date"))
+        ]
+        # Reach back to the oldest entry, so no old row is flagged for want of loaded FX bars.
+        days = max(365 * 2, (datetime.now(UTC).date() - min(entries)).days + 30) if entries else 365 * 2
+        series = _Series(price_db, load_closes, days)
         changed = tagged = 0
         for pred in rows:
             score = dict(pred.score_json or {})
@@ -82,6 +93,15 @@ def main() -> None:
                 )
                 pred.realised_return, pred.excess_return = realised, excess
                 outcome["fx_basis"], outcome["return_currency"] = "eur", "EUR"
+                judged = excess if excess is not None else realised
+                hit = 1 if judged > 0 else 0
+                score["before_fx_fix"].update(hit=score.get("hit"), brier=score.get("brier"))
+                score["hit"] = hit
+                probability = (
+                    pred.conviction_calibrated if score.get("brier_basis") == "calibrated" else pred.conviction
+                )
+                if score.get("brier") is not None and probability is not None:
+                    score["brier"] = (float(probability) - hit) ** 2
             score["outcome"] = outcome
             pred.score_json = score
             changed += 1
@@ -93,6 +113,7 @@ def main() -> None:
             print(f"\nDry run: {changed} would be re-scored or flagged, {tagged} tagged. Pass --apply to write.")
     finally:
         db.close()
+        price_db.close()
 
 
 if __name__ == "__main__":

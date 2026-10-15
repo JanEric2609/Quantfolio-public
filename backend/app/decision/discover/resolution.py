@@ -14,9 +14,11 @@ How a prediction is measured:
   dividend paid inside the window is counted instead of showing up as a drop.
   ``price_at_prediction`` is only a fallback entry when the series does not
   reach back far enough.
-- **EUR.** A non-EUR listing is converted with the ``<CCY>EUR=X`` rate on the
-  entry and exit dates. Without a rate the local-currency return is kept and
-  the outcome says so.
+- **EUR.** A non-EUR listing is converted on the entry and exit dates. The
+  app stores dollar pairs only (``USDEUR=X``, ``USD<CCY>=X``), so a third
+  currency crosses through USD. Without a rate the pick waits; once the grace
+  has passed it is scored in local currency and tagged
+  ``outcome.fx_basis = "local_fallback"``, which the calibrator leaves out.
 - **Against the passive core.** The same window is measured on the passive
   core (``passive_core_ticker``, EUNL.DE by default): the alternative to any
   pick is simply buying more of the ETF. ``excess_return`` is the
