@@ -82,6 +82,8 @@ class GuardResult:
     accepted: pd.DataFrame
     quarantined: list[QuarantinedBar] = field(default_factory=list)
     split_suspected: bool = False
+    #: Each split signature: the day and its close ratio to the day before.
+    split_days: list[tuple[pd.Timestamp, float]] = field(default_factory=list)
 
     @property
     def stored_to_quarantine(self) -> list[QuarantinedBar]:
@@ -247,6 +249,7 @@ def guard_bars(
                 continue  # the next bar is measured against the bar before the spike
         elif abs(r0) > SPLIT_MOVE and _split_like(c_t / c_prev):
             result.split_suspected = True
+            result.split_days.append((_day(row["ts"]), c_t / c_prev))
             if not allow_split and row["_new"]:
                 split_from = i
                 break

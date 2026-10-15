@@ -4,8 +4,10 @@ from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 import logging
 import math
+import threading
 from typing import Any, cast
 
+import numpy as np
 import pandas as pd
 from sqlalchemy import exc as sa_exc, text
 from sqlalchemy.orm import Session
@@ -35,6 +37,62 @@ MACRO_RETRY_DELAYS_S = (5.0, 30.0)
 # the values were identical.
 VIX_SERIES_ID = "VIXCLS"
 VIX_INDEX_SYMBOL = "^VIX"
+#: A stored bar is the quarantined one when its close is within this share.
+_SAME_CLOSE = 0.005
+#: A split signature is a split only when the provider lists a split within
+#: this many sessions of it, at a ratio within this share (the day's own move
+#: rides on top of the split ratio). Plan 2026-10-14, M1.
+SPLIT_EVENT_SESSIONS = 3
+SPLIT_EVENT_RATIO_TOL = 0.10
+#: Without a split event, a move up to this factor either way is a real move
+#: (a crash or a doubling). A larger one (P500.DE's 100:1) stays a split even
+#: when the provider lists no event.
+REAL_MOVE_MAX_FACTOR = 2.5
+#: A split-event lookup that takes longer is treated as unreadable.
+SPLIT_EVENT_TIMEOUT_S = 20.0
+#: A timed-out lookup cannot be cancelled; at most this many may still be running.
+SPLIT_EVENT_MAX_PENDING = 2
+_split_lookups = threading.BoundedSemaphore(SPLIT_EVENT_MAX_PENDING)
+
+
+def _fetch_split_events(symbol: str) -> Any:
+    """yfinance's split series for ``symbol`` (a pandas Series), or None.
+
+    Run in a worker thread with a hard deadline: yfinance's cookie and crumb
+    requests can block past any socket timeout, and a re-pull must never hang
+    on a lookup that only refines a verdict.
+
+    A thread cannot be cancelled once it runs, so the lookup is a daemon
+    thread (it never holds up process exit) and at most
+    :data:`SPLIT_EVENT_MAX_PENDING` may still be running: while that many are
+    stuck, a new lookup is not started and reads as unknown.
+    """
+    if not _split_lookups.acquire(blocking=False):
+        logger.warning("split events for %s skipped: %d earlier lookups still running",
+                       symbol, SPLIT_EVENT_MAX_PENDING)
+        return None
+    box: dict[str, Any] = {}
+    done = threading.Event()
+
+    def _load() -> None:
+        try:
+            import yfinance as yf
+
+            box["events"] = yf.Ticker(symbol).splits
+        except Exception as exc:  # noqa: BLE001 - no events known is not "no split"
+            box["error"] = exc
+        finally:
+            _split_lookups.release()
+            done.set()
+
+    threading.Thread(target=_load, name=f"split-events-{symbol}", daemon=True).start()
+    if not done.wait(SPLIT_EVENT_TIMEOUT_S):
+        logger.warning("split events for %s timed out after %.0f s", symbol, SPLIT_EVENT_TIMEOUT_S)
+        return None
+    if "error" in box:
+        logger.debug("split events unavailable for %s", symbol, exc_info=box["error"])
+        return None
+    return box.get("events")
 
 
 def _finite(value: Any) -> float:
@@ -86,8 +144,8 @@ class DataIngester:
     def _set_pin(
         self, symbol: str, provider: str, *, full_repull: bool = False, quarantine_reason: str | None = None,
         clear_quarantine: bool = False,
-    ) -> None:
-        """Create or move the pin. Does not commit."""
+    ) -> Any:
+        """Create or move the pin and return it. Does not commit."""
         from app.foundation.models.entities import BarSeriesMeta
 
         from app.foundation.providers.registry import ProviderRegistry
@@ -107,6 +165,7 @@ class DataIngester:
             pin.quarantine_reason = quarantine_reason
         elif clear_quarantine:
             pin.quarantine_reason = None
+        return pin
 
     def _bars_frame(self, symbol: str, result: dict[str, Any]) -> tuple[pd.DataFrame, str, str | None, int]:
         """Provider rows as a validated bar frame: (frame, provider, reported currency, rows received)."""
@@ -216,11 +275,18 @@ class DataIngester:
                 existing.reason = q.reason
                 existing.resolved_at = None
                 existing.resolution = None
-            if q.stored:
-                self.db.execute(
-                    text("DELETE FROM bar_prices WHERE symbol = :symbol AND ts = :ts"),
-                    {"symbol": symbol, "ts": q.ts.to_pydatetime()},
-                )
+            # The stored copy of this bar leaves bar_prices, also when the
+            # incremental fetch's one-day overlap brought it back as "new"
+            # (plan 2026-10-14, H3). Only a row with the quarantined close goes:
+            # a fallback provider's bad fresh bar must not delete the good
+            # pinned bar stored for the same day.
+            self.db.execute(
+                text(
+                    "DELETE FROM bar_prices WHERE symbol = :symbol AND ts = :ts "
+                    "AND abs(close - :close) <= :tol * abs(:close)"
+                ),
+                {"symbol": symbol, "ts": q.ts.to_pydatetime(), "close": float(q.close), "tol": _SAME_CLOSE},
+            )
             logger.warning("bar_guard: %s %s quarantined (%s, %s)", symbol, q.ts.date(), q.reason, q.provider)
 
     def _confirm_quarantined(self, symbol: str, pinned: str, bars: list[Any]) -> list[Any]:
@@ -566,16 +632,21 @@ class DataIngester:
             pinned_provider=used, allow_split=True,
         )
         keep = cast(pd.DataFrame, guarded.accepted)
+        verdict = self.split_verdict(symbol, guarded)
+        unadjusted = verdict in ("split", "unknown")
         try:
             self.db.execute(text("DELETE FROM bar_prices WHERE symbol = :symbol"), {"symbol": symbol})
             self._write_quarantine(symbol, guarded.quarantined)
             if not keep.empty:
                 self._upsert_bars(keep, used)
-            self._set_pin(
+            pin = self._set_pin(
                 symbol, used, full_repull=True,
-                quarantine_reason="split_unadjusted" if guarded.split_suspected else None,
-                clear_quarantine=not guarded.split_suspected,
+                quarantine_reason="split_unadjusted" if unadjusted else None,
+                clear_quarantine=not unadjusted,
             )
+            if verdict == "real_move":
+                days = ", ".join(f"{d.date()} x{r:.2f}" for d, r in guarded.split_days)
+                pin.notes = f"real_move: {days} (no split event at the provider)"
             from app.foundation.models.entities import PriceCache
 
             self.db.query(PriceCache).filter(PriceCache.ticker == symbol).delete(synchronize_session=False)
@@ -591,8 +662,12 @@ class DataIngester:
             except Exception:
                 pass
             return {"success": False, "symbol": symbol, "message": str(e), "repull": True}
-        if guarded.split_suspected:
-            logger.warning("bar_guard: %s still shows a split after a full re-pull from %s", symbol, used)
+        if verdict == "real_move":
+            logger.warning("bar_guard: %s real_move kept: %s", symbol, guarded.split_days)
+        elif unadjusted:
+            logger.warning(
+                "bar_guard: %s still shows a split after a full re-pull from %s (%s)", symbol, used, verdict,
+            )
         self._record_provider_health(
             provider=used, capability="bar_prices", ok=True,
             message=f"Re-pulled {len(keep)} bars for {symbol}",
@@ -605,8 +680,52 @@ class DataIngester:
             "rows_received": initial_count,
             "quarantined": len(guarded.quarantined),
             "provider": used,
-            "split_unadjusted": guarded.split_suspected,
+            "split_unadjusted": unadjusted,
+            "split_verdict": verdict,
         }
+
+    def split_events(self, symbol: str) -> list[tuple[pd.Timestamp, float]] | None:
+        """The provider's split events (day, factor), or None when they cannot be read.
+
+        yfinance's factor is new shares per old one (2.0 for a 2:1 split, 0.1
+        for a 1:10 reverse split), so the price ratio across it is 1 / factor.
+        Called only on the re-pull path.
+        """
+        splits = _fetch_split_events(symbol)
+        if splits is None:
+            return None
+        out: list[tuple[pd.Timestamp, float]] = []
+        for ts, factor in splits.items():
+            try:
+                f = float(factor)
+            except (TypeError, ValueError):
+                continue
+            if f > 0:
+                day = cast(pd.Timestamp, pd.Timestamp(cast(Any, ts)))
+                out.append(((day.tz_localize(None) if day.tzinfo is not None else day).normalize(), f))
+        return out
+
+    def split_verdict(self, symbol: str, guarded: Any) -> str:
+        """What a split signature in a re-pulled series is (plan 2026-10-14, M1).
+
+        ``none``: no signature. ``split``: the provider lists a split at that
+        day and ratio, so the series is unadjusted. ``real_move``: no event and
+        a move a market can make. ``unknown``: the events cannot be read, kept
+        as a split as before.
+        """
+        if not guarded.split_suspected:
+            return "none"
+        events = self.split_events(symbol)
+        if events is None:
+            return "unknown"
+        for day, ratio in guarded.split_days:
+            for event_day, factor in events:
+                near = abs(int(np.busday_count(min(day, event_day).date(), max(day, event_day).date())))
+                if near <= SPLIT_EVENT_SESSIONS and abs(ratio * factor - 1.0) <= SPLIT_EVENT_RATIO_TOL:
+                    return "split"
+        if all(1.0 / REAL_MOVE_MAX_FACTOR <= ratio <= REAL_MOVE_MAX_FACTOR for _, ratio in guarded.split_days):
+            return "real_move"
+        return "split"
 
     #: A re-pull must return at least this share of the stored bars in its
     #: window, and start within REPULL_START_SLACK_DAYS of the stored start.
