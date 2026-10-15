@@ -74,3 +74,27 @@ def test_benchmarks_by_class():
     for bond in ("bond_govt_eur_short", "bond_govt_eur_mid", "bond_govt_eur_long", "bond_aggregate_eur_hedged",
                  "bond_other"):
         assert benchmark_symbol_for(bond) not in ("EUNL.DE", "URTH", "SPY", "VGK", "EWJ")
+
+
+def test_cash_flow_and_waterproof_are_not_cash_or_water():
+    # Plan 2026-10-14, M11: "cash\b" read a cash-flow equity fund as money market.
+    assert classify_etf("VanEck Morningstar US Cash Flow Leaders UCITS ETF") != "money_market"
+    assert classify_etf("Waterproof Global Equity UCITS ETF") != "equity_sector_theme"
+    assert classify_etf("iShares Global Water UCITS ETF") == "equity_sector_theme"
+    assert classify_etf("Xtrackers II EUR Overnight Rate Swap UCITS ETF 1C") == "money_market"
+
+
+def test_known_bond_and_cash_funds_get_the_bond_move_limit():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.foundation.core.db import Base
+    from app.foundation.data_backbone.bar_guard import guard_class_for
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+    for symbol in ("EUNH.DE", "EUNA.DE", "CBE3.L", "XEON.DE"):
+        assert guard_class_for(db, symbol) == "bond_mm_etf", symbol
+    assert guard_class_for(db, "EUNL.DE") == "equity_etf"
