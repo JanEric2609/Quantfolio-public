@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 import logging
+import threading
 from typing import Any, cast
 
 import numpy as np
@@ -48,6 +49,9 @@ SPLIT_EVENT_RATIO_TOL = 0.10
 REAL_MOVE_MAX_FACTOR = 2.5
 #: A split-event lookup that takes longer is treated as unreadable.
 SPLIT_EVENT_TIMEOUT_S = 20.0
+#: A timed-out lookup cannot be cancelled; at most this many may still be running.
+SPLIT_EVENT_MAX_PENDING = 2
+_split_lookups = threading.BoundedSemaphore(SPLIT_EVENT_MAX_PENDING)
 
 
 def _fetch_split_events(symbol: str) -> Any:
@@ -56,26 +60,38 @@ def _fetch_split_events(symbol: str) -> Any:
     Run in a worker thread with a hard deadline: yfinance's cookie and crumb
     requests can block past any socket timeout, and a re-pull must never hang
     on a lookup that only refines a verdict.
+
+    A thread cannot be cancelled once it runs, so the lookup is a daemon
+    thread (it never holds up process exit) and at most
+    :data:`SPLIT_EVENT_MAX_PENDING` may still be running: while that many are
+    stuck, a new lookup is not started and reads as unknown.
     """
-    from concurrent.futures import ThreadPoolExecutor
-    from concurrent.futures import TimeoutError as FutureTimeout
+    if not _split_lookups.acquire(blocking=False):
+        logger.warning("split events for %s skipped: %d earlier lookups still running",
+                       symbol, SPLIT_EVENT_MAX_PENDING)
+        return None
+    box: dict[str, Any] = {}
+    done = threading.Event()
 
-    def _load() -> Any:
-        import yfinance as yf
+    def _load() -> None:
+        try:
+            import yfinance as yf
 
-        return yf.Ticker(symbol).splits
+            box["events"] = yf.Ticker(symbol).splits
+        except Exception as exc:  # noqa: BLE001 - no events known is not "no split"
+            box["error"] = exc
+        finally:
+            _split_lookups.release()
+            done.set()
 
-    pool = ThreadPoolExecutor(max_workers=1)
-    try:
-        return pool.submit(_load).result(timeout=SPLIT_EVENT_TIMEOUT_S)
-    except FutureTimeout:
+    threading.Thread(target=_load, name=f"split-events-{symbol}", daemon=True).start()
+    if not done.wait(SPLIT_EVENT_TIMEOUT_S):
         logger.warning("split events for %s timed out after %.0f s", symbol, SPLIT_EVENT_TIMEOUT_S)
         return None
-    except Exception:  # noqa: BLE001 - no events known is not "no split"
-        logger.debug("split events unavailable for %s", symbol, exc_info=True)
+    if "error" in box:
+        logger.debug("split events unavailable for %s", symbol, exc_info=box["error"])
         return None
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+    return box.get("events")
 
 
 class DataIngester:
