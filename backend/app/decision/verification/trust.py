@@ -735,47 +735,77 @@ def _days(n: int) -> str:
     return f"{n:,} trading day{'' if n == 1 else 's'}"
 
 
+def _selection_scope(sel: dict[str, Any]) -> str:
+    """Same sector, unless some days had to compare against other sectors."""
+    k = int(sel.get("n_fallback_days") or 0)
+    if not k:
+        return "same run, same sector"
+    return f"same run; same sector except on {_days(k)}, when other sectors stood in"
+
+
 def _years_text(years: float) -> str:
     return f"{years:.1f}" if years < 10 else f"{years:.0f}"
 
 
-def _time_to_know_phrase(f1: dict[str, Any]) -> str:
-    """'most likely after about 19 years (1 in 10 paths: under 6 years; 9 in 10: under 42)'."""
-    t = f1["time_to_know"]
-    edge = round(t["assumption"] * 100, 1)
-    assumption = f"an edge of +{edge:g} % per 21 days"
-    if t["q50_years"] is None:
-        cap = _years_text(t["max_days"] / TRADING_DAYS_PER_YEAR)
-        return f"{assumption} would most likely take more than {cap} years to show"
-    spread = ""
-    if t["q10_years"] is not None:
-        hi = f"{_years_text(t['q90_years'])}" if t["q90_years"] is not None else "more than " + _years_text(
-            t["max_days"] / TRADING_DAYS_PER_YEAR
-        )
-        spread = f" (10-90 % range: {_years_text(t['q10_years'])} to {hi} years)"
-    return f"{assumption} would most likely show after about {_years_text(t['q50_years'])} years{spread}"
+#: Shown under the headline while nothing has crossed (plan 2026-10-14, H2).
+SCOPE_NOTE = (
+    "The comparison with MSCI World can only catch a large edge or harm. The question this page can "
+    "answer in a few years is whether the picks are worth following."
+)
 
 
-def _headline(f1: dict[str, Any], today: date) -> str:
-    n = f1["n_days"]
-    e = f1["e_skill"] if f1["state"] == "skill" else f1["e_harm"]
+def _grid_phrase(sel: dict[str, Any]) -> str:
+    """'a 0.5 % edge per 21 days would take about 6 years to show (0.25 %: > 40 years; 1 %: 2 years)'."""
+    points = (sel.get("time_to_know") or {}).get("grid") or []
+
+    def years(p: dict[str, Any]) -> str:
+        if p.get("beyond_40y") or p.get("q50_years") is None:
+            return "> 40 years"
+        return f"about {_years_text(p['q50_years'])} years"
+
+    if not points:
+        return ""
+    parts = [f"{p['edge_21d'] * 100:g} %: {years(p)}" for p in points]
+    return "Median time to a verdict at an edge per 21 days of " + "; ".join(parts) + "."
+
+
+def _headline(tests: dict[str, Any], today: date) -> str:
+    """S and U set the headline; F1 speaks only when it crosses (amendment of 2026-10-14, §6)."""
+    f1 = _primary(tests)
     if f1["state"] == "skill":
         return (
-            f"Evidence that Discover's picks beat your ETF: e = {e:,.0f} over {_days(n)} "
+            f"Evidence that Discover's picks beat your ETF: e = {f1['e_skill']:,.0f} over {_days(f1['n_days'])} "
             "(pre-registered test, 5 % false-discovery rate)."
         )
     if f1["state"] == "harm":
         return (
             f"Evidence of harm: Discover's picks have done worse than simply holding your ETF "
-            f"(e = {e:,.0f} over {_days(n)})."
+            f"(e = {f1['e_harm']:,.0f} over {_days(f1['n_days'])})."
+        )
+    sel = tests.get("selection") or {}
+    n = int(sel.get("n_days") or 0)
+    state = sel.get("state")
+    if state == "skill":
+        return (
+            f"Evidence that Discover picks well: its picks beat the stocks it could have picked instead "
+            f"({_selection_scope(sel)}), e = {sel['e_skill']:,.0f} over {_days(n)}."
+        )
+    if state == "harm":
+        return (
+            f"Evidence of harm: the picks did worse than the stocks Discover could have picked instead "
+            f"(e = {sel['e_harm']:,.0f} over {_days(n)})."
+        )
+    if state == "not_worth_following":
+        return (
+            f"Not worth following: the picks' edge over the stocks Discover could have picked is below what "
+            f"pays for trading them (e = {sel['e_futility']:,.0f} over {_days(n)})."
         )
     if n == 0:
-        start = date.fromisoformat(f1["start"])
+        start = date.fromisoformat(str(sel.get("start") or f1["start"]))
         when = f"starts on {start.isoformat()}" if today < start else f"started on {start.isoformat()}"
         return f"Too early to tell: the pre-registered test {when}; no trading day with open picks recorded yet."
-    if f1["state"] == "no_evidence":
-        return f"No evidence yet that the picks beat your ETF: {_days(n)} so far; {_time_to_know_phrase(f1)}."
-    return f"Too early to tell: {_days(n)} so far; {_time_to_know_phrase(f1)}."
+    lead = "No evidence yet either way" if state == "no_evidence" else "Too early to tell"
+    return f"{lead}: {_days(n)} so far. {SCOPE_NOTE} {_grid_phrase(sel)}".strip()
 
 
 def build_verdict(db: Session, user_id: str, *, now: datetime | None = None) -> dict[str, Any]:
@@ -815,7 +845,7 @@ def build_verdict(db: Session, user_id: str, *, now: datetime | None = None) -> 
     n_units = len(units)
     first_due = _earliest_future([by_type[k].next_resolution_at for k in ("ideas", "advisor")], now)
     return {
-        "headline": _headline(f1, now.date()),
+        "headline": _headline(tests, now.date()),
         "first_resolution_due": first_due.isoformat() if first_due else None,
         "daily_tests": tests,
         "resolved_calls": sum(s["n_calls"] for s in stats),

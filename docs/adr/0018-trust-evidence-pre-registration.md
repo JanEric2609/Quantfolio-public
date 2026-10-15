@@ -550,6 +550,11 @@ The test is §4 with a smaller reference noise:
 - **σ_ref** is measured on each series' first 63 observed days and then frozen.
   - The e-process starts on the 64th observed day, so σ_ref never uses data the test bets on.
   - C = 4.5 × σ_ref, the pseudo-variance is 0.0121 and the cap is 0.75/p0.
+  - σ_ref is at least 0.1 % per 21 days. A sleeve that held the benchmark for its first 63
+    days would otherwise get σ_ref = 0 and never be tested (added 2026-10-15, before any
+    mandate had 63 observed days).
+  - Only the sleeve's current run counts: a reset starts the series again from its new
+    inception day. The ledger keeps the earlier days.
 - **e-BH** runs over the two mandates, K = 2, with e ≥ 40 for one rejection.
 - **Retire rule.** A mandate whose futility hypothesis is rejected is **retired**:
   - its reviews and trades stop;

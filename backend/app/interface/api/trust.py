@@ -203,6 +203,10 @@ class FamilyTestOut(BaseModel):
     family: Literal["F1", "F2", "F3"]
     series: Literal["ideas", "ranking", "advisor"]
     role: Literal["primary", "secondary"]
+    alarm_only: bool = Field(
+        default=False,
+        description="Shown only when it crosses: harm or a large edge (ADR 0018 amendment of 2026-10-14, §6).",
+    )
     question: str
     start: str
     n_days: int = Field(description="Trading days with something open since the start; each is one observation.")
@@ -228,6 +232,68 @@ class FamilyTestOut(BaseModel):
     path: list[EPathPointOut] = Field(default_factory=list)
     posterior: PosteriorOut | None = None
     time_to_know: TimeToKnowOut
+
+
+class TimeGridPointOut(BaseModel):
+    edge_21d: float
+    q50_years: float | None = None
+    beyond_40y: bool = False
+
+
+class TimeGridOut(BaseModel):
+    """Median years to a verdict at stated edges (ADR 0018 amendment of 2026-10-14, §10)."""
+
+    sd_daily: float
+    sd_measured: bool = False
+    grid: list[TimeGridPointOut] = Field(default_factory=list)
+
+
+class SelectionTestOut(BaseModel):
+    """S (picks against same-run, same-sector non-picks) and U (futility) on one series."""
+
+    family: Literal["S"] = "S"
+    series: Literal["selection"] = "selection"
+    role: Literal["primary"] = "primary"
+    question: str
+    futility_question: str
+    start: str
+    n_days: int
+    n_days_pre_registration: int = 0
+    first_day: str | None = None
+    mean_21d: float | None = None
+    mean_ci_21d: list[float] | None = None
+    sd_daily: float | None = None
+    clip: float
+    sigma_ref: float
+    e_skill: float
+    e_harm: float
+    e_futility: float
+    threshold: float
+    futility_threshold: float
+    futility_delta_21d: float = Field(description="U's margin per 21 days, gross of costs.")
+    n_fallback_days: int = 0
+    rho1: float | None = Field(default=None, description="Lag-1 autocorrelation of the first 63 days (shown, never whitened).")
+    rho1_flag: bool = False
+    state: Literal["too_early", "no_evidence", "skill", "harm", "not_worth_following"]
+    path: list[EPathPointOut] = Field(default_factory=list)
+    time_to_know: TimeGridOut
+
+
+class MandateTestOut(BaseModel):
+    """M: is the mandate worth running? A rejection retires it."""
+
+    series: Literal["mandate_a", "mandate_b"]
+    mandate: str
+    n_days: int
+    n_tested_days: int = Field(description="Days after the first 63, which only set the reference noise.")
+    sigma_ref_daily: float | None = None
+    clip: float | None = None
+    mean_21d: float | None = None
+    e_futility: float
+    delta_21d: float
+    threshold: float
+    retire: bool = False
+    state: Literal["too_early", "no_evidence", "retire"]
 
 
 class PairedPointOut(BaseModel):
@@ -298,6 +364,8 @@ class DailyTestsOut(BaseModel):
     min_days_for_state: int
     horizon_days: int
     families: list[FamilyTestOut]
+    selection: SelectionTestOut | None = None
+    mandates: list[MandateTestOut] = Field(default_factory=list)
     paired: PairedComparisonOut | None = None
     factor_neutral: FactorNeutralOut | None = Field(
         default=None,
