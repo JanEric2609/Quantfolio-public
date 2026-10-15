@@ -66,7 +66,8 @@ def _fetch_split_events(symbol: str) -> Any:
     :data:`SPLIT_EVENT_MAX_PENDING` may still be running: while that many are
     stuck, a new lookup is not started and reads as unknown.
     """
-    if not _split_lookups.acquire(blocking=False):
+    sem = _split_lookups  # the permit goes back to this semaphore, whatever the global is by then
+    if not sem.acquire(blocking=False):
         logger.warning("split events for %s skipped: %d earlier lookups still running",
                        symbol, SPLIT_EVENT_MAX_PENDING)
         return None
@@ -81,7 +82,7 @@ def _fetch_split_events(symbol: str) -> Any:
         except Exception as exc:  # noqa: BLE001 - no events known is not "no split"
             box["error"] = exc
         finally:
-            _split_lookups.release()
+            sem.release()
             done.set()
 
     threading.Thread(target=_load, name=f"split-events-{symbol}", daemon=True).start()
