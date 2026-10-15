@@ -31,7 +31,7 @@ The FastAPI API server and APScheduler job runner. Houses both the `quantfolio-a
 
 ### LLM (quantfolio-llm)
 
-llama.cpp compiled with optional NVIDIA GPU support. Serves `Qwen3.5-9B-UD-Q4_K_XL`, fully offloaded to the GPU, at `http://<LLM_HOST>:8080` with an OpenAI-compatible API at the `/v1` endpoint. Systemd unit is `quantfolio-llamacpp`. The `Qwen3.6-35B-A3B` MoE is a benchmark candidate (plan 2026-10-14, WP-D5), not the served model; the container's RAM was raised from 16 to 24 GB on 2026-10-14 for it.
+llama.cpp compiled with optional NVIDIA GPU support. Serves `Qwen3.5-9B-UD-Q4_K_XL`, fully offloaded to the GPU, at `http://<LLM_HOST>:8080` with an OpenAI-compatible API at the `/v1` endpoint. Systemd unit is `quantfolio-llamacpp`. The `Qwen3.6-35B-A3B` MoE was benchmarked against it on 2026-10-15 (plan 2026-10-14, WP-D5) and not adopted: the same extraction accuracy (98.8 %) at 4.5× the latency, short of the ≥ 3 pp adoption bar. Its file was deleted; see `docs/research/llm-benchmark-2026-10-15.md`. The container's RAM limit stays at 24 GB (raised from 16 GB for the benchmark; a limit, not a reservation).
 
 **See** `infra/runbooks/deploy.md` Stage 2 for CMake build, model download, and service setup.
 

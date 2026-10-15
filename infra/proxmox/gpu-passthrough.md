@@ -1,6 +1,6 @@
 # Proxmox GPU Passthrough Configuration
 
-This guide enables GPU passthrough for the `quantfolio-llm` LXC container running llama.cpp with Qwen3.6-35B-A3B-UD-Q4_K_M.
+This guide enables GPU passthrough for the `quantfolio-llm` LXC container running llama.cpp with Qwen3.5-9B-UD-Q4_K_XL (see `qwen35-9b-notes.md`).
 
 ## Prerequisites
 
