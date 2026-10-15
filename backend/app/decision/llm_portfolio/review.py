@@ -542,6 +542,9 @@ def run_mandate_review(db: Session, user_id: str, mandate: str) -> dict[str, Any
     # Ensure portfolio exists
     portfolio = ensure_mandate_portfolio(db, user_id, mandate)
     portfolio_id = portfolio.id
+    if portfolio.managed_by == "retired":
+        # ADR 0018 amendment of 2026-10-14, §5: its futility test rejected.
+        return {"status": "retired", "mandate": mandate, "portfolio_id": portfolio_id, "decisions": [], "trades": []}
 
     # Build context
     context = assemble_review_context(db, portfolio_id, mandate)
