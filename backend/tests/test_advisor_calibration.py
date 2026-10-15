@@ -194,3 +194,22 @@ def test_cycle_stores_calibrated_confidence_and_attribution():
     assert decision["confidence_raw"] == 0.65
     assert decision["confidence_calibrated"] is None
     assert payload["lessons_injected"] == []
+
+
+def test_a_row_scored_in_local_currency_is_not_trained_on():
+    """Plan 2026-10-14, M12: an outcome scored without an FX rate mixes a
+    local return with a EUR benchmark, so the calibrator leaves it out."""
+    from app.decision.discover.calibrator import training_rows
+
+    db = _memory_db()
+    user = _user(db)
+    _seed_resolved_history(db, user, conviction=0.6, n=3, hits=2)
+    rows = db.query(DiscoveryPrediction).order_by(DiscoveryPrediction.symbol).all()
+    rows[0].score_json = {"outcome": {"fx_basis": "local_fallback"}}
+    rows[1].score_json = {"outcome": {"fx_basis": "eur"}}
+    db.commit()
+    new = DiscoveryPrediction(
+        id=uuid4().hex, user_id=user.id, run_id="new", symbol="NEW", predicted_at=datetime.now(UTC),
+        horizon_days=21, resolve_at=datetime.now(UTC) + timedelta(days=30), direction="buy", conviction=0.6,
+    )
+    assert len(training_rows(db, new)) == 2
