@@ -735,6 +735,14 @@ def _days(n: int) -> str:
     return f"{n:,} trading day{'' if n == 1 else 's'}"
 
 
+def _selection_scope(sel: dict[str, Any]) -> str:
+    """Same sector, unless some days had to compare against other sectors."""
+    k = int(sel.get("n_fallback_days") or 0)
+    if not k:
+        return "same run, same sector"
+    return f"same run; same sector except on {_days(k)}, when other sectors stood in"
+
+
 def _years_text(years: float) -> str:
     return f"{years:.1f}" if years < 10 else f"{years:.0f}"
 
@@ -783,12 +791,13 @@ def _headline(tests: dict[str, Any], today: date) -> str:
         day = (sel.get("noise_check") or {}).get("failed_at_day")
         return (
             f"No valid verdict: the selection series' daily values persist (noise check failed at day {day}), "
-            "so its daily tests can raise false alarms. The test moves to one observation per 21 days."
+            "so its daily tests can raise false alarms. ADR 0018 moves it to one observation per 21 days; "
+            "that test is not built yet, so nothing is shown until it is."
         )
     if state == "skill":
         return (
             f"Evidence that Discover picks well: its picks beat the stocks it could have picked instead "
-            f"(same run, same sector), e = {sel['e_skill']:,.0f} over {_days(n)}.{tail}"
+            f"({_selection_scope(sel)}), e = {sel['e_skill']:,.0f} over {_days(n)}.{tail}"
         )
     if state == "harm":
         return (

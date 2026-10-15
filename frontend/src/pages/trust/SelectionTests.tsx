@@ -18,7 +18,7 @@ const SELECTION_STATE: Record<TrustSelectionTest["state"], { label: string; mean
   not_valid: {
     label: "Not valid: serial correlation",
     meaning:
-      "The daily values persist from one day to the next, so these daily tests can raise false alarms. No verdict here is acted on; the test moves to one observation per 21 days.",
+      "The daily values persist from one day to the next, so these daily tests can raise false alarms. No verdict here is acted on. ADR 0018 moves the test to one observation per 21 days; that test is not built yet.",
   },
 };
 
@@ -32,7 +32,10 @@ const MANDATE_STATE: Record<TrustMandateTest["state"], string> = {
 
 /** One line on the §11 noise check: what it measured so far and what is next. */
 export function noiseText(nc: TrustNoiseCheck): string {
-  const done = nc.looks.filter((l) => l.vr != null);
+  // A failure is final: the looks after it are not shown.
+  const done = nc.looks.filter(
+    (l) => l.vr != null && (nc.status !== "failed" || nc.failed_at_day == null || l.day <= nc.failed_at_day),
+  );
   const measured = done.map((l) => `day ${l.day}: ${l.vr!.toFixed(2)} (limit ${l.cutoff})`).join(" · ");
   const next = nc.looks.find((l) => l.vr == null);
   if (nc.status === "failed") return `Noise check failed at day ${nc.failed_at_day}: ${measured}.`;
@@ -124,6 +127,9 @@ export function SelectionCard({ sel, f1 }: { sel: TrustSelectionTest; f1?: Trust
         years is whether the picks are worth following. Alternatives are the same run's scored stocks in the pick's
         sector (all of them when the sector has fewer than three
         {sel.n_fallback_days ? `; ${sel.n_fallback_days} days used that fallback` : ""}).
+        {sel.rho1 != null
+          ? ` Day-to-day correlation of the first three months: ${sel.rho1.toFixed(2)}${sel.rho1_flag ? " (above 0.15: noted, the test stays valid)" : ""}.`
+          : ""}
         {te != null
           ? ` Risk budget: the basket moves ${fmtPct(te, 0)} a year apart from MSCI World (tracking error), mostly from its sector, style and currency tilt. That is reported, not tested.`
           : ""}

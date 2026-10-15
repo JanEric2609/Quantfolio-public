@@ -37,9 +37,10 @@ def retire_futile_mandates(db: Any, user_id: str) -> list[str]:
     A retirement is never reversed by later data. Returns the mandates retired now.
     """
     from app.decision.verification.daily_ledger import MANDATE_SERIES, SERIES
+    from app.decision.verification.daily_ledger import mandate_starts
     from app.decision.verification.daily_tests import mandate_results
     from app.foundation.models.entities import PaperPortfolio, TrustDailyActiveReturn
-    from app.foundation.notify import alert_owners
+    from app.foundation.notify import alert_user
 
     rows = (
         db.query(TrustDailyActiveReturn)
@@ -51,7 +52,7 @@ def retire_futile_mandates(db: Any, user_id: str) -> list[str]:
     for r in rows:
         by_series[r.series].append(r)
     retired: list[str] = []
-    for result in mandate_results(by_series):
+    for result in mandate_results(by_series, mandate_starts(db, user_id)):
         if not result["retire"]:
             continue
         sleeve = (
@@ -68,8 +69,8 @@ def retire_futile_mandates(db: Any, user_id: str) -> list[str]:
             f"{result['delta_21d']:.1%} per 21 days over MSCI World after costs (e = {result['e_futility']:.0f}). "
             "It stops trading; its value is still tracked on the Trust page."
         )
-        alert_owners(db, source="trust", title=f"Mandate {result['mandate']} retired", telegram_text=text,
-                     body=text, severity="info", href="/trust")
+        alert_user(db, user_id, source="trust", title=f"Mandate {result['mandate']} retired", telegram_text=text,
+                   body=text, severity="info", href="/trust")
     return retired
 
 
@@ -81,16 +82,18 @@ def run_daily_ledger() -> dict[str, dict[str, int]]:
         SERIES_MANDATE_B,
         freeze_user_series,
         ledger_users,
+        mandate_users,
     )
     from app.foundation.core.db import SessionLocal
 
     db = SessionLocal()
     try:
+        # A mandate sleeve needs no discovery records, so its owner may not be a ledger user.
         out = {
             user_id: freeze_user_series(
                 db, user_id, (SERIES_IDEAS, SERIES_ADVISOR, SERIES_MANDATE_A, SERIES_MANDATE_B), refresh=True,
             )
-            for user_id in ledger_users(db)
+            for user_id in sorted(set(ledger_users(db)) | set(mandate_users(db)))
         }
         for user_id in out:
             try:

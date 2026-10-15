@@ -248,7 +248,7 @@ def test_a_futile_mandate_retires_once(monkeypatch):
     from app.decision.verification.jobs import RETIRED, retire_futile_mandates
 
     sent: list[str] = []
-    monkeypatch.setattr("app.foundation.notify.alert_owners", lambda db, **kw: sent.append(kw["title"]) or True)
+    monkeypatch.setattr("app.foundation.notify.alert_user", lambda db, user_id, **kw: sent.append(kw["title"]) or True)
     db = _memory_db()
     uid = _user(db)
     sleeve = _sleeve(db, uid, "A", daily_tests.PRIMARY_TEST_START)
@@ -264,6 +264,49 @@ def test_a_futile_mandate_retires_once(monkeypatch):
     assert sent == ["Mandate A retired"]
 
 
+def test_a_reset_sleeve_is_tested_on_its_new_run_only():
+    from app.decision.verification.daily_ledger import mandate_starts
+
+    db = _memory_db()
+    uid = _user(db)
+    rng = np.random.default_rng(5)
+    old = _rows(uid, "mandate_a", rng.normal(-0.01 / 21, 0.004, 252 * 4))
+    db.add_all(old)
+    reset_day = old[-1].day
+    _sleeve(db, uid, "A", reset_day)
+    db.commit()
+    starts = mandate_starts(db, uid)
+    assert starts == {"mandate_a": reset_day}
+    out = {m["series"]: m for m in daily_tests.mandate_results({"mandate_a": old}, starts)}
+    assert out["mandate_a"]["n_days"] == 0 and out["mandate_a"]["retire"] is False
+    unscoped = {m["series"]: m for m in daily_tests.mandate_results({"mandate_a": old})}
+    assert unscoped["mandate_a"]["retire"] is True
+
+
+def test_a_sleeve_with_flat_first_days_is_still_tested():
+    values = [0.0] * 63 + [-0.01 / 21] * (252 * 4)
+    out = {m["series"]: m for m in daily_tests.mandate_results({"mandate_a": _rows("u", "mandate_a", values)})}
+    assert out["mandate_a"]["sigma_ref_daily"] == daily_tests.MANDATE_SIGMA_FLOOR
+    assert out["mandate_a"]["n_tested_days"] > 0 and out["mandate_a"]["e_futility"] > 1.0
+
+
+def test_mandate_owners_without_discovery_records_are_ledger_users():
+    from app.decision.verification.daily_ledger import ledger_users, mandate_users
+
+    db = _memory_db()
+    uid = _user(db)
+    _sleeve(db, uid, "B", daily_tests.PRIMARY_TEST_START)
+    db.commit()
+    assert ledger_users(db) == [] and mandate_users(db) == [uid]
+
+
+def test_the_selection_test_shows_its_lag1_autocorrelation():
+    rng = np.random.default_rng(7)
+    out = daily_tests.selection_result(_rows("u", "selection", rng.normal(0.0, 0.004, 70)))
+    assert out["rho1"] is not None and isinstance(out["rho1_flag"], bool)
+    assert daily_tests.selection_result(_rows("u", "selection", [0.001] * 10))["rho1"] is None
+
+
 def test_a_retired_mandate_is_not_reviewed():
     from app.decision.llm_portfolio.review import run_mandate_review
 
@@ -274,6 +317,13 @@ def test_a_retired_mandate_is_not_reviewed():
     db.commit()
     out = run_mandate_review(db, uid, "B")
     assert out["status"] == "retired" and out["trades"] == []
+
+
+def test_the_skill_headline_names_the_cross_sector_fallback():
+    from app.decision.verification.trust import _selection_scope
+
+    assert _selection_scope({"n_fallback_days": 0}) == "same run, same sector"
+    assert "3 trading days" in _selection_scope({"n_fallback_days": 3})
 
 
 # --- the noise check (ADR 0018 §11) ------------------------------------------------

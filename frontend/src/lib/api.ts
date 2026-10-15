@@ -1694,6 +1694,8 @@ export interface TrustSelectionTest {
   futility_threshold: number;
   futility_delta_21d: number;
   n_fallback_days?: number;
+  rho1?: number | null;
+  rho1_flag?: boolean;
   state: "too_early" | "no_evidence" | "skill" | "harm" | "not_worth_following" | "not_valid";
   provisional?: boolean;
   noise_check?: TrustNoiseCheck | null;

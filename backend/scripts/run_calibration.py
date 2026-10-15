@@ -93,7 +93,8 @@ def main() -> None:
             for m in ("iid_normal", "t4_garch")
         }
         row["min_detectable_edge_21d"] = {
-            str(y): minimum_detectable_edge(spec, "iid_normal", sd, y, MDE_GRID_21D, n_paths=args.paths // 2, seed=13)
+            # The table's seed, so the two agree where an edge's median verdict sits near the horizon.
+            str(y): minimum_detectable_edge(spec, "iid_normal", sd, y, MDE_GRID_21D, n_paths=args.paths // 2, seed=12)
             for y in (5, 10)
         }
         out["tests"][spec.name] = row

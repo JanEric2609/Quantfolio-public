@@ -287,6 +287,8 @@ class SelectionTestOut(BaseModel):
     futility_threshold: float
     futility_delta_21d: float = Field(description="U's margin per 21 days, gross of costs.")
     n_fallback_days: int = 0
+    rho1: float | None = Field(default=None, description="Lag-1 autocorrelation of the first 63 days (shown, never whitened).")
+    rho1_flag: bool = False
     state: Literal["too_early", "no_evidence", "skill", "harm", "not_worth_following", "not_valid"]
     provisional: bool = Field(default=False, description="A verdict reached before the noise check's last look.")
     noise_check: NoiseCheckOut | None = None
