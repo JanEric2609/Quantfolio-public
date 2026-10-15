@@ -193,7 +193,14 @@ def cleanup_llm_audit_events() -> dict[str, int]:
             s = get_public_settings(db)
             raw_hours = int(s.get("prompt_raw_retention_hours", 24))
             delete_days = int(s.get("prompt_delete_after_days", 14))
-            return apply_prompt_retention_policy(db, raw_hours=raw_hours, delete_days=delete_days)
+            out = apply_prompt_retention_policy(db, raw_hours=raw_hours, delete_days=delete_days)
+            # Per-call metadata (model, sampling, tokens, outcome) is kept longer
+            # than the bodies: 180 days (plan 2026-10-14, M7).
+            from app.foundation.llm.audit import prune_call_metadata
+
+            out["call_metadata_deleted"] = prune_call_metadata(db)
+            db.commit()
+            return out
     result = [{}]
     def _cleanup_llm_audit_events_tracked() -> None:
         result[0] = _cleanup_llm_audit_events_inner()

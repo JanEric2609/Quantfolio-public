@@ -281,7 +281,9 @@ def test_a_flat_daily_record_after_three_months_is_no_evidence():
     db = _memory_db()
     user = _user(db)
     _seed_daily(db, user, "ideas", _daily(0.0, 80, sd=0.01))
-    _seed_daily(db, user, "selection", _daily(0.0, 80, sd=0.005))
+    # Seed 7's first 63 draws have VR(21) 3.7, one of the 2 % of clean series the noise
+    # check fails at day 63 (ADR 0018 §11); this test is about the state, not that check.
+    _seed_daily(db, user, "selection", _daily(0.0, 80, sd=0.005, seed=8))
 
     verdict = build_verdict(db, user.id, now=NOW)
 
@@ -294,7 +296,7 @@ def test_a_futile_selection_edge_sets_the_headline():
     db = _memory_db()
     user = _user(db)
     # No edge at all, with little noise: below the 0.6 % margin, but no harm.
-    _seed_daily(db, user, "selection", _daily(0.0, 1500, sd=0.002))
+    _seed_daily(db, user, "selection", _daily(0.0, 1500, sd=0.002, seed=8))  # seed 7 fails the noise check
 
     verdict = build_verdict(db, user.id, now=NOW)
 
@@ -841,3 +843,19 @@ def test_time_to_know_follows_the_issue_cadence_weekly_ideas_daily_advisor():
     assert advisor["n_needed"] == 3503 and advisor["lag_h"] == 12  # 12 dates need 12 chains so far
     assert advisor["years_needed"] == pytest.approx(3503 / 252)
     assert verdict["n_needed"] == 868 and verdict["years_needed"] > 0  # the picks' own schedule
+
+
+def test_a_failed_noise_check_voids_the_selection_headline():
+    db = _memory_db()
+    user = _user(db)
+    rng = np.random.default_rng(3)
+    x, prev = [], 0.0
+    for _ in range(300):  # AR(1) 0.9: the daily values persist
+        prev = 0.9 * prev + rng.normal(0.0, 0.002)
+        x.append(prev - 0.001)
+    _seed_daily(db, user, "selection", x)
+
+    verdict = build_verdict(db, user.id, now=NOW)
+
+    assert verdict["daily_tests"]["selection"]["state"] == "not_valid"
+    assert verdict["headline"].startswith("No valid verdict: the selection series' daily values persist")

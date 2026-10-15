@@ -1664,6 +1664,13 @@ export interface TrustTimeGrid {
   grid: { edge_21d: number; q50_years: number | null; beyond_40y?: boolean }[];
 }
 
+/** ADR 0018 §11: VR(21) at 63, 126 and 252 observed days; a failed look voids the series' verdicts. */
+export interface TrustNoiseCheck {
+  status: "pending" | "passing" | "passed" | "failed";
+  failed_at_day: number | null;
+  looks: { day: number; cutoff: number; vr: number | null; failed: boolean }[];
+}
+
 /** S (picks vs same-run, same-sector non-picks) and U (futility) on one series. */
 export interface TrustSelectionTest {
   family: "S";
@@ -1689,7 +1696,9 @@ export interface TrustSelectionTest {
   n_fallback_days?: number;
   rho1?: number | null;
   rho1_flag?: boolean;
-  state: "too_early" | "no_evidence" | "skill" | "harm" | "not_worth_following";
+  state: "too_early" | "no_evidence" | "skill" | "harm" | "not_worth_following" | "not_valid";
+  provisional?: boolean;
+  noise_check?: TrustNoiseCheck | null;
   path: { day: string; e_skill: number; e_harm: number }[];
   time_to_know: TrustTimeGrid;
 }
@@ -1707,7 +1716,8 @@ export interface TrustMandateTest {
   delta_21d: number;
   threshold: number;
   retire?: boolean;
-  state: "too_early" | "no_evidence" | "retire";
+  state: "too_early" | "no_evidence" | "retire" | "retire_pending" | "not_valid";
+  noise_check?: TrustNoiseCheck | null;
 }
 
 /** Advisor minus Discover picks on the days both had open calls; descriptive only. */
@@ -3940,6 +3950,9 @@ export interface CrashGuardEpisode {
 
 export interface CrashGuardState {
   active: boolean;
+  /** The last close is more than 3 trading days old: no level is judged on it. */
+  stale?: boolean;
+  stale_since?: string | null;
   market: {
     ticker: string;
     as_of: string | null;

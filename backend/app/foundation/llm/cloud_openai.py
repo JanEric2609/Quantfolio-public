@@ -13,6 +13,10 @@ from .base import Completion, LlmUnavailableError
 class OpenAIBackend:
     """OpenAI client using OpenAI SDK."""
 
+    name = "openai"
+    #: What every request sends.
+    sampling = {"temperature": 0.2}
+
     def __init__(self, api_key: str, model: str = "gpt-4o-mini"):
         """Initialize the OpenAI backend.
 

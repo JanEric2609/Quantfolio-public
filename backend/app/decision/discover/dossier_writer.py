@@ -88,9 +88,9 @@ _RETRY_EXCERPT_CHARS = 800
 DOSSIER_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        # direction and horizon_months are deterministic (plan 2026-10-12,
-        # D7): the system sets them after validation, like conviction.
-        "conviction": {"type": "number", "minimum": 0, "maximum": 1},
+        # direction, horizon_months and conviction are set by the system after
+        # validation (plan 2026-10-12, D7); asking the model for a conviction it
+        # never keeps only spent tokens (plan 2026-10-14, E4).
         # minLength closes the same gap fixed in advisor/llm_decision.py's
         # thesis field (audit-fixes-2026-08 todo 6): without it, the grammar
         # has no reason to refuse "" for a required string field.
@@ -124,7 +124,7 @@ DOSSIER_JSON_SCHEMA: dict[str, Any] = {
     # a 3-month forecast — see docs/archive/plans/unified-portfolio-engine-implementation.md
     # Phase 3).
     "required": [
-        "conviction", "thesis", "key_risks",
+        "thesis", "key_risks",
     ],
 }
 
@@ -884,7 +884,12 @@ def write_dossier(
                     )
                     if check.ok:
                         candidate_dossier["thesis"] = check.thesis
-                        candidate_dossier["key_risks"] = check.key_risks
+                        # The data's own risks stay in, whatever the LLM wrote
+                        # (plan 2026-10-14, M3).
+                        earnings, data_risks = deterministic_risks(scores, signal_breakdown)
+                        candidate_dossier["key_risks"] = merge_risks(
+                            [*earnings, *data_risks], list(check.key_risks),
+                        )[:_MAX_RISKS]
                         final_dossier = candidate_dossier
                         break
                     content_rejections.append(check.reason or "invalid")
@@ -1017,7 +1022,10 @@ def write_dossier(
             mode="discover",
             data_quality_score=__import__("decimal").Decimal(str(_as_dict(scores.get("history_ingest")).get("coverage", 0.0))),
             risk_score=__import__("decimal").Decimal(str(_as_dict(scores.get("momentum_quality")).get("volatility_6m", 0.5))),
-            portfolio_fit_score=__import__("decimal").Decimal(str(_as_dict(scores.get("portfolio_fit")).get("fit_score", 0.0))),
+            portfolio_fit_score=(
+                None if (fit_value := _as_dict(scores.get("portfolio_fit")).get("fit_score")) is None
+                else __import__("decimal").Decimal(str(fit_value))
+            ),
             # Only a proven track record puts a Discover idea in front of the
             # owner as a decision. Anything else (unproven, insufficient_data,
             # missing gate) stays as a "draft": the row is kept and Discover
@@ -1604,6 +1612,49 @@ def _resolve_expected_return(
     }
 
 
+def deterministic_risks(
+    scores: dict[str, Any], signal_breakdown: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    """The risks the data shows, whoever writes the dossier: (earnings, the rest).
+
+    The earnings event leads the list. Insider and IBES lines are ticker-matched,
+    not gvkey-verified (see the pit_panel_joins module docstring), so the
+    caveat is spelled out.
+    """
+    earnings: list[str] = []
+    earnings_line = _earnings_text(_as_dict(scores.get("sentiment_fundamentals")))
+    if earnings_line:
+        earnings.append(f"Earnings event: {earnings_line}")
+    rest: list[str] = []
+    cluster_score = signal_breakdown.get("insider_cluster_buy_score")
+    if cluster_score:
+        rest.append(
+            f"Insider activity: {int(cluster_score)} distinct insider(s) opportunistically bought in "
+            "the trailing 30 days (SEC filings, best-effort ticker match)."
+        )
+    sue = signal_breakdown.get("estimate_sue")
+    if sue is not None and abs(sue) >= 1.0:
+        beat = "beat" if sue > 0 else "missed"
+        rest.append(
+            f"Analyst estimates: most recent reported earnings {beat} consensus by "
+            f"{abs(sue):.2f} standardized units (IBES, best-effort ticker match)."
+        )
+    return earnings, rest
+
+
+def merge_risks(required: list[str], written: list[Any]) -> list[str]:
+    """``required`` first, then the writer's own risks not already covered
+    (compared on the first 40 characters, case-insensitive)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for risk in [*required, *(str(r) for r in written if r)]:
+        key = risk.strip().lower()[:40]
+        if key and key not in seen:
+            seen.add(key)
+            out.append(risk)
+    return out
+
+
 def deterministic_template(
     candidate: dict[str, Any],
     scores: dict[str, Any],
@@ -1635,30 +1686,14 @@ def deterministic_template(
         signal_breakdown=signal_breakdown,
         annual=annual,
     )
+    earnings, data_risks = deterministic_risks(scores, signal_breakdown)
     key_risks = [
+        *earnings,
         "Market risk: broad equity drawdowns affect the position.",
         "Currency risk: non-EUR denominated assets carry FX exposure.",
         "Concentration risk: single-name exposure may exceed diversification targets.",
+        *data_risks,
     ]
-    # Ticker-matched, not gvkey-verified (see pit_panel_joins module
-    # docstring) -- the fallback template is the one place the LLM isn't
-    # around to weigh that caveat itself, so it's spelled out inline.
-    cluster_score = signal_breakdown.get("insider_cluster_buy_score")
-    if cluster_score:
-        key_risks.append(
-            f"Insider activity: {int(cluster_score)} distinct insider(s) opportunistically bought in "
-            "the trailing 30 days (SEC filings, best-effort ticker match)."
-        )
-    earnings_line = _earnings_text(_as_dict(scores.get("sentiment_fundamentals")))
-    if earnings_line:
-        key_risks.insert(0, f"Earnings event: {earnings_line}")
-    sue = signal_breakdown.get("estimate_sue")
-    if sue is not None and abs(sue) >= 1.0:
-        direction = "beat" if sue > 0 else "missed"
-        key_risks.append(
-            f"Analyst estimates: most recent reported earnings {direction} consensus by "
-            f"{abs(sue):.2f} standardized units (IBES, best-effort ticker match)."
-        )
 
     dossier = {
         "direction": direction if direction is not None else deterministic_direction(

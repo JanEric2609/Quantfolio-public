@@ -9,8 +9,12 @@ writes ``docs/research/calibration/calibration-<date>.json``:
 
 Not a trial: no return claim, nothing in the trial ledger.
 
+``--noise-check`` instead writes ``noise-check-<date>.json``: how often the
+ADR 0018 §11 noise check fails per noise model (20,000 paths each).
+
 Usage (from backend/):
     .venv/bin/python scripts/run_calibration.py [--paths 2000] [--out ../docs/research/calibration]
+    .venv/bin/python scripts/run_calibration.py --noise-check
 """
 from __future__ import annotations
 
@@ -24,7 +28,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.decision.verification import daily_tests as dt  # noqa: E402
-from app.lab.calibration import MODELS, TestSpec, minimum_detectable_edge, time_to_verdict, type_i_error  # noqa: E402
+from app.lab.calibration import (  # noqa: E402
+    MODELS,
+    TestSpec,
+    minimum_detectable_edge,
+    noise_check_fail_rates,
+    time_to_verdict,
+    type_i_error,
+)
 
 #: A mandate sleeve against MSCI World: about 0.8 % a day (a 78 %-cash sleeve on 1 % equity noise).
 MANDATE_SD_DAILY = 0.008
@@ -49,11 +60,29 @@ def specs() -> list[tuple[TestSpec, float]]:
     ]
 
 
+def noise_check(out_dir: Path) -> None:
+    """How often the noise check fails per model, at day 63 and at any of its looks."""
+    looks = dt.NOISE_CHECK_LOOKS
+    out = {"date": date.today().isoformat(), "paths": 20000, "looks": [list(lk) for lk in looks], "models": {}}
+    for m in MODELS:
+        out["models"][m] = noise_check_fail_rates(m, looks)
+        print(f"{m:<17} first look {out['models'][m]['first_look']:.3f}  any look {out['models'][m]['any_look']:.3f}",
+              flush=True)
+    path = out_dir / f"noise-check-{out['date']}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(out, indent=1))
+    print(path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--paths", type=int, default=2000)
     parser.add_argument("--out", default=str(Path(__file__).resolve().parents[2] / "docs" / "research" / "calibration"))
+    parser.add_argument("--noise-check", action="store_true", help="only the ADR 0018 §11 noise check")
     args = parser.parse_args()
+    if args.noise_check:
+        noise_check(Path(args.out))
+        return
     out: dict = {"date": date.today().isoformat(), "paths": args.paths, "tests": {}}
     for spec, sd in specs():
         row: dict = {"spec": spec.__dict__, "sd_daily": sd, "sd_21d": sd * math.sqrt(dt.HORIZON_DAYS)}

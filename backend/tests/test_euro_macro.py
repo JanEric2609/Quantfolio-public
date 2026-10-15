@@ -93,3 +93,18 @@ def test_latest_row_per_series_not_25_rows_of_estr():
     db.commit()
     names = [r["name"] for r in market.macro_indicators(db)]
     assert sorted(names) == ["ECB_DFR", "ESTR"]
+
+
+def test_a_series_whose_refresh_stopped_is_stale_even_when_another_is_fresh():
+    """Plan 2026-10-14, L3: the flag was the newest fetch over all series."""
+    from datetime import UTC, datetime
+
+    db = _memory_db()
+    store_series(db, "ESTR", [{"date": "2026-10-13", "value": 2.4}])
+    store_series(db, "ECB_DFR", [{"date": "2026-09-16", "value": 2.5}])
+    db.commit()
+    dfr = db.query(MacroIndicator).filter(MacroIndicator.name == "ECB_DFR").one()
+    dfr.fetched_at = datetime.now(UTC) - timedelta(days=20)
+    db.commit()
+    stale = {r["name"]: r["stale"] for r in market.macro_indicators(db)}
+    assert stale == {"ESTR": False, "ECB_DFR": True}

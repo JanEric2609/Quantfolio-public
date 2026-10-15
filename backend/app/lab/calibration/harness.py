@@ -18,6 +18,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from app.foundation.forecast_verification import variance_ratio
+
 TRADING_DAYS_PER_YEAR = 252
 HORIZON_DAYS = 21
 
@@ -202,3 +204,16 @@ def minimum_detectable_edge(spec: TestSpec, model: str, sd_daily: float, years: 
         if q50 is not None and q50 <= years:
             return edge
     return None
+
+
+def noise_check_fail_rates(model: str, looks: tuple[tuple[int, float], ...], *, n_paths: int = 20000,
+                           sd_daily: float = 0.005, seed: int = 9) -> dict[str, float]:
+    """Share of *model* paths the ADR 0018 §11 noise check fails: at the first look and at any look.
+
+    *looks* is ``daily_tests.NOISE_CHECK_LOOKS`` (observed days, VR(21) cutoff),
+    passed in like every other test constant. VR ignores the mean, so the
+    paths are simulated at mean 0.
+    """
+    x = simulate(model, n_paths, max(d for d, _ in looks), 0.0, sd_daily, seed)
+    fails = np.array([[(variance_ratio(row[:d], HORIZON_DAYS) or 0.0) > cut for d, cut in looks] for row in x])
+    return {"first_look": float(fails[:, 0].mean()), "any_look": float(fails.any(axis=1).mean())}

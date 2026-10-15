@@ -9,7 +9,7 @@ placed order back to the plan action it fulfils (ADR 0019 §3).
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.decision.monthly_plan import build_monthly_plan
@@ -307,6 +307,8 @@ class CrashGuardFinding(BaseModel):
 
 class CrashGuardResponse(BaseModel):
     active: bool
+    stale: bool = Field(default=False, description="The last close is more than 3 trading days old.")
+    stale_since: str | None = None
     market: CrashGuardMarket
     episodes: list[CrashGuardEpisode]
     message: str
