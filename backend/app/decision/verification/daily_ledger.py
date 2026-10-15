@@ -35,7 +35,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -355,6 +355,21 @@ def mandate_starts(db: Session, user_id: str) -> dict[str, date]:
     return out
 
 
+def _snapshot_job_days(db: Session) -> set[date]:
+    """Days whose paper snapshots the 00:00 job rewrote at the close (a run on day D + 1 values D).
+
+    A failed run gives no day: it does not say which sleeve failed.
+    """
+    from app.foundation.models.entities import JobRun
+
+    runs = (
+        db.query(JobRun.started_at)
+        .filter(JobRun.job_name == "snapshot_paper_portfolios", JobRun.status.in_(("success", "warning")))
+        .all()
+    )
+    return {_utc_date(started) - timedelta(days=1) for (started,) in runs if started is not None}
+
+
 def freeze_mandate_series(
     db: Session,
     user_id: str,
@@ -367,9 +382,12 @@ def freeze_mandate_series(
     """Freeze a mandate sleeve's daily active return against the passive core.
 
     The NAV is the nightly ``paper_snapshots`` row (valued at that day's
-    closes, after fees and dividends). A day waits for both snapshots for at
-    most :data:`GRACE_TRADING_DAYS`, then freezes without an observation. Days
-    before the sleeve's inception (its last reset) are never written.
+    closes, after fees and dividends). A row counts only once it is end of day:
+    written after its day ended, or rewritten by a successful 00:00 run. The
+    advisor cycle's same-day row at the live quote does not count. A day waits
+    for both snapshots for at most :data:`GRACE_TRADING_DAYS`, then freezes
+    without an observation. Days before the sleeve's inception (its last reset)
+    are never written.
     """
     from app.foundation.models.entities import PaperSnapshot
 
@@ -381,11 +399,16 @@ def freeze_mandate_series(
     if start_at is None:
         return 0
     start = _utc_date(start_at)
-    navs = {
-        s.date: float(s.total_value)
-        for s in db.query(PaperSnapshot).filter(PaperSnapshot.portfolio_id == sleeve.id).all()
-        if s.total_value is not None and float(s.total_value) > 0
-    }
+    closed = _snapshot_job_days(db)
+    navs: dict[date, float] = {}
+    provisional: set[date] = set()
+    for s in db.query(PaperSnapshot).filter(PaperSnapshot.portfolio_id == sleeve.id).all():
+        if s.total_value is None or float(s.total_value) <= 0:
+            continue
+        if s.date in closed or (s.created_at is not None and _utc_date(s.created_at) > s.date):
+            navs[s.date] = float(s.total_value)
+        else:
+            provisional.add(s.date)  # the advisor cycle's live-quote row; the 00:00 job never replaced it
     benchmark = passive_core_symbol(db)
     prices = EurSeries(db, days=(today - start).days + _PAD_DAYS, refresh=refresh, loader=loader)
     calendar = [d for d in prices.calendar(benchmark) if d <= today]
@@ -402,7 +425,7 @@ def freeze_mandate_series(
         if a is None or b is None:
             if behind < GRACE_TRADING_DAYS:
                 break  # the nightly snapshot may still come; frozen days stay a contiguous prefix
-            detail["missing"] = "snapshot"
+            detail["missing"] = "snapshot_provisional" if {prev, day} & provisional else "snapshot"
         else:
             bench_r, _ = daily_return(prices, benchmark, prev, day)
             value = b / a - 1.0 - bench_r

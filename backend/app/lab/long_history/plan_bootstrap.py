@@ -77,7 +77,7 @@ def bootstrap_indices(pool: np.ndarray, n_paths: int, horizon: int, rng: np.rand
 
 def simulate_rule(returns: np.ndarray, idx: np.ndarray, rule: str, horizon: int,
                   costs: PlanCosts) -> dict[str, np.ndarray]:
-    """Terminal real wealth, max drawdown and R5's withdrawal shortfall per path.
+    """Terminal real wealth, cost basis, max drawdown and R5's withdrawal shortfall per path.
 
     *returns* is (years, assets) real returns; *idx* the bootstrap rows (paths, horizon).
     Each year: contribute, rebalance to target (paying trading cost and the tax
@@ -112,7 +112,11 @@ def simulate_rule(returns: np.ndarray, idx: np.ndarray, rule: str, horizon: int,
         cost = costs.trade_cost * np.abs(trade).sum(axis=1) + tax
         buy = np.clip(trade, 0.0, None)
         basis = basis + buy
-        value = target * ((wealth - cost) / np.where(wealth > 0, wealth, 1.0))[:, None]
+        # Costs are paid by selling the same share of every holding: basis falls with it.
+        # (The gain on that small sale is left untaxed.)
+        kept = ((wealth - cost) / np.where(wealth > 0, wealth, 1.0))[:, None]
+        value = target * kept
+        basis = basis * kept
         r = returns[idx[:, t]] - ter
         # The year's base is the wealth before trading costs and tax, so they count as a fall.
         before = wealth
@@ -122,7 +126,7 @@ def simulate_rule(returns: np.ndarray, idx: np.ndarray, rule: str, horizon: int,
         peak = np.maximum(peak, unit)
         max_dd = np.maximum(max_dd, 1.0 - unit / peak)
     wealth = value.sum(axis=1)
-    out = {"wealth": wealth, "max_dd": max_dd}
+    out = {"wealth": wealth, "max_dd": max_dd, "basis": basis.sum(axis=1)}
     if rule == "R5":
         out["withdrawal_short"] = value[:, BILL] < R5_WITHDRAWAL - 1e-9
     return out

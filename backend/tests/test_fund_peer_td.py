@@ -144,14 +144,24 @@ def test_an_outage_keeps_the_last_good_figures_and_old_ones_age_out(monkeypatch)
     assert stored_peer_td(db, today=TODAY + timedelta(days=fund_tracking.MAX_AGE_DAYS + 1)) == {}
 
 
-def test_tracking_difference_never_picks_between_indexes():
-    tilt = [c for c in CANDIDATES if c.sleeve == "tilt"]
-    assert len({c.index for c in tilt}) > 1
-    plain = suggest_fund("tilt")
-    for c in tilt:
-        favoured = suggest_fund("tilt", peer_td={c.isin: 5.0})
-        index = next(x.index for x in CANDIDATES if x.isin == favoured.isin)
-        assert index == next(x.index for x in CANDIDATES if x.isin == plain.isin)
+@pytest.mark.parametrize("sleeve", ["core", "tilt"])
+def test_tracking_difference_never_picks_between_indexes(sleeve):
+    funds = [c for c in CANDIDATES if c.sleeve == sleeve]
+    assert len({c.index for c in funds}) > 1
+    plain = suggest_fund(sleeve)
+    index_of = {c.isin: c.index for c in CANDIDATES}
+    for c in funds:
+        for td in (5.0, -5.0):
+            favoured = suggest_fund(sleeve, peer_td={c.isin: td})
+            assert index_of[favoured.isin] == index_of[plain.isin]
+
+
+def test_a_small_td_edge_inside_msci_world_does_not_hand_core_to_all_world():
+    # Pullfrog's case: EUNL ahead of XDWD on TD by 7 bp made VWCE (FTSE All-World) the core pick.
+    plain = suggest_fund("core")
+    tilted = suggest_fund("core", peer_td={"IE00B4L5Y983": 0.07, "IE00BJ0KDQ92": 0.0})
+    index_of = {c.isin: c.index for c in CANDIDATES}
+    assert index_of[tilted.isin] == index_of[plain.isin]
 
 
 # --- the Trust page's "funds" row --------------------------------------------------
@@ -197,3 +207,7 @@ def test_held_funds_compare_each_curated_fund_with_its_best_peer():
     assert world["best_peer"]["isin"] == "IE00BJ0KDQ92" and world["gap_pct"] == pytest.approx(0.2)
     assert world["flag"] is True
     assert all_world["td_pct"] is None and all_world["best_peer"] is None and all_world["flag"] is False
+    # Past MAX_AGE_DAYS the figures and their date both drop out.
+    late = date(2026, 10, 1) + timedelta(days=fund_tracking.MAX_AGE_DAYS + 1)
+    stale = fund_tracking.held_funds(db, user.id, today=late)
+    assert stale["as_of"] is None and all(f["td_pct"] is None for f in stale["funds"])

@@ -159,6 +159,23 @@ def test_a_cash_only_book_still_gets_a_target(monkeypatch):
     assert [(t.key, t.weights) for t in targets] == [(f"book:{user.id}", {"cash": 1.0})]
 
 
+def test_an_all_unpriced_sleeve_keeps_its_target_as_fully_unpriced():
+    from app.lab.risk_forecast.service import _Closes, paper_targets
+
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.flush()
+    p = PaperPortfolio(user_id=user.id, name="Mandate B", initial_cash=Decimal("0"))
+    db.add(p)
+    db.flush()
+    db.add(PaperHolding(portfolio_id=p.id, ticker="NOPRICE", name="No price", quantity=Decimal("5"),
+                        avg_buy_price=Decimal("100")))
+    db.commit()
+    targets = [t for t in paper_targets(db, _Closes(db)) if t.key == f"paper:{p.id}"]
+    assert len(targets) == 1 and targets[0].weights == {} and targets[0].unpriced == pytest.approx(1.0)
+
+
 def test_the_calibration_set_is_centred_on_the_fitting_window_only(monkeypatch):
     # A drift that starts only in the last third must not change what the
     # first two thirds' models are fitted on.

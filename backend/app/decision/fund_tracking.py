@@ -178,8 +178,9 @@ def held_funds(db: Session, user_id: str, *, today: date | None = None) -> dict[
     from app.foundation.settings import get_setting_row
 
     stored = get_setting_row(db, SETTING_KEY)
-    as_of = stored.get("as_of") if isinstance(stored, dict) else None
     td = stored_peer_td(db, today=today)
+    # A measurement past MAX_AGE_DAYS reads as no measurement, date included.
+    as_of = stored.get("as_of") if isinstance(stored, dict) and td else None
     by_isin = {c.isin: c for c in CANDIDATES}
     funds: list[dict[str, Any]] = []
     others = 0

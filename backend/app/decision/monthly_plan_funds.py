@@ -210,18 +210,16 @@ def _rank(sleeve: str, peer_td: Mapping[str, float] | None) -> list[FundCandidat
     """The sleeve's candidates, best first.
 
     Tracking difference is measured against funds of the same index, so it
-    ranks within an index only: each index's best fund is picked with it, then
-    those winners are compared without it (a tilt sleeve mixes several factor
-    indexes, and only some of them have two curated funds).
+    ranks within an index only. Indexes are ordered by their best fund's score
+    without it (core mixes MSCI World and FTSE All-World, a tilt sleeve several
+    factor indexes); within an index, tracking difference then picks the fund.
     """
     pool = [c for c in CANDIDATES if c.sleeve == sleeve]
     by_index: dict[str, list[FundCandidate]] = {}
     for c in pool:
         by_index.setdefault(c.index, []).append(c)
-    for members in by_index.values():
-        members.sort(key=lambda c: (-score_fund(c, peer_td), c.isin))
-    winners = sorted((m[0] for m in by_index.values()), key=lambda c: (-score_fund(c), c.isin))
-    order = {c.index: i for i, c in enumerate(winners)}
+    best = {idx: max(score_fund(m) for m in members) for idx, members in by_index.items()}
+    order = {idx: i for i, idx in enumerate(sorted(best, key=lambda idx: (-best[idx], idx)))}
     return sorted(pool, key=lambda c: (order[c.index], -score_fund(c, peer_td), c.isin))
 
 

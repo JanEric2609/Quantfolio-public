@@ -182,7 +182,7 @@ def test_scores_wait_for_inflation_then_use_the_real_time_weighted_return(_model
     plan_bands.publish_due(db, today=day)
     end = day + timedelta(days=365)
     # The book doubled its unit value: +100 % nominal, far above any band.
-    monkeypatch.setattr(service, "_unit_values", lambda _db, _uid, _start: ([(day, 1.0), (end, 2.0)], None))
+    monkeypatch.setattr(service, "_unit_values", lambda _db, _uid, _start, _end: ([(day, 1.0), (end, 2.0)], None))
 
     waiting = plan_bands.score_due(db, today=end + timedelta(days=3))
     assert waiting["scored"] == 0 and "HICP" in waiting["waiting"][0]
@@ -206,7 +206,7 @@ def test_a_year_without_a_unit_value_near_its_start_waits(_models, monkeypatch):
     plan_bands.publish_due(db, today=day)
     end = day + timedelta(days=365)
     _hicp(db, end.replace(day=1), 2.0)
-    monkeypatch.setattr(service, "_unit_values", lambda _db, _uid, _start: ([(day + timedelta(days=30), 1.0),
+    monkeypatch.setattr(service, "_unit_values", lambda _db, _uid, _start, _end: ([(day + timedelta(days=30), 1.0),
                                                                              (end, 1.1)], None))
     out = plan_bands.score_due(db, today=end)
     assert out["scored"] == 0 and "no unit value" in out["waiting"][0]
@@ -221,7 +221,7 @@ def test_a_year_with_unpriced_holdings_waits(_models, monkeypatch):
     _hicp(db, end.replace(day=1), 2.0)
     perf = {"series": [{"date": day.isoformat(), "unit_value": 1.0}, {"date": end.isoformat(), "unit_value": 1.0}],
             "unpriced": ["IE0000000001"], "days_without_full_prices": 0}
-    monkeypatch.setattr("app.foundation.book_performance.compute_book_performance", lambda db, uid, start: perf)
+    monkeypatch.setattr("app.foundation.book_performance.compute_book_performance", lambda db, uid, start, end: perf)
     out = plan_bands.score_due(db, today=end)
     assert out["scored"] == 0 and "no price for IE0000000001" in out["waiting"][0]
     perf.update(unpriced=[], days_without_full_prices=service.MAX_FLAT_DAYS + 1)
@@ -239,7 +239,7 @@ def test_overlapping_years_count_once_in_the_interval(_models, monkeypatch):
     for d in days:
         _hicp(db, (d + timedelta(days=365)).replace(day=1), 0.0)
     monkeypatch.setattr(service, "_unit_values",
-                        lambda _db, _uid, start: ([(start, 1.0), (start + timedelta(days=365), 1.03)], None))
+                        lambda _db, _uid, start, _end: ([(start, 1.0), (start + timedelta(days=365), 1.03)], None))
     plan_bands.score_due(db, today=date(2025, 11, 20))
     plan_bands.score_due(db, today=date(2026, 10, 25))
     planner = next(m for m in plan_bands.summary(db, user.id) if m["model"] == "planner")

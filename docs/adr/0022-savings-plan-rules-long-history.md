@@ -174,6 +174,19 @@ costs and tax, so a year whose return just offset them showed no fall. It now me
 from the wealth before those deductions. Re-run on the same code otherwise, seed and data
 (`plan_rules_2026-10-15_dd_fix.json`, local): every Δ, interval, count and verdict is identical;
 the drawdowns move by at most 0.2 points, and only R1's rounded figures change (46 % / 68 % before).
+- **Run:** the file records code `6373dcb6`, because the run used that commit plus the uncommitted
+  two-line drawdown fix. Commit `b258b6b7` committed exactly that fix (its only change to
+  `plan_bootstrap.py`), so `b258b6b7` reproduces the file.
+
+**Correction of 2026-10-15 (cost basis).** Costs were paid by selling the same share of every
+holding, but the cost basis kept the full purchase, so later rebalances understated the gains and
+the tax on them. The basis now falls with the holdings.
+- **Run:** code `ba629ebdededc91fffa1c3ca244bf41601684460`, same seed and data
+  (`plan_rules_2026-10-15_basis_fix.json`, local).
+- **Outcome:** every figure in this section is unchanged at the precision shown, and so is the
+  verdict. The only change is a rounding flip: R1's 1950-2020 Δ is −18.65 % in both runs and now
+  rounds to −18.7 % (it read −18.6 %). The largest relative change in any per-country Δ is 5 %
+  of a 0.4 % figure.
 
 **Other reported quantities:**
 - **10 and 20 years, γ = 5:**

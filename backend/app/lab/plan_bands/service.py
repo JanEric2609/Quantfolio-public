@@ -151,16 +151,18 @@ def _inflation(db: Session, end: date) -> float | None:
     return float(row[0]) / 100.0 if row else None
 
 
-def _unit_values(db: Session, user_id: str, start: date) -> tuple[list[tuple[date, float]], str | None]:
-    """The book's unit values from *start*, and why they cannot be scored yet (None when they can).
+def _unit_values(db: Session, user_id: str, start: date, end: date
+                 ) -> tuple[list[tuple[date, float]], str | None]:
+    """The book's unit values from *start* to *end*, and why they cannot be scored yet (None when they can).
 
     A holding with no price at all is left out of the unit value, and a day
     without every price holds it flat; a score is final, so it waits for both
-    to clear (up to :data:`MAX_FLAT_DAYS` flat days are accepted).
+    to clear (up to :data:`MAX_FLAT_DAYS` flat days are accepted). Only the
+    band's own year counts: a fund bought after it does not hold the score up.
     """
     from app.foundation.book_performance import compute_book_performance
 
-    perf = compute_book_performance(db, user_id, start=start)
+    perf = compute_book_performance(db, user_id, start=start, end=end)
     series = [(date.fromisoformat(p["date"]), float(p["unit_value"])) for p in perf.get("series") or []
               if p.get("unit_value")]
     if perf.get("unpriced"):
@@ -191,7 +193,7 @@ def score_due(db: Session, *, today: date | None = None) -> dict[str, Any]:
         if inflation is None:
             waiting.append(f"{day}: HICP for {end:%Y-%m} not stored yet")
             continue
-        series, incomplete = _unit_values(db, user_id, day)
+        series, incomplete = _unit_values(db, user_id, day, end)
         if incomplete:
             waiting.append(f"{day}: {incomplete}")
             continue
