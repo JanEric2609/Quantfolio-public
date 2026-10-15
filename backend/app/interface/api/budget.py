@@ -61,7 +61,7 @@ from app.foundation.envelope import (
     sinking_fund_progress,
 )
 from app.foundation.expense_rules import apply_rules, llm_categorize_uncategorized, seed_default_rules
-from app.foundation.schemas.bounds import MoneyDecimal
+from app.foundation.schemas.bounds import DbInt, MoneyDecimal
 
 logger = logging.getLogger(__name__)
 
@@ -395,7 +395,7 @@ class ExpenseRuleIn(BaseModel):
     pattern: str
     match_type: str = "contains"
     category_id: str | None = None
-    priority: int = 10
+    priority: DbInt = 10
 
 
 class ExpenseRuleOut(BaseModel):

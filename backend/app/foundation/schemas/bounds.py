@@ -37,7 +37,11 @@ def between(low: float | None, high: float | None) -> AfterValidator:
     return AfterValidator(check)
 
 
+#: An ``Integer`` column: SQLite refuses a value past 64 bits and Postgres past 32.
+INT32_MAX = 2**31 - 1
+
 MoneyDecimal = Annotated[Decimal, between(-MAX_MONEY, MAX_MONEY)]
+DbInt = Annotated[int, between(-INT32_MAX - 1, INT32_MAX)]
 MoneyFloat = Annotated[float, between(-MAX_MONEY, MAX_MONEY)]
 
 
