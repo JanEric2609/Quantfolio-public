@@ -206,6 +206,15 @@ def _no_live_revenue_confirmation(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_split_events(monkeypatch):
+    """A re-pull reads the provider's split events from yfinance; offline in
+    tests (unreadable, so a split signature stays a split)."""
+    from app.foundation.data_backbone import ingest
+
+    monkeypatch.setattr(ingest, "_fetch_split_events", lambda _symbol: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_live_etf_composition(monkeypatch):
     """Keep ETF look-through off yfinance: the mandate assessment reads the
     top holdings of every held ETF. The static fallback still answers; a test
