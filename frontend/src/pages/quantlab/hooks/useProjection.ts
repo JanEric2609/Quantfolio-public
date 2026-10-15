@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, type PortfolioProjection } from "../../../lib/api";
+import { api, type LongHistoryProjection, type PortfolioProjection } from "../../../lib/api";
 
 export interface ProjectionParams {
   years: number;
@@ -17,6 +17,18 @@ export const useProjection = (p: ProjectionParams) => {
   return useQuery({
     queryKey: ["quant", "projection", q.toString()],
     queryFn: () => api<PortfolioProjection>(`/api/quant/portfolio/projection?${q.toString()}`),
+    staleTime: 10 * 60_000,
+  });
+};
+
+/** The same plan drawn from 150 years of euro-area history (plan D6); no return input, history sets it. */
+export const useLongHistoryProjection = (p: Omit<ProjectionParams, "realReturn">) => {
+  const q = new URLSearchParams({ years: String(p.years) });
+  if (p.goal != null && p.goal > 0) q.set("goal_eur", String(p.goal));
+  if (p.contribution != null) q.set("contribution_eur", String(p.contribution));
+  return useQuery({
+    queryKey: ["quant", "projection", "long-history", q.toString()],
+    queryFn: () => api<LongHistoryProjection>(`/api/quant/portfolio/projection/long-history?${q.toString()}`),
     staleTime: 10 * 60_000,
   });
 };

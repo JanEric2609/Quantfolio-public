@@ -236,3 +236,30 @@ def alert_owners(
         if bell:
             create_notification(db, admin.id, source, title, body=body, severity=severity, href=href)
     return sent
+
+
+def alert_user(
+    db: Session,
+    user_id: str,
+    *,
+    source: str,
+    title: str,
+    telegram_text: str | None,
+    body: str | None = None,
+    severity: str = "info",
+    href: str | None = None,
+) -> bool:
+    """Tell one user: a Telegram message to their linked chat and an in-app notification.
+
+    The per-user counterpart of :func:`alert_owners`, for news about that
+    user's own book (a retired mandate). Returns True when Telegram sent.
+    """
+    from app.foundation.telegram_bot import get_linked_account, send_telegram_message
+
+    sent = False
+    if telegram_text:
+        account = get_linked_account(db, user_id)
+        if account is not None and account.chat_id:
+            sent = send_telegram_message(db, str(account.chat_id), telegram_text)
+    create_notification(db, user_id, source, title, body=body, severity=severity, href=href)
+    return sent

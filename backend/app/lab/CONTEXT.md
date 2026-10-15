@@ -19,12 +19,18 @@ walk-forward CV; a mined signal, so it gates nothing before DSR/PBO),
 `satellite` (the stock-picking sleeve those scores would drive, simulated
 through `quant_lab`'s engine net of broker costs and German tax),
 `evidence_gate` (Deflated Sharpe and PBO over those pre-registered records:
-the step a mined score must pass before it may touch money).
+the step a mined score must pass before it may touch money),
+`calibration` (the ADR 0018 trust tests run on simulated noise: false alarms,
+time to a verdict; not a trial), `risk_forecast` (daily VaR/ES bands for each
+sleeve, the real book and the benchmark, stored before the fact and scored after),
+`long_history` (ADR 0022's harness on JST Macrohistory: the plan's asset mix
+over 150 years) and `plan_bands` (the wealth plan's one-year real-return bands,
+published monthly and scored a year later).
 
 ## Public surface (facade `app.lab.<package>`)
 
 Each sub-package is its own facade and carries its own `CONTEXT.md`; the
-layer root `app/lab/__init__.py` is intentionally empty. Of the eight,
+layer root `app/lab/__init__.py` is intentionally empty. Of these,
 `alphacrafter` is additionally enrolled as a *source* module on the
 decision-loop facade-only contracts (it may not deep-import decision
 internals).

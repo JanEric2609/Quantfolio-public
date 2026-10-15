@@ -191,10 +191,14 @@ def poll_once(db: Session, *, long_poll_seconds: int = 20) -> int | None:
 def poll_telegram_updates(
     db: Session,
     *,
-    budget_seconds: float = 50.0,
+    budget_seconds: float = 45.0,
     long_poll_seconds: int = 20,
 ) -> dict[str, int]:
     """Long-poll repeatedly for about *budget_seconds* (one scheduler tick).
+
+    The budget stays well inside the job's one-minute interval: at 50 s, a
+    last poll's HTTP time pushed the run past the next tick, which the
+    scheduler then skipped (plan 2026-10-14, E5).
 
     A quiet poll returns after ``long_poll_seconds``; an update returns at once,
     so the loop keeps the bot responsive between scheduler ticks. A skipped or

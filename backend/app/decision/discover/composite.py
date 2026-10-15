@@ -253,7 +253,11 @@ def derive_signals_from_scores(scores: dict[str, Any] | Any) -> dict[str, float]
     )
     has_sentiment_data = _num(sent_fund.get("social_mentions"), 0.0) > 0
 
-    fit_score = _num(fit.get("fit_score"), 0.5)
+    # No portfolio (or too little overlap): the component is dropped and the
+    # composite renormalises, like fundamentals without data (plan
+    # 2026-10-14, M5). Breakdowns stored before carry 0.5 and replay as they ran.
+    fit_value = fit.get("fit_score")
+    fit_score = float(fit_value) if isinstance(fit_value, (int, float)) else None
 
     # Wiring fix (F9, #4): pipeline.py's stage_quant_signals stamps
     # scores["quant_signals"]["instrument_type"] = "money_market" specifically
@@ -331,11 +335,12 @@ def derive_signals_from_scores(scores: dict[str, Any] | Any) -> dict[str, float]
 
     signals: dict[str, float] = {
         "ic_icir": ic_score,
-        "portfolio": fit_score,
         "momentum": momentum_score,
         "risk": risk_score,
         "benchmark": benchmark_score,
     }
+    if fit_score is not None:
+        signals["portfolio"] = fit_score
     if has_fundamentals_data:
         # Blend the live-provider fundamentals_score with the gvkey-verified
         # WRDS/JKP factor-characteristics score (stage_quant_signals) when

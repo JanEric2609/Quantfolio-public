@@ -30,7 +30,7 @@ def test_the_pre_registered_constants_match_the_adr():
     assert daily_tests.BET_CAP == 0.75
     assert daily_tests.THRESHOLD == pytest.approx(40.0)
     assert daily_tests.TAU_21D == 0.005
-    assert daily_tests.PRIMARY_TEST_START.isoformat() == "2026-10-12"
+    assert daily_tests.PRIMARY_TEST_START.isoformat() == "2026-10-15"
 
 
 def test_the_bet_cap_keeps_every_factor_at_or_above_a_quarter():

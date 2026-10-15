@@ -67,6 +67,7 @@ def test_plan_response_carries_suggestions_and_acc_dist_note():
     assert all(s["why"] for s in plan["suggested_funds"])
     assert "NV-Bescheinigung" in plan["acc_dist_note"]
     assert "Vorabpauschale" in plan["acc_dist_note"]
+    assert "16 countries since 1870" in plan["mix_note"] and "not a forecast" in plan["mix_note"]
     assert ACC_DIST_NOTE == plan["acc_dist_note"]
 
 

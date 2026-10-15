@@ -231,15 +231,18 @@ def build_panel(
                     data = result.get("data", {}) if isinstance(result, dict) else {}
                     fundamentals_scalar[symbol] = _extract_fundamentals(data)
 
+    # One DataFrame per field from a dict of columns: inserting ~150 columns
+    # one by one fragmented the frame (about 650 PerformanceWarnings a run;
+    # plan 2026-10-14, E5).
     for field in FUNDAMENTAL_FIELDS:
-        frame = pd.DataFrame(index=reference_index)
+        columns: dict[str, np.ndarray] = {}
         for symbol in reference_columns:
             if symbol in fundamentals_series[field]:
-                frame[symbol] = fundamentals_series[field][symbol].to_numpy()
+                columns[symbol] = fundamentals_series[field][symbol].to_numpy()
             else:
                 value = fundamentals_scalar.get(symbol, {}).get(field)
-                frame[symbol] = np.full(len(reference_index), value, dtype=float)
-        panel[field] = frame.reindex(columns=reference_columns)
+                columns[symbol] = np.full(len(reference_index), value, dtype=float)
+        panel[field] = pd.DataFrame(columns, index=reference_index).reindex(columns=reference_columns)
 
     # WRDS factor characteristics / IBES estimates / insider trading: no
     # provider-registry scalar fallback exists for these (unlike
@@ -258,12 +261,14 @@ def build_panel(
             else {f: {} for f in value_columns}
         )
         for field in value_columns:
-            frame = pd.DataFrame(index=reference_index)
-            for symbol in reference_columns:
-                if symbol in series[field]:
-                    frame[symbol] = series[field][symbol].to_numpy()
-                else:
-                    frame[symbol] = np.full(len(reference_index), np.nan, dtype=float)
-            panel[field] = frame.reindex(columns=reference_columns)
+            columns = {
+                symbol: (
+                    series[field][symbol].to_numpy()
+                    if symbol in series[field]
+                    else np.full(len(reference_index), np.nan, dtype=float)
+                )
+                for symbol in reference_columns
+            }
+            panel[field] = pd.DataFrame(columns, index=reference_index).reindex(columns=reference_columns)
 
     return panel

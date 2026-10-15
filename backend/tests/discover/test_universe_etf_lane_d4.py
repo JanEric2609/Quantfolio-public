@@ -123,6 +123,9 @@ def test_plan_gap_lines_info_list_and_coverage():
     assert bond["fund"]["isin"] == "IE00B3VTMJ91"
     assert bond["amount_eur"] == pytest.approx(1_000.0)
     assert "Teilfreistellung 0 %" in bond["tax_note"]
+    assert "20 % bond sleeve did not beat 100 % equity" in bond["evidence"]
+    assert "not a forecast" in bond["evidence"]
+    assert "evidence" not in lines["gold"]
     gold = lines["gold"]
     assert gold["fund"]["isin"] == "DE000A0S9GB0"
     assert "§ 23 EStG" in gold["tax_note"] and "12 months" in gold["tax_note"]
@@ -135,3 +138,14 @@ def test_plan_gap_lines_info_list_and_coverage():
 def test_no_targets_no_lines():
     out = asset_class_suggestions({}, [], book_eur=10_000.0, universe=[])
     assert out["lines"] == []
+
+
+def test_bond_cost_note_reads_the_nearest_tested_mix():
+    from app.decision.plan_rules import BOND_MIXES, bond_cost_note, bond_mix
+
+    assert bond_mix(10).rule == "R2" and bond_mix(30).rule == "R2" and bond_mix(35).rule == "R3"
+    assert not any(m.passed for m in BOND_MIXES)  # ADR 0022: no rule passed
+    note = bond_cost_note(40)
+    assert "40 % bond sleeve" in note
+    assert "14.2 % less savings" in note and "0.7 % more" in note
+    assert "31 % against 48 %" in note
