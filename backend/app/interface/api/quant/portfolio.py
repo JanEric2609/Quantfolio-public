@@ -523,7 +523,8 @@ def portfolio_projection_long_history(
     )
     goal = goal_eur if goal_eur is not None else (float(settings["mc_goal_eur"]) if settings.get("mc_goal_eur") else None)
     monthly = float(settings.get("monthly_contribution_eur") or 0) if contribution_eur is None else contribution_eur
-    mix = book_mix(combined_positions(db, user.id, include_unreconciled=True))
+    # The same inventory as the start value: reconciled positions only.
+    mix = book_mix(combined_positions(db, user.id))
     result = project_plan(history[0], history[1], start_value=start, monthly_contribution=monthly, years=years,
                           mix=mix, goal=goal)
     result["available"] = True

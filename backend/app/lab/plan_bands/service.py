@@ -43,6 +43,8 @@ HORIZON_DAYS = 365
 MAX_GAP_DAYS = 7
 #: After this many days past its end, a band that still cannot be scored is left unscored.
 GIVE_UP_DAYS = 75
+#: At most this many days without every price (held flat) in a scored year, about 2 %.
+MAX_FLAT_DAYS = 5
 COVERAGE_LEVEL = 0.8
 HICP = "HICP_EA"
 
@@ -149,12 +151,23 @@ def _inflation(db: Session, end: date) -> float | None:
     return float(row[0]) / 100.0 if row else None
 
 
-def _unit_values(db: Session, user_id: str, start: date) -> list[tuple[date, float]]:
+def _unit_values(db: Session, user_id: str, start: date) -> tuple[list[tuple[date, float]], str | None]:
+    """The book's unit values from *start*, and why they cannot be scored yet (None when they can).
+
+    A holding with no price at all is left out of the unit value, and a day
+    without every price holds it flat; a score is final, so it waits for both
+    to clear (up to :data:`MAX_FLAT_DAYS` flat days are accepted).
+    """
     from app.foundation.book_performance import compute_book_performance
 
     perf = compute_book_performance(db, user_id, start=start)
-    return [(date.fromisoformat(p["date"]), float(p["unit_value"])) for p in perf.get("series") or []
-            if p.get("unit_value")]
+    series = [(date.fromisoformat(p["date"]), float(p["unit_value"])) for p in perf.get("series") or []
+              if p.get("unit_value")]
+    if perf.get("unpriced"):
+        return series, f"no price for {', '.join(perf['unpriced'])}"
+    if int(perf.get("days_without_full_prices") or 0) > MAX_FLAT_DAYS:
+        return series, f"{perf['days_without_full_prices']} days without every price"
+    return series, None
 
 
 def score_due(db: Session, *, today: date | None = None) -> dict[str, Any]:
@@ -178,7 +191,10 @@ def score_due(db: Session, *, today: date | None = None) -> dict[str, Any]:
         if inflation is None:
             waiting.append(f"{day}: HICP for {end:%Y-%m} not stored yet")
             continue
-        series = _unit_values(db, user_id, day)
+        series, incomplete = _unit_values(db, user_id, day)
+        if incomplete:
+            waiting.append(f"{day}: {incomplete}")
+            continue
         first = next(((d, u) for d, u in series if d >= day), None)
         last = next(((d, u) for d, u in reversed(series) if d <= end), None)
         if (first is None or last is None or (first[0] - day).days > MAX_GAP_DAYS

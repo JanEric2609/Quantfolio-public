@@ -136,3 +136,43 @@ def test_risk_bands_endpoint(monkeypatch):
     finally:
         app.dependency_overrides.clear()
     assert body["targets"] == [] and "before the fact" in body["note"]
+
+
+def test_an_unpriced_holding_moves_the_target_by_zero_not_by_the_priced_lines():
+    from app.lab.risk_forecast.service import _shares
+
+    assert _shares({"AAA": 50.0}, 50.0) == {"AAA": 0.5}
+    assert _shares({"AAA": 50.0, "cash": 50.0}, 0.0) == {"AAA": 0.5, "cash": 0.5}
+    assert _shares({}, 10.0) == {}
+
+
+def test_a_cash_only_book_still_gets_a_target(monkeypatch):
+    from app.lab.risk_forecast.service import _Closes, book_targets
+
+    db = _memory_db()
+    user = User(username="c", password_hash="x")
+    db.add(user)
+    db.commit()
+    monkeypatch.setattr("app.foundation.live_positions.combined_positions", lambda db, uid, **kw: [])
+    monkeypatch.setattr("app.foundation.live_positions.synced_cash", lambda db, uid: (Decimal("500"), None))
+    targets = book_targets(db, _Closes(db))
+    assert [(t.key, t.weights) for t in targets] == [(f"book:{user.id}", {"cash": 1.0})]
+
+
+def test_the_calibration_set_is_centred_on_the_fitting_window_only(monkeypatch):
+    # A drift that starts only in the last third must not change what the
+    # first two thirds' models are fitted on.
+    from app.lab.risk_forecast import models
+
+    seen: list[np.ndarray] = []
+    real = models.fit_garch_t
+    monkeypatch.setattr(models, "fit_garch_t", lambda r: seen.append(np.array(r)) or real(r))
+    rng = np.random.default_rng(4)
+    base = rng.normal(0.0, 0.01, MIN_OBS + 100)
+    drifted = base.copy()
+    drifted[(2 * len(base)) // 3:] += 0.002
+    forecast(base, 1)
+    first = seen[0]
+    seen.clear()
+    forecast(drifted, 1)
+    np.testing.assert_array_equal(seen[0], first)

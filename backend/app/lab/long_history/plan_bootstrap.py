@@ -114,7 +114,8 @@ def simulate_rule(returns: np.ndarray, idx: np.ndarray, rule: str, horizon: int,
         basis = basis + buy
         value = target * ((wealth - cost) / np.where(wealth > 0, wealth, 1.0))[:, None]
         r = returns[idx[:, t]] - ter
-        before = value.sum(axis=1)
+        # The year's base is the wealth before trading costs and tax, so they count as a fall.
+        before = wealth
         value = value * (1.0 + r)
         after = value.sum(axis=1)
         unit = unit * np.where(before > 0, after / np.where(before > 0, before, 1.0), 1.0)

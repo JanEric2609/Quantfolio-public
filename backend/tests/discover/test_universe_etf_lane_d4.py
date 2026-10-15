@@ -147,5 +147,5 @@ def test_bond_cost_note_reads_the_nearest_tested_mix():
     assert not any(m.passed for m in BOND_MIXES)  # ADR 0022: no rule passed
     note = bond_cost_note(40)
     assert "40 % bond sleeve" in note
-    assert "14.2 % more savings" in note and "0.7 % less" in note
+    assert "14.2 % less savings" in note and "0.7 % more" in note
     assert "31 % against 48 %" in note

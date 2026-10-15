@@ -22,7 +22,8 @@ class TestedMix:
 
     rule: str
     label: str
-    #: Equivalent savings change against 100 % equity, pooled over the 16 countries.
+    #: ADR 0022's Δ = CE_rule / CE_R0 - 1, pooled over the 16 countries: a 100 %-equity saver
+    #: needs Δ more savings to match the rule (Δ < 0: |Δ| less).
     pooled_delta: float
     #: The median of the 16 per-country changes.
     median_country_delta: float
@@ -56,14 +57,19 @@ def bond_mix(target_pct: float) -> TestedMix:
 
 
 def bond_cost_note(target_pct: float) -> str:
-    """The cost line shown next to the owner's bond target. It describes history and forecasts nothing."""
+    """The cost line shown next to the owner's bond target. It describes history and forecasts nothing.
+
+    Told from the 100 %-equity saver's side, which is how ADR 0022 defines Δ,
+    so the figures are the ADR's own without conversion.
+    """
     mix = bond_mix(target_pct)
-    pooled = "more" if mix.pooled_delta < 0 else "less"
-    median = "less" if mix.median_country_delta > 0 else "more"
+    pooled = "more" if mix.pooled_delta > 0 else "less"
+    median = "more" if mix.median_country_delta > 0 else "less"
     return (
-        f"Tested ({SOURCE}): {mix.label} did not beat 100 % equity. Across all 16 countries a saver "
-        f"needed about {_signed_pct(mix.pooled_delta)} {pooled} savings for the same outcome; in the "
-        f"median country about {_signed_pct(mix.median_country_delta)} {median}. Typical worst fall "
+        f"Tested ({SOURCE}): {mix.label} did not beat 100 % equity. Across all 16 countries, 100 % "
+        f"equity reached the same outcome with about {_signed_pct(mix.pooled_delta)} {pooled} savings; "
+        f"in the median country it needed about {_signed_pct(mix.median_country_delta)} {median}. "
+        f"Typical worst fall "
         f"{100 * mix.max_dd_median:.0f} % against {100 * R0_MAX_DD_MEDIAN:.0f} %. Your target, your "
         f"choice; a history, not a forecast."
     )
