@@ -68,7 +68,6 @@ _KNOWN_FUNDS = {
     "IWDA.AS": "etf", "SXR8.DE": "etf", "EUNL.DE": "etf",
     "CBE3.L": "bond", "EUNH.DE": "bond", "EUNA.DE": "bond", "IBCM.DE": "bond", "XEON.DE": "money_market",
 }
-_KNOWN_ETFS = frozenset(_KNOWN_FUNDS)
 
 
 @dataclass(frozen=True)

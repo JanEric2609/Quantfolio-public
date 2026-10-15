@@ -417,3 +417,34 @@ def test_the_api_state_says_when_prices_are_stale(monkeypatch):
     _patch_prices(monkeypatch, [100, 99], start=date(2020, 1, 1))
     out = crash_guard.crash_guard(db, user.id)
     assert out["stale"] is True and out["stale_since"] == "2020-01-02"
+
+
+def test_a_lagging_feed_that_keeps_adding_old_days_alerts_once(monkeypatch):
+    db = _memory_db()
+    user = _user(db)
+    _with_telegram(db, user)
+    sent = _capture(monkeypatch)
+    # Five business days behind on each run, one new bar a day.
+    for run_day, last in ((date(2026, 10, 15), date(2026, 10, 8)), (date(2026, 10, 16), date(2026, 10, 9)),
+                          (date(2026, 10, 19), date(2026, 10, 12))):
+        _patch_prices(monkeypatch, [100, 100], start=last - timedelta(days=1))
+        assert crash_guard.run_daily(db, now=datetime.combine(run_day, datetime.min.time(), tzinfo=UTC)
+                                     .replace(hour=7))["skipped"] == "stale"
+    assert len(sent) == 1 and "no fresh prices" in sent[0]
+    assert crash_guard._load_state(db)["stale_since"] == "2026-10-08"
+
+
+def test_a_new_benchmark_gets_its_own_stale_alert(monkeypatch):
+    from app.foundation.settings import upsert_public_settings
+
+    db = _memory_db()
+    user = _user(db)
+    _with_telegram(db, user)
+    sent = _capture(monkeypatch)
+    now = datetime(2026, 10, 15, 7, tzinfo=UTC)
+    _patch_prices(monkeypatch, [100, 100], start=date(2026, 10, 7))
+    crash_guard.run_daily(db, now=now)
+    upsert_public_settings(db, {"benchmark_ticker": "VWCE.DE"})
+    crash_guard.run_daily(db, now=now)
+    assert len(sent) == 2 and all("no fresh prices" in s for s in sent)
+    assert crash_guard._load_state(db)["ticker"] == "VWCE.DE"

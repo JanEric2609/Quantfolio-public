@@ -324,25 +324,29 @@ def run_daily(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
         logger.warning("Crash guard skipped: no closes for %s", state.ticker)
         return {"level": None, "drawdown": None, "sent": [], "skipped": "no_prices"}
     previous = _load_state(db)
+    if previous.get("ticker") and previous["ticker"] != state.ticker:
+        # The benchmark was changed: the stored level, peak, findings and stale
+        # episode belong to the old index, so start over rather than compare across the two.
+        previous = {}
     lag = stale_days(state, when.date())
     if lag is not None and lag > STALE_TRADING_DAYS:
         # Old closes say nothing about today: during a fall they would read
-        # "calm". One alert per stale episode, no level or recovery message.
+        # "calm". One alert per stale episode (it ends with the next fresh run,
+        # which writes the state without ``stale_since``), even while a lagging
+        # feed keeps adding old days; no level or recovery message.
         sent: list[str] = []
-        if previous.get("stale_since") != state.as_of:
+        since = previous.get("stale_since")
+        if not since:
+            since = state.as_of
             text = (f"Quantfolio crash guard: no fresh prices for {index_name(state.ticker)} since "
                     f"{state.as_of}. The crash guard cannot judge the market until they return.")
             alert_owners(db, source="crash_guard", title=f"Crash guard: prices stale since {state.as_of}",
                          telegram_text=text, body=text, severity="warning", href="/plan")
             sent.append("stale")
         upsert_public_settings(db, {STATE_KEY: {
-            **previous, "stale_since": state.as_of, "checked_at": when.isoformat(),
+            **previous, "ticker": state.ticker, "stale_since": since, "checked_at": when.isoformat(),
         }})
         return {"level": None, "drawdown": state.drawdown, "sent": sent, "skipped": "stale"}
-    if previous.get("ticker") and previous["ticker"] != state.ticker:
-        # The benchmark was changed: the stored level, peak and findings belong
-        # to the old index, so start over rather than compare across the two.
-        previous = {}
     worst_level = str(previous.get("worst_level") or "calm")
     seen: set[str] = set(previous.get("behaviour_seen") or [])
     sent: list[str] = []
