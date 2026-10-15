@@ -631,7 +631,8 @@ found the tests hold under fat tails, volatility clustering and regimes, but not
 serial correlation:
 - at a daily autocorrelation of 0.15, false alarms run about 2-2.5× the nominal rate;
 - when each pick's drift persists through its 21 days (the `overlap_21d` stress model),
-  52-58 %.
+  56-62 % (52-58 % before the harness fix of 2026-10-15; the noise check's own rates did not
+  change).
 
 The check below catches the second case. It cannot catch the first within a year, and the page
 says so.

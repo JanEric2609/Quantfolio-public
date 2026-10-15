@@ -236,6 +236,10 @@ MANDATE_SIGMA_DAYS = 63
 MANDATE_SIGMA_FLOOR = 0.001 / math.sqrt(21)
 #: Clip as a multiple of the reference noise, as everywhere.
 CLIP_SIGMAS = 4.5
+#: ADR 0018 §11, the noise check: (observed days, VR(21) cutoff) per look. A
+#: failed look is final; sized on the 2026-10-14 harness (about 5 % of clean
+#: series fail at any look, 99 % of overlap_21d series do).
+NOISE_CHECK_LOOKS = ((63, 3.0), (126, 2.3), (252, 1.8))
 SELECTION_QUESTION = "Do Discover's picks beat the stocks it could have picked instead (same run, same sector)?"
 FUTILITY_QUESTION = "Is the picks' selection edge too small to pay for trading them?"
 
@@ -258,6 +262,31 @@ def _bet(values: list[float], clip: float, shift: float = 0.0) -> tuple[fv.EProc
     )
 
 
+def noise_check(values: list[float]) -> dict[str, Any]:
+    """ADR 0018 §11: VR(21) of the first *n* observed values at each look in :data:`NOISE_CHECK_LOOKS`.
+
+    ``status`` is ``pending`` before the first look, ``passing`` while the
+    looks reached so far are within their cutoffs, ``passed`` after all of
+    them and ``failed`` from the first look above its cutoff on.
+    """
+    looks = []
+    failed_at: int | None = None
+    for days, cutoff in NOISE_CHECK_LOOKS:
+        vr = fv.variance_ratio(values[:days], HORIZON_DAYS) if len(values) >= days else None
+        failed = vr is not None and vr > cutoff
+        if failed and failed_at is None:
+            failed_at = days
+        looks.append({"day": days, "cutoff": cutoff, "vr": vr, "failed": failed})
+    reached = [lk for lk in looks if lk["vr"] is not None]
+    if failed_at is not None:
+        status = "failed"
+    elif len(reached) == len(looks):
+        status = "passed"
+    else:
+        status = "passing" if reached else "pending"
+    return {"status": status, "failed_at_day": failed_at, "looks": looks}
+
+
 def selection_result(rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
     """S (skill and harm, K = 2) and U (futility, K = 1) on the ``selection`` series."""
     days, values, n_pre = _observed(rows)
@@ -267,7 +296,10 @@ def selection_result(rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
     _, futile = _bet(values, SELECTION_CLIP, shift=delta_d)
     rejected = fv.e_bh([skill.final, harm.final], FDR_LEVEL)
     futility = futile.final >= FUTILITY_THRESHOLD
-    if rejected[1]:
+    noise = noise_check(values)
+    if noise["status"] == "failed":
+        state = "not_valid"
+    elif rejected[1]:
         state = "harm"
     elif rejected[0]:
         state = "skill"
@@ -305,6 +337,9 @@ def selection_result(rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
         "rho1": rho1,
         "rho1_flag": rho1 is not None and abs(rho1) > AR1_FLAG,
         "state": state,
+        # A verdict before the day-252 look has passed is provisional (§11).
+        "provisional": state in ("skill", "harm", "not_worth_following") and noise["status"] != "passed",
+        "noise_check": noise,
         "path": _thin(days, skill.path, harm.path),
         "time_to_know": time_to_know_grid(sd, SELECTION_CLIP, measured),
     }
@@ -335,6 +370,7 @@ def mandate_results(
         out.append({
             "series": series,
             "mandate": mandate,
+            "noise_check": noise_check(values),
             "n_days": len(values),
             "n_tested_days": len(tested),
             "sigma_ref_daily": sigma,
@@ -343,11 +379,21 @@ def mandate_results(
             "e_futility": e,
             "delta_21d": MANDATE_DELTA_21D,
         })
-    rejected = fv.e_bh([m["e_futility"] for m in out], FDR_LEVEL)
+    # A series whose noise check failed enters e-BH with no evidence (§11).
+    rejected = fv.e_bh(
+        [1.0 if m["noise_check"]["status"] == "failed" else m["e_futility"] for m in out], FDR_LEVEL
+    )
     for m, r in zip(out, rejected):
+        status = m["noise_check"]["status"]
         m["threshold"] = THRESHOLD
-        m["retire"] = bool(r)
-        m["state"] = "retire" if r else ("too_early" if m["n_tested_days"] == 0 else "no_evidence")
+        # A mandate retires only after its series has passed all three looks.
+        m["retire"] = bool(r) and status == "passed"
+        if status == "failed":
+            m["state"] = "not_valid"
+        elif r:
+            m["state"] = "retire" if m["retire"] else "retire_pending"
+        else:
+            m["state"] = "too_early" if m["n_tested_days"] == 0 else "no_evidence"
     return out
 
 
@@ -506,10 +552,12 @@ __all__ = [
     "CLIP",
     "FAMILIES",
     "MIN_DAYS_FOR_STATE",
+    "NOISE_CHECK_LOOKS",
     "PRIMARY_TEST_START",
     "THRESHOLD",
     "build_daily_tests",
     "mandate_results",
+    "noise_check",
     "paired_comparison",
     "selection_result",
     "series_result",

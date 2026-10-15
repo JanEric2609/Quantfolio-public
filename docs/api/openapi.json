@@ -6030,6 +6030,16 @@
             "title": "N Tested Days",
             "type": "integer"
           },
+          "noise_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoiseCheckOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "retire": {
             "default": false,
             "title": "Retire",
@@ -6058,7 +6068,9 @@
             "enum": [
               "too_early",
               "no_evidence",
-              "retire"
+              "retire",
+              "retire_pending",
+              "not_valid"
             ],
             "title": "State",
             "type": "string"
@@ -6838,6 +6850,80 @@
           "sinking_funds"
         ],
         "title": "MonthlyReviewOut",
+        "type": "object"
+      },
+      "NoiseCheckOut": {
+        "description": "ADR 0018 \u00a711: serial correlation that would void the daily e-processes.",
+        "properties": {
+          "failed_at_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed At Day"
+          },
+          "looks": {
+            "items": {
+              "$ref": "#/components/schemas/NoiseLookOut"
+            },
+            "title": "Looks",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "passing",
+              "passed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "NoiseCheckOut",
+        "type": "object"
+      },
+      "NoiseLookOut": {
+        "properties": {
+          "cutoff": {
+            "title": "Cutoff",
+            "type": "number"
+          },
+          "day": {
+            "description": "Observed days the look uses.",
+            "title": "Day",
+            "type": "integer"
+          },
+          "failed": {
+            "default": false,
+            "title": "Failed",
+            "type": "boolean"
+          },
+          "vr": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "VR(21) of the first `day` observed values; null before then.",
+            "title": "Vr"
+          }
+        },
+        "required": [
+          "day",
+          "cutoff"
+        ],
+        "title": "NoiseLookOut",
         "type": "object"
       },
       "ObsidianQueryRequest": {
@@ -11637,12 +11723,28 @@
             "title": "N Fallback Days",
             "type": "integer"
           },
+          "noise_check": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NoiseCheckOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "path": {
             "items": {
               "$ref": "#/components/schemas/EPathPointOut"
             },
             "title": "Path",
             "type": "array"
+          },
+          "provisional": {
+            "default": false,
+            "description": "A verdict reached before the noise check's last look.",
+            "title": "Provisional",
+            "type": "boolean"
           },
           "question": {
             "title": "Question",
@@ -11702,7 +11804,8 @@
               "no_evidence",
               "skill",
               "harm",
-              "not_worth_following"
+              "not_worth_following",
+              "not_valid"
             ],
             "title": "State",
             "type": "string"
