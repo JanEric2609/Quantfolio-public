@@ -1920,6 +1920,23 @@
               }
             ],
             "title": "Plan Note"
+          },
+          "stale": {
+            "default": false,
+            "description": "The last close is more than 3 trading days old.",
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "stale_since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale Since"
           }
         },
         "required": [

@@ -40,4 +40,10 @@ describe("CrashGuardCard", () => {
     renderCard({ ...base, plan_note: null });
     expect(screen.getByRole("link", { name: "Profile" })).toHaveAttribute("href", "/settings/profile");
   });
+
+  it("says the prices are stale instead of judging the market on them", () => {
+    renderCard({ ...base, active: false, stale: true, stale_since: "2026-10-08", behaviour: [] });
+    expect(screen.getByRole("heading", { name: "No fresh market prices since 2026-10-08" })).toBeInTheDocument();
+    expect(screen.getByTestId("crash-guard-stale")).toBeInTheDocument();
+  });
 });
