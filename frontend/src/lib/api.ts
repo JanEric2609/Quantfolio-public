@@ -1712,6 +1712,27 @@ export interface TrustTierRate {
   range: [number, number] | null;
 }
 
+/** Held curated funds against their same-index peers (GET /api/trust/funds; plan 2026-10-14, C4). */
+export interface TrustHeldFund {
+  isin: string;
+  name: string;
+  index: string;
+  value: number;
+  td_pct: number | null;
+  best_peer: { isin: string; name: string; td_pct: number } | null;
+  gap_pct: number | null;
+  flag: boolean;
+}
+
+export interface TrustFunds {
+  as_of: string | null;
+  years: number;
+  flag_pct: number;
+  funds: TrustHeldFund[];
+  n_other_positions: number;
+  note: string;
+}
+
 export interface TrustRankingSection {
   n_runs: number;
   n_cohort_runs: number;

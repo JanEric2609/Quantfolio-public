@@ -95,3 +95,61 @@ def stored_peer_td(db: Session) -> dict[str, float]:
     td = stored.get("td_pct") if isinstance(stored, dict) else None
     return {str(k): float(v) for k, v in td.items()} if isinstance(td, dict) else {}
 
+
+
+#: A held fund trailing its best same-index peer by more than this (% a year) is flagged.
+GAP_FLAG_PCT = 0.10
+
+
+def held_funds(db: Session, user_id: str) -> dict[str, Any]:
+    """The Trust page's "funds" row: each held curated fund's tracking difference against its peers.
+
+    Descriptive, monthly (the figures come from :func:`refresh_peer_td`). A
+    fund outside the curated list has no same-index peers here and is only
+    counted. ``gap_pct`` is how far the fund trails the best measured peer on
+    its index, in % a year; above :data:`GAP_FLAG_PCT` it is flagged.
+    """
+    from app.foundation.live_positions import combined_positions
+    from app.foundation.settings import get_setting_row
+
+    stored = get_setting_row(db, SETTING_KEY)
+    as_of = stored.get("as_of") if isinstance(stored, dict) else None
+    td = stored_peer_td(db)
+    by_isin = {c.isin: c for c in CANDIDATES}
+    funds: list[dict[str, Any]] = []
+    others = 0
+    for pos in combined_positions(db, user_id, include_unreconciled=True):
+        c = by_isin.get(pos.isin)
+        if c is None:
+            others += 1
+            continue
+        own = td.get(c.isin)
+        peers = [p for p in CANDIDATES if p.index == c.index and p.isin != c.isin and p.isin in td]
+        best = max(peers, key=lambda p: td[p.isin], default=None)
+        gap = round(td[best.isin] - own, 4) if best is not None and own is not None else None
+        funds.append({
+            "isin": c.isin,
+            "name": c.name,
+            "index": c.index,
+            "value": float(pos.value or 0),
+            "td_pct": own,
+            "best_peer": (
+                {"isin": best.isin, "name": best.name, "td_pct": td[best.isin]}
+                if best is not None and gap is not None and gap > 0 else None
+            ),
+            "gap_pct": max(gap, 0.0) if gap is not None else None,
+            "flag": gap is not None and gap > GAP_FLAG_PCT,
+        })
+    funds.sort(key=lambda f: -f["value"])
+    return {
+        "as_of": as_of,
+        "years": YEARS,
+        "flag_pct": GAP_FLAG_PCT,
+        "funds": funds,
+        "n_other_positions": others,
+        "note": (
+            "Tracking difference: a fund's yearly return over 3 years minus the median of the curated funds on the "
+            "same index, from stored closes. Measured monthly; a gap is a reason to look, not to switch: a switch "
+            "realises gains and costs a spread."
+        ),
+    }

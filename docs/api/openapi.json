@@ -4237,6 +4237,76 @@
         "title": "ForecastGridOut",
         "type": "object"
       },
+      "FundPeerOut": {
+        "properties": {
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "td_pct": {
+            "title": "Td Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "isin",
+          "name",
+          "td_pct"
+        ],
+        "title": "FundPeerOut",
+        "type": "object"
+      },
+      "FundsOut": {
+        "description": "Held curated funds against their same-index peers (plan 2026-10-14, C4 live check).",
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "flag_pct": {
+            "title": "Flag Pct",
+            "type": "number"
+          },
+          "funds": {
+            "items": {
+              "$ref": "#/components/schemas/HeldFundOut"
+            },
+            "title": "Funds",
+            "type": "array"
+          },
+          "n_other_positions": {
+            "default": 0,
+            "title": "N Other Positions",
+            "type": "integer"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "years": {
+            "title": "Years",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "years",
+          "flag_pct",
+          "note"
+        ],
+        "title": "FundsOut",
+        "type": "object"
+      },
       "GainHarvestNoticeOut": {
         "properties": {
           "code": {
@@ -4585,6 +4655,72 @@
           "after_tax_factor"
         ],
         "title": "HaircutOut",
+        "type": "object"
+      },
+      "HeldFundOut": {
+        "properties": {
+          "best_peer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FundPeerOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "flag": {
+            "default": false,
+            "title": "Flag",
+            "type": "boolean"
+          },
+          "gap_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gap Pct"
+          },
+          "index": {
+            "title": "Index",
+            "type": "string"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "td_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "% a year against the same-index median; null when unmeasured.",
+            "title": "Td Pct"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "isin",
+          "name",
+          "index",
+          "value"
+        ],
+        "title": "HeldFundOut",
         "type": "object"
       },
       "HistoryOut": {
@@ -31640,6 +31776,28 @@
           }
         },
         "summary": "Get Calls",
+        "tags": [
+          "trust"
+        ]
+      }
+    },
+    "/api/trust/funds": {
+      "get": {
+        "description": "Each held curated fund's tracking difference against funds on the same index (descriptive, monthly).",
+        "operationId": "get_funds_api_trust_funds_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FundsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Funds",
         "tags": [
           "trust"
         ]

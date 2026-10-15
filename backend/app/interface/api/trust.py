@@ -551,6 +551,45 @@ class HistoryOut(BaseModel):
     disclosures: list[str]
 
 
+class FundPeerOut(BaseModel):
+    isin: str
+    name: str
+    td_pct: float
+
+
+class HeldFundOut(BaseModel):
+    isin: str
+    name: str
+    index: str
+    value: float
+    td_pct: float | None = Field(default=None, description="% a year against the same-index median; null when unmeasured.")
+    best_peer: FundPeerOut | None = None
+    gap_pct: float | None = None
+    flag: bool = False
+
+
+class FundsOut(BaseModel):
+    """Held curated funds against their same-index peers (plan 2026-10-14, C4 live check)."""
+
+    as_of: str | None = None
+    years: int
+    flag_pct: float
+    funds: list[HeldFundOut] = Field(default_factory=list)
+    n_other_positions: int = 0
+    note: str
+
+
+@router.get("/funds", response_model=FundsOut)
+def get_funds(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Each held curated fund's tracking difference against funds on the same index (descriptive, monthly)."""
+    from app.decision.fund_tracking import held_funds
+
+    return held_funds(db, user.id)
+
+
 @router.get("/verdict", response_model=VerdictOut)
 def get_verdict(
     user: User = Depends(current_user),
