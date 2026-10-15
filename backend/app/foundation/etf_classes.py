@@ -59,8 +59,8 @@ REFERENCE_FUNDS: dict[str, ReferenceFund] = {
                                          "iShares € Govt Bond 1-3yr UCITS ETF (Acc)", "Bloomberg Euro Govt 1-3Y"),
     "bond_govt_eur_mid": ReferenceFund("bond_govt_eur_mid", "EUNH.DE", "IE00B4WXJJ64",
                                        "iShares Core € Govt Bond UCITS ETF (Dist)", "Bloomberg Euro Govt"),
-    "bond_govt_eur_long": ReferenceFund("bond_govt_eur_long", "EUNH.DE", "IE00B4WXJJ64",
-                                        "iShares Core € Govt Bond UCITS ETF (Dist)", "Bloomberg Euro Govt"),
+    "bond_govt_eur_long": ReferenceFund("bond_govt_eur_long", "IBCM.DE", "IE00B1FZS806",
+                                        "iShares € Govt Bond 7-10yr UCITS ETF (Dist)", "Bloomberg Euro Govt 7-10Y"),
     "bond_aggregate_eur_hedged": ReferenceFund(
         "bond_aggregate_eur_hedged", "EUNA.DE", "IE00BDBRDM35",
         "iShares Core Global Aggregate Bond UCITS ETF EUR Hedged (Acc)", "Bloomberg Global Aggregate (EUR hedged)",
@@ -82,6 +82,7 @@ _OVERRIDES: dict[str, tuple[str, str]] = {
     "IE00B4L5YC18": ("equity_region", "MSCI EM"),
     "IE00B3VTMJ91": ("bond_govt_eur_short", "Euro Govt 1-3Y"),
     "IE00B4WXJJ64": ("bond_govt_eur_mid", "Euro Govt"),
+    "IE00B1FZS806": ("bond_govt_eur_long", "Euro Govt 7-10Y"),
     "IE00BDBRDM35": ("bond_aggregate_eur_hedged", "Bloomberg Global Aggregate (EUR hedged)"),
     "LU0290358497": ("money_market", "€STR"),
     "DE000A0S9GB0": ("gold", "Gold"),

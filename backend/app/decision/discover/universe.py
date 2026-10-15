@@ -680,6 +680,22 @@ def build_universe(
         .limit(50)
     ).scalars().all()
 
+    # The same size and liquidity floors as the index names (plan 2026-10-14,
+    # L4): a positive headline does not make a micro-cap tradeable.
+    news_tickers = sorted({n.ticker.upper() for n in news_rows if n.ticker} - seen - set(held))
+    news_fund = _batch_load_fundamental_cache(db, news_tickers)
+    missing = [t for t in news_tickers if t not in news_fund]
+    if missing:
+        fetched: dict[str, dict[str, Any]] = {}
+        for t in missing:
+            try:
+                fetched[t] = _fetch_live_fundamentals_no_db(t, registry)[1]
+            except Exception:  # noqa: BLE001 - an unknown size fails the floor below
+                logger.debug("Live fundamentals failed for news ticker %s", t, exc_info=True)
+                fetched[t] = {}
+        _persist_fundamentals_batch(db, fetched)
+        news_fund.update(fetched)
+
     for news in news_rows:
         if not news.ticker:
             continue
@@ -687,6 +703,10 @@ def build_universe(
         if t in seen or t in held:
             continue
         if any(excl in t.lower() or excl in (news.title or "").lower() for excl in exclusions):
+            continue
+        fund = news_fund.get(t, {})
+        mcap_eur = _market_cap_eur(db, t, fund, eur_rates)
+        if mcap_eur is None or mcap_eur < min_mcap or _safe_float(fund.get("volume"), 0.0) < min_volume:
             continue
         # Try to resolve ISIN/name via fallback
         resolved = _search_symbol_fallback(t)

@@ -313,3 +313,26 @@ def test_index_lists_have_no_duplicates_and_eurostoxx_has_fifty():
         assert len(tickers) == len(set(tickers))
     assert len(universe._EUROSTOXX50) == 50
     assert all("." in t for t in universe._EUROSTOXX50)  # no US listings
+
+
+def test_news_candidates_pass_the_same_size_and_volume_floors():
+    """Plan 2026-10-14, L4: a positive headline used to admit any ticker."""
+    from datetime import timedelta
+    from decimal import Decimal
+
+    from app.foundation.models.entities import NewsItem
+
+    db = _memory_db()
+    user = _user(db)
+    for ticker in ("BIGNEWS", "TINYNEWS"):
+        db.add(NewsItem(
+            id=uuid4().hex, title=f"{ticker} beats", url=f"http://example.com/{ticker}", source="test",
+            ticker=ticker, sentiment_score=Decimal("0.8"), sentiment_label="positive",
+            published_at=datetime.now(UTC) - timedelta(days=2),
+        ))
+    db.commit()
+    _seed_fundamentals(db, "BIGNEWS", market_cap=5e9, volume=2e6)
+    _seed_fundamentals(db, "TINYNEWS", market_cap=3e7, volume=5e3)
+    with patch.object(universe_mod, "_search_symbol_fallback", return_value=None):
+        news = {c["symbol"] for c in _build(db, user) if c["source"] == "news_sentiment"}
+    assert news == {"BIGNEWS"}
