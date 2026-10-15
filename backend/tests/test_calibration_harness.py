@@ -47,3 +47,13 @@ def test_a_large_edge_is_found_and_crossing_days_are_one_based():
     assert (days > 0).all() and days.min() >= 1
     t = time_to_verdict(F1_LIKE, "iid_normal", 0.02, 0.005, years=10, n_paths=100, seed=6)
     assert t["q50_years"] is not None and t["q50_years"] < 3 and t["p_within_10y"] == 1.0
+
+
+def test_noise_check_fails_few_clean_series_and_most_persistent_ones():
+    from app.decision.verification.daily_tests import NOISE_CHECK_LOOKS
+    from app.lab.calibration import noise_check_fail_rates
+
+    clean = noise_check_fail_rates("iid_normal", NOISE_CHECK_LOOKS, n_paths=2000, seed=3)
+    stressed = noise_check_fail_rates("overlap_21d", NOISE_CHECK_LOOKS, n_paths=500, seed=3)
+    assert clean["any_look"] < 0.08 and clean["first_look"] <= clean["any_look"]
+    assert stressed["any_look"] > 0.95

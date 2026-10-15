@@ -569,6 +569,38 @@ describe("VerdictTab", () => {
     expect(within(screen.getByTestId("trust-alarms")).getByTestId("family-F1")).toBeInTheDocument();
   });
 
+  it("marks a selection series that failed its noise check as not valid", async () => {
+    const base = makeTests();
+    const looks = [
+      { day: 63, cutoff: 3, vr: 3.4, failed: true },
+      { day: 126, cutoff: 2.3, vr: null, failed: false },
+      { day: 252, cutoff: 1.8, vr: null, failed: false },
+    ];
+    renderTab(
+      makeVerdict({
+        daily_tests: {
+          ...base,
+          selection: {
+            family: "S", series: "selection", role: "primary", question: "q", futility_question: "fq",
+            start: "2026-10-15", n_days: 70, first_day: "2026-10-15", mean_21d: -0.002, mean_ci_21d: null,
+            clip: 0.0225, sigma_ref: 0.005, e_skill: 1, e_harm: 3, e_futility: 2, threshold: 40,
+            futility_threshold: 20, futility_delta_21d: 0.006, state: "not_valid", path: [],
+            noise_check: { status: "failed", failed_at_day: 63, looks },
+            time_to_know: { sd_daily: 0.005, grid: [] },
+          },
+          mandates: [
+            { series: "mandate_a", mandate: "A", n_days: 200, n_tested_days: 137, sigma_ref_daily: 0.004, clip: 0.018,
+              mean_21d: -0.08, e_futility: 90, delta_21d: 0.002, threshold: 40, state: "retire_pending",
+              noise_check: { status: "passing", failed_at_day: null, looks: looks.map((l) => ({ ...l, vr: l.day <= 126 ? 1.1 : null, failed: false })) } },
+          ],
+        },
+      }),
+    );
+    expect(await screen.findByTestId("family-S")).toHaveTextContent("Not valid: serial correlation");
+    expect(screen.getByTestId("selection-noise")).toHaveTextContent("Noise check failed at day 63: day 63: 3.40 (limit 3)");
+    expect(screen.getByTestId("mandates")).toHaveTextContent("retires once its noise check passes at 252 days");
+  });
+
   it("shows a glossary and the method note at the bottom", async () => {
     renderTab(makeVerdict());
     const glossary = await screen.findByRole("heading", { name: "Glossary" });

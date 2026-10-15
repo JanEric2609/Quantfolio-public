@@ -777,20 +777,28 @@ def _headline(tests: dict[str, Any], today: date) -> str:
     sel = tests.get("selection") or {}
     n = int(sel.get("n_days") or 0)
     state = sel.get("state")
+    # A verdict before the noise check's last look is provisional (ADR 0018 §11).
+    tail = " Provisional until the noise check at 252 trading days." if sel.get("provisional") else ""
+    if state == "not_valid":
+        day = (sel.get("noise_check") or {}).get("failed_at_day")
+        return (
+            f"No valid verdict: the selection series' daily values persist (noise check failed at day {day}), "
+            "so its daily tests can raise false alarms. The test moves to one observation per 21 days."
+        )
     if state == "skill":
         return (
             f"Evidence that Discover picks well: its picks beat the stocks it could have picked instead "
-            f"(same run, same sector), e = {sel['e_skill']:,.0f} over {_days(n)}."
+            f"(same run, same sector), e = {sel['e_skill']:,.0f} over {_days(n)}.{tail}"
         )
     if state == "harm":
         return (
             f"Evidence of harm: the picks did worse than the stocks Discover could have picked instead "
-            f"(e = {sel['e_harm']:,.0f} over {_days(n)})."
+            f"(e = {sel['e_harm']:,.0f} over {_days(n)}).{tail}"
         )
     if state == "not_worth_following":
         return (
             f"Not worth following: the picks' edge over the stocks Discover could have picked is below what "
-            f"pays for trading them (e = {sel['e_futility']:,.0f} over {_days(n)})."
+            f"pays for trading them (e = {sel['e_futility']:,.0f} over {_days(n)}).{tail}"
         )
     if n == 0:
         start = date.fromisoformat(str(sel.get("start") or f1["start"]))

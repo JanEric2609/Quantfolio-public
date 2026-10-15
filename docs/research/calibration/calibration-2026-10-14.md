@@ -37,19 +37,35 @@ and nothing goes into the trial ledger.
      persistence over a month, and slight reversal if anything. But nothing measured yet rules
      it out for these baskets.
 
-## Recommendation (owner decision; not implemented)
+## The noise check (adopted 2026-10-15; ADR 0018 amendment of 2026-10-14, §11)
 
-Add a pre-registered **noise check** to ADR 0018's amendment before any e-value is read. It
-belongs in the same window in which M measures σ.
-- **When:** on day 63 after T0.
-- **What:** compute each series' variance ratio VR(21), the variance of non-overlapping 21-day
-  sums over 21 × the daily variance, with its standard error.
-- **If VR(21) > 1.3:** the Trust page marks that series' S/U/M verdicts "not valid: serial
-  correlation", and a new amendment moves that test to non-overlapping cohorts. Each cohort is
-  then one observation of its whole 21-day return.
-- **Otherwise:** nothing changes.
+The owner adopted a pre-registered **noise check** for S, U and M, measured on the series' own
+noise, not its mean.
 
-The check uses only the series' own noise, not its mean, so it does not peek at the answer.
+- **Statistic:** VR(21), Lo and MacKinlay's overlapping variance ratio
+  (`foundation.forecast_verification.variance_ratio`).
+- **Looks and cutoffs:** at 63, 126 and 252 observed days, failing above 3.0, 2.3 and 1.8.
+- **On failure:** the failure is final. The series' verdicts read "not valid: serial
+  correlation", and its test moves to non-overlapping observations.
+- **Until the day-252 look passes:** S/U verdicts are provisional, and no mandate retires.
+
+The single cutoff first recommended here (1.3 on day 63) was dropped before adoption. With 63
+days, VR(21) has a standard error of about 0.6, so 1.3 fails about a quarter of clean series.
+
+How often the check fails, from 20,000 paths per model
+(`run_calibration.py --noise-check`, `noise-check-2026-10-15.json`):
+
+| Model | Fails at day 63 | Fails at any look |
+|---|---|---|
+| iid normal | 2.0 % | 4.9 % |
+| t(4)-GARCH | 2.0 % | 6.1 % |
+| regime switch | 2.5 % | 8.3 % |
+| AR(1) 0.15 | 5.8 % | 19.9 % |
+| overlap 21d | 52.6 % | 99.2 % |
+
+- **What it catches:** the check catches the failure that matters, persistent per-pick drift.
+- **What it misses:** it cannot reliably catch AR(1) 0.15 within a year. In that case false
+  alarms stay at about 2× nominal, and the page does not claim otherwise.
 
 ## Time to a verdict (iid normal; t(4)-GARCH in brackets)
 
