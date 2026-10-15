@@ -62,6 +62,11 @@ def _is_schema_rejection(exc: BaseException) -> bool:
 class LocalLlamaBackend:
     """OpenAI-compatible llama.cpp client."""
 
+    #: The label audit rows and ``Completion.backend`` use.
+    name = "local_llama"
+    #: What every request sends (the audit row records it).
+    sampling = {k: QWEN_SAMPLING[k] for k in ("temperature", "top_p", "top_k")}
+
     def __init__(self, base_url: str, model: str = "qwen3.5-9b", api_key: str | None = None):
         """Initialize the local llama backend.
 
