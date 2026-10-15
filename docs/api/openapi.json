@@ -7662,6 +7662,177 @@
         "title": "PlanAction",
         "type": "object"
       },
+      "PlanBandModelOut": {
+        "properties": {
+          "above": {
+            "title": "Above",
+            "type": "integer"
+          },
+          "below": {
+            "title": "Below",
+            "type": "integer"
+          },
+          "coverage_high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage High"
+          },
+          "coverage_low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Low"
+          },
+          "first_check": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Check"
+          },
+          "inside": {
+            "title": "Inside",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "latest": {
+            "$ref": "#/components/schemas/PlanBandOut"
+          },
+          "model": {
+            "enum": [
+              "planner",
+              "long_history"
+            ],
+            "title": "Model",
+            "type": "string"
+          },
+          "n_bands": {
+            "title": "N Bands",
+            "type": "integer"
+          },
+          "n_independent": {
+            "title": "N Independent",
+            "type": "integer"
+          },
+          "n_scored": {
+            "title": "N Scored",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model",
+          "label",
+          "latest",
+          "n_bands",
+          "n_scored",
+          "inside",
+          "below",
+          "above",
+          "n_independent"
+        ],
+        "title": "PlanBandModelOut",
+        "type": "object"
+      },
+      "PlanBandOut": {
+        "properties": {
+          "end_day": {
+            "title": "End Day",
+            "type": "string"
+          },
+          "forecast_day": {
+            "title": "Forecast Day",
+            "type": "string"
+          },
+          "monthly_contribution": {
+            "title": "Monthly Contribution",
+            "type": "number"
+          },
+          "p10": {
+            "title": "P10",
+            "type": "number"
+          },
+          "p50": {
+            "title": "P50",
+            "type": "number"
+          },
+          "p90": {
+            "title": "P90",
+            "type": "number"
+          },
+          "start_value": {
+            "title": "Start Value",
+            "type": "number"
+          },
+          "value_p10": {
+            "title": "Value P10",
+            "type": "number"
+          },
+          "value_p50": {
+            "title": "Value P50",
+            "type": "number"
+          },
+          "value_p90": {
+            "title": "Value P90",
+            "type": "number"
+          }
+        },
+        "required": [
+          "forecast_day",
+          "end_day",
+          "p10",
+          "p50",
+          "p90",
+          "start_value",
+          "monthly_contribution",
+          "value_p10",
+          "value_p50",
+          "value_p90"
+        ],
+        "title": "PlanBandOut",
+        "type": "object"
+      },
+      "PlanBandsOut": {
+        "properties": {
+          "estimate": {
+            "default": true,
+            "title": "Estimate",
+            "type": "boolean"
+          },
+          "models": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PlanBandModelOut"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          }
+        },
+        "title": "PlanBandsOut",
+        "type": "object"
+      },
       "PlanCash": {
         "properties": {
           "broker_cash_by_broker": {
@@ -29495,6 +29666,112 @@
         ]
       }
     },
+    "/api/quant/portfolio/projection/long-history": {
+      "get": {
+        "description": "The same plan drawn from 150 years of euro-area history instead of one model (plan 2026-10-14, D6).",
+        "operationId": "portfolio_projection_long_history_api_quant_portfolio_projection_long_history_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "years",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 60,
+              "minimum": 1,
+              "title": "Years",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Goal in today's euros; defaults to the setting.",
+            "in": "query",
+            "name": "goal_eur",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Goal in today's euros; defaults to the setting.",
+              "title": "Goal Eur"
+            }
+          },
+          {
+            "description": "Monthly, in today's euros; defaults to the plan.",
+            "in": "query",
+            "name": "contribution_eur",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Monthly, in today's euros; defaults to the plan.",
+              "title": "Contribution Eur"
+            }
+          },
+          {
+            "description": "Defaults to the synced book's value.",
+            "in": "query",
+            "name": "start_value_eur",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Defaults to the synced book's value.",
+              "title": "Start Value Eur"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Portfolio Projection Long History Api Quant Portfolio Projection Long History Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Portfolio Projection Long History",
+        "tags": [
+          "quant",
+          "quant-portfolio"
+        ]
+      }
+    },
     "/api/quant/portfolio/real/holdings": {
       "get": {
         "operationId": "real_holdings_api_quant_portfolio_real_holdings_get",
@@ -32426,6 +32703,28 @@
           }
         },
         "summary": "Get History",
+        "tags": [
+          "trust"
+        ]
+      }
+    },
+    "/api/trust/plan-bands": {
+      "get": {
+        "description": "The latest one-year plan band per model and how the scored ones did.",
+        "operationId": "get_plan_bands_api_trust_plan_bands_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanBandsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Plan Bands",
         "tags": [
           "trust"
         ]
