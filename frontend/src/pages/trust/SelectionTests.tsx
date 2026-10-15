@@ -94,6 +94,9 @@ export function SelectionCard({ sel, f1 }: { sel: TrustSelectionTest; f1?: Trust
         years is whether the picks are worth following. Alternatives are the same run's scored stocks in the pick's
         sector (all of them when the sector has fewer than three
         {sel.n_fallback_days ? `; ${sel.n_fallback_days} days used that fallback` : ""}).
+        {sel.rho1 != null
+          ? ` Day-to-day correlation of the first three months: ${sel.rho1.toFixed(2)}${sel.rho1_flag ? " (above 0.15: noted, the test stays valid)" : ""}.`
+          : ""}
         {te != null
           ? ` Risk budget: the basket moves ${fmtPct(te, 0)} a year apart from MSCI World (tracking error), mostly from its sector, style and currency tilt. That is reported, not tested.`
           : ""}

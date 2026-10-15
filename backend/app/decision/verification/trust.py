@@ -735,6 +735,14 @@ def _days(n: int) -> str:
     return f"{n:,} trading day{'' if n == 1 else 's'}"
 
 
+def _selection_scope(sel: dict[str, Any]) -> str:
+    """Same sector, unless some days had to compare against other sectors."""
+    k = int(sel.get("n_fallback_days") or 0)
+    if not k:
+        return "same run, same sector"
+    return f"same run; same sector except on {_days(k)}, when other sectors stood in"
+
+
 def _years_text(years: float) -> str:
     return f"{years:.1f}" if years < 10 else f"{years:.0f}"
 
@@ -780,7 +788,7 @@ def _headline(tests: dict[str, Any], today: date) -> str:
     if state == "skill":
         return (
             f"Evidence that Discover picks well: its picks beat the stocks it could have picked instead "
-            f"(same run, same sector), e = {sel['e_skill']:,.0f} over {_days(n)}."
+            f"({_selection_scope(sel)}), e = {sel['e_skill']:,.0f} over {_days(n)}."
         )
     if state == "harm":
         return (
