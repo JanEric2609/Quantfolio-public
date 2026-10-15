@@ -168,7 +168,7 @@ def test_empty_ledgers_are_too_early_everywhere_with_a_plain_headline():
 
     assert verdict["state"] == "too_early"
     assert verdict["headline"] == (
-        "Too early to tell: the pre-registered test starts on 2026-10-12; no trading day with open picks recorded yet."
+        "Too early to tell: the pre-registered test starts on 2026-10-15; no trading day with open picks recorded yet."
     )
     assert verdict["resolved_calls"] == 0
     assert verdict["skill"] is None
@@ -191,7 +191,7 @@ def test_empty_ledgers_are_too_early_everywhere_with_a_plain_headline():
     assert "ADR 0018" in verdict["method_note"] and "about 3,500" in verdict["legacy_method_note"]
 
     tests = verdict["daily_tests"]
-    assert tests["start"] == "2026-10-12" and tests["threshold"] == pytest.approx(40.0)
+    assert tests["start"] == "2026-10-15" and tests["threshold"] == pytest.approx(40.0)
     assert [(f["family"], f["series"], f["role"]) for f in tests["families"]] == [
         ("F1", "ideas", "primary"), ("F2", "ranking", "primary"), ("F3", "advisor", "secondary"),
     ]

@@ -41,9 +41,9 @@ from app.decision.verification.daily_ledger import SERIES, SERIES_ADVISOR, SERIE
 from app.foundation import forecast_verification as fv
 from app.foundation.models.entities import TrustDailyActiveReturn
 
-#: First day an observation may enter an e-value (ADR 0018 §2: 2026-10-12, or
-#: the first trading day after the ADR merges if that is later).
-PRIMARY_TEST_START = date(2026, 10, 12)
+#: First day an observation may enter an e-value (ADR 0018, amendment of
+#: 2026-10-12: the first trading day after the release and the paper reset).
+PRIMARY_TEST_START = date(2026, 10, 15)
 #: Reference daily standard deviation: 5 % per 21 days.
 SIGMA_REF = 0.05 / math.sqrt(21)
 #: Clip before betting: 4.5 x SIGMA_REF, rounded to 5 %.
