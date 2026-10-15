@@ -553,14 +553,26 @@ def register_index_currency_weights_job(scheduler: Any | None = None) -> str:
     uses to look through index ETFs (``foundation.etf_currency``). Until the
     first run, the module's seed values from 2026-09-28 apply; weights older
     than six months raise a risk alert.
+
+    The same monthly run measures the curated plan funds' tracking difference
+    against their same-index peers (``decision.fund_tracking``, ADR 0019 as
+    amended 2026-10-14); one step failing does not stop the other. It rides
+    here rather than as its own job because the worker's pool is sized for
+    the job count.
     """
 
     def index_currency_weights_inner() -> None:
+        from app.decision.fund_tracking import refresh_peer_td
         from app.foundation.core.db import SessionLocal
         from app.foundation.etf_currency import refresh_index_currency_weights
 
         with SessionLocal() as db:
-            refresh_index_currency_weights(db)
+            try:
+                refresh_index_currency_weights(db)
+            except Exception:
+                logger.exception("index_currency_weights: refresh failed")
+                db.rollback()
+            logger.info("fund_peer_td: %s", refresh_peer_td(db))
 
     return register_cron_job(
         "index_currency_weights", index_currency_weights_inner,

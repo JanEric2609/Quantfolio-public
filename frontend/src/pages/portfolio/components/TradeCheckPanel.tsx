@@ -27,7 +27,11 @@ export function TradeCheckPanel({ portfolioId }: { portfolioId: string }) {
         Trade check (shadow): would have stopped {d.would_block} of {d.trades_checked} trades
         {d.checked_nav_eur != null && (
           <>
-            {" · "}value with the check on <strong className="tabular-nums">{eur(d.checked_nav_eur)}</strong>
+            {" · "}
+            <span title="Blocked buys counted as money held in MSCI World, blocked sells as positions kept (ADR 0021). An estimate.">
+              estimated value with the check on
+            </span>{" "}
+            <strong className="tabular-nums">{eur(d.checked_nav_eur)}</strong>
             {" ("}
             <span className={effect < 0 ? "text-danger" : "text-success"}>
               {effect >= 0 ? "+" : ""}
@@ -41,7 +45,9 @@ export function TradeCheckPanel({ portfolioId }: { portfolioId: string }) {
         <p className="text-text-muted">
           A trade passes when the edge its source has shown so far (calibrated calls, or the run's own resolved trades
           against MSCI World, shrunk toward a coin flip) is larger than its cost: fee, half the spread and tax on a
-          realised gain (none while the NV certificate covers the year). Costs paid so far {eur(d.cost_paid_eur, 2)}, of
+          realised gain (none while the NV certificate covers the year). The value with the check on counts a blocked
+          buy's money as held in MSCI World and a blocked sell's position as kept, so it mixes the run's cash with an
+          index holding: an estimate, not a second portfolio. Costs paid so far {eur(d.cost_paid_eur, 2)}, of
           which {eur(d.cost_of_blocked_eur, 2)} on trades the check would have stopped. {d.open} trade
           {d.open === 1 ? " is" : "s are"} still inside the 21 trading days they are measured over.
         </p>

@@ -243,7 +243,7 @@ def _benchmark_symbols() -> list[str]:
 
     bond_refs = [
         REFERENCE_FUNDS[k].symbol
-        for k in ("bond_govt_eur_short", "bond_govt_eur_mid", "bond_aggregate_eur_hedged")
+        for k in ("bond_govt_eur_short", "bond_govt_eur_mid", "bond_govt_eur_long", "bond_aggregate_eur_hedged")
     ]
     return _ordered_unique(
         [_BENCHMARK_EUROPE, _BENCHMARK_US, _BENCHMARK_GLOBAL_ETF, _BENCHMARK_JAPAN, *bond_refs]
@@ -1112,6 +1112,27 @@ def stage_sentiment_fundamentals(
 # Stage 2 — momentum quality (backward-looking)
 # ---------------------------------------------------------------------------
 
+def _closes_in_eur(db: Session, symbol: str, df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+    """``df`` with ``close`` restated in EUR, and ``"eur"``; or the frame as it
+    was and ``"local"`` when no rate covers it (better a flagged local series
+    than dropping the candidate)."""
+    from app.foundation import eur_prices
+
+    closes = {str(d)[:10]: float(c) for d, c in zip(df["date"], df["close"]) if float(c) > 0}
+    try:
+        eur, _ccy = eur_prices.to_eur(db, symbol, closes, days=430)
+    except Exception:  # noqa: BLE001 - an FX outage must not fail the stage
+        logger.debug("stage_momentum_quality: EUR restatement failed for %s", symbol, exc_info=True)
+        eur = {}
+    if not eur or len(eur) < 0.9 * len(closes):
+        return df, "local"
+    days = pd.Series([str(d)[:10] for d in df["date"]], index=df.index)
+    keep = days.isin(list(eur))
+    out = df.loc[keep].copy()
+    out["close"] = [eur[d] for d in days[keep]]
+    return out, "eur"
+
+
 def stage_momentum_quality(
     db: Session,
     symbol: str,
@@ -1132,6 +1153,9 @@ def stage_momentum_quality(
         return None, "momentum_quality: no close prices"
 
     df = df.dropna(subset=["close"]).sort_values("date")
+    # In EUR, like the benchmark legs and the owner's own returns: a dollar
+    # stock's momentum otherwise ranked on its dollar move (plan 2026-10-14, M4).
+    df, fx_basis = _closes_in_eur(db, symbol, df)
     if len(df) < 130:
         return None, f"momentum_quality: only {len(df)} rows (< 130)"
 
@@ -1170,6 +1194,8 @@ def stage_momentum_quality(
     trailing_1m_annualized_return = annualised_return(trailing_1m_returns) if trailing_1m_returns else 0.0
 
     concerns: list[str] = []
+    if fx_basis != "eur":
+        concerns.append("momentum and volatility in the listing currency (no EUR rate)")
     if momentum < _MOMENTUM_MIN:
         concerns.append(f"weak 12m momentum {momentum:.1%}")
     if vol > _VOL_MAX:
@@ -1180,6 +1206,7 @@ def stage_momentum_quality(
         "volatility_6m": round(vol, 4),
         "max_drawdown": round(mdd, 4),
         "trailing_1m_annualized_return": round(float(trailing_1m_annualized_return), 4),
+        "fx_basis": fx_basis,
         "concerns": concerns,
     }
     logger.debug("stage_momentum_quality: %s mom=%.2f vol=%.2f concerns=%d", symbol, momentum, vol, len(concerns))
@@ -1720,6 +1747,26 @@ def _held_etf_tickers(db: Session, user_id: str) -> list[str]:
     return list(dict.fromkeys(tickers))
 
 
+def _book_weights(db: Session, user_id: str, tickers: list[str]) -> dict[str, float] | None:
+    """Each held ticker's share of the book's value (``live_positions``), or None.
+
+    The same inventory as ``build_real_price_matrix``: reconciled positions
+    only. A held line without a value (no current value and no price) gets no
+    weight here, so the "value" basis covers only the valued lines.
+    """
+    from app.foundation.live_positions import combined_positions
+
+    values: dict[str, float] = {}
+    for pos in combined_positions(db, user_id):
+        ticker = (pos.ticker or "").upper()
+        if ticker in tickers and pos.value and float(pos.value) > 0:
+            values[ticker] = values.get(ticker, 0.0) + float(pos.value)
+    total = sum(values.values())
+    if total <= 0:
+        return None
+    return {t: v / total for t, v in values.items()}
+
+
 def stage_portfolio_fit(
     db: Session,
     user_id: str,
@@ -1764,22 +1811,34 @@ def stage_portfolio_fit(
     # Portfolio price matrix (build_real_price_matrix already yields a DatetimeIndex)
     port_df = build_real_price_matrix(db, user_id, lookback_days=_FIT_HISTORY_DAYS)
     if port_df is None or port_df.empty:
-        # No portfolio → neutral fit
-        return {"correlation": None, "overlap": None, "fit_score": 0.5}, None
+        # No portfolio: no fit to measure. The component is dropped and the
+        # composite renormalises (plan 2026-10-14, M5), not a neutral 0.5.
+        return {"correlation": None, "overlap": None, "fit_score": None, "note": "no portfolio"}, None
 
-    # Portfolio weighted return (equal weight fallback)
+    # The book's weekly return at its real EUR weights (equal weight only when
+    # no position value is known).
     port_rets = port_df.resample("W-FRI").last().pct_change(fill_method=None)
-    port_weighted = pd.Series(port_rets.mean(axis=1)).dropna()
+    weights = _book_weights(db, user_id, list(port_rets.columns))
+    if weights is None:
+        port_weighted = pd.Series(port_rets.mean(axis=1)).dropna()
+        weight_basis = "equal"
+    else:
+        w = pd.Series(weights).reindex(port_rets.columns).fillna(0.0)
+        present = port_rets.notna()
+        # A week where a line has no price spreads its weight over the others.
+        denom = present.mul(w, axis=1).sum(axis=1)
+        port_weighted = (port_rets.fillna(0.0).mul(w, axis=1).sum(axis=1) / denom.where(denom > 0)).dropna()
+        weight_basis = "value"
 
     common = cand_rets.index.intersection(port_weighted.index)  # type: ignore[union-attr]
     if len(common) < _FIT_MIN_WEEKS:
         # Fail open: too little overlap is a data-availability problem, not a
-        # quality signal. Return a neutral fit so the candidate still reaches the
-        # LLM rather than being silently dropped.
+        # quality signal. No fit score (it drops out of the composite), and the
+        # candidate still reaches the LLM rather than being silently dropped.
         return {
             "correlation": None,
             "overlap": None,
-            "fit_score": 0.5,
+            "fit_score": None,
             "note": f"only {len(common)} aligned weeks with portfolio",
         }, None
 
@@ -1820,6 +1879,7 @@ def stage_portfolio_fit(
         "correlation": round(corr, 4),
         "correlation_basis": "weekly",
         "correlation_weeks": len(common),
+        "weight_basis": weight_basis,
         "overlap": round(overlap, 4) if is_etf else None,
         "fit_score": round(fit_score, 4),
     }
