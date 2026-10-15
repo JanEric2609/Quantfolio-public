@@ -43,6 +43,7 @@ from app.foundation.data_backbone.listing_currency import resolve_currency
 from app.foundation import market
 from app.foundation.models.entities import DiscoveryPrediction
 from app.foundation.models.entities._core import now_utc
+from app.foundation.providers.utils import currency_unit
 from app.foundation.settings import get_public_settings
 
 logger = logging.getLogger(__name__)
@@ -132,16 +133,35 @@ class _Series:
         recorded, else the listing suffix (which read IWDA.L as GBP)."""
         return resolve_currency(self._db, symbol)
 
-    def eur_factor(self, currency: str, start: date, end: date) -> float | None:
-        """Growth of one unit of *currency* in EUR from *start* to *end*."""
-        if currency == "EUR":
-            return 1.0
-        fx = self.get(f"{currency}EUR=X")
-        a = _last_on_or_before(fx, start, MAX_REFERENCE_GAP_DAYS)
-        b = _last_on_or_before(fx, end, MAX_REFERENCE_GAP_DAYS)
-        if a is None or b is None:
+    def _eur_per_unit(self, currency: str, day: date) -> float | None:
+        """EUR per one unit of *currency* on *day*, carried at most
+        :data:`MAX_REFERENCE_GAP_DAYS`. The app's FX bars are dollar pairs
+        (``USDEUR=X``, ``USDGBP=X``), so a third currency crosses through USD;
+        there is no ``GBPEUR=X`` series (plan 2026-10-14, M12)."""
+        eur_per_usd = _last_on_or_before(self.get("USDEUR=X"), day, MAX_REFERENCE_GAP_DAYS)
+        if eur_per_usd is None:
             return None
-        return b[1] / a[1]
+        if currency == "USD":
+            return eur_per_usd[1]
+        ccy_per_usd = _last_on_or_before(self.get(f"USD{currency}=X"), day, MAX_REFERENCE_GAP_DAYS)
+        if ccy_per_usd is None or ccy_per_usd[1] <= 0:
+            return None
+        return eur_per_usd[1] / ccy_per_usd[1]
+
+    def eur_factor(self, currency: str, start: date, end: date) -> float | None:
+        """Growth of one unit of *currency* in EUR from *start* to *end*.
+
+        A minor unit (``GBp``) is its major currency: the 1/100 cancels in the
+        ratio.
+        """
+        iso, _ = currency_unit(currency)
+        if iso in ("", "EUR"):
+            return 1.0
+        a = self._eur_per_unit(iso, start)
+        b = self._eur_per_unit(iso, end)
+        if a is None or b is None or a <= 0:
+            return None
+        return b / a
 
 
 def resolve_due_predictions(
@@ -258,6 +278,10 @@ def _resolve_one(
     currency = series.currency(pred.symbol)
     local_return = exit_px / entry_px - 1.0
     fx = series.eur_factor(currency, entry_on, exit_on)
+    if fx is None and not past_grace:
+        # No silent local-currency score (plan 2026-10-14, M12): wait for the rate.
+        _note_wait(pred, "no_fx", cutoff)
+        return None
     stock_return = (1.0 + local_return) * fx - 1.0 if fx is not None else local_return
 
     bench_return = _benchmark_return(series, benchmark, entry_on, exit_on)
@@ -280,6 +304,9 @@ def _resolve_one(
         "entry_basis": entry_basis,
         "currency": currency,
         "return_currency": "EUR" if fx is not None else currency,
+        # "local_fallback": scored in the listing currency after the grace
+        # ran out without a rate; the calibrator leaves such rows out.
+        "fx_basis": "eur" if fx is not None else "local_fallback",
         "local_return": local_return,
         "benchmark": benchmark,
         "hit_basis": "excess" if excess is not None else "raw",

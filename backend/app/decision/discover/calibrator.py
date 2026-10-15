@@ -141,13 +141,18 @@ def _utc(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=UTC)
 
 
+def _fx_basis(score_json: Any) -> str | None:
+    outcome = score_json.get("outcome") if isinstance(score_json, dict) else None
+    return outcome.get("fx_basis") if isinstance(outcome, dict) else None
+
+
 def training_rows(db: Session, prediction: DiscoveryPrediction) -> list[tuple[float, bool, date]]:
     """Matured, same-source, embargoed ``(score, hit, issue_date)`` rows for *prediction*."""
     issued = _utc(prediction.predicted_at or datetime.now(UTC))
     cutoff = _embargo_cutoff(issued)
     rows = (
         db.query(DiscoveryPrediction.conviction, DiscoveryPrediction.excess_return, DiscoveryPrediction.predicted_at,
-                 DiscoveryPrediction.resolve_at)
+                 DiscoveryPrediction.resolve_at, DiscoveryPrediction.score_json)
         .filter(
             DiscoveryPrediction.user_id == prediction.user_id,
             DiscoveryPrediction.outcome_status.in_(("resolved", "delisted")),
@@ -163,9 +168,11 @@ def training_rows(db: Session, prediction: DiscoveryPrediction) -> list[tuple[fl
         .all()
     )
     out = []
-    for conviction, excess, predicted_at, resolve_at in rows:
+    for conviction, excess, predicted_at, resolve_at, score_json in rows:
         if predicted_at is None or resolve_at is None or _utc(resolve_at) > cutoff:
             continue
+        if _fx_basis(score_json) == "local_fallback":
+            continue  # its excess mixes a local return with a EUR benchmark
         out.append((float(conviction), float(excess) > 0, _utc(predicted_at).date()))
     return out
 
