@@ -12,8 +12,10 @@ any UPDATE, see migration ``0130_trust_evidence_ledgers``):
   same window.
 * ``trust_daily_active_returns`` — the calendar-time daily series the
   pre-registered tests bet on: the mean daily active return of every open call
-  (``ideas``, ``advisor``) and the rank-weighted long-short return of the open
-  ranking cohorts (``ranking``).
+  (``ideas``, ``advisor``), the rank-weighted long-short return of the open
+  ranking cohorts (``ranking``), the picks against their same-run, same-sector
+  alternatives (``selection``) and each mandate sleeve against the passive core
+  (``mandate_a``, ``mandate_b``).
 
 Run ids are plain strings, not foreign keys: deleting a ``DiscoverRun`` must
 not delete evidence about it. Ownership still cascades from ``users``.
@@ -118,7 +120,7 @@ class TrustDailyActiveReturn(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    #: "ideas", "advisor" or "ranking".
+    #: "ideas", "advisor", "ranking", "selection", "mandate_a" or "mandate_b".
     series: Mapped[str] = mapped_column(String(16))
     day: Mapped[date] = mapped_column(Date)
     #: Open calls (ideas, advisor) or open cohorts (ranking) on the day.
