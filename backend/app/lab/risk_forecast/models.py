@@ -37,7 +37,7 @@ _EPS = 1e-10
 #: At least this many daily returns to forecast at all.
 MIN_OBS = 500
 #: Bump when a model, its inputs or the conformal split changes: it goes into every stored row.
-MODEL_VERSION = "har-garcht-conformal-1"
+MODEL_VERSION = "har-garcht-conformal-2"
 
 
 @dataclass(frozen=True)
