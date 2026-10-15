@@ -21,7 +21,8 @@ through `quant_lab`'s engine net of broker costs and German tax),
 `evidence_gate` (Deflated Sharpe and PBO over those pre-registered records:
 the step a mined score must pass before it may touch money),
 `calibration` (the ADR 0018 trust tests run on simulated noise: false alarms,
-time to a verdict; not a trial).
+time to a verdict; not a trial), `risk_forecast` (daily VaR/ES bands for each
+sleeve, the real book and the benchmark, stored before the fact and scored after).
 
 ## Public surface (facade `app.lab.<package>`)
 

@@ -569,7 +569,7 @@ def summary(db: Session, portfolio_id: str, nav_eur: float | None = None) -> dic
 
 
 def register_trade_check_job(scheduler: Any | None = None) -> str:
-    """Daily at 22:30 UTC, after the day's cycles and the closing prices."""
+    """Daily at 22:30 UTC, after the day's cycles and the closing prices; then the risk forecasts (D3)."""
     from app.foundation.jobs import register_cron_job
 
     def _inner() -> None:
@@ -577,6 +577,15 @@ def register_trade_check_job(scheduler: Any | None = None) -> str:
 
         with SessionLocal() as db:
             logger.info("trade_check_daily: %s", run_daily(db))
+        # The day's risk forecasts and their scores (plan 2026-10-14, D3) share this slot: both need
+        # the closing prices, and the worker's pool is sized for the job count.
+        try:
+            from app.lab.risk_forecast import run_forecasts
+
+            with SessionLocal() as db:
+                logger.info("risk_forecasts: %s", run_forecasts(db))
+        except Exception:
+            logger.exception("risk_forecasts: run failed")
 
     return register_cron_job("trade_check_daily", _inner, scheduler=scheduler, hour=22, minute=30)
 
