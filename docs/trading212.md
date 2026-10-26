@@ -25,7 +25,11 @@ The key and the secret are stored encrypted in `api_keys` (`set_secret("trading2
 meta={"api_secret": …})`; the secret is a sensitive meta field and never reaches `meta_json`).
 The key belongs to the app user who ran the first sync. Nobody else can sync or test it, change
 its settings, or replace it. A key for a different Trading 212 account (for example a demo key
-first, then the live one) is refused with `account_changed`, so two accounts are never mixed.
+first, then the live one) is refused with `account_changed`, so two accounts are never mixed. To
+switch accounts, press **Remove synced data** next to the sync button (`DELETE
+/api/trading212/data`, owner only). It removes the positions, cash, ledger rows, tax lots and
+events, pies and sync logs the sync wrote, keeps the key, and changes nothing at Trading 212.
+The next sync then reads the new account's full history.
 
 ## What the client may call
 

@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui
 import {
   getTrading212Pies,
   getTrading212Status,
+  resetTrading212Data,
   syncTrading212,
   type Trading212State,
   type Trading212Status,
@@ -45,6 +46,12 @@ export function Trading212SyncButton() {
     onError: (error: Error) => toast.error(error.message),
     onSettled: () => queryClient.invalidateQueries(),
   });
+  const reset = useMutation({
+    mutationFn: resetTrading212Data,
+    onSuccess: () => toast.success("Synced Trading 212 data removed. Sync again to read the new account."),
+    onError: (error: Error) => toast.error(error.message),
+    onSettled: () => queryClient.invalidateQueries(),
+  });
   const data = status.data;
   if (!data?.enabled) return null;
   const badge = data.stale && data.state === "ready" ? { variant: "warning" as const, label: "out of date" } : STATE_BADGE[data.state];
@@ -73,6 +80,19 @@ export function Trading212SyncButton() {
         <RefreshCw className={sync.isPending ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
         Sync Trading 212
       </Button>
+      {data.error_code === "account_changed" ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={reset.isPending}
+          onClick={() => {
+            if (window.confirm("Remove the positions, cash, history, tax lots and pies synced from the old Trading 212 account? The key stays, and nothing changes at Trading 212.")) reset.mutate();
+          }}
+        >
+          Remove synced data
+        </Button>
+      ) : null}
       {["not_configured", "key_invalid", "key_scope", "error"].includes(data.state) ? (
         <Button asChild variant="ghost" size="sm">
           <Link to="/settings/bank?connection=trading212">Fix</Link>

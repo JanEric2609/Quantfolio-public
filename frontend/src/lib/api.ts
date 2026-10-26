@@ -3980,6 +3980,9 @@ export interface Trading212Pie {
 export const getTrading212Status = () => api<Trading212Status>("/api/trading212/status");
 export const syncTrading212 = () => api<Trading212SyncLog>("/api/trading212/sync", { method: "POST" });
 export const getTrading212Pies = () => api<Trading212Pie[]>("/api/trading212/pies");
+/** Removes what the sync wrote (to start over with another account); the key stays. */
+export const resetTrading212Data = () =>
+  api<{ removed: Record<string, number> }>("/api/trading212/data", { method: "DELETE" });
 
 /** GET /api/quant/backtest/strategies */
 export interface BacktestStrategy {

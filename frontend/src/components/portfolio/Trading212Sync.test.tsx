@@ -27,6 +27,7 @@ vi.mock("../../lib/api", () => ({
     },
   ],
   syncTrading212: vi.fn(),
+  resetTrading212Data: vi.fn(),
 }));
 
 function wrap(node: React.ReactNode) {

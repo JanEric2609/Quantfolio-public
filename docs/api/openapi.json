@@ -16630,6 +16630,22 @@
         "title": "Trading212ProbeStepOut",
         "type": "object"
       },
+      "Trading212ResetOut": {
+        "properties": {
+          "removed": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Removed",
+            "type": "object"
+          }
+        },
+        "required": [
+          "removed"
+        ],
+        "title": "Trading212ResetOut",
+        "type": "object"
+      },
       "Trading212StatusOut": {
         "properties": {
           "account_id": {
@@ -33268,6 +33284,28 @@
         "summary": "Telegram Webhook",
         "tags": [
           "telegram"
+        ]
+      }
+    },
+    "/api/trading212/data": {
+      "delete": {
+        "description": "Remove what the sync wrote (to start over with another account). The key stays; nothing at Trading 212 changes.",
+        "operationId": "delete_synced_data_api_trading212_data_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trading212ResetOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Delete Synced Data",
+        "tags": [
+          "trading212"
         ]
       }
     },

@@ -29,6 +29,7 @@ vi.mock("../../lib/api", () => ({
   getTrading212Status: async () => ({ enabled: false, state: "disabled" }),
   getTrading212Pies: async () => [],
   syncTrading212: vi.fn(),
+  resetTrading212Data: vi.fn(),
 }));
 vi.mock("../../hooks/useDkbSync", () => ({
   useDkbSync: () => ({ state: "idle", isPending: false, start: vi.fn(), session: null }),

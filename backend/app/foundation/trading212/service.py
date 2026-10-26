@@ -230,7 +230,8 @@ def sync(db: Session, user_id: str, *, trigger: str = "manual") -> dict[str, Any
             raise Trading212AccountChanged(
                 "account_changed",
                 f"The key reads Trading 212 account {account_id}, but account {depot.external_id} is already "
-                "synced. Save the key of that account, or remove the old Trading 212 data before syncing another.",
+                "synced. Save the key of that account, or remove the synced Trading 212 data (Accounts › "
+                "Trading 212 › Remove synced data) and sync again.",
             )
         positions = map_positions(client.get(POSITIONS))
         raw = load_raw(depot)
@@ -573,6 +574,49 @@ def ingest_tax_events(db: Session, user_id: str) -> dict[str, Any]:
             types.update(stored)
     return ingest_broker_tax_events(db, user_id, source=SOURCE, lot_source=LOT_SOURCE, label=LABEL,
                                     security_types=types)
+
+
+# --- reset (another account) -------------------------------------------------
+
+
+def reset_synced_data(db: Session, user_id: str) -> dict[str, int]:
+    """Remove everything the Trading 212 sync wrote for *user_id*; the saved key stays.
+
+    For a key that now reads another account (``account_changed``, e.g. a
+    demo key first): the positions, cash, ledger rows, tax lots and events,
+    pies and sync logs of the old account go, and the next sync starts over
+    with the full history. Nothing at Trading 212 changes.
+    """
+    from app.foundation.models.entities import TaxLedgerEvent, TaxLot
+
+    accounts = [a.id for a in db.query(ConnectedAccount.id).filter(
+        ConnectedAccount.user_id == user_id, ConnectedAccount.source == SOURCE)]
+    removed = {
+        "pies": db.query(BrokerPie).filter(BrokerPie.user_id == user_id, BrokerPie.source == SOURCE)
+        .delete(synchronize_session=False),
+        "positions": db.query(BrokerPosition).filter(BrokerPosition.user_id == user_id,
+                                                     BrokerPosition.source == SOURCE)
+        .delete(synchronize_session=False),
+        "ledger_rows": db.query(ActivityLedgerEntry).filter(ActivityLedgerEntry.user_id == user_id,
+                                                            ActivityLedgerEntry.source == SOURCE)
+        .delete(synchronize_session=False),
+        "tax_lots": db.query(TaxLot).filter(TaxLot.user_id == user_id, TaxLot.source == LOT_SOURCE)
+        .delete(synchronize_session=False),
+        "tax_events": db.query(TaxLedgerEvent).filter(TaxLedgerEvent.user_id == user_id,
+                                                      TaxLedgerEvent.source == LOT_SOURCE)
+        .delete(synchronize_session=False),
+        "sync_logs": db.query(BrokerSyncLog).filter(BrokerSyncLog.user_id == user_id,
+                                                    BrokerSyncLog.source == SOURCE, BrokerSyncLog.state != "running")
+        .delete(synchronize_session=False),
+        "accounts": db.query(ConnectedAccount).filter(ConnectedAccount.id.in_(accounts or [""]))
+        .delete(synchronize_session=False),
+    }
+    db.commit()
+    from app.foundation.portfolio_service import invalidate_wealth_cache, sync_dkb_to_wealth_ledger
+
+    sync_dkb_to_wealth_ledger(db, user_id)  # drop the mirrored holdings of the removed positions
+    invalidate_wealth_cache(user_id)
+    return removed
 
 
 # --- pies (fail soft) --------------------------------------------------------

@@ -503,3 +503,19 @@ def test_savings_plan_freshness_reads_only_the_scalable_log(fake):
     db.commit()
     t212.sync(db, user.id)  # a newer Trading 212 log must not hide the failed fetch
     assert plans_freshness(db, user.id)["last_fetch_failed"] is True
+
+
+def test_removing_the_synced_data_lets_another_account_sync(fake):
+    db = _memory_db()
+    user = _setup(db)
+    t212.sync(db, user.id)
+    fake.data["/equity/account/summary"] = {**fake.data["/equity/account/summary"], "id": 999}
+    with pytest.raises(t212.Trading212AccountChanged):
+        t212.sync(db, user.id)
+    removed = t212.reset_synced_data(db, user.id)
+    assert removed["positions"] == 2 and removed["tax_lots"] == 2 and removed["accounts"] == 2
+    assert db.query(ActivityLedgerEntry).filter(ActivityLedgerEntry.source == "trading212").count() == 0
+    assert get_secret(db, "trading212") is not None  # the key stays
+    log = t212.sync(db, user.id)
+    assert log["state"] == "success"
+    assert trading212_status.depot_account(db, user.id).external_id == "999"

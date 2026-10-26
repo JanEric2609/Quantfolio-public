@@ -163,6 +163,17 @@ def post_test(db: Session = Depends(get_db), user: User = Depends(current_user))
     return t212.probe(db)
 
 
+class Trading212ResetOut(BaseModel):
+    removed: dict[str, int]
+
+
+@router.delete("/data", response_model=Trading212ResetOut)
+def delete_synced_data(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict[str, Any]:
+    """Remove what the sync wrote (to start over with another account). The key stays; nothing at Trading 212 changes."""
+    require_connection_owner(db, user)
+    return {"removed": t212.reset_synced_data(db, user.id)}
+
+
 @router.get("/sync/logs", response_model=list[Trading212SyncLogOut])
 def get_sync_logs(limit: LimitQuery = 20, db: Session = Depends(get_db),
                   user: User = Depends(current_user)) -> list[dict[str, Any]]:
