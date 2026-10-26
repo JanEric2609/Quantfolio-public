@@ -118,7 +118,7 @@ def test_the_book_is_weighted_by_value(monkeypatch):
     weighted, _ = pipeline_mod.stage_portfolio_fit(_memory_db(), "u", "ABC")
     monkeypatch.setattr(pipeline_mod, "_book_weights", lambda *a: None)
     equal, _ = pipeline_mod.stage_portfolio_fit(_memory_db(), "u", "ABC")
-    assert weighted["weight_basis"] == "value" and equal["weight_basis"] == "equal"
+    assert weighted["weight_basis"] == "market_value" and equal["weight_basis"] == "equal"
     assert weighted["correlation"] > equal["correlation"] + 0.1
     assert weighted["fit_score"] < equal["fit_score"]
 

@@ -11,7 +11,8 @@ reason code, stored as ``fallback_reason`` when the template is used:
 * ``script``            — CJK, Hangul or Cyrillic characters;
 * ``ungrounded_number`` — a number that is not in the fact sheet;
 * ``macro``             — rate-direction words the macro facts do not support;
-* ``contradiction``     — bearish wording on a ``long`` dossier.
+* ``contradiction``     — bearish wording on a ``long`` dossier;
+* ``ticker``            — a near-miss of the candidate's own ticker ("DDDOG" for DDOG).
 
 Pure: no DB, no network.
 """
@@ -35,6 +36,7 @@ _HIKE_WORDS = re.compile(r"\brate hikes?\b|\brising (interest )?rates\b|\bhigher
                          r"\brate increases?\b", re.I)
 _CUT_WORDS = re.compile(r"\brate cuts?\b|\bfalling (interest )?rates\b|\blower (interest )?rates\b|\beasing\b|"
                         r"\brate reductions?\b", re.I)
+_CAPS_TOKEN = re.compile(r"\b[A-Z]{2,7}\b")
 _BEARISH = re.compile(r"\bneutral stance\b|\bbearish\b|\bavoid\b|\bsell\b(?!-off)", re.I)
 
 #: Absolute and relative tolerance of a grounded number (in the unit shown).
@@ -160,6 +162,19 @@ def contradiction_problem(text: str, direction: str) -> str | None:
     return f"'{m.group(0)}' contradicts a long stance" if m else None
 
 
+def ticker_problem(text: str, symbol: str | None, facts_text: str) -> str | None:
+    """A capitals token one letter off the candidate's ticker that the facts never show."""
+    base = (symbol or "").split(".")[0].upper()
+    if len(base) < 3:
+        return None
+    for token in _CAPS_TOKEN.findall(text or ""):
+        if token == base or token in facts_text or abs(len(token) - len(base)) != 1:
+            continue
+        if base in token or token in base:
+            return f"'{token}' is not the ticker; write {base}"
+    return None
+
+
 def check_thesis(
     thesis: str,
     key_risks: list[str],
@@ -167,6 +182,7 @@ def check_thesis(
     facts_text: str,
     macro: dict[str, Any] | None,
     direction: str,
+    symbol: str | None = None,
 ) -> ThesisCheck:
     """Clean and check a thesis and its risks; the first failing rule names the reason."""
     trimmed = trim_to_sentence(thesis)
@@ -191,4 +207,10 @@ def check_thesis(
     problem = contradiction_problem(trimmed, direction)
     if problem:
         result.reason, result.problems = "contradiction", [problem]
+        return result
+    for t in texts:
+        problem = ticker_problem(t, symbol, facts_text)
+        if problem:
+            result.reason, result.problems = "ticker", [problem]
+            return result
     return result

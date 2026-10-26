@@ -383,3 +383,34 @@ def test_vix_days_fred_lacks_are_filled_from_the_index(db, monkeypatch):
         (today - timedelta(days=1), 16.25, "cboe_index"),
     ]
     assert result["vix_index"]["added"] == 2
+
+
+def test_fred_holidays_store_no_row(db, monkeypatch):
+    """FRED's "." for a holiday parsed to NaN and was stored (prod check 2026-10-26);
+    a missing value used to become 0."""
+    from app.foundation.providers.fred_provider import FredProvider
+    from app.foundation.providers.registry import ProviderRegistry
+
+    def fake_get_history(self, symbol, start=None, end=None, days=None):
+        return {
+            "ok": True,
+            "provider": "fred",
+            "data": [
+                {"date": "2026-10-09T00:00:00", "value": 0.51},
+                {"date": "2026-10-12T00:00:00", "value": float("nan")},
+                {"date": "2026-10-13T00:00:00", "value": None},
+                {"date": "2026-10-14T00:00:00", "value": "."},
+                {"date": "2026-10-15T00:00:00", "value": 0.53},
+            ],
+        }
+
+    monkeypatch.setattr(FredProvider, "get_history", fake_get_history)
+    monkeypatch.setattr(
+        "app.foundation.data_backbone.ingest.build_provider_registry",
+        lambda _db: ProviderRegistry([FredProvider(api_key=None, enabled=True)]),
+    )
+
+    DataIngester(db).ingest_macro_indicators(series_ids=["T10Y2Y"])
+
+    rows = db.query(MacroIndicator).filter(MacroIndicator.name == "T10Y2Y").order_by(MacroIndicator.date).all()
+    assert [(r.date, float(r.value)) for r in rows] == [(date(2026, 10, 9), 0.51), (date(2026, 10, 15), 0.53)]

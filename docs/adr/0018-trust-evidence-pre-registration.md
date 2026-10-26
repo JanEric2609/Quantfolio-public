@@ -682,6 +682,23 @@ observed days from T0, at three looks:
   - M's e-process starts on day 64, and its median time to a verdict at a 2 % edge is about
     2 years, so this costs nothing in practice.
 
+## Amendment of 2026-10-26 (a silent symbol stops holding days back)
+
+Observed (prod check of 2026-10-26): WBD, a Discover pick of 2026-10-14, was delisted. It stays
+a member for its 21-day window, and under §3 every one of those days waited the full 5-day grace
+before freezing. `ideas`, `ranking` and `selection` therefore ran 5 trading days behind the
+calendar until the window closed.
+
+**Change.** A day still waits for a member's close, for at most 5 trading days. A symbol whose
+last close is already 5 or more trading days behind the end of the calendar no longer makes a
+later day wait: that day is frozen at once with the carried price, counted in `n_stale`.
+
+**What does not change.** The value written for such a day is the one the old rule wrote 5 days
+later: a pick that stops trading is cash (active return −r_bench) for the rest of its window, as
+§3 says. Only a data outage longer than 5 trading days that is later filled in could differ, and
+under the old rule the first days of that outage were already frozen as stale. No test statistic,
+look or threshold depends on when a day is written.
+
 ## Consequences
 
 **Gained.**

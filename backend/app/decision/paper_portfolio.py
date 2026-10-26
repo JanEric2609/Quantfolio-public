@@ -1084,6 +1084,7 @@ def execute_trade(
     confidence: float | None = None,
     rationale: str | None = None,
     fee: float = 0.0,
+    isin: str | None = None,
 ) -> dict[str, Any]:
     """Execute a simulated buy or sell trade in the paper portfolio.
 
@@ -1095,6 +1096,8 @@ def execute_trade(
             cash; a sell nets ``value - fee``. Defaults to 0 so manual trades
             and existing callers are unaffected — the advisor cycle passes a
             real figure from ``services/advisor/costs.py``.
+        isin: A buy's ISIN when the caller resolved one; a new holding and its
+            trade carry it (Mandate B's NEM buy of 2026-10-23 had none).
     """
     portfolio = db.get(PaperPortfolio, portfolio_id)
     if portfolio is None:
@@ -1133,8 +1136,9 @@ def execute_trade(
             holding = PaperHolding(
                 portfolio_id=portfolio_id,
                 ticker=ticker.upper(),
-                name=resolve_instrument_name(db, ticker.upper()),
-                asset_type=resolve_paper_asset_type(db, ticker.upper()),
+                isin=isin,
+                name=resolve_instrument_name(db, ticker.upper(), isin=isin),
+                asset_type=resolve_paper_asset_type(db, ticker.upper(), isin=isin),
                 quantity=qty,
                 avg_buy_price=trade_price,
                 currency=portfolio.currency,
@@ -1142,6 +1146,8 @@ def execute_trade(
             db.add(holding)
             db.flush()
         else:
+            if isin and not holding.isin:
+                holding.isin = isin
             total_cost = (holding.quantity * holding.avg_buy_price) + (qty * trade_price)
             holding.quantity += qty
             holding.avg_buy_price = total_cost / holding.quantity if holding.quantity > 0 else Decimal("0")

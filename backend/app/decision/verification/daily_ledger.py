@@ -28,11 +28,15 @@ never dropped.
 
 Days are written in order, once. A day waits while a member has no close on or
 after it, for at most :data:`GRACE_TRADING_DAYS`; after that it is frozen with
-the carried price and the member counted in ``n_stale``. A frozen day is never
+the carried price and the member counted in ``n_stale``. A symbol that has had
+no close for :data:`GRACE_TRADING_DAYS` already (a delisting) holds no later
+day back: it would otherwise make every remaining day of its window wait the
+full grace (WBD, prod check 2026-10-26). A frozen day is never
 rewritten (the table rejects UPDATEs on Postgres).
 """
 from __future__ import annotations
 
+from bisect import bisect_right
 import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -235,6 +239,19 @@ def _member_value(m: Member, prices: EurSeries, benchmark: str, prev: date, day:
     return total, stale
 
 
+def _waits_for(last_close: date | None, day: date, calendar: list[date]) -> bool:
+    """Whether *day* should wait for a symbol last closed on *last_close*.
+
+    No close yet (a fetch failure) waits; so does a close behind *day* unless
+    the calendar has run :data:`GRACE_TRADING_DAYS` past it with none newer.
+    """
+    if last_close is None:
+        return True
+    if last_close >= day:
+        return False
+    return len(calendar) - bisect_right(calendar, last_close) < GRACE_TRADING_DAYS
+
+
 def freeze_series(
     db: Session,
     user_id: str,
@@ -295,7 +312,7 @@ def freeze_series(
         behind = len(calendar) - 1 - i
         members_today = open_on.get(day, [])
         symbols = {p.symbol for m in members_today for p in m.positions}
-        lagging = [s for s in symbols if (prices.last_date(s) or date.min) < day]
+        lagging = [s for s in symbols if _waits_for(prices.last_date(s), day, calendar)]
         if lagging and behind < GRACE_TRADING_DAYS:
             break  # wait for the closes; frozen days stay a contiguous prefix
         detail: dict[str, Any] = {"prev_day": prev.isoformat()}

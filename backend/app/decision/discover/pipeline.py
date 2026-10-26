@@ -1018,6 +1018,21 @@ def _yfinance_revenue_growth(symbol: str) -> float | None:
         return None
 
 
+def _yfinance_classification(symbol: str) -> tuple[str | None, str | None]:
+    """yfinance's ``(sector, industry)``, for a symbol the main provider left unclassified."""
+    try:
+        import yfinance as yf
+
+        info = yf.Ticker(symbol).info or {}
+    except Exception:  # noqa: BLE001 - network / provider failure: still unclassified
+        return None, None
+    sector, industry = info.get("sector"), info.get("industry")
+    return (
+        sector if isinstance(sector, str) and sector.strip() else None,
+        industry if isinstance(industry, str) and industry.strip() else None,
+    )
+
+
 def _sane_revenue_growth(
     symbol: str, rg: float | None, *, sector: str | None, industry: str | None, source: str,
 ) -> tuple[float | None, str | None]:
@@ -1099,6 +1114,11 @@ def stage_sentiment_fundamentals(
         for key in ("sector", "industry"):
             value = data.get(key)
             result[key] = value if isinstance(value, str) and value.strip() else None
+        # Finnhub's free tier has no profile for most non-US listings, so a
+        # bank like HSBA.L arrived unclassified and its gross-interest
+        # "revenue growth" (25 % vs +11 % reported) passed the financials check.
+        if rg is not None and result["sector"] is None and result["industry"] is None:
+            result["sector"], result["industry"] = _yfinance_classification(symbol)
         rg, rg_concern = _sane_revenue_growth(
             symbol, rg, sector=result["sector"], industry=result["industry"],
             source=str(fund_result.get("source") or ""),
@@ -1887,7 +1907,8 @@ def stage_portfolio_fit(
         # A week where a line has no price spreads its weight over the others.
         denom = present.mul(w, axis=1).sum(axis=1)
         port_weighted = (port_rets.fillna(0.0).mul(w, axis=1).sum(axis=1) / denom.where(denom > 0)).dropna()
-        weight_basis = "value"
+        # Not "value": the dossier model read that as a value-investing style.
+        weight_basis = "market_value"
 
     common = cand_rets.index.intersection(port_weighted.index)  # type: ignore[union-attr]
     if len(common) < _FIT_MIN_WEEKS:

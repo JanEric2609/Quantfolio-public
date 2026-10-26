@@ -6,6 +6,12 @@ IBES consensus goes blank after 92 days, and the insider extract ended
 2024-03-29 (automated since 2026-09-29, ``sec_edgar_insider``). This report
 backs the "Research extracts" card in Settings -> Data (owner decision
 2026-09-29: keep the WRDS exports, and make a missed one visible).
+
+``stale_after_days`` follows how often the source publishes, so "stale" means
+a newer release exists that is not loaded yet. It is not the join's own
+tolerance: JKP rows older than 92 days are still left out of the joins
+(``pit_panel_joins._WRDS_MAX_STALENESS_DAYS``). Between JKP's yearly releases
+those features are therefore empty, and nothing on our side can fill them.
 """
 from __future__ import annotations
 
@@ -40,13 +46,22 @@ EXTRACTS: tuple[ExtractSpec, ...] = (
         "ibes_estimates", "IBES analyst consensus", "ibes_estimates_pit", "statpers",
         _WRDS, 92, "Discover estimate revision (live Yahoo consensus is used when this is stale)",
     ),
+    # JKP publishes once a year: the release of 2026-05-21 runs to 2025-12-31.
+    # The next one (to 2026-12) is due around May 2027, so a December month
+    # plus 18 months means a release was missed.
     ExtractSpec(
         "jkp_characteristics", "JKP stock characteristics", "wrds_factor_characteristics_pit", "eom",
-        _WRDS, 92, "Pooled ML features, factor evidence",
+        f"{_WRDS}; JKP publishes yearly, about five months after December", 548,
+        "Pooled ML features, factor evidence (empty in live joins once the newest month is 92 days old)",
     ),
+    # Compustat updates the security file daily, but a gvkey's ISIN rarely
+    # changes and the join carries the newest mapping forward with no age
+    # limit. An old export only misses securities listed after it, so it is
+    # re-exported once a year, in the same WRDS session as the JKP pull.
     ExtractSpec(
         "security_identifiers", "Compustat security identifiers", "security_identifiers_pit", "as_of_date",
-        _WRDS, 183, "ISIN to gvkey links for the WRDS joins",
+        f"{_WRDS}; re-export yearly with the JKP pull", 730,
+        "ISIN to gvkey links for the WRDS joins (ISINs listed after the newest date are not linked)",
     ),
     ExtractSpec(
         "crsp_names", "CRSP ticker history", "crsp_names_pit", "ingested_at",

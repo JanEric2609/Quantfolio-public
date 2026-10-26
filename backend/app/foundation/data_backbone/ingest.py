@@ -105,6 +105,19 @@ def _finite(value: Any) -> float:
     return out if math.isfinite(out) else 0.0
 
 
+def _macro_value(value: Any) -> Decimal | None:
+    """A macro observation as a Decimal; None for a missing one.
+
+    FRED reports a holiday as "." (NaN once parsed); storing it wrote NaN rows
+    (BAA10Y 30, T10Y2Y 29, VIXCLS 7 by 2026-10-26), and None used to become 0.
+    """
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return Decimal(str(out)) if math.isfinite(out) else None
+
+
 class DataIngester:
     """Orchestrates data ingestion from providers into hypertables."""
 
@@ -887,8 +900,9 @@ class DataIngester:
                     for row in hist_result.get("data", []):
                         try:
                             value = row.get("value") if isinstance(row, dict) else row
-                            float_value = float(value) if value is not None else 0.0
-                            decimal_value = Decimal(str(float_value))
+                            decimal_value = _macro_value(value)
+                            if decimal_value is None:
+                                continue
 
                             date_str = row.get("date") if isinstance(row, dict) else None
                             if date_str:
@@ -954,8 +968,9 @@ class DataIngester:
                     try:
                         # Parse value
                         value = series_data.get("value") if isinstance(series_data, dict) else series_data
-                        float_value = float(value) if value is not None else 0.0
-                        decimal_value = Decimal(str(float_value))
+                        decimal_value = _macro_value(value)
+                        if decimal_value is None:
+                            continue
 
                         # Parse date from timestamp or use today
                         timestamp_str = series_data.get("timestamp") if isinstance(series_data, dict) else None

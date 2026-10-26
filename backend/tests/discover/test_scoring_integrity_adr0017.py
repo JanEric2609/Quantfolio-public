@@ -423,7 +423,7 @@ def test_bbva_dossier_is_grounded_and_estimate_starts_from_market_prior(monkeypa
 
     prompt = captured[0][1]["content"]
     assert "is the trailing 3-year annualized return" in prompt
-    assert "12-1 month momentum is a separate figure: +60.9%" in prompt
+    assert "12-1 month momentum (a separate figure from the anchor): a +60.9% price return" in prompt
     assert "Market beta: 1.10 (weekly returns vs VGK" in prompt
     assert "must not be cited as market beta" in prompt
     assert "median price target 23.825 (-5.5% vs current price)" in prompt

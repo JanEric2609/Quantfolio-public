@@ -199,10 +199,20 @@ def _no_live_analyst_estimates(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_live_revenue_confirmation(monkeypatch):
-    """Discover asks yfinance to confirm an extreme revenue growth; offline in tests."""
+    """Discover asks yfinance to confirm an extreme revenue growth and to classify
+    an unclassified symbol; offline in tests."""
     from app.decision.discover import pipeline
 
     monkeypatch.setattr(pipeline, "_yfinance_revenue_growth", lambda _symbol: None)
+    monkeypatch.setattr(pipeline, "_yfinance_classification", lambda _symbol: (None, None))
+
+
+@pytest.fixture(autouse=True)
+def _no_live_isin_lookup(monkeypatch):
+    """A mandate buy of a never-held ticker asks yfinance for its ISIN; offline in tests."""
+    from app.decision.llm_portfolio import review
+
+    monkeypatch.setattr(review, "_yfinance_isin", lambda _ticker: None)
 
 
 @pytest.fixture(autouse=True)
