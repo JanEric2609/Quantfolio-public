@@ -244,6 +244,20 @@ def update_settings(
                 status_code=403,
                 detail="Only the user Scalable Capital syncs into can change its settings",
             )
+    # The saved Trading 212 key is installation-wide and bound to the user it
+    # syncs into: nobody else may switch it off, repoint it or replace the key.
+    trading212_changes = [
+        key for key, value in public_settings.items() if key.startswith("trading212_") and current.get(key) != value
+    ] + [service for service in payload.integrations if service == "trading212"]
+    if trading212_changes:
+        from app.foundation.trading212_status import owner_user_id as trading212_owner
+
+        owner = trading212_owner(db)
+        if owner is not None and owner != user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the user Trading 212 syncs into can change its settings or key",
+            )
     # The per-bank Freistellungsauftrag/NV values describe one person's accounts.
     if any(key in public_settings for key in BANK_SETTING_KEYS):
         try:

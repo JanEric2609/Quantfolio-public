@@ -120,6 +120,8 @@ FREQUENCY_PER_MONTH = {
 
 # Fees live in foundation/broker_fees.py (SAVINGS_PLAN_FEE_EUR, order_fee_eur).
 SATELLITE_BROKER_LABELS = {"dkb": "DKB", "scalable": "Scalable Capital"}
+# Synced brokers that report savings plans.
+PLANS_SOURCES: tuple[str, ...] = ("scalable",)
 # Synced brokers whose cash account is a savings account, not buying power.
 SAVINGS_CASH_SOURCES = frozenset({"trading212"})
 
@@ -509,7 +511,9 @@ def plans_freshness(db: Session, user_id: str) -> dict[str, Any]:
     last = (
         db.query(BrokerSyncLog)
         .filter(
-            BrokerSyncLog.user_id == user_id, BrokerSyncLog.source.in_(BROKER_SOURCES), BrokerSyncLog.state.in_(("success", "warning")),
+            # Only a broker that syncs savings plans says whether the fetch failed.
+            BrokerSyncLog.user_id == user_id, BrokerSyncLog.source.in_(PLANS_SOURCES),
+            BrokerSyncLog.state.in_(("success", "warning")),
         )
         .order_by(BrokerSyncLog.started_at.desc())
         .first()

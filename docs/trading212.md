@@ -23,7 +23,9 @@ Nothing in Quantfolio can place, change or cancel an order, or change a pie.
 
 The key and the secret are stored encrypted in `api_keys` (`set_secret("trading212", key,
 meta={"api_secret": …})`; the secret is a sensitive meta field and never reaches `meta_json`).
-The key belongs to the app user who ran the first sync. Nobody else can sync or test it.
+The key belongs to the app user who ran the first sync. Nobody else can sync or test it, change
+its settings, or replace it. A key for a different Trading 212 account (for example a demo key
+first, then the live one) is refused with `account_changed`, so two accounts are never mixed.
 
 ## What the client may call
 
@@ -67,6 +69,8 @@ sequential.
   - **Deposits** before the first sync are history (`external_pre_sync`). The first sync books the
     account's total value once as the opening balance, the same as Scalable.
   - A later sync stops paging a feed at the first page that holds a stored row.
+  - A feed longer than 20,000 rows is read only to that cap. Older rows are not imported, and
+    the sync log says so.
 - **Tax** goes to the tax cockpit through `broker_sync.ingest_broker_tax_events` (`source =
   "trading212_sync"`). Buys become FIFO lots per depot and sells consume them. Dividends and
   interest become events at Trading 212's bank, so they use its Freistellungsauftrag.

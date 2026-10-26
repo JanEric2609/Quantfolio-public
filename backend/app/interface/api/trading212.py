@@ -130,7 +130,7 @@ def require_connection_owner(db: Session, user: User) -> None:
 
 def _error(exc: Trading212Error) -> HTTPException:
     if isinstance(exc, (t212.Trading212Busy, t212.Trading212Disabled, t212.Trading212OwnedByOtherUser,
-                        t212.Trading212NotConfigured)):
+                        t212.Trading212NotConfigured, t212.Trading212AccountChanged)):
         status = 409
     elif isinstance(exc, (Trading212AuthError, Trading212ScopeError)):
         # 424, not 401: it is the Trading 212 key that was refused, not the app login.

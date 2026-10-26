@@ -418,3 +418,88 @@ def test_the_monthly_plan_counts_trading212_cash_as_savings_not_buying_power(fak
     assert "trading212" not in state["broker_cash_by_broker"]
     # A Trading 212 depot alone is not a Scalable depot.
     assert connected_brokers(db, user.id) == []
+
+
+def test_a_pie_list_that_is_not_a_list_keeps_the_last_read(fake):
+    db = _memory_db()
+    user = _setup(db)
+    t212.sync(db, user.id)
+    fake.data["/equity/pies"] = {"items": []}
+    log = t212.sync(db, user.id)
+    assert log["state"] == "success" and "pies not readable" in log["message"]
+    assert db.query(BrokerPie).count() == 1
+
+
+def test_a_key_for_another_account_is_refused(fake):
+    db = _memory_db()
+    user = _setup(db)
+    t212.sync(db, user.id)
+    fake.data["/equity/account/summary"] = {**fake.data["/equity/account/summary"], "id": 999}
+    with pytest.raises(t212.Trading212AccountChanged):
+        t212.sync(db, user.id)
+    assert db.query(ConnectedAccount).filter(ConnectedAccount.account_type == "depot").count() == 1
+
+
+def test_a_feed_past_the_page_cap_is_marked_read_and_named(fake, monkeypatch):
+    monkeypatch.setattr(t212_client, "MAX_PAGES", 1)
+    db = _memory_db()
+    user = _setup(db)
+    fake.data["/equity/history/transactions"] = [fake.data["/equity/history/transactions"][0], []]
+    log = t212.sync(db, user.id)
+    assert log["state"] == "warning" and "older history is not imported" in log["message"]
+    depot = trading212_status.depot_account(db, user.id)
+    assert json.loads(depot.raw_json)["history_complete"]["transactions"] is True
+
+
+def test_trading212_dividends_are_not_grossed_up_twice():
+    from datetime import date
+
+    from app.foundation.models.entities import TaxLedgerEvent
+    from app.foundation.tax_allowances import _is_net_credit
+
+    dividend = TaxLedgerEvent(event_type="dividend", source="trading212_sync", gross_eur=Decimal("5"),
+                              withheld_eur=Decimal("0"), event_date=date(2026, 10, 1), tax_year=2026)
+    interest = TaxLedgerEvent(event_type="interest", source="trading212_sync", gross_eur=Decimal("1"),
+                              withheld_eur=Decimal("0"), event_date=date(2026, 10, 1), tax_year=2026)
+    assert not _is_net_credit(dividend)  # booked at its own gross already
+    assert _is_net_credit(interest)
+
+
+def test_another_user_cannot_change_the_trading212_settings_or_key(fake):
+    from fastapi.testclient import TestClient
+
+    from app.foundation.auth import current_user
+    from app.foundation.core.db import get_db
+    from app.main import app
+
+    db = _memory_db()
+    owner = _setup(db)
+    t212.sync(db, owner.id)
+    other = User(username="other", password_hash="x", role="admin")
+    db.add(other)
+    db.commit()
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[current_user] = lambda: other
+    try:
+        client = TestClient(app)
+        off = client.put("/api/settings", json={"settings": {"trading212_enabled": False}, "integrations": {}})
+        key = client.put("/api/settings", json={"settings": {},
+                                                 "integrations": {"trading212": {"secret": "MINE"}}})
+    finally:
+        app.dependency_overrides.clear()
+    assert off.status_code == 403 and key.status_code == 403
+    assert (get_secret(db, "trading212") or ("", {}))[0] == "KEY-123"
+
+
+def test_savings_plan_freshness_reads_only_the_scalable_log(fake):
+    from app.decision.monthly_plan import plans_freshness
+    from app.foundation.models.entities import BrokerSyncLog
+
+    db = _memory_db()
+    user = _setup(db)
+    db.add(BrokerSyncLog(user_id=user.id, source="scalable", trigger="scheduled", state="warning",
+                         started_at=datetime.now(UTC) - timedelta(hours=2),
+                         counts_json=json.dumps({"plans_unavailable": True})))
+    db.commit()
+    t212.sync(db, user.id)  # a newer Trading 212 log must not hide the failed fetch
+    assert plans_freshness(db, user.id)["last_fetch_failed"] is True

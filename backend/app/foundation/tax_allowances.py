@@ -155,6 +155,17 @@ def _rate(value: Any) -> Decimal | None:
     return rate / Decimal("100") if rate > 1 else rate
 
 
+def _is_net_credit(ev: TaxLedgerEvent) -> bool:
+    """A synced credit booked after the bank's withholding, so the planner grosses it up.
+
+    Trading 212 dividends are booked at the gross from the dividend itself
+    (gross per share x quantity); only its interest is a net credit.
+    """
+    if ev.source == "trading212_sync" and ev.event_type == "dividend":
+        return False
+    return ev.source in _NET_CREDIT_SOURCES and not Decimal(str(ev.withheld_eur or 0))
+
+
 @dataclass
 class _Pots:
     dividends: Decimal = ZERO
@@ -171,7 +182,7 @@ class _Pots:
         self.events.append(ev)
         gross = Decimal(str(ev.gross_eur or 0))
         tf = Decimal(str(ev.teilfreistellung_pct or 0))
-        net = ev.source in _NET_CREDIT_SOURCES and not Decimal(str(ev.withheld_eur or 0))
+        net = _is_net_credit(ev)
         if ev.event_type == "dividend":
             self.dividends += apply_teilfreistellung(gross, tf)
             if net:

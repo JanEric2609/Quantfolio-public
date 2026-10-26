@@ -342,7 +342,10 @@ class PieRecord:
 
 
 def map_pie_list(body: Any) -> list[dict[str, Any]]:
-    return [p for p in (body if isinstance(body, list) else []) if isinstance(p, dict) and p.get("id") is not None]
+    """The pies of ``GET /equity/pies``; a body that is not a list is unreadable, never "no pies"."""
+    if not isinstance(body, list):
+        raise ValueError("the pie list is not a list")
+    return [p for p in body if isinstance(p, dict) and p.get("id") is not None]
 
 
 def map_pie(summary: dict[str, Any], detail: Any, positions_by_ticker: dict[str, PositionRecord]) -> PieRecord:

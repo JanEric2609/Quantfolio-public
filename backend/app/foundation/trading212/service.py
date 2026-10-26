@@ -32,6 +32,8 @@ from app.foundation.models.entities import (
 from app.foundation.settings import get_public_settings, get_secret, upsert_public_settings
 
 from .client import (
+    MAX_PAGES,
+    PAGE_LIMIT,
     Trading212AuthError,
     Trading212Client,
     Trading212Config,
@@ -90,6 +92,10 @@ class Trading212Busy(Trading212Error):
 
 class Trading212OwnedByOtherUser(Trading212Error):
     """The saved key already syncs into another app user."""
+
+
+class Trading212AccountChanged(Trading212Error):
+    """The key now reads a different Trading 212 account than the one already synced."""
 
 
 ClientFactory = Callable[[Trading212Config], Trading212Client]
@@ -217,8 +223,17 @@ def sync(db: Session, user_id: str, *, trigger: str = "manual") -> dict[str, Any
     try:
         summary = map_summary(client.get(SUMMARY))
         account_id = summary.account_id or "default"
+        depot = depot_account(db, user_id)
+        if depot is not None and depot.external_id and depot.external_id != account_id:
+            # Never mix two accounts (a demo key, then the live one): their
+            # positions, cash and tax lots would all count.
+            raise Trading212AccountChanged(
+                "account_changed",
+                f"The key reads Trading 212 account {account_id}, but account {depot.external_id} is already "
+                "synced. Save the key of that account, or remove the old Trading 212 data before syncing another.",
+            )
         positions = map_positions(client.get(POSITIONS))
-        raw = load_raw(depot_account(db, user_id))
+        raw = load_raw(depot)
         complete = _obj(raw.get("history_complete"))
         known = _known_hashes(db, user_id)
 
@@ -260,8 +275,10 @@ def sync(db: Session, user_id: str, *, trigger: str = "manual") -> dict[str, Any
                 logger.info("Trading 212 instrument list unavailable: %s", exc.code)
                 counts["instrument_types"] = "unavailable"
 
+        # A feed past the page cap is marked read as well: the next sync reads
+        # only what is new, and the log names the history as capped.
         counts.update(_write(db, user_id, account_id, summary, positions, fills, dividends, cash,
-                             security_types=types, complete={k: not v for k, v in cut.items()}))
+                             security_types=types, complete={k: True for k in cut}))
         db.commit()
     except Trading212ReadOnlyViolation as exc:
         db.rollback()
@@ -309,7 +326,8 @@ def sync(db: Session, user_id: str, *, trigger: str = "manual") -> dict[str, Any
         message += (f"; {corporate} share movements without a trade (splits, spin-offs) are in the ledger "
                     "for review and not in the tax lots")
     if truncated:
-        message += "; the history is longer than one sync reads (" + ", ".join(truncated) + "), the rest follows"
+        message += (f"; only the newest {MAX_PAGES * PAGE_LIMIT} rows of " + ", ".join(truncated)
+                    + " were read, older history is not imported")
     state = "warning" if failed_steps or tax_problems or truncated else "success"
     _finish_log(db, log, state, message, counts=counts)
     return log_to_dict(log)
@@ -420,8 +438,6 @@ def _write(db: Session, user_id: str, account_id: str, summary: AccountSummary, 
     rate = (interest * Decimal(365) / Decimal(INTEREST_WINDOW_DAYS) / balance) if balance and interest else None
     history_complete = dict(raw.get("history_complete") or {})
     for feed, done in complete.items():
-        # Once a feed was read to its end it stays complete; a cut-off read
-        # leaves the flag off, so the next sync reads the whole feed again.
         history_complete[feed] = bool(history_complete.get(feed) or done)
     raw.update({
         "account_id": account_id,
