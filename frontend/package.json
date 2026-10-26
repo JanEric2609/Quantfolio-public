@@ -45,7 +45,7 @@
     "react-hotkeys-hook": "^5.3.3",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.4",
-    "recharts": "^2.15.0",
+    "recharts": "^3.10.1",
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.7.0",
