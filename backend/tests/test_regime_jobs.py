@@ -416,6 +416,36 @@ def test_price_backfill_daily_skips_ingest_when_regime_bars_fresh(monkeypatch):
     assert calls == []  # step already ran / data fresh → zero ingestions
 
 
+def _fetches_at(monkeypatch, newest_bar: str, now: datetime) -> bool:
+    from app.worker import _refresh_regime_index_bars
+
+    db = _memory_db()
+    db.execute(
+        text("""
+            INSERT INTO bar_prices
+            (symbol, ts, open, high, low, close, volume, currency, provider)
+            VALUES ('^STOXX50E', :ts, 1.0, 1.0, 1.0, 1.0, 0, 'EUR', 'test')
+        """),
+        {"ts": datetime.fromisoformat(newest_bar).replace(tzinfo=timezone.utc)},
+    )
+    db.commit()
+    calls: list = []
+    _make_ingester_stub(monkeypatch, calls)
+    _refresh_regime_index_bars(db, now=now)
+    return len(calls) == 1
+
+
+def test_regime_index_bars_are_fetched_each_day_a_new_close_exists(monkeypatch):
+    # Prod 2026-10-17: the newest bar was Wednesday's, two days inside the
+    # 7-day limit, so the fetch was skipped and the regime ran on 10-14.
+    at = lambda day: datetime(2026, 10, day, 6, 30, tzinfo=timezone.utc)  # noqa: E731
+    assert _fetches_at(monkeypatch, "2026-10-14", at(17)) is True    # Sat, Fri missing
+    assert _fetches_at(monkeypatch, "2026-10-16", at(17)) is False   # Sat, Fri stored
+    assert _fetches_at(monkeypatch, "2026-10-16", at(19)) is False   # Mon: Fri is newest
+    assert _fetches_at(monkeypatch, "2026-10-16", at(20)) is True    # Tue: Mon missing
+    assert _fetches_at(monkeypatch, "2026-10-19", at(20)) is False
+
+
 def test_price_backfill_daily_tolerates_regime_ingest_failure(monkeypatch, caplog):
     """Ingestion blow-up is logged; the daily job still completes."""
     import logging

@@ -17,6 +17,15 @@ more than the four characteristics loaded so far. This extract fixes both: one
 consistent pull with full history and 41 characteristics, two to five from
 each of JKP's 13 themes.
 
+## When
+
+Once a year. JKP publishes yearly on WRDS: the release of 2026-05-21 runs to
+2025-12-31, so the next one (to 2026-12) is due around May 2027. Settings ->
+Data marks the extract stale 18 months after its newest month, i.e. only when a
+release was missed. In the same WRDS session, re-export the Compustat security
+identifiers (marked stale after two years). Between releases, the live joins
+leave JKP features empty once the newest month is 92 days old; that is expected.
+
 ## The query
 
 WRDS → Get Data → Contributed Data Forms → **Global Factor Data** →

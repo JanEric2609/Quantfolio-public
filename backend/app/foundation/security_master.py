@@ -72,6 +72,7 @@ _YAHOO_SUFFIX_WHITELIST: frozenset[str] = frozenset({
 })
 
 _WS_RE = re.compile(r"\s+")
+_ISIN_RE = re.compile(r"[A-Z]{2}[A-Z0-9]{9}[0-9]")
 
 #: OpenFIGI v3 documented batch/rate limits (openfigi.com/api/documentation):
 #: 10 mapping jobs/request unauthenticated, 100/request with an API key;
@@ -91,6 +92,20 @@ _OPENFIGI_RATE_LIMIT_WITH_KEY = RateLimitConfig(
 #: Shared-limiter key for :func:`resolve_securities_batch`'s OpenFIGI POSTs
 #: (exposed so tests can reset the module-level shared limiter between runs).
 OPENFIGI_BATCH_LIMITER_KEY = "openfigi_mapping"
+
+
+def valid_isin(value: object) -> bool:
+    """ISO 6166 shape and Luhn check digit (letters expand to 10-35)."""
+    if not isinstance(value, str) or not _ISIN_RE.fullmatch(value):
+        return False
+    digits = "".join(str(int(ch, 36)) for ch in value)
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        n = int(ch)
+        if i % 2 == 1:
+            n = n * 2 - 9 if n > 4 else n * 2
+        total += n
+    return total % 10 == 0
 
 
 def normalize_alias(alias: str) -> str:

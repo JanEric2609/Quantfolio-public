@@ -1,8 +1,10 @@
 """Audit log API endpoints."""
 
+from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import AuditLog, User
@@ -25,6 +27,12 @@ class AuditEventResponse(BaseModel):
     created_at: str
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("created_at", mode="before")
+    @classmethod
+    def _iso(cls, value: Any) -> Any:
+        # The column is a datetime; the contract has always been a string.
+        return value.isoformat() if isinstance(value, datetime) else value
 
 
 @router.get("", response_model=list[AuditEventResponse])

@@ -310,8 +310,27 @@ def test_a_day_waits_for_a_lagging_close_then_freezes_it_as_stale_cash():
     stale = db.query(TrustDailyActiveReturn).filter_by(day=DAYS[3]).one()
     assert stale.n_stale == 1 and stale.value == pytest.approx(-0.01)
     assert stale.detail_json["stale"] == ["AAA"]
-    # Days still inside the grace window keep waiting.
-    assert max(r.day for r in db.query(TrustDailyActiveReturn).all()) == DAYS[11 - daily_ledger.GRACE_TRADING_DAYS]
+    # AAA has been silent for longer than the grace: the later days need not
+    # wait for it either (WBD, prod check 2026-10-26).
+    assert max(r.day for r in db.query(TrustDailyActiveReturn).all()) == DAYS[11]
+
+
+def test_a_short_lag_still_waits_while_a_silent_symbol_does_not():
+    db = _memory_db()
+    uid = _user(db)
+    _prediction(db, uid, "DEAD", DAYS[0], horizon=20)
+    _prediction(db, uid, "LATE", DAYS[0], horizon=20)
+    prices = FakePrices({
+        BENCH: _geometric(DAYS[:12], 0.01),
+        "DEAD": _geometric(DAYS[:3], 0.01),  # delisted after DAYS[2]
+        "LATE": _geometric(DAYS[:10], 0.01),  # its last two closes are late
+    })
+    daily_ledger.freeze_series(db, uid, "ideas", today=DAYS[11], loader=prices)
+    db.commit()
+    rows = {r.day: r for r in db.query(TrustDailyActiveReturn).all()}
+    # Frozen through LATE's last close; DAYS[10] and DAYS[11] wait for it, not for DEAD.
+    assert max(rows) == DAYS[9]
+    assert rows[DAYS[9]].detail_json["stale"] == ["DEAD"]
 
 
 def _snapshots(db, uid, run_id, issued: date, composites: dict[str, float]):

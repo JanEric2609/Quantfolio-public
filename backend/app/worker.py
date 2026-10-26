@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -878,7 +878,15 @@ def register_snapshot_paper_portfolios_job(scheduler: Any | None = None) -> str:
 REGIME_INDEX_LOOKBACK_DAYS = 400
 
 
-def _refresh_regime_index_bars(db: Session) -> dict[str, Any]:
+def _previous_weekday(day: date) -> date:
+    """The last Monday-Friday before ``day``: the newest close stored by 06:30 UTC."""
+    prev = day - timedelta(days=1)
+    while prev.weekday() >= 5:
+        prev -= timedelta(days=1)
+    return prev
+
+
+def _refresh_regime_index_bars(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
     """Backfill bars for the configured regime index symbol (Wave 3, T3.E).
 
     Why: production evidence (audit D2,
@@ -892,9 +900,10 @@ def _refresh_regime_index_bars(db: Session) -> dict[str, Any]:
     Reuses the ONE shared ingestion entrypoint the classifier's own stale-bar
     guard uses (``DataIngester.ingest_bar_prices``). The symbol comes from
     public settings (``regime_index_symbol``, ^STOXX50E fallback identical to
-    ``classify_and_store`` — never hardcoded here). Skips the network when the
-    newest stored bar is already within ``regime_max_bar_age_days``, so an
-    already-fresh symbol is not re-ingested on every run.
+    ``classify_and_store`` — never hardcoded here). Skips the network only when
+    the previous weekday's bar is already stored. ``regime_max_bar_age_days``
+    is the classifier's refusal limit, not a fetch interval: used as one, it
+    left the regime classifying closes up to six days old (prod, 2026-10).
 
     Never raises: any failure is logged and returned so one symbol failing can
     never kill the rest of the daily job.
@@ -907,10 +916,9 @@ def _refresh_regime_index_bars(db: Session) -> dict[str, Any]:
     try:
         settings = get_public_settings(db)
         symbol = str(settings.get("regime_index_symbol", "^STOXX50E"))
-        max_age_days = float(settings.get("regime_max_bar_age_days", 7))
         outcome["symbol"] = symbol
 
-        end = datetime.now(UTC)
+        end = now or datetime.now(UTC)
         latest = BarStore(db).get_latest_bar(symbol)
         if latest is not None and latest.get("ts") is not None:
             last_ts = latest["ts"]
@@ -921,7 +929,7 @@ def _refresh_regime_index_bars(db: Session) -> dict[str, Any]:
             if last_ts.tzinfo is not None:
                 last_ts = last_ts.astimezone(UTC).replace(tzinfo=None)
             age_days = (end.replace(tzinfo=None) - last_ts).total_seconds() / 86400.0
-            if age_days <= max_age_days:
+            if last_ts.date() >= _previous_weekday(end.date()):
                 outcome.update(
                     skipped=True,
                     reason="bars_fresh",

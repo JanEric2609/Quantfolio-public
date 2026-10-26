@@ -74,6 +74,8 @@ _THESIS_RULES = (
     "Rules for thesis and key_risks:\n"
     f"- thesis: at most 3 complete sentences and {_PROMPT_THESIS_CHARS} characters; end with a full stop.\n"
     "- Use only numbers that appear above. Do not invent figures, multiples, targets or consensus values.\n"
+    "- Each claim rests on a figure or fact above; no stock phrases such as \"mean reversion potential\" "
+    "or \"momentum drives value\".\n"
     "- Do not describe interest-rate moves (hikes, cuts, tightening, easing) unless the Macro facts above "
     "show that direction.\n"
     "- Direction and horizon are fixed by the system (above); do not argue the opposite stance.\n"
@@ -483,10 +485,6 @@ def _grounding_prompt_lines(scores: dict[str, Any], annual: dict[str, Any]) -> s
             f"{_ANCHOR_KIND_TEXT[kind]} — backward-looking, not a forecast. Refer to it by "
             "exactly this name."
         )
-        if kind != "momentum_12_1m" and isinstance(mom.get("momentum_12_1m"), (int, float)):
-            lines.append(
-                f"12-1 month momentum is a separate figure: {_pct(mom['momentum_12_1m'] * 100)}."
-            )
         lines.append(
             "System forward estimate (annual, before scaling to horizon_months): "
             f"{_pct(components.get('er_annual_pct'))} = market-implied "
@@ -502,6 +500,42 @@ def _grounding_prompt_lines(scores: dict[str, Any], annual: dict[str, Any]) -> s
             f"{_ANCHOR_KIND_TEXT[kind]}."
         )
 
+    # Prod check 2026-10-26: "momentum (1.33x)" for a +133 % return, "momentum
+    # (0.91)" for the rank and "52.6 % momentum rank" for a return. Return and
+    # rank are named side by side so neither stands in for the other.
+    if isinstance(mom.get("momentum_12_1m"), (int, float)):
+        rank = mom.get("momentum_rank")
+        rank_text = (
+            f"; its momentum rank is {float(rank):.2f}, the percentile of that return among this run's "
+            "candidates (0-1, the composite's momentum input)"
+            if isinstance(rank, (int, float)) else ""
+        )
+        separate = " (a separate figure from the anchor)" if kind != "momentum_12_1m" else ""
+        lines.append(
+            f"12-1 month momentum{separate}: a {_pct(mom['momentum_12_1m'] * 100)} price return{rank_text}. "
+            "Write the return as a percentage and the rank as a percentile; never write either as a "
+            "multiple such as 1.33x."
+        )
+
+    fit = _as_dict(scores.get("portfolio_fit"))
+    if isinstance(fit.get("correlation"), (int, float)):
+        weighting = {
+            "market_value": "each position weighted by its market value",
+            "value": "each position weighted by its market value",
+            "equal": "positions weighted equally",
+        }.get(str(fit.get("weight_basis")), "positions weighted by value")
+        weeks = f", {fit['correlation_weeks']} weeks" if fit.get("correlation_weeks") else ""
+        fit_score = fit.get("fit_score")
+        fit_text = (
+            f" Fit score {float(fit_score):.2f} (0-1, higher = adds more diversification)."
+            if isinstance(fit_score, (int, float)) else ""
+        )
+        lines.append(
+            f"Portfolio fit: weekly-return correlation {float(fit['correlation']):.2f} with the investor's "
+            f"current portfolio ({weighting}{weeks}). It is a correlation to that portfolio, not to an index, "
+            f"a benchmark or 'equities', and says nothing about value investing.{fit_text}"
+        )
+
     inputs = scores.get("composite_inputs")
     if isinstance(inputs, list) and inputs:
         drivers = "; ".join(
@@ -510,7 +544,10 @@ def _grounding_prompt_lines(scores: dict[str, Any], annual: dict[str, Any]) -> s
             for row in inputs
             if isinstance(row, dict)
         )
-        lines.append(f"Composite score drivers (signal score x applied weight = contribution): {drivers}.")
+        lines.append(
+            f"Composite score drivers (signal score x applied weight = contribution): {drivers}. "
+            "Signal scores are 0-1 scores or ranks, not returns."
+        )
 
     quant = _as_dict(scores.get("quant_signals"))
     beta_weekly = quant.get("market_beta_weekly")
@@ -639,6 +676,15 @@ def write_dossier(
     backtest_raw = _as_dict(scores.get("backtest_vs_benchmark"))
     mom_raw = _as_dict(scores.get("momentum_quality"))
     sf_scores = _as_dict(scores.get("sentiment_fundamentals"))
+    if sf_scores:
+        # The pipeline's checked figures win over the raw re-fetch above: it
+        # drops a bank's revenue growth (gross interest income) and fills a
+        # missing sector, and the prompt showed the raw 25 % for HSBA.L anyway
+        # (prod check 2026-10-26).
+        fundamentals["revenue_growth"] = sf_scores.get("revenue_growth")
+        for key in ("sector", "industry"):
+            if not fundamentals.get(key) and sf_scores.get(key):
+                fundamentals[key] = sf_scores[key]
     ml_scores = _as_dict(scores.get("ml_signal"))
     ml_regime_context = _as_dict(ml_scores.get("regime_context"))
     estimate_revision_scores = _as_dict(scores.get("estimate_revision_signal"))
@@ -816,7 +862,6 @@ def write_dossier(
         f"ICIR: {icir}\n"
         f"{_regime_text(db, regime_state)}\n"
         f"ML signal regime context: {json.dumps(ml_regime_context)}\n"
-        f"Portfolio context: {json.dumps(portfolio_fit_raw)}\n"
         f"Quantitative scores: {json.dumps(_reword_concerns_for_prompt(scores))}\n"
         f"{instrument_facts_lines}"
         f"Fundamentals: {json.dumps(fundamentals)}\n"
@@ -826,6 +871,7 @@ def write_dossier(
         f"{grounding_lines}"
         f"User profile: {json.dumps(profile)}\n"
         f"Macro facts: {json.dumps(macro) if macro else 'unavailable'}\n"
+        f"Ticker: write it exactly as {symbol.split('.')[0].upper()}.\n"
         f"Direction (fixed by the system): {direction}. Horizon: {horizon_months} months. "
         f"System expected return over the horizon: {resolved['expected_return_pct']} %.\n"
         f"\n{_THESIS_RULES}"
@@ -881,6 +927,7 @@ def write_dossier(
                         facts_text=context,
                         macro=macro,
                         direction=direction,
+                        symbol=symbol,
                     )
                     if check.ok:
                         candidate_dossier["thesis"] = check.thesis

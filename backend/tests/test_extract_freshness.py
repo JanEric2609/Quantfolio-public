@@ -28,10 +28,24 @@ def test_each_extract_reports_its_newest_date_and_staleness(tmp_path):
     assert insider["newest"] == "2026-09-25" and insider["age_days"] == 4 and insider["rows"] == 2
     assert insider["stale"] is False and "Automatic" in insider["refresh"]
     jkp = report["jkp_characteristics"]
-    assert jkp["newest"] == "2025-12-31" and jkp["age_days"] == 272 and jkp["stale"] is True
+    assert jkp["newest"] == "2025-12-31" and jkp["age_days"] == 272 and jkp["stale"] is False
     assert "WRDS" in jkp["refresh"]
     missing = report["ibes_estimates"]
     assert missing["newest"] is None and missing["rows"] == 0 and missing["stale"] is True
+
+
+def test_yearly_wrds_extracts_go_stale_only_after_a_missed_release(tmp_path):
+    # Prod on 2026-10-19: JKP to 2025-12 (latest release), identifiers to 2024-12.
+    _panel(tmp_path, "wrds_factor_characteristics_pit", "eom", ["2025-12-31"])
+    _panel(tmp_path, "security_identifiers_pit", "as_of_date", ["2024-12-31"])
+
+    def stale(today):
+        report = research_extract_freshness(tmp_path, today=today)
+        return {e["key"]: e["stale"] for e in report if e["key"] in ("jkp_characteristics", "security_identifiers")}
+
+    assert stale(date(2026, 10, 19)) == {"jkp_characteristics": False, "security_identifiers": False}
+    # The 2026-12 JKP release is due around May 2027; by July it was missed.
+    assert stale(date(2027, 7, 3)) == {"jkp_characteristics": True, "security_identifiers": True}
 
 
 def test_the_endpoint_returns_every_extract(tmp_path, monkeypatch):

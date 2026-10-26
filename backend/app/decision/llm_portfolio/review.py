@@ -477,7 +477,24 @@ def _resolve_isin(db: Session, ticker: str) -> str | None:
         .order_by(DiscoverCandidate.id.desc())
         .first()
     )
-    return candidate.isin if candidate else None
+    if candidate:
+        return candidate.isin
+    # US names never held have neither row (Discover stores them without an
+    # ISIN): NEM, Mandate B's buy of 2026-10-23.
+    return _yfinance_isin(ticker)
+
+
+def _yfinance_isin(ticker: str) -> str | None:
+    """yfinance's ISIN for *ticker* when its check digit holds, else None."""
+    from app.foundation.security_master import valid_isin
+
+    try:
+        import yfinance as yf
+
+        value = yf.Ticker(ticker).isin
+    except Exception:  # noqa: BLE001 - network / provider failure: no ISIN
+        return None
+    return value if valid_isin(value) else None
 
 
 
@@ -551,6 +568,7 @@ def _deploy_cash(
             rationale=(f"Deterministic cash deployment: cash {cash / nav:.0%} of NAV, ETF weight "
                        f"{etf_value / nav:.0%} under the {min_etf:.0%} floor; core ETF bought up to it."),
             fee=fee,
+            isin=isin,
         )
     except ValueError as exc:
         return {"gate_result": {**gate_result, "passed": False, "reason": f"Core buy not executed: {exc}"},
@@ -888,6 +906,7 @@ def run_mandate_review(db: Session, user_id: str, mandate: str) -> dict[str, Any
                     confidence=confidence,
                     rationale=thesis,
                     fee=fee,
+                    isin=isin,
                 )
             except ValueError as exc:
                 gate_result = {
@@ -899,14 +918,6 @@ def run_mandate_review(db: Session, user_id: str, mandate: str) -> dict[str, Any
             else:
                 trade = db.get(PaperTrade, booked["id"])
                 trade_created = True
-                if isin:
-                    new_holding = (
-                        db.query(PaperHolding)
-                        .filter(PaperHolding.portfolio_id == portfolio_id, PaperHolding.ticker == ticker)
-                        .one_or_none()
-                    )
-                    if new_holding is not None and not new_holding.isin:
-                        new_holding.isin = isin
         else:
             logger.info("Buy rejected by gates for %s: %s", ticker, gate_result["reason"])
 
