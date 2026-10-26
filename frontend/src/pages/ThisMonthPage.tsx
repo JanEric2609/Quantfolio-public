@@ -447,7 +447,7 @@ export function ThisMonthPage() {
           <CardTitle className="pt-2 text-2xl leading-snug">{data.headline}</CardTitle>
           {!data.has_holdings && (
             <CardDescription>
-              No holdings yet, so the split below starts from an empty book. Sync DKB or Scalable Capital, and enter
+              No holdings yet, so the split below starts from an empty book. Sync DKB, Scalable Capital or Trading 212, and enter
               positions held elsewhere under Portfolio → Holdings, to see your sleeves.
             </CardDescription>
           )}

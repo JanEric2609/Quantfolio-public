@@ -12,7 +12,7 @@ const num = (value: number | null | undefined) => formatMetricNumber(value, 2, "
 const pct = (value: number | null | undefined) => formatMetricPercent(value, 2, "-");
 
 /**
- * Risk of the whole book (DKB and Scalable, in EUR) against a benchmark in
+ * Risk of the whole book (every synced broker, in EUR) against a benchmark in
  * EUR, both paired by date. Empty fields mean the defaults: the configured
  * benchmark (MSCI World EUR) and the ECB deposit rate.
  */

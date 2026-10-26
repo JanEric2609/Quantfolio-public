@@ -1,4 +1,4 @@
-"""Order and savings-plan fees of the two brokers the owner uses.
+"""Order and savings-plan fees of the three brokers the owner uses.
 
 Price lists, checked 2026-10-06 (de.scalable.capital/trading-gebuehren,
 Preis- und Leistungsverzeichnis from 2026-09-01; dkb.de/privatkunden/broker):
@@ -12,6 +12,11 @@ Preis- und Leistungsverzeichnis from 2026-09-01; dkb.de/privatkunden/broker):
 * DKB: an order costs 10 EUR up to 5,000 EUR, 15 EUR up to 20,000 EUR and
   30 EUR above (Tradegate/gettex/Quotrix); a savings plan 1.50 EUR per
   execution.
+* Trading 212 (checked 2026-10-26, trading212.com/multi-currency and broker
+  reviews): no commission on stocks and ETFs; a line traded in another
+  currency than the account's (EUR) pays 0.15 % for the conversion, on the
+  buy and again on the sale. Pies (its savings plans) are free; a pie buying
+  a non-EUR line pays the same 0.15 %, which the plan does not model.
 
 There is no issuer field anywhere in the data, so a Prime ETF is recognised
 by the fund name every broker and price source carries ("iShares Core MSCI
@@ -24,7 +29,8 @@ import re
 SCALABLE_ORDER_FEE_EUR = 0.99
 SCALABLE_PRIME_MIN_ORDER_EUR = 250.0
 SCALABLE_OTHER_VENUE_FEE_EUR = 1.99  # gettex / Xetra since 2026-09-01; not used, EIX is assumed
-SAVINGS_PLAN_FEE_EUR = {"dkb": 1.5, "scalable": 0.0}
+TRADING212_FX_FEE_RATE = 0.0015
+SAVINGS_PLAN_FEE_EUR = {"dkb": 1.5, "scalable": 0.0, "trading212": 0.0}
 DKB_ORDER_TIERS_EUR: tuple[tuple[float, float], ...] = ((5_000.0, 10.0), (20_000.0, 15.0))
 DKB_ORDER_ABOVE_EUR = 30.0
 
@@ -55,6 +61,22 @@ def dkb_order_fee(amount: float) -> float:
     return DKB_ORDER_ABOVE_EUR
 
 
-def order_fee_eur(broker: str, amount: float, name: str | None = None, side: str = "buy") -> float:
-    """One order's fee at *broker* (``"scalable"`` or ``"dkb"``); *side* is ``"buy"`` or ``"sell"``."""
-    return scalable_order_fee(amount, name, side) if broker == "scalable" else dkb_order_fee(amount)
+def trading212_order_fee(amount: float, currency: str | None = None) -> float:
+    """One Trading 212 order: free in EUR, 0.15 % FX fee on a line in another currency."""
+    if amount <= 0 or not currency or currency.upper() == "EUR":
+        return 0.0
+    return round(amount * TRADING212_FX_FEE_RATE, 2)
+
+
+def order_fee_eur(
+    broker: str, amount: float, name: str | None = None, side: str = "buy", currency: str | None = None,
+) -> float:
+    """One order's fee at *broker* (``"scalable"``, ``"trading212"`` or ``"dkb"``); *side* is ``"buy"`` or ``"sell"``.
+
+    *currency* is the traded line's currency; only Trading 212 charges for it.
+    """
+    if broker == "scalable":
+        return scalable_order_fee(amount, name, side)
+    if broker == "trading212":
+        return trading212_order_fee(amount, currency)
+    return dkb_order_fee(amount)

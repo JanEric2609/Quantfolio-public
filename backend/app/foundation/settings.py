@@ -67,7 +67,7 @@ DEFAULT_PUBLIC_SETTINGS: dict[str, Any] = {
     "freistellungsauftrag_dkb_eur": None,
     "freistellungsauftrag_scalable_eur": None,
     "freistellungsauftrag_trading212_eur": None,
-    # Total of the orders on file at banks other than DKB and Scalable (None = none
+    # Total of the orders on file at banks other than DKB, Scalable and Trading 212 (None = none
     # entered; then the allowance used elsewhere stands in for it).
     "freistellungsauftrag_other_banks_eur": None,
     # DKB Tagesgeld interest rate (fraction), for projecting the year's interest.

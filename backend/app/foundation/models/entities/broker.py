@@ -1,4 +1,4 @@
-"""Generic live-broker tables (Scalable Capital today, the next broker tomorrow).
+"""Generic live-broker tables (Scalable Capital and Trading 212; the next broker lands here too).
 
 DKB keeps its own ``dkb_*`` tables; every broker added after it lands here, so
 readers go through ``app.foundation.live_positions`` instead of learning one
@@ -108,4 +108,28 @@ class BrokerPie(Base):
     goal: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     instruments_json: Mapped[str] = mapped_column(Text, default="[]")
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class BrokerInstrument(Base):
+    """One line a broker offers (Trading 212's instrument list), shared by every user.
+
+    An ISIN can have several lines, one per venue and currency (``EUNLd_EQ``
+    on Xetra in EUR, ``IWDAl_EQ`` in London in USD). Replaced as a whole on
+    each refresh; ``synced_at`` says how old the list is.
+    """
+
+    __tablename__ = "broker_instruments"
+    __table_args__ = (
+        UniqueConstraint("source", "ticker", name="uq_broker_instruments_source_ticker"),
+        Index("ix_broker_instruments_source_isin", "source", "isin"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    source: Mapped[str] = mapped_column(String(32))
+    ticker: Mapped[str] = mapped_column(String(40))
+    isin: Mapped[str] = mapped_column(String(12))
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    type: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

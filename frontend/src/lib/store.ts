@@ -3,8 +3,8 @@ import { create } from "zustand";
 type ViewMode = "desktop" | "mobile";
 type Density  = "comfortable" | "compact";
 /** Which synced broker the position views show; "all" includes hand-entered holdings. */
-export type BrokerFilter = "all" | "dkb" | "scalable";
-const BROKER_FILTERS: readonly BrokerFilter[] = ["all", "dkb", "scalable"];
+export type BrokerFilter = "all" | "dkb" | "scalable" | "trading212";
+const BROKER_FILTERS: readonly BrokerFilter[] = ["all", "dkb", "scalable", "trading212"];
 
 interface UiState {
   viewMode: ViewMode;
@@ -18,7 +18,7 @@ interface UiState {
   /** The sidebar's "Research tools" group (Quant Lab, Strategy lab) is collapsed unless this is on. */
   showResearchTools: boolean;
   setShowResearchTools(v: boolean): void;
-  /** Shared by every page with the All / DKB / Scalable filter. */
+  /** Shared by every page with the All / DKB / Scalable / Trading 212 filter. */
   brokerFilter: BrokerFilter;
   setBrokerFilter(v: BrokerFilter): void;
 }

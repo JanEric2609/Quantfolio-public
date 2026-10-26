@@ -95,7 +95,7 @@ function AcceptedSection() {
     <section aria-labelledby="decide-accepted" className="space-y-3">
       <SectionHeading id="decide-accepted" count={waiting.length}>Accepted</SectionHeading>
       <p className="text-sm text-text-secondary">
-        Place the order at your broker. The next DKB or Scalable sync finds the trade and marks it done; there is
+        Place the order at your broker. The next DKB, Scalable or Trading 212 sync finds the trade and marks it done; there is
         nothing to log by hand.
       </p>
       <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">

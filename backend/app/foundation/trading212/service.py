@@ -29,6 +29,7 @@ from app.foundation.models.entities import (
     BrokerSyncLog,
     ConnectedAccount,
 )
+from app.foundation import broker_instruments
 from app.foundation.settings import get_public_settings, get_secret, upsert_public_settings
 
 from .client import (
@@ -53,7 +54,6 @@ from .mapping import (
     PositionRecord,
     cash_activity_type,
     map_dividends,
-    map_instrument_types,
     map_orders,
     map_pie,
     map_pie_list,
@@ -270,14 +270,17 @@ def sync(db: Session, user_id: str, *, trigger: str = "manual") -> dict[str, Any
         if any(cut.values()):
             counts["history_truncated"] = sorted(k for k, v in cut.items() if v)
 
-        types: dict[str, Any] = _obj(raw.get("security_types"))
-        wanted = ({p.isin for p in positions} | {f.isin for f in fills if f.isin}) - set(types)
-        if wanted:
+        # What Trading 212 offers (Discover, the monthly plan, the fee model),
+        # read at most once a day; the positions' security types come from it.
+        if broker_instruments.needs_refresh(db):
             try:
-                types = {**types, **map_instrument_types(client.get(INSTRUMENTS), wanted)}
+                counts["instruments"] = broker_instruments.replace_instruments(db, client.get(INSTRUMENTS))
             except Trading212Transient as exc:
                 logger.info("Trading 212 instrument list unavailable: %s", exc.code)
-                counts["instrument_types"] = "unavailable"
+                counts["instruments"] = "unavailable"
+        types: dict[str, Any] = _obj(raw.get("security_types"))
+        wanted = ({p.isin for p in positions} | {f.isin for f in fills if f.isin}) - set(types)
+        types = {**types, **broker_instruments.instrument_types(db, wanted)}
 
         # A feed past the page cap is marked read as well: the next sync reads
         # only what is new, and the log names the history as capped.
@@ -451,6 +454,8 @@ def _write(db: Session, user_id: str, account_id: str, summary: AccountSummary, 
         "instrument_currency": {**dict(raw.get("instrument_currency") or {}), **instrument_currency},
         "quantity_in_pies": {p.isin: str(p.quantity_in_pies) for p in positions if p.quantity_in_pies},
         "history_complete": history_complete,
+        # Free cash only: cash already in a pie is not there to buy with.
+        "cash": {"buying_power": str(free) if free is not None else None},
         "interest_30d_eur": str(interest.quantize(Decimal("0.01"))),
         "interest_rate_measured": str(rate.quantize(Decimal("0.0001"))) if rate is not None else None,
     })

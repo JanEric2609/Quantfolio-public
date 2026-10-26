@@ -6,12 +6,12 @@ import { cn } from "../../lib/utils";
 
 export type SyncedBroker = Exclude<BrokerFilter, "all">;
 
-const BROKER_SHORT: Record<SyncedBroker, string> = { dkb: "DKB", scalable: "Scalable" };
-const BROKER_ORDER: SyncedBroker[] = ["dkb", "scalable"];
+export const BROKER_SHORT: Record<SyncedBroker, string> = { dkb: "DKB", scalable: "Scalable", trading212: "Trading 212" };
+const BROKER_ORDER: SyncedBroker[] = ["dkb", "scalable", "trading212"];
 
 /** The synced broker behind a position or account `source`; null for a hand-entered one. */
 export function brokerOf(source?: string | null): SyncedBroker | null {
-  return source === "dkb" || source === "scalable" ? source : null;
+  return BROKER_ORDER.find((broker) => broker === source) ?? null;
 }
 
 export function matchesBroker(source: string | null | undefined, filter: BrokerFilter): boolean {
@@ -37,7 +37,7 @@ export function useBrokerFilter(sources: Iterable<string | null | undefined>) {
   return { filter, brokers, setFilter };
 }
 
-/** All / DKB / Scalable. Renders nothing until positions from two brokers exist. */
+/** All / DKB / Scalable / Trading 212. Renders nothing until positions from two brokers exist. */
 export function BrokerFilterToggle({
   brokers,
   value,
@@ -66,7 +66,7 @@ export function BrokerFilterToggle({
   );
 }
 
-/** Where a position sits: "DKB", "Scalable", or "Manual" for a hand-entered holding. */
+/** Where a position sits: "DKB", "Scalable", "Trading 212", or "Manual" for a hand-entered holding. */
 export function BrokerBadge({ source, className }: { source?: string | null; className?: string }) {
   const broker = brokerOf(source);
   return (

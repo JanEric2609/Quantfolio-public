@@ -2,8 +2,8 @@
 
 The app never orders anything. Accepting a recommendation records the
 decision and the position held at each broker at that moment; the person
-places the order themselves through a link to the broker. After each DKB or
-Scalable sync, :func:`detect_executions` compares the synced positions with
+places the order themselves through a link to the broker. After each DKB,
+Scalable or Trading 212 sync, :func:`detect_executions` compares the synced positions with
 that baseline: more units of a buy idea (fewer of a sell) at a broker means the
 trade was done there, and the recommendation moves to ``executed`` with a
 review row saying where and how much. Nothing is logged by hand.
@@ -21,6 +21,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.foundation.broker_instruments import Trading212Listings
 from app.foundation.live_positions import BROKER_LABELS, live_positions
 from app.foundation.models.entities import Recommendation, RecommendationReview
 
@@ -54,12 +55,20 @@ def scalable_security_url(isin: str | None) -> str | None:
     return None
 
 
-def broker_links(isin: str | None) -> list[dict[str, str]]:
-    """``[{broker, label, url}]`` for every broker with a usable link."""
+def broker_links(isin: str | None, db: Session | None = None) -> list[dict[str, str]]:
+    """``[{broker, label, url}]`` for every broker with a usable link.
+
+    Trading 212 is added (with *db*) when its instrument list offers the ISIN:
+    a US line's public page, else the web app, where the ISIN finds it.
+    """
     out = [{"broker": "dkb", "label": "DKB", "url": dkb_search_url(isin)}]
     scalable = scalable_security_url(isin)
     if scalable:
         out.append({"broker": "scalable", "label": "Scalable", "url": scalable})
+    if db is not None:
+        t212 = Trading212Listings(db)
+        if t212.listed(isin):
+            out.append({"broker": "trading212", "label": "Trading 212", "url": t212.url(isin)})
     return out
 
 
@@ -229,7 +238,7 @@ def accepted_and_executed(db: Session, user_id: str, *, now: datetime | None = N
             "isin": isin,
             "side": info.get("side") or side(rec),
             "accepted_at": info.get("accepted_at"),
-            "links": broker_links(isin),
+            "links": broker_links(isin, db),
         }
         if rec.approval_state == "executed":
             item.update({

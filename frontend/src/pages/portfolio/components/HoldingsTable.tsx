@@ -12,8 +12,9 @@ import { Button } from "../../../components/ui/button";
 import { useQuotes } from "../../../hooks/useQuotes";
 import { usePriceMoves } from "../../../hooks/usePriceMoves";
 import { HoldingDetailSheet } from "./HoldingDetailSheet";
-import { BrokerBadge } from "../../../components/portfolio/BrokerFilter";
+import { BrokerBadge, brokerOf } from "../../../components/portfolio/BrokerFilter";
 
+// A "broker_sync" holding without a synced position left to name its depot was Scalable's (the first generic broker).
 const SYNC_SOURCES: Record<string, string> = { dkb_sync: "dkb", broker_sync: "scalable" };
 
 /**
@@ -58,7 +59,7 @@ export function HoldingsTable({ rightSlot }: { rightSlot?: React.ReactNode }) {
   const rows = useMemo(() => {
     const depotsByIsin = new Map<string, string[]>();
     for (const position of wealth.data?.positions ?? []) {
-      if (!position.isin || (position.source !== "dkb" && position.source !== "scalable")) continue;
+      if (!position.isin || !brokerOf(position.source)) continue;
       const depots = depotsByIsin.get(position.isin) ?? [];
       if (!depots.includes(position.source)) depots.push(position.source);
       depotsByIsin.set(position.isin, depots.sort());

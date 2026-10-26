@@ -255,12 +255,15 @@ _reg(CatalogEntry("plan_contribution_mode", "profile", "How it is invested",
     section="Monthly plan"))
 _reg(CatalogEntry("plan_broker", "profile", "Broker for new money",
     "Where each buy in the plan goes, and so its fee: DKB orders from 10 € and savings plans 1,50 €; "
-    "Scalable FREE orders 0,99 € and savings plans free. Automatic picks the cheapest synced depot.",
-    input_type="select", options=["auto", "dkb", "scalable"],
+    "Scalable FREE orders 0,99 € and savings plans free; Trading 212 orders free, plus 0,15 % on a line "
+    "not traded in euros. Automatic picks the cheapest synced depot.",
+    input_type="select", options=["auto", "dkb", "scalable", "trading212"],
     option_labels={"auto": "Automatic (cheapest connected broker)", "dkb": "DKB",
-                   "scalable": "Scalable Capital (FREE)"},
-    extended_help="DKB orders cost 10 € up to 5,000 € (15 € to 20,000 €). Synced Scalable positions count "
-    "toward the plan automatically; positions at other brokers once entered under Portfolio → Holdings.",
+                   "scalable": "Scalable Capital (FREE)", "trading212": "Trading 212"},
+    extended_help="DKB orders cost 10 € up to 5,000 € (15 € to 20,000 €). Automatic sends a buy to Trading 212 "
+    "only when its instrument list offers that ETF; on a tie, savings plans stay at Scalable. Synced DKB, "
+    "Scalable and Trading 212 positions count toward the plan automatically; positions at other brokers once "
+    "entered under Portfolio → Holdings.",
     section="Monthly plan"))
 _reg(CatalogEntry("emergency_reserve_eur", "profile", "Emergency reserve",
     "Cash you keep aside, in euros. Tagesgeld and free broker cash above it is shown as investable; "
@@ -364,7 +367,7 @@ _reg(CatalogEntry("freistellungsauftrag_amount", "tax", "Sparer-Pauschbetrag",
     "law changes before the app does.",
     input_type="number", unit="eur", min=0, section="Allowance", advanced=True))
 _reg(CatalogEntry("freistellungsauftrag_used", "tax", "Allowance already used at other banks",
-    "Income this year already set against orders at banks other than DKB and Scalable. Usually leave it "
+    "Income this year already set against orders at banks other than DKB, Scalable and Trading 212. Usually leave it "
     "empty and enter those orders below; the larger of the two is used.",
     input_type="number", unit="eur", min=0, section="Allowance", advanced=True))
 _reg(CatalogEntry("freistellungsauftrag_other_banks_eur", "tax", "Freistellungsaufträge at other banks",
