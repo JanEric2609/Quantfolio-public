@@ -643,6 +643,7 @@ export type TaxSettings = {
   /** Freistellungsauftrag on file per bank (EUR; null = not entered). */
   freistellungsauftrag_dkb_eur?: number | null;
   freistellungsauftrag_scalable_eur?: number | null;
+  freistellungsauftrag_trading212_eur?: number | null;
   /** Total of the orders on file at other banks (EUR; null = none entered). */
   freistellungsauftrag_other_banks_eur?: number | null;
   /** DKB Tagesgeld interest rate as a fraction. */
@@ -650,6 +651,7 @@ export type TaxSettings = {
   /** Which banks hold a copy of the NV certificate. */
   tax_nv_filed_dkb?: boolean | null;
   tax_nv_filed_scalable?: boolean | null;
+  tax_nv_filed_trading212?: boolean | null;
   tax_other_income_eur?: number;
   tax_health_insurance?: "unknown" | "de_family" | "de_own" | "foreign";
   tax_bafoeg?: boolean;
@@ -3893,6 +3895,91 @@ export const applyScalableReconcile = (decisions: Record<string, ScalableDecisio
     method: "POST",
     body: JSON.stringify({ decisions }),
   });
+
+// --- Trading 212 (read-only sync through its REST API) ----------------------
+
+export type Trading212State =
+  | "ready"
+  | "running"
+  | "never_synced"
+  | "not_configured"
+  | "key_invalid"
+  | "key_scope"
+  | "error"
+  | "disabled";
+
+export interface Trading212Status {
+  source: "trading212";
+  enabled: boolean;
+  state: Trading212State;
+  environment: string;
+  message: string;
+  error_code: string | null;
+  last_sync_at: string | null;
+  last_success_at: string | null;
+  stale: boolean;
+  account_id: string | null;
+  tracking_since: string | null;
+  positions: number;
+  pies: number;
+  pies_synced_at: string | null;
+  pies_unavailable: boolean;
+  pies_stale: boolean;
+  /** Interest on uninvested cash booked in the last 30 days (EUR, as a decimal string). */
+  interest_30d_eur: string | null;
+  /** That interest annualised over today's cash, as a fraction; null until interest was paid. */
+  interest_rate_measured: string | null;
+  pending_reconciliation: number;
+  read_only: true;
+}
+
+export interface Trading212SyncLog {
+  id: string;
+  source: string;
+  trigger: string;
+  state: "running" | "success" | "warning" | "error";
+  error_code: string | null;
+  message: string;
+  counts: Record<string, unknown>;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface Trading212PieInstrument {
+  t212_ticker: string | null;
+  isin: string | null;
+  name: string | null;
+  /** Shares of the pie as fractions (decimal strings). */
+  expected_share: string | null;
+  current_share: string | null;
+  owned_quantity: string | null;
+  value: string | null;
+  result: string | null;
+  issues: { name: string; severity: string }[];
+}
+
+export interface Trading212Pie {
+  id: string;
+  name: string;
+  status: "AHEAD" | "ON_TRACK" | "BEHIND" | string | null;
+  cash: number | null;
+  invested: number | null;
+  value: number | null;
+  result: number | null;
+  result_pct: number | null;
+  dividends_gained: number | null;
+  dividends_reinvested: number | null;
+  dividends_in_cash: number | null;
+  dividend_action: "REINVEST" | "TO_ACCOUNT_CASH" | string | null;
+  goal: number | null;
+  end_date: string | null;
+  instruments: Trading212PieInstrument[];
+  synced_at: string | null;
+}
+
+export const getTrading212Status = () => api<Trading212Status>("/api/trading212/status");
+export const syncTrading212 = () => api<Trading212SyncLog>("/api/trading212/sync", { method: "POST" });
+export const getTrading212Pies = () => api<Trading212Pie[]>("/api/trading212/pies");
 
 /** GET /api/quant/backtest/strategies */
 export interface BacktestStrategy {

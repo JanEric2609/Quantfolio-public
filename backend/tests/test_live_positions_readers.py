@@ -31,6 +31,8 @@ BROKER_POSITION_ALLOWED = {
     "foundation/live_positions.py",
     "foundation/portfolio/isin_resolver.py",
     "foundation/scalable/service.py",
+    "foundation/trading212/service.py",
+    "foundation/trading212_status.py",
 }
 
 

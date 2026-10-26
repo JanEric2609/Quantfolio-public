@@ -39,7 +39,7 @@ SCHEDULER_JOB_DEFAULTS: dict[str, Any] = {
 # and ~40 of them share a handful of trigger minutes. Each running job holds one
 # DB connection (two for a tracked job on PostgreSQL: session + advisory lock),
 # which is why foundation/core/db.py sizes the connection pool to match.
-WORKER_THREAD_POOL_SIZE = 16
+WORKER_THREAD_POOL_SIZE = 17
 
 
 def scheduler_job_defaults() -> dict[str, Any]:

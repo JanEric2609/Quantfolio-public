@@ -43,9 +43,9 @@ SYNCED_HOLDING_SOURCES: tuple[str, ...] = ("dkb_sync", "broker_sync")
 
 # ConnectedAccount / BrokerPosition sources of brokers synced into the generic
 # tables (DKB keeps its own dkb_* tables).
-BROKER_SOURCES: tuple[str, ...] = ("scalable",)
+BROKER_SOURCES: tuple[str, ...] = ("scalable", "trading212")
 
-BROKER_LABELS = {"dkb": "DKB", "scalable": "Scalable Capital"}
+BROKER_LABELS = {"dkb": "DKB", "scalable": "Scalable Capital", "trading212": "Trading 212"}
 
 # A broker's security type (Scalable's GraphQL ``type``) -> Holding.asset_type.
 # Only investment funds owe Vorabpauschale and get a Teilfreistellung; a share
@@ -54,6 +54,7 @@ _ASSET_TYPES = {
     "ETF": "etf", "FUND": "etf", "ELTIF": "etf",
     "STOCK": "stock", "EQ": "stock", "EQUITY": "stock", "SHARE": "stock",
     "BOND": "bond",
+    "WARRANT": "etc",
     "ETC": "etc", "ETN": "etc",
 }
 

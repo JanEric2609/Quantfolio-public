@@ -6,6 +6,7 @@ import { CrashGuardBanner } from "../components/composed/CrashGuardBanner";
 import { PageHeader } from "../components/composed/PageHeader";
 import { DkbSyncButton } from "../components/portfolio/DkbSyncButton";
 import { ScalableSyncButton } from "../components/portfolio/ScalableSync";
+import { Trading212SyncButton } from "../components/portfolio/Trading212Sync";
 import { RegimeChip } from "../components/regime/RegimeChip";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -61,7 +62,13 @@ function BrokerSplit({ wealth, syncNeeded }: { wealth: WealthSummary; syncNeeded
           )}
           {syncNeeded[row.source] && (
             <div className="flex w-full min-w-0 pt-1.5">
-              {row.source === "dkb" ? <DkbSyncButton showState showTestPid={false} /> : <ScalableSyncButton />}
+              {row.source === "dkb" ? (
+                <DkbSyncButton showState showTestPid={false} />
+              ) : row.source === "trading212" ? (
+                <Trading212SyncButton />
+              ) : (
+                <ScalableSyncButton />
+              )}
             </div>
           )}
         </li>
@@ -83,6 +90,10 @@ function StatusStrip() {
   for (const row of wealth.data?.by_broker ?? []) {
     if (row.source === "dkb") syncNeeded.dkb = isStale(row.last_synced, DKB_STALE_HOURS) || failed("dkb");
     if (row.source === "scalable") syncNeeded.scalable = isStale(row.last_synced, 2 * syncHours) || failed("scalable");
+    if (row.source === "trading212") {
+      const t212Hours = Number(settings.data?.settings?.trading212_sync_hours) || DEFAULT_SCALABLE_SYNC_HOURS;
+      syncNeeded.trading212 = isStale(row.last_synced, 2 * t212Hours) || failed("trading212");
+    }
   }
 
   return (

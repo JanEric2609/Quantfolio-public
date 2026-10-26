@@ -120,6 +120,8 @@ FREQUENCY_PER_MONTH = {
 
 # Fees live in foundation/broker_fees.py (SAVINGS_PLAN_FEE_EUR, order_fee_eur).
 SATELLITE_BROKER_LABELS = {"dkb": "DKB", "scalable": "Scalable Capital"}
+# Synced brokers whose cash account is a savings account, not buying power.
+SAVINGS_CASH_SOURCES = frozenset({"trading212"})
 
 # A plan whose next execution lies further back than this is treated as not
 # running (sc sends no paused flag): listed, but left out of the totals.
@@ -400,7 +402,7 @@ def connected_brokers(db: Session, user_id: str) -> list[str]:
     out: list[str] = []
     if db.query(DkbAccount.id).filter(DkbAccount.user_id == user_id, DkbAccount.type == "depot").first():
         out.append("dkb")
-    if _broker_depots(db, user_id):
+    if any(a.source == "scalable" for a in _broker_depots(db, user_id)):
         out.append("scalable")
     return out
 
@@ -547,6 +549,12 @@ def cash_state(db: Session, user_id: str, cfg: dict[str, Any]) -> dict[str, Any]
         .all()
     )
     savings += sum(float(a.balance or 0) for a in broker_accounts if a.account_type == "savings")
+    # Trading 212's uninvested cash earns interest like a Tagesgeld and new
+    # money goes to Scalable (decision of 2026-10-05): it counts as savings,
+    # never as buying power to invest there.
+    savings += sum(float(a.balance or 0) for a in broker_accounts
+                   if a.source in SAVINGS_CASH_SOURCES and a.account_type == "cash")
+    broker_accounts = [a for a in broker_accounts if a.source not in SAVINGS_CASH_SOURCES]
     broker_cash: dict[str, float] = {}
     cash_accounts = {a.external_id: a for a in broker_accounts if a.account_type == "cash" and a.external_id}
     depots = [a for a in broker_accounts if a.account_type == "depot"]

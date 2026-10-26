@@ -296,6 +296,10 @@ def test_integration(
         from app.interface.api.scalable import require_connection_owner
 
         require_connection_owner(db, user)
+    if payload.service == "trading212":
+        from app.interface.api.trading212 import require_connection_owner as require_t212_owner
+
+        require_t212_owner(db, user)
     result = _probe_integration(payload, db)
     if payload.value is None or payload.service == "smtp":
         result.tested_at = record_connection_test(
@@ -312,6 +316,14 @@ def _probe_integration(payload: IntegrationTestRequest, db: Session) -> Integrat
         failed = next((step for step in result["steps"] if not step["ok"]), None)
         message = result["message"] if failed is None else f"{failed['name']}: {failed['detail']}"
         return IntegrationTestResponse(service="scalable", ok=bool(result["ok"]), message=message[:500])
+
+    if payload.service == "trading212":
+        from app.foundation.trading212.service import probe as t212_probe
+
+        result = t212_probe(db)
+        failed = next((step for step in result["steps"] if not step["ok"]), None)
+        message = result["message"] if failed is None else f"{failed['name']}: {failed['detail']}"
+        return IntegrationTestResponse(service="trading212", ok=bool(result["ok"]), message=message[:500])
 
     if payload.service == "dkb":
         try:

@@ -368,8 +368,8 @@ _reg(CatalogEntry("freistellungsauftrag_used", "tax", "Allowance already used at
     "empty and enter those orders below; the larger of the two is used.",
     input_type="number", unit="eur", min=0, section="Allowance", advanced=True))
 _reg(CatalogEntry("freistellungsauftrag_other_banks_eur", "tax", "Freistellungsaufträge at other banks",
-    "Total of the orders on file at banks and brokers other than DKB and Scalable Capital. All orders "
-    "together may not exceed the Sparer-Pauschbetrag, so this is the part DKB and Scalable can't get. "
+    "Total of the orders on file at banks and brokers other than DKB, Scalable Capital and Trading 212. All "
+    "orders together may not exceed the Sparer-Pauschbetrag, so this is the part those three can't get. "
     "Empty = none (the allowance used elsewhere counts as the minimum).",
     input_type="number", unit="eur", min=0, section="Allowance"))
 _reg(CatalogEntry("freistellungsauftrag_dkb_eur", "tax", "Freistellungsauftrag at DKB",
@@ -379,6 +379,9 @@ _reg(CatalogEntry("freistellungsauftrag_dkb_eur", "tax", "Freistellungsauftrag a
 _reg(CatalogEntry("freistellungsauftrag_scalable_eur", "tax", "Freistellungsauftrag at Scalable Capital",
     "The amount on file at Scalable (app: Profil › Freistellungsauftrag). One order covers the depot "
     "and the Tagesgeld/overnight account.",
+    input_type="number", unit="eur", min=0, section="Allowance"))
+_reg(CatalogEntry("freistellungsauftrag_trading212_eur", "tax", "Freistellungsauftrag at Trading 212",
+    "The amount on file at Trading 212 (app: tax overview). Trading 212 withholds German tax above it.",
     input_type="number", unit="eur", min=0, section="Allowance"))
 _reg(CatalogEntry("tax_interest_rate_dkb", "tax", "DKB Tagesgeld interest rate",
     "Used to project this year's DKB interest against the Freistellungsauftrag. Scalable's rate comes from the sync.",
@@ -402,6 +405,9 @@ _reg(CatalogEntry("tax_nv_filed_dkb", "tax", "NV certificate filed at DKB",
 _reg(CatalogEntry("tax_nv_filed_scalable", "tax", "NV certificate filed at Scalable Capital",
     "Scalable has a copy (upload link from support, or post; by 15 December). Without it Scalable withholds "
     "tax above its Freistellungsauftrag.",
+    input_type="boolean", section="NV certificate"))
+_reg(CatalogEntry("tax_nv_filed_trading212", "tax", "NV certificate filed at Trading 212",
+    "Trading 212 has a copy. Without it Trading 212 withholds tax above its Freistellungsauftrag.",
     input_type="boolean", section="NV certificate"))
 _reg(CatalogEntry("tax_other_income_eur", "tax", "Other income this year",
     "Salary and other non-capital income after Werbungskosten; it uses up the Grundfreibetrag first.",
@@ -484,6 +490,28 @@ _reg(CatalogEntry("scalable_require_read_only_guard", "banking", "Require the tr
     "Sync only when sc reports that its local trade controls refuse every order (allowed_isins = []). "
     "Turn off only for a one-off test.",
     input_type="boolean", connection="scalable", section="Scalable CLI", advanced=True))
+
+_reg(CatalogEntry("trading212_enabled", "banking", "Sync Trading 212",
+    "Read-only sync of positions, cash, order/dividend/interest history and pies through Trading 212's "
+    "public API. It can never trade: the client only sends allow-listed GET requests, and the key is "
+    "created without the Orders permission.",
+    input_type="boolean", connection="trading212", section="Trading 212",
+    doc_url="https://docs.trading212.com/api"))
+_reg(CatalogEntry("trading212_environment", "banking", "Trading 212 account",
+    "Live is the real-money account; Demo is the paper-trading one (a key works for one of them only).",
+    input_type="select", options=["live", "demo"], option_labels={"live": "Live (real money)", "demo": "Demo"},
+    connection="trading212", section="Trading 212", advanced=True))
+_reg(CatalogEntry("trading212_sync_hours", "banking", "Sync every",
+    "How often the worker syncs Trading 212. The first sync reads the whole history and takes a few minutes.",
+    input_type="number", unit="hours", min=1, max=48, connection="trading212", section="Trading 212"))
+_reg(CatalogEntry("trading212", "banking", "Trading 212 API key",
+    "Create it in the Trading 212 app under Settings › API (Beta) with Account data, Portfolio, History, "
+    "Pies and Metadata enabled and Orders off, restricted to this server's IP address.",
+    doc_url="https://docs.trading212.com/api", input_type="password", sensitive=True, connection="trading212",
+    setup_steps=["Trading 212 app › Settings › API (Beta) › Generate key, live account",
+                 "Enable Account data, Portfolio, History, Pies and Metadata; leave Orders off",
+                 "Restrict the key to this server's outbound IP address",
+                 "Paste the key and the secret here, then press Test connection"]))
 
 # ===========================================================================
 # Connections › Market data
@@ -835,6 +863,11 @@ _conn(Connection("scalable", "banking", "Scalable Capital (sc CLI)",
     "Read-only depot, cash and transaction sync. Log in once on the server; no credential is stored here.",
     enabled_key="scalable_enabled", panel="scalable_login",
     optional_settings=["scalable_portfolio_id", "scalable_binary_sha256", "scalable_cli_user"]))
+
+_conn(Connection("trading212", "banking", "Trading 212 (API)",
+    "Read-only positions, cash, history and pies. The key is created without the Orders permission.",
+    secret="trading212", secret_label="API key", enabled_key="trading212_enabled",
+    meta_fields=[MetaField("api_secret", "API secret", sensitive=True)]))
 
 _conn(Connection("finnhub", "market_data", "Finnhub", "Quotes, fundamentals and news.", secret="finnhub"))
 _conn(Connection("tiingo", "market_data", "Tiingo", "Adjusted US price history.", secret="tiingo",

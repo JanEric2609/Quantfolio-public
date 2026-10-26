@@ -123,6 +123,7 @@ def attention_items(db: Session, *, today: date | None = None) -> list[dict[str,
     _extract_items(clock, items)
     _dkb_items(db, now, items)
     _scalable_items(db, settings, items)
+    _trading212_items(db, settings, items)
     _setting_items(settings, clock, items)
     _backup_items(db, now, items)
     _price_items(db, now, items)
@@ -382,6 +383,58 @@ def _scalable_items(db: Session, settings: dict[str, Any], items: list[Attention
             f"{n} Scalable position{'s' if n > 1 else ''} match{'' if n > 1 else 'es'} a hand-entered holding",
             "They aren't counted until you choose: replace the manual row, or keep both.",
             "/portfolio/accounts#scalable-review", "Review",
+        ))
+
+
+def _trading212_items(db: Session, settings: dict[str, Any], items: list[AttentionItem]) -> None:
+    """Key missing, refused or short of a permission; failed or stale sync; pies gone for a week."""
+    if not settings.get("trading212_enabled"):
+        return
+    from app.foundation.models.entities import BrokerSyncLog
+    from app.foundation.trading212_status import owner_user_id, status as t212_status
+
+    # One saved key per installation, so one status: the owner's, or before
+    # the first successful sync whoever tried last.
+    user_id = owner_user_id(db) or (
+        db.query(BrokerSyncLog.user_id)
+        .filter(BrokerSyncLog.source == "trading212")
+        .order_by(BrokerSyncLog.started_at.desc())
+        .limit(1)
+        .scalar()
+    )
+    state = t212_status(db, user_id or "")
+    link = _page("banking", "trading212")
+    if state["state"] == "not_configured":
+        items.append(AttentionItem(
+            "trading212-key-missing", "info", "Trading 212 key not saved",
+            "Sync is on, but no API key and secret are saved.", link, "Set up",
+        ))
+    elif state["state"] == "key_invalid":
+        items.append(AttentionItem(
+            "trading212-key", "warning", "Trading 212 refused the API key",
+            "The key was revoked, expired or mistyped: create a new one (Orders off) and save it.", link, "Fix",
+        ))
+    elif state["state"] == "key_scope":
+        items.append(AttentionItem(
+            "trading212-scope", "warning", "Trading 212 key lacks a permission",
+            str(state["message"])[:300], link, "Fix",
+        ))
+    elif state["state"] == "error":
+        items.append(AttentionItem(
+            "trading212-failed", "warning", "Last Trading 212 sync failed", str(state["message"])[:300],
+            link, "Open",
+        ))
+    elif state["stale"]:
+        items.append(AttentionItem(
+            "trading212-stale", "info", "Trading 212 not synced for two intervals",
+            "Positions and cash at Trading 212 are only as current as the last sync.",
+            "/portfolio/accounts", "Sync now",
+        ))
+    if state["pies_stale"]:
+        items.append(AttentionItem(
+            "trading212-pies", "info", "Trading 212 pies unreadable for over a week",
+            "The pie endpoints are deprecated upstream; the last read pies are shown. Positions are unaffected.",
+            link, "Open",
         ))
 
 

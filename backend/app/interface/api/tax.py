@@ -156,10 +156,12 @@ class VorabpauschaleIn(BaseModel):
 _CLEARABLE_TAX_SETTINGS = frozenset({
     "freistellungsauftrag_dkb_eur",
     "freistellungsauftrag_scalable_eur",
+    "freistellungsauftrag_trading212_eur",
     "freistellungsauftrag_other_banks_eur",
     "tax_interest_rate_dkb",
     "tax_nv_filed_dkb",
     "tax_nv_filed_scalable",
+    "tax_nv_filed_trading212",
 })
 
 
@@ -170,6 +172,7 @@ class TaxSettingsIn(BaseModel):
     freistellungsauftrag_used: float | None = None
     freistellungsauftrag_dkb_eur: float | None = Field(default=None, ge=0, le=2000)
     freistellungsauftrag_scalable_eur: float | None = Field(default=None, ge=0, le=2000)
+    freistellungsauftrag_trading212_eur: float | None = Field(default=None, ge=0, le=2000)
     freistellungsauftrag_other_banks_eur: float | None = Field(default=None, ge=0, le=2000)
     tax_interest_rate_dkb: float | None = Field(default=None, ge=0, le=0.2)
     tax_spouse_allowance: bool | None = None
@@ -179,6 +182,7 @@ class TaxSettingsIn(BaseModel):
     tax_nv_valid_until: date | Literal[""] | None = None
     tax_nv_filed_dkb: bool | None = None
     tax_nv_filed_scalable: bool | None = None
+    tax_nv_filed_trading212: bool | None = None
     tax_other_income_eur: float | None = Field(default=None, ge=0)
     tax_health_insurance: Literal["unknown", "de_family", "de_own", "foreign"] | None = None
     tax_bafoeg: bool | None = None
@@ -219,7 +223,7 @@ def _validate_tax_settings(current: dict[str, Any], updates: dict[str, Any]) -> 
     orders = sum(
         float(merged.get(key) or 0)
         for key in ("freistellungsauftrag_dkb_eur", "freistellungsauftrag_scalable_eur",
-                    "freistellungsauftrag_other_banks_eur")
+                    "freistellungsauftrag_trading212_eur", "freistellungsauftrag_other_banks_eur")
     )
     if orders > allowance + 0.005:
         raise HTTPException(

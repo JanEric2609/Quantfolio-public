@@ -1,4 +1,4 @@
-"""Freistellungsauftrag and NV-Bescheinigung across DKB and Scalable Capital.
+"""Freistellungsauftrag and NV-Bescheinigung across DKB, Scalable Capital and Trading 212.
 
 Each bank withholds Kapitalertragsteuer on capital income above the
 Freistellungsauftrag (FSA) the customer gave *that* bank, unless it holds a
@@ -54,7 +54,9 @@ from app.foundation.tax_cockpit import (
 )
 
 ZERO = Decimal("0")
-BANKS: tuple[tuple[str, str], ...] = (("dkb", "DKB"), ("scalable", "Scalable Capital"))
+BANKS: tuple[tuple[str, str], ...] = (
+    ("dkb", "DKB"), ("scalable", "Scalable Capital"), ("trading212", "Trading 212"),
+)
 # The per-bank orders and NV copies describe one person's accounts, but settings
 # are installation-wide: they belong to the user who set them, and only that
 # user's plan reads them (another user sees them as not entered).
@@ -63,16 +65,20 @@ BANK_SETTING_KEYS = (
     "tax_nv_valid_until",
     "freistellungsauftrag_dkb_eur",
     "freistellungsauftrag_scalable_eur",
+    "freistellungsauftrag_trading212_eur",
     "freistellungsauftrag_other_banks_eur",
     "tax_nv_filed_dkb",
     "tax_nv_filed_scalable",
+    "tax_nv_filed_trading212",
     "tax_interest_rate_dkb",
 )
 BANK_SETTINGS_OWNER_KEY = "tax_bank_settings_user_id"
 # Synced cash credits are booked net: above the Freistellungsauftrag the bank
 # has already taken its tax off them.
-_NET_CREDIT_SOURCES = frozenset({"dkb_sync", "scalable_sync"})
+_NET_CREDIT_SOURCES = frozenset({"dkb_sync", "scalable_sync", "trading212_sync"})
 BANK_LABELS: dict[str, str] = dict(BANKS)
+# Always planned; the others only once the user has an account there.
+CORE_BANKS = frozenset({"dkb", "scalable"})
 # Health-insurance settings whose income limit caps the harvest room: German
 # family insurance (Sec. 10 SGB V), and co-insurance abroad, where EU rules may
 # apply the same test to a family member living in Germany (conservative).
@@ -102,6 +108,12 @@ HOW_TO: dict[str, dict[str, str]] = {
         "loss": "Ask Scalable support for a Verlustbescheinigung (Sec. 43a(3) EStG); the request must reach them by "
                 "15 December and cannot be withdrawn.",
     },
+    "trading212": {
+        "fsa": "Trading 212 app: add or change the Freistellungsauftrag in the tax overview (Steuerübersicht). "
+               "Trading 212 withholds German tax for German tax residents above it.",
+        "loss": "Ask Trading 212 support for a Verlustbescheinigung (Sec. 43a(3) EStG); the request must reach "
+                "them by 15 December and cannot be withdrawn.",
+    },
 }
 
 SOURCES: list[dict[str, str]] = [
@@ -120,6 +132,8 @@ SOURCES: list[dict[str, str]] = [
             "wird-mein-freistellungsauftrag-auch-f%C3%BCr-das-tagesgeldkon-87c1de18"},
     {"label": "Scalable: NV-Bescheinigung", "url": "https://help.scalable.capital/steuern-de12f868/"
      "was-ist-eine-nichtveranlagungsbescheinigung-473d7d7b"},
+    {"label": "Trading 212: taxes in Germany (Freistellungsauftrag in the tax overview)",
+     "url": "https://www.trading212.com/de/taxes"},
     {"label": "DKB: Freistellungsauftrag", "url": "https://www.dkb.de/fragen-antworten/wie-hinterlege-ich-einen-freistellungsauftrag"},
 ]
 
@@ -246,6 +260,22 @@ def _tagesgeld(db: Session, user_id: str, settings: dict[str, Any]) -> dict[str,
         if isinstance(overnight, dict) and sc_rate is None:
             sc_rate = _rate(overnight.get("interest_rate"))
     out["scalable"] = (sc_balance, sc_rate)
+    # Trading 212 pays interest on uninvested cash; its rate is the one
+    # measured from the payments the sync booked (none advertised in the API).
+    t212_balance = ZERO
+    t212_rate = None
+    for acc in db.query(ConnectedAccount).filter(
+        ConnectedAccount.user_id == user_id, ConnectedAccount.source == "trading212",
+        ConnectedAccount.account_type == "cash",
+    ):
+        t212_balance += Decimal(str(acc.balance or 0))
+        try:
+            raw = json.loads(acc.raw_json or "{}")
+        except ValueError:
+            raw = {}
+        if isinstance(raw, dict) and t212_rate is None:
+            t212_rate = _rate(raw.get("interest_rate_measured"))
+    out["trading212"] = (t212_balance, t212_rate)
     return out
 
 
@@ -303,7 +333,24 @@ def _harvestable_by_bank(db: Session, user_id: str) -> dict[str, Decimal]:
     return out
 
 
-def nv_status(settings: dict[str, Any], year: int) -> dict[str, Any]:
+def _bank_in_use(settings: dict[str, Any], bank: str) -> bool:
+    """A bank beyond DKB and Scalable counts once one of its tax settings is entered."""
+    return bank in CORE_BANKS or any(
+        settings.get(key) is not None
+        for key in (f"freistellungsauftrag_{bank}_eur", f"tax_nv_filed_{bank}")
+    )
+
+
+def plan_banks(db: Session, user_id: str, settings: dict[str, Any]) -> list[tuple[str, str]]:
+    """The banks the plan covers: DKB and Scalable, plus any other synced or configured one."""
+    synced = {
+        source for (source,) in db.query(ConnectedAccount.source).filter(
+            ConnectedAccount.user_id == user_id).distinct()
+    }
+    return [(bank, label) for bank, label in BANKS if bank in synced or _bank_in_use(settings, bank)]
+
+
+def nv_status(settings: dict[str, Any], year: int, banks: list[tuple[str, str]] | None = None) -> dict[str, Any]:
     """Whether an NV certificate covers ``year`` and at which banks a copy is filed.
 
     A certificate always ends on 31 December (Sec. 44a(2) sentence 3 EStG). One
@@ -321,7 +368,8 @@ def nv_status(settings: dict[str, Any], year: int) -> dict[str, Any]:
     year_end = date(year, 12, 31)
     valid = has and (valid_until is None or valid_until >= year_end)
     ends_midyear = bool(has and valid_until and date(year, 1, 1) <= valid_until < year_end)
-    flags = {bank: settings.get(f"tax_nv_filed_{bank}") for bank, _ in BANKS}
+    banks = banks if banks is not None else [(b, label) for b, label in BANKS if _bank_in_use(settings, b)]
+    flags = {bank: settings.get(f"tax_nv_filed_{bank}") for bank, _ in banks}
     # None = never answered (older settings had only "NV certificate filed");
     # an explicit False means that bank has no copy.
     banks_known = any(value is not None for value in flags.values())
@@ -335,7 +383,7 @@ def nv_status(settings: dict[str, Any], year: int) -> dict[str, Any]:
         "filed_at": [bank for bank, on in filed.items() if on],
         "banks_known": banks_known,
         # Unanswered: every bank is assumed to have a copy, and the plan asks.
-        "filed": filed if banks_known else {bank: has for bank, _ in BANKS},
+        "filed": filed if banks_known else {bank: has for bank, _ in banks},
     }
 
 
@@ -407,17 +455,18 @@ def compute_allowance_plan(db: Session, user_id: str, year: int, today: date | N
     spouse = bool(settings.get("tax_spouse_allowance"))
     allowance = _dec(settings.get("freistellungsauftrag_amount")) or (
         SPARER_PAUSCHBETRAG_SPOUSE if spouse else SPARER_PAUSCHBETRAG_SINGLE)
-    # What DKB and Scalable can get is the allowance minus the orders on file
+    # What the synced banks can get is the allowance minus the orders on file
     # elsewhere; an order can't be below what that bank already used.
     used_elsewhere = max(ZERO, _dec(settings.get("freistellungsauftrag_used")) or ZERO)
     other_banks = max(used_elsewhere, _dec(settings.get("freistellungsauftrag_other_banks_eur")) or ZERO)
-    nv = nv_status(settings, year)
+    banks = plan_banks(db, user_id, settings)
+    nv = nv_status(settings, year, banks)
     church_rate = _church_rate(db)
     past, ahead = _year_fractions(year, today)
 
     pots: dict[str, _Pots] = {bank: _Pots() for bank, _ in BANKS}
     unassigned = _Pots()  # no bank recorded
-    elsewhere = _Pots()  # booked at a bank other than DKB and Scalable
+    elsewhere = _Pots()  # booked at a bank other than the synced ones
     unassigned_count = 0
     vorab_booked_isins: dict[str | None, set[str]] = {}
     for ev in list_events(db, user_id, year):
@@ -460,7 +509,7 @@ def compute_allowance_plan(db: Session, user_id: str, year: int, today: date | N
     rows: list[BankYear] = []
     detail: dict[str, dict[str, Any]] = {}
     loss_left: dict[str, tuple[Decimal, Decimal]] = {}
-    for bank, label in BANKS:
+    for bank, label in banks:
         p = pots[bank]
         vorab_estimate = vorab_est.get(bank, ZERO)
         if vorab_booked:

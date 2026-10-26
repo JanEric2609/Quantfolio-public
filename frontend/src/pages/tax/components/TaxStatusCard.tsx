@@ -16,6 +16,7 @@ const num = (v: string): number | null => {
 const BANKS = [
   { key: "dkb", label: "DKB" },
   { key: "scalable", label: "Scalable Capital" },
+  { key: "trading212", label: "Trading 212" },
 ] as const;
 
 const fieldClass = "rounded border border-border bg-surface px-2 py-1 text-sm";
@@ -53,6 +54,7 @@ export function TaxStatusCard() {
   const orders =
     (draft.freistellungsauftrag_dkb_eur ?? 0) +
     (draft.freistellungsauftrag_scalable_eur ?? 0) +
+    (draft.freistellungsauftrag_trading212_eur ?? 0) +
     (draft.freistellungsauftrag_other_banks_eur ?? 0);
   const over = orders > allowance;
   const nv = draft.tax_nv_certificate === true;
