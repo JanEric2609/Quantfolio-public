@@ -82,7 +82,7 @@ class SetupStatus(BaseModel):
 
 
 class IntegrationTestRequest(BaseModel):
-    service: Literal["llm", "dkb", "scalable", "alphavantage", "finnhub", "openbb", "obsidian", "smtp", "fred", "eod", "anthropic", "openai", "rss", "massive", "telegram", "twelvedata", "databento", "tiingo", "alpaca", "ecb_sdw", "yfinance", "justetf"]
+    service: Literal["llm", "dkb", "scalable", "trading212", "alphavantage", "finnhub", "openbb", "obsidian", "smtp", "fred", "eod", "anthropic", "openai", "rss", "massive", "telegram", "twelvedata", "databento", "tiingo", "alpaca", "ecb_sdw", "yfinance", "justetf"]
     value: str | None = None
     meta: dict[str, Any] = Field(default_factory=dict)
 

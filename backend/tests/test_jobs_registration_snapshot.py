@@ -52,6 +52,7 @@ from app.lab.regime.jobs import (
     register_regime_refit_job,
 )
 from app.foundation.scalable.jobs import register_scalable_sync_job
+from app.foundation.trading212.jobs import register_trading212_sync_job
 from app.worker import (
     register_bar_repull_job,
     register_daily_position_snapshot_job,
@@ -147,6 +148,7 @@ EXPECTED_REGISTRATIONS = {
     "trade_check_daily": {"trigger": "cron", "hour": 22, "minute": 30},
     "bar_repull_weekly": {"trigger": "cron", "day_of_week": "sun", "hour": 5, "minute": 0},
     "scalable_sync": {"trigger": "interval", "hours": 1},
+    "trading212_sync": {"trigger": "interval", "hours": 1},
     "llm_mandate_a_review": {
         "trigger": "cron",
         "day_of_week": "tue",
@@ -232,6 +234,7 @@ def _drive_all_registrations(sched):
     returns["trade_check_daily"] = register_trade_check_job(sched)
     returns["bar_repull_weekly"] = register_bar_repull_job(sched)
     returns["scalable_sync"] = register_scalable_sync_job(sched)
+    returns["trading212_sync"] = register_trading212_sync_job(sched)
     returns["llm_portfolio_review_jobs"] = register_llm_portfolio_review_jobs(sched)
     returns["llm_review_scoring"] = register_llm_review_scoring_job(sched)
     returns["discovery_resolution"] = register_discovery_resolution_job(sched)
@@ -351,7 +354,7 @@ EXPECTED_SCHEDULER_DEFAULTS = {"misfire_grace_time": 300, "coalesce": True, "max
 
 def test_scheduler_defaults_snapshot():
     assert jobs.SCHEDULER_JOB_DEFAULTS == EXPECTED_SCHEDULER_DEFAULTS
-    assert jobs.WORKER_THREAD_POOL_SIZE == 16
+    assert jobs.WORKER_THREAD_POOL_SIZE == 17
     # A caller mutating the returned dict must not change the shared defaults.
     jobs.scheduler_job_defaults()["misfire_grace_time"] = 1
     assert jobs.SCHEDULER_JOB_DEFAULTS == EXPECTED_SCHEDULER_DEFAULTS

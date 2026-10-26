@@ -1716,7 +1716,7 @@ def test_sale_without_lots_is_named_not_guessed(fake):
     log = scalable.sync(db, user.id)
     assert db.query(TaxLedgerEvent).filter_by(event_type="sale").count() == 0
     assert log["state"] == "warning"
-    assert "no tax lots at Scalable cover the sale of " + AAPL in log["message"]
+    assert "no tax lots at Scalable Capital cover the sale of " + AAPL in log["message"]
     # The tax Scalable withheld was paid even though the gain is not estimated.
     withheld = db.query(TaxLedgerEvent).filter_by(event_type="withholding").one()
     assert withheld.withheld_eur == Decimal("3.10")

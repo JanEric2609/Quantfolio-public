@@ -6,10 +6,10 @@ more table per broker.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.foundation.core.db_base import Base
@@ -73,3 +73,39 @@ class BrokerSyncLog(Base):
     counts_json: Mapped[str] = mapped_column(Text, default="{}")
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BrokerPie(Base):
+    """One Trading 212 pie as last read (read-only mirror; the pie endpoints are deprecated).
+
+    Replaced on every successful read of the pies; on a failed read the last
+    good snapshot stays, with its ``synced_at``.
+    """
+
+    __tablename__ = "broker_pies"
+    __table_args__ = (
+        UniqueConstraint("user_id", "source", "external_id", name="uq_broker_pies_user_source_ext"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    connected_account_id: Mapped[str | None] = mapped_column(
+        ForeignKey("connected_accounts.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    source: Mapped[str] = mapped_column(String(32))
+    external_id: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(120))
+    status: Mapped[str | None] = mapped_column(String(16), nullable=True)  # AHEAD | ON_TRACK | BEHIND
+    cash: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    invested: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    value: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    result: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    result_pct: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    dividends_gained: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    dividends_reinvested: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    dividends_in_cash: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    dividend_action: Mapped[str | None] = mapped_column(String(24), nullable=True)  # REINVEST | TO_ACCOUNT_CASH
+    goal: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    instruments_json: Mapped[str] = mapped_column(Text, default="[]")
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

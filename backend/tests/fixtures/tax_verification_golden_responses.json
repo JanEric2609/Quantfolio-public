@@ -117,17 +117,17 @@
   "tax_events_create": {
     "POST /events": {
       "estimate": true,
-      "id": "9a1778eb-0420-4710-9eda-2f1e4f0bafe2",
+      "id": "3fde4a0c-16cc-4d42-8d41-b975a3793d06",
       "not_tax_advice": true
     }
   },
   "tax_events_delete": {
     "DELETE /events/{id}": {
-      "deleted": "085486f2-8981-4dc4-bcb2-f0ab6e156434"
+      "deleted": "18312d51-d3ce-4c4d-bb93-15bd84de0a2f"
     },
     "POST /events (for delete)": {
       "estimate": true,
-      "id": "085486f2-8981-4dc4-bcb2-f0ab6e156434",
+      "id": "18312d51-d3ce-4c4d-bb93-15bd84de0a2f",
       "not_tax_advice": true
     }
   },
@@ -418,17 +418,17 @@
   "tax_lots_create": {
     "POST /lots": {
       "estimate": true,
-      "id": "a3fabcaa-5802-4746-81d7-a38b9a5928ce",
+      "id": "40bacdc8-a8eb-47c3-ab9b-e32ef926de68",
       "not_tax_advice": true
     }
   },
   "tax_lots_delete": {
     "DELETE /lots/{id}": {
-      "deleted": "f5ec273c-4987-4c19-9fb1-39efb067ecb2"
+      "deleted": "257defe7-5bd0-4955-81fe-7e27c5f8a6e1"
     },
     "POST /lots (for delete)": {
       "estimate": true,
-      "id": "f5ec273c-4987-4c19-9fb1-39efb067ecb2",
+      "id": "257defe7-5bd0-4955-81fe-7e27c5f8a6e1",
       "not_tax_advice": true
     }
   },
@@ -644,7 +644,7 @@
     "POST /residency": {
       "country": "DE",
       "estimate": true,
-      "id": "6f7bd41c-ed26-4a2f-a425-29fa099cdb2d",
+      "id": "25415c96-281d-493a-9a3c-37353964cc99",
       "not_tax_advice": true,
       "valid_from": "2025-01-01"
     }
@@ -664,7 +664,7 @@
     "POST /sales/fifo (enabled)": {
       "estimate": true,
       "gross_eur": 239.0,
-      "id": "137473c6-8f5a-4866-b0a9-bb8f54fef177",
+      "id": "6aca85b4-7502-4443-9e26-82fffd5c93a3",
       "not_tax_advice": true,
       "realised_gain_eur": 39.0
     }
@@ -677,6 +677,7 @@
         "freistellungsauftrag_dkb_eur": null,
         "freistellungsauftrag_other_banks_eur": null,
         "freistellungsauftrag_scalable_eur": null,
+        "freistellungsauftrag_trading212_eur": null,
         "freistellungsauftrag_used": 0,
         "tax_bafoeg": false,
         "tax_estimation_enabled": true,
@@ -685,6 +686,7 @@
         "tax_nv_certificate": false,
         "tax_nv_filed_dkb": null,
         "tax_nv_filed_scalable": null,
+        "tax_nv_filed_trading212": null,
         "tax_nv_valid_until": null,
         "tax_other_income_eur": 0,
         "tax_residency_country": "DE",
@@ -700,6 +702,7 @@
         "freistellungsauftrag_dkb_eur": null,
         "freistellungsauftrag_other_banks_eur": null,
         "freistellungsauftrag_scalable_eur": null,
+        "freistellungsauftrag_trading212_eur": null,
         "freistellungsauftrag_used": 250.0,
         "tax_bafoeg": false,
         "tax_estimation_enabled": true,
@@ -708,6 +711,7 @@
         "tax_nv_certificate": false,
         "tax_nv_filed_dkb": null,
         "tax_nv_filed_scalable": null,
+        "tax_nv_filed_trading212": null,
         "tax_nv_valid_until": null,
         "tax_other_income_eur": 0,
         "tax_residency_country": "DE",
@@ -723,6 +727,7 @@
         "freistellungsauftrag_dkb_eur": null,
         "freistellungsauftrag_other_banks_eur": null,
         "freistellungsauftrag_scalable_eur": null,
+        "freistellungsauftrag_trading212_eur": null,
         "freistellungsauftrag_used": 0,
         "tax_bafoeg": false,
         "tax_estimation_enabled": true,
@@ -731,6 +736,7 @@
         "tax_nv_certificate": false,
         "tax_nv_filed_dkb": null,
         "tax_nv_filed_scalable": null,
+        "tax_nv_filed_trading212": null,
         "tax_nv_valid_until": null,
         "tax_other_income_eur": 0,
         "tax_residency_country": "DE",

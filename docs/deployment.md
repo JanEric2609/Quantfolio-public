@@ -78,7 +78,7 @@ After changing the unit files or this `.env`, `quantfolio-update-app` installs u
 
 When `REDIS_URL` is set explicitly (environment or `.env`), the **market-data provider rate limiters** (`foundation/providers/rate_limiter.py`) also live in Redis (key prefix `quantfolio:ratelimit:`), so the API and the worker draw from one quota per vendor instead of one each. If Redis is unreachable the limiters fall back to the per-process window and retry Redis after 30 s; provider calls are never blocked on it.
 
-**Tuning knobs** (all optional): `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` (PostgreSQL connection pool per process, default 10 + 20 — the worker runs up to 16 job threads and a tracked job holds two connections) and `PRICE_BACKFILL_WORKERS` (symbols backfilled concurrently, default 4; 1 is sequential; SQLite always runs sequentially).
+**Tuning knobs** (all optional): `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` (PostgreSQL connection pool per process, default 10 + 24 — the worker runs up to 17 job threads and a tracked job holds two connections) and `PRICE_BACKFILL_WORKERS` (symbols backfilled concurrently, default 4; 1 is sequential; SQLite always runs sequentially).
 
 **`LLM_LOCAL_URL`** is read by the settings resolver at startup and can be overridden by the Control Center `llm_base_url` setting (no app restart required). Similarly, **`FRONTEND_ORIGIN`** (comma-separated allowed origins) is honored at runtime via the settings resolver; adding a new origin does not require a rebuild or restart.
 

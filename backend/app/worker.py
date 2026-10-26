@@ -50,6 +50,7 @@ from app.lab.regime.jobs import (
     register_regime_refit_job,
 )
 from app.foundation.scalable.jobs import register_scalable_sync_job
+from app.foundation.trading212.jobs import register_trading212_sync_job
 from app.lab.evidence_gate.jobs import register_evidence_gate_job
 from app.foundation.settings import get_public_settings
 
@@ -1070,6 +1071,8 @@ def build_scheduler() -> Any:
     register_bar_repull_job(scheduler)
     # Read-only and TAN-free, unlike DKB; wakes hourly, syncs per scalable_sync_hours.
     register_scalable_sync_job(scheduler)
+    # Read-only REST API; wakes hourly, syncs per trading212_sync_hours.
+    register_trading212_sync_job(scheduler)
     register_evidence_gate_job(scheduler)
     register_regime_daily_job(scheduler)
     register_regime_refit_job(scheduler)

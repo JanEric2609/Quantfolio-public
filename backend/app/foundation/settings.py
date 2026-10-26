@@ -37,6 +37,10 @@ DEFAULT_PUBLIC_SETTINGS: dict[str, Any] = {
     "scalable_binary_sha256": "",
     "scalable_timeout_seconds": 60,
     "scalable_require_read_only_guard": True,
+    # Trading 212, read-only through its REST API (foundation/trading212).
+    "trading212_enabled": False,
+    "trading212_environment": "live",
+    "trading212_sync_hours": 6,
     "frontend_origin": "http://localhost:5173",
     "webauthn_rp_id": "localhost",
     "webauthn_rp_name": "QuantFolio",
@@ -62,6 +66,7 @@ DEFAULT_PUBLIC_SETTINGS: dict[str, Any] = {
     # Each bank applies only its own (Sec. 44a EStG); the Tax Cockpit plans the split.
     "freistellungsauftrag_dkb_eur": None,
     "freistellungsauftrag_scalable_eur": None,
+    "freistellungsauftrag_trading212_eur": None,
     # Total of the orders on file at banks other than DKB and Scalable (None = none
     # entered; then the allowance used elsewhere stands in for it).
     "freistellungsauftrag_other_banks_eur": None,
@@ -78,6 +83,7 @@ DEFAULT_PUBLIC_SETTINGS: dict[str, Any] = {
     # Tax Cockpit asks); False = that bank has no copy.
     "tax_nv_filed_dkb": None,
     "tax_nv_filed_scalable": None,
+    "tax_nv_filed_trading212": None,
     "tax_other_income_eur": 0,
     # "de_family" (German Familienversicherung: income limit applies),
     # "de_own", "foreign" (e.g. Austrian ÖGK), or "unknown".
@@ -266,7 +272,7 @@ DEFAULT_PUBLIC_SETTINGS: dict[str, Any] = {
 SENSITIVE_INTEGRATIONS = {
     "alphavantage", "finnhub", "fred", "eod", "obsidian", "dkb", "smtp",
     "llm", "anthropic", "openai", "massive",
-    "twelvedata", "databento", "alpaca", "tiingo", "telegram",
+    "twelvedata", "databento", "alpaca", "tiingo", "telegram", "trading212",
 }
 
 

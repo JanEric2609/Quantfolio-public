@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, Upload, XCircle } from "lucide-react";
 import { DkbSyncButton } from "../../components/portfolio/DkbSyncButton";
 import { ScalableReview, ScalableSavingsPlans, ScalableSyncButton, useScalableStatus } from "../../components/portfolio/ScalableSync";
+import { Trading212Pies, Trading212SyncButton, useTrading212Status } from "../../components/portfolio/Trading212Sync";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
 import { AccountsTable } from "./components/AccountsTable";
@@ -66,6 +67,7 @@ function ConnectionRow({ name, status, children }: { name: string; status?: Reac
 function ConnectionsCard() {
   const accounts = useQuery({ queryKey: ["portfolio-accounts"], queryFn: () => api<Account[]>("/api/portfolio/accounts") });
   const scalable = useScalableStatus();
+  const trading212 = useTrading212Status();
   const dkbSynced = (accounts.data ?? [])
     .filter((a) => a.source === "dkb" && a.last_synced)
     .map((a) => a.last_synced as string)
@@ -92,6 +94,11 @@ function ConnectionsCard() {
             <ScalableSyncButton />
           </ConnectionRow>
         )}
+        {trading212.data?.enabled && (
+          <ConnectionRow name="Trading 212">
+            <Trading212SyncButton />
+          </ConnectionRow>
+        )}
       </CardContent>
     </Card>
   );
@@ -110,6 +117,7 @@ export function AccountsTab() {
         }
       />
       <ScalableSavingsPlans />
+      <Trading212Pies />
     </div>
   );
 }

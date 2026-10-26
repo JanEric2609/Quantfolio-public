@@ -198,7 +198,7 @@ def _classify_holding(
 
 
 # Lots created by code, not typed in by the user.
-_AUTO_LOT_SOURCES = frozenset({"activity-ledger", "scalable_sync"})
+_AUTO_LOT_SOURCES = frozenset({"activity-ledger", "scalable_sync", "trading212_sync"})
 
 
 def _estimate_holdings_vorabpauschale(
@@ -607,7 +607,7 @@ def _kap_mapping(
 
 # Synced events name their bank through their source; each bank applies only
 # its own Freistellungsauftrag (Sec. 44a EStG).
-SOURCE_INSTITUTION = {"dkb_sync": "dkb", "scalable_sync": "scalable"}
+SOURCE_INSTITUTION = {"dkb_sync": "dkb", "scalable_sync": "scalable", "trading212_sync": "trading212"}
 
 
 def normalise_institution(value: Any) -> str | None:
@@ -884,6 +884,7 @@ TAX_SETTING_KEYS = (
     "freistellungsauftrag_used",
     "freistellungsauftrag_dkb_eur",
     "freistellungsauftrag_scalable_eur",
+    "freistellungsauftrag_trading212_eur",
     "freistellungsauftrag_other_banks_eur",
     "tax_interest_rate_dkb",
     "tax_spouse_allowance",
@@ -892,6 +893,7 @@ TAX_SETTING_KEYS = (
     "tax_nv_valid_until",
     "tax_nv_filed_dkb",
     "tax_nv_filed_scalable",
+    "tax_nv_filed_trading212",
     "tax_other_income_eur",
     "tax_health_insurance",
     "tax_bafoeg",

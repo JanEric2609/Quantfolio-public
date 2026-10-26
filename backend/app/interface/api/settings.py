@@ -244,6 +244,20 @@ def update_settings(
                 status_code=403,
                 detail="Only the user Scalable Capital syncs into can change its settings",
             )
+    # The saved Trading 212 key is installation-wide and bound to the user it
+    # syncs into: nobody else may switch it off, repoint it or replace the key.
+    trading212_changes = [
+        key for key, value in public_settings.items() if key.startswith("trading212_") and current.get(key) != value
+    ] + [service for service in payload.integrations if service == "trading212"]
+    if trading212_changes:
+        from app.foundation.trading212_status import owner_user_id as trading212_owner
+
+        owner = trading212_owner(db)
+        if owner is not None and owner != user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the user Trading 212 syncs into can change its settings or key",
+            )
     # The per-bank Freistellungsauftrag/NV values describe one person's accounts.
     if any(key in public_settings for key in BANK_SETTING_KEYS):
         try:
@@ -296,6 +310,10 @@ def test_integration(
         from app.interface.api.scalable import require_connection_owner
 
         require_connection_owner(db, user)
+    if payload.service == "trading212":
+        from app.interface.api.trading212 import require_connection_owner as require_t212_owner
+
+        require_t212_owner(db, user)
     result = _probe_integration(payload, db)
     if payload.value is None or payload.service == "smtp":
         result.tested_at = record_connection_test(
@@ -312,6 +330,14 @@ def _probe_integration(payload: IntegrationTestRequest, db: Session) -> Integrat
         failed = next((step for step in result["steps"] if not step["ok"]), None)
         message = result["message"] if failed is None else f"{failed['name']}: {failed['detail']}"
         return IntegrationTestResponse(service="scalable", ok=bool(result["ok"]), message=message[:500])
+
+    if payload.service == "trading212":
+        from app.foundation.trading212.service import probe as t212_probe
+
+        result = t212_probe(db)
+        failed = next((step for step in result["steps"] if not step["ok"]), None)
+        message = result["message"] if failed is None else f"{failed['name']}: {failed['detail']}"
+        return IntegrationTestResponse(service="trading212", ok=bool(result["ok"]), message=message[:500])
 
     if payload.service == "dkb":
         try:
