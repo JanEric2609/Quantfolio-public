@@ -168,7 +168,8 @@ def ticker_problem(text: str, symbol: str | None, facts_text: str) -> str | None
     if len(base) < 3:
         return None
     for token in _CAPS_TOKEN.findall(text or ""):
-        if token == base or token in facts_text or abs(len(token) - len(base)) != 1:
+        # A whole word of the facts, not a substring: "DDO" sits inside "DDOG".
+        if token == base or re.search(rf"\b{re.escape(token)}\b", facts_text) or abs(len(token) - len(base)) != 1:
             continue
         if base in token or token in base:
             return f"'{token}' is not the ticker; write {base}"

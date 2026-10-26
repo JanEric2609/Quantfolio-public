@@ -16,6 +16,8 @@ def test_near_miss_ticker_is_rejected():
     facts = "Candidate: DDOG (Datadog)\n"
     assert ticker_problem("DDDOG offers moderate portfolio fit.", "DDOG", facts) is not None
     assert ticker_problem("DDOG offers moderate portfolio fit.", "DDOG", facts) is None
+    # A truncation is a substring of the real ticker in the facts, but not a word there.
+    assert ticker_problem("DDO offers moderate portfolio fit.", "DDOG", facts) is not None
     # Short tickers and unrelated capitals (EUR, ETF) are left alone.
     assert ticker_problem("MUU and EUR exposure.", "MU", facts) is None
     assert ticker_problem("Priced in EUR with ETF peers.", "HSBA.L", facts) is None
