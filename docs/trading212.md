@@ -28,7 +28,8 @@ its settings, or replace it. A key for a different Trading 212 account (for exam
 first, then the live one) is refused with `account_changed`, so two accounts are never mixed. To
 switch accounts, press **Remove synced data** next to the sync button (`DELETE
 /api/trading212/data`, owner only). It removes the positions, cash, ledger rows, tax lots and
-events, pies and sync logs the sync wrote, keeps the key, and changes nothing at Trading 212.
+events, pies, book snapshots and sync logs the sync wrote, keeps the key and its owner, and
+changes nothing at Trading 212.
 The next sync then reads the new account's full history.
 
 ## What the client may call

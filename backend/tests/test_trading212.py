@@ -512,8 +512,17 @@ def test_removing_the_synced_data_lets_another_account_sync(fake):
     fake.data["/equity/account/summary"] = {**fake.data["/equity/account/summary"], "id": 999}
     with pytest.raises(t212.Trading212AccountChanged):
         t212.sync(db, user.id)
+    other = User(username="other", password_hash="x", role="admin")
+    db.add(other)
+    db.commit()
     removed = t212.reset_synced_data(db, user.id)
-    assert removed["positions"] == 2 and removed["tax_lots"] == 2 and removed["accounts"] == 2
+    assert removed["positions"] == 2 and removed["tax_lots"] == 2 and removed["accounts"] == 1
+    # The key stays bound to its owner, and the mirror dropped the old holdings.
+    assert trading212_status.owner_user_id(db) == user.id
+    with pytest.raises(t212.Trading212OwnedByOtherUser):
+        t212.sync(db, other.id)
+    from app.foundation.models.entities import Holding
+    assert db.query(Holding).filter(Holding.source == "broker_sync").count() == 0
     assert db.query(ActivityLedgerEntry).filter(ActivityLedgerEntry.source == "trading212").count() == 0
     assert get_secret(db, "trading212") is not None  # the key stays
     log = t212.sync(db, user.id)

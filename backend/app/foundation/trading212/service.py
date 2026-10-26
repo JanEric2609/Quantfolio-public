@@ -224,7 +224,10 @@ def sync(db: Session, user_id: str, *, trigger: str = "manual") -> dict[str, Any
         summary = map_summary(client.get(SUMMARY))
         account_id = summary.account_id or "default"
         depot = depot_account(db, user_id)
-        if depot is not None and depot.external_id and depot.external_id != account_id:
+        if depot is not None and not depot.external_id:
+            depot.external_id = account_id  # adopt the depot a reset emptied
+            db.flush()
+        elif depot is not None and depot.external_id != account_id:
             # Never mix two accounts (a demo key, then the live one): their
             # positions, cash and tax lots would all count.
             raise Trading212AccountChanged(
@@ -584,13 +587,18 @@ def reset_synced_data(db: Session, user_id: str) -> dict[str, int]:
 
     For a key that now reads another account (``account_changed``, e.g. a
     demo key first): the positions, cash, ledger rows, tax lots and events,
-    pies and sync logs of the old account go, and the next sync starts over
-    with the full history. Nothing at Trading 212 changes.
-    """
-    from app.foundation.models.entities import TaxLedgerEvent, TaxLot
+    pies, book snapshots and sync logs of the old account go, and the next
+    sync starts over with the full history. Nothing at Trading 212 changes.
 
-    accounts = [a.id for a in db.query(ConnectedAccount.id).filter(
-        ConnectedAccount.user_id == user_id, ConnectedAccount.source == SOURCE)]
+    The depot row stays, emptied and without an account id: it is what binds
+    the saved key to its owner, and the next sync adopts it for the new account.
+    """
+    from app.foundation.models.entities import BookPositionSnapshot, TaxLedgerEvent, TaxLot
+
+    keep = depot_account(db, user_id)
+    others = [a.id for a in db.query(ConnectedAccount.id).filter(
+        ConnectedAccount.user_id == user_id, ConnectedAccount.source == SOURCE)
+        if keep is None or a.id != keep.id]
     removed = {
         "pies": db.query(BrokerPie).filter(BrokerPie.user_id == user_id, BrokerPie.source == SOURCE)
         .delete(synchronize_session=False),
@@ -608,13 +616,23 @@ def reset_synced_data(db: Session, user_id: str) -> dict[str, int]:
         "sync_logs": db.query(BrokerSyncLog).filter(BrokerSyncLog.user_id == user_id,
                                                     BrokerSyncLog.source == SOURCE, BrokerSyncLog.state != "running")
         .delete(synchronize_session=False),
-        "accounts": db.query(ConnectedAccount).filter(ConnectedAccount.id.in_(accounts or [""]))
+        "book_snapshots": db.query(BookPositionSnapshot).filter(BookPositionSnapshot.user_id == user_id,
+                                                                BookPositionSnapshot.source == SOURCE)
+        .delete(synchronize_session=False),
+        "accounts": db.query(ConnectedAccount).filter(ConnectedAccount.id.in_(others or [""]))
         .delete(synchronize_session=False),
     }
+    if keep is not None:
+        keep.external_id = None
+        keep.balance = Decimal("0")
+        keep.raw_json = "{}"
+        keep.last_synced = None
     db.commit()
     from app.foundation.portfolio_service import invalidate_wealth_cache, sync_dkb_to_wealth_ledger
 
-    sync_dkb_to_wealth_ledger(db, user_id)  # drop the mirrored holdings of the removed positions
+    # The emptied depot still counts as a connected broker, so the mirror runs
+    # and drops the holdings it had mirrored from the removed positions.
+    sync_dkb_to_wealth_ledger(db, user_id)
     invalidate_wealth_cache(user_id)
     return removed
 
