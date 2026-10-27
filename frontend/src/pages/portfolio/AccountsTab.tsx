@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, Upload, XCircle } from "lucide-react";
 import { DkbSyncButton } from "../../components/portfolio/DkbSyncButton";
 import { ScalableReview, ScalableSavingsPlans, ScalableSyncButton, useScalableStatus } from "../../components/portfolio/ScalableSync";
 import { Trading212Pies, Trading212SyncButton, useTrading212Status } from "../../components/portfolio/Trading212Sync";
+import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
 import { AccountsTable } from "./components/AccountsTable";
@@ -64,6 +65,19 @@ function ConnectionRow({ name, status, children }: { name: string; status?: Reac
   );
 }
 
+function OffBadge() {
+  return <Badge variant="secondary">sync off</Badge>;
+}
+
+/** A broker whose sync is off still gets its row, so it is never hidden. */
+function TurnOnLink({ connection }: { connection: "scalable" | "trading212" }) {
+  return (
+    <Button asChild variant="outline" size="sm">
+      <Link to={`/settings/bank?connection=${connection}`}>Turn on</Link>
+    </Button>
+  );
+}
+
 function ConnectionsCard() {
   const accounts = useQuery({ queryKey: ["portfolio-accounts"], queryFn: () => api<Account[]>("/api/portfolio/accounts") });
   const scalable = useScalableStatus();
@@ -89,16 +103,12 @@ function ConnectionsCard() {
           {/* The Test PID switch lives in Control Center, under the DKB diagnostics. */}
           <DkbSyncButton showTestPid={false} />
         </ConnectionRow>
-        {scalable.data?.enabled && (
-          <ConnectionRow name="Scalable">
-            <ScalableSyncButton />
-          </ConnectionRow>
-        )}
-        {trading212.data?.enabled && (
-          <ConnectionRow name="Trading 212">
-            <Trading212SyncButton />
-          </ConnectionRow>
-        )}
+        <ConnectionRow name="Scalable" status={scalable.data && !scalable.data.enabled ? <OffBadge /> : null}>
+          {scalable.data?.enabled ? <ScalableSyncButton /> : <TurnOnLink connection="scalable" />}
+        </ConnectionRow>
+        <ConnectionRow name="Trading 212" status={trading212.data && !trading212.data.enabled ? <OffBadge /> : null}>
+          {trading212.data?.enabled ? <Trading212SyncButton /> : <TurnOnLink connection="trading212" />}
+        </ConnectionRow>
       </CardContent>
     </Card>
   );

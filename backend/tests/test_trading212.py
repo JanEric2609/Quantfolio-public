@@ -29,7 +29,7 @@ from app.foundation.models.entities import (
     TaxLot,
     User,
 )
-from app.foundation.settings import get_secret, set_secret, upsert_public_settings
+from app.foundation.settings import get_public_settings, get_secret, set_secret, upsert_public_settings
 from app.foundation.trading212 import client as t212_client
 from app.foundation.trading212 import service as t212
 from app.foundation.trading212.client import (
@@ -516,6 +516,36 @@ def test_another_user_cannot_change_the_trading212_settings_or_key(fake):
         app.dependency_overrides.clear()
     assert off.status_code == 403 and key.status_code == 403
     assert (get_secret(db, "trading212") or ("", {}))[0] == "KEY-123"
+
+
+def test_saving_the_trading212_key_switches_the_sync_on_unless_the_save_sets_the_switch():
+    from fastapi.testclient import TestClient
+
+    from app.foundation.auth import current_user
+    from app.foundation.core.db import get_db
+    from app.main import app
+
+    db = _memory_db()
+    user = User(username="owner", password_hash="x", role="admin")
+    db.add(user)
+    db.commit()
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[current_user] = lambda: user
+    try:
+        client = TestClient(app)
+        saved = client.put("/api/settings", json={"settings": {},
+                                                   "integrations": {"trading212": {"secret": "KEY", "api_secret": "S"}}})
+        assert saved.status_code == 200
+        assert get_public_settings(db)["trading212_enabled"] is True
+        # Meta alone (no new key) and an explicit off both leave the switch to the owner.
+        client.put("/api/settings", json={"settings": {"trading212_enabled": False}, "integrations": {}})
+        client.put("/api/settings", json={"settings": {}, "integrations": {"trading212": {"api_secret": "S2"}}})
+        assert get_public_settings(db)["trading212_enabled"] is False
+        client.put("/api/settings", json={"settings": {"trading212_enabled": False},
+                                          "integrations": {"trading212": {"secret": "KEY2"}}})
+        assert get_public_settings(db)["trading212_enabled"] is False
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_savings_plan_freshness_reads_only_the_scalable_log(fake):

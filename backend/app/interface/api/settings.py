@@ -32,7 +32,7 @@ from app.foundation.settings import (
     update_secret_meta,
     upsert_public_settings,
 )
-from app.foundation.settings_catalog import PAGES, get_catalog, get_connections, validate_public_settings
+from app.foundation.settings_catalog import CONNECTIONS, PAGES, get_catalog, get_connections, validate_public_settings
 from app.foundation.email import send_test_email
 from app.foundation.providers.alphavantage_provider import AlphaVantageProvider
 from app.foundation.providers.databento_provider import DatabentoProvider
@@ -264,6 +264,17 @@ def update_settings(
             public_settings = claim_bank_settings(db, user.id, public_settings)
         except BankSettingsOwnedByOtherUser as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+    # Saving a credential means "use it": switch its connection on, unless the
+    # same save sets the switch. Otherwise a saved Trading 212 key never syncs
+    # and the broker stays hidden behind the off switch.
+    for connection in CONNECTIONS.values():
+        if (
+            connection.enabled_key
+            and connection.secret
+            and (payload.integrations.get(connection.secret) or {}).get("secret")
+            and connection.enabled_key not in public_settings
+        ):
+            public_settings[connection.enabled_key] = True
     telegram_changed = "telegram_mode" in public_settings or "telegram" in payload.integrations
     settings = upsert_public_settings(db, public_settings)
     delete_public_setting(db, "dkb_username")  # remove any legacy plaintext mirror
