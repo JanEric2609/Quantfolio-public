@@ -48,6 +48,14 @@ describe("AccountsTab", () => {
     expect(await screen.findByText("Connections")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Sync DKB/ })).toBeInTheDocument();
     expect(screen.queryByText("Test PID")).not.toBeInTheDocument();
+    // A broker whose sync is off keeps its row, with a way to turn it on.
+    expect(screen.getByText("Trading 212")).toBeInTheDocument();
+    expect(screen.getByText("Scalable")).toBeInTheDocument();
+    const turnOn = await screen.findAllByRole("link", { name: "Turn on" });
+    expect(turnOn.map((link) => link.getAttribute("href"))).toEqual([
+      "/settings/bank?connection=scalable",
+      "/settings/bank?connection=trading212",
+    ]);
     expect(await screen.findByRole("link", { name: /Import CSV/ })).toBeInTheDocument();
     expect(await screen.findByText("securities")).toBeInTheDocument();
     expect(screen.queryByText(/^0,00/)).not.toBeInTheDocument();
