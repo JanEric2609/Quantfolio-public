@@ -8,13 +8,14 @@ import { Card, CardContent } from "../../../components/ui/card";
 import { Skeleton } from "../../../components/ui/skeleton";
 import { DataTable } from "../../../components/composed/DataTable";
 import { Input } from "../../../components/ui/input";
+import { SourceLabel } from "../../../components/portfolio/BrokerFilter";
 
 const _SKELETON_COUNT = 5;
 
 const columns: ColumnDef<PortfolioActivity>[] = [
   { accessorKey: "date", header: "Date", cell: ({ row }) => formatDate(row.original.date) },
   { accessorKey: "description", header: "Description" },
-  { accessorKey: "source", header: "Source" },
+  { accessorKey: "source", header: "Source", cell: ({ row }) => <SourceLabel source={row.original.source} /> },
   { accessorKey: "amount", header: "Amount", cell: ({ row }) => <span className="font-mono">{formatCurrency(Number(row.original.amount), { currency: row.original.currency })}</span> },
   { accessorKey: "isin", header: "ISIN", cell: ({ row }) => <span className="font-mono">{row.original.isin ?? "-"}</span> },
   { accessorKey: "symbol", header: "Symbol", cell: ({ row }) => <span className="font-mono">{row.original.symbol ?? "-"}</span> },

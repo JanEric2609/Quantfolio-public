@@ -75,3 +75,8 @@ export function BrokerBadge({ source, className }: { source?: string | null; cla
     </Badge>
   );
 }
+
+/** A row's `source`: the broker badge for a synced broker, else the source as written (a CSV import, "manual"). */
+export function SourceLabel({ source }: { source?: string | null }) {
+  return brokerOf(source) ? <BrokerBadge source={source} /> : <span>{source || "—"}</span>;
+}

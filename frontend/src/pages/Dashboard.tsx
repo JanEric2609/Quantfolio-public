@@ -13,7 +13,9 @@ import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { LineChart } from "../components/charts/LineChart";
 import { DonutChart } from "../components/charts/DonutChart";
 import { DkbSyncButton } from "../components/portfolio/DkbSyncButton";
-import { BrokerBadge, BrokerFilterToggle, brokerOf, matchesBroker, useBrokerFilter } from "../components/portfolio/BrokerFilter";
+import { ScalableSyncButton } from "../components/portfolio/ScalableSync";
+import { Trading212SyncButton } from "../components/portfolio/Trading212Sync";
+import { BrokerBadge, BrokerFilterToggle, SourceLabel, brokerOf, matchesBroker, useBrokerFilter } from "../components/portfolio/BrokerFilter";
 import { RegimeBadge } from "../components/portfolio/RegimeBadge";
 import { type PortfolioRange, usePortfolioHistory } from "../hooks/usePortfolioHistory";
 import { usePriceMoves } from "../hooks/usePriceMoves";
@@ -24,7 +26,7 @@ const ranges: PortfolioRange[] = ["1W", "1M", "3M", "YTD", "1Y", "All"];
 const activityColumns: ColumnDef<PortfolioActivity>[] = [
   { accessorKey: "date", header: "Date", cell: ({ row }) => formatDate(row.original.date) },
   { accessorKey: "description", header: "Description" },
-  { accessorKey: "source", header: "Source" },
+  { accessorKey: "source", header: "Source", cell: ({ row }) => <SourceLabel source={row.original.source} /> },
   {
     accessorKey: "amount",
     header: "Amount",
@@ -78,6 +80,11 @@ export function Dashboard() {
           <DkbSyncButton showState />
         </div>
       )}
+      {/* Scalable and Trading 212 sync without a TAN; each renders nothing while its connection is off. */}
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 empty:hidden">
+        <ScalableSyncButton />
+        <Trading212SyncButton />
+      </div>
 
       {wealth.isError && (
         <Card>

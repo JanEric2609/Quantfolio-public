@@ -5,6 +5,7 @@ import { api, type WealthSummary } from "../../../lib/api";
 import { formatCurrency, formatDate, formatSignedDelta } from "../../../lib/format";
 import { DeltaText } from "../../../components/composed/DeltaText";
 import { Badge } from "../../../components/ui/badge";
+import { BrokerBadge, brokerOf } from "../../../components/portfolio/BrokerFilter";
 import { Button } from "../../../components/ui/button";
 import { Skeleton } from "../../../components/ui/skeleton";
 
@@ -43,6 +44,8 @@ export function SummaryStrip() {
     totals[key] = (totals[key] ?? 0) + position.current_value;
     return totals;
   }, {})).slice(0, 4);
+  // One line per synced broker: DKB, Scalable and Trading 212 each sync on their own.
+  const synced = (wealth.data?.by_broker ?? []).filter((row) => brokerOf(row.source));
   const pnl = wealth.data?.cashflow_30d?.net ?? 0;
   // Server wealth figures are computed in EUR (no FX conversion exists yet), so
   // label them with the server's declared currency, never the reporting-currency
@@ -59,7 +62,18 @@ export function SummaryStrip() {
           {!breakdown.length && <span className="text-sm text-text-muted">No positions</span>}
         </div>
       </div>
-      <Stat label="DKB last sync" value={wealth.data?.last_snapshot ? formatDate(wealth.data.last_snapshot) : "Not recorded"} />
+      <div>
+        <div className="text-xs text-text-secondary">Last sync</div>
+        <div className="mt-1 flex flex-col gap-0.5">
+          {synced.map((row) => (
+            <div key={row.source} className="flex items-center gap-1.5 font-mono text-sm tabular-nums">
+              <BrokerBadge source={row.source} />
+              {row.last_synced ? formatDate(row.last_synced) : "never"}
+            </div>
+          ))}
+          {!synced.length && <span className="text-sm text-text-muted">No broker synced</span>}
+        </div>
+      </div>
       <div className="flex items-center">
         <Button variant="ghost" size="sm" onClick={() => navigate("/quantlab/overview")} className="gap-1 text-xs" title="Open in Quant Lab">
           <BarChart3 className="h-3.5 w-3.5" />

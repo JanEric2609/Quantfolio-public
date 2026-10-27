@@ -29,7 +29,7 @@ PAGES: list[dict[str, str]] = [
     {"group": "tax", "path": "tax", "area": "you", "label": "Tax",
      "description": "Inputs for the German tax estimates in the Tax Cockpit. Estimates only, not tax advice."},
     {"group": "banking", "path": "bank", "area": "connections", "label": "Banks & brokers",
-     "description": "Read-only sync with DKB over FinTS and with Scalable Capital through its official CLI."},
+     "description": "Read-only sync with DKB over FinTS, Scalable Capital through its official CLI and Trading 212 through its API."},
     {"group": "market_data", "path": "market-data", "area": "connections", "label": "Market data",
      "description": "Price, fundamentals and macro data providers, and the order they are asked in."},
     {"group": "ai", "path": "ai", "area": "connections", "label": "AI models",
@@ -427,7 +427,7 @@ _reg(CatalogEntry("tax_bafoeg", "tax", "Receiving BAföG",
     input_type="boolean", section="Your situation"))
 
 # ===========================================================================
-# Connections › Banks & brokers (DKB, Scalable Capital)
+# Connections › Banks & brokers (DKB, Scalable Capital, Trading 212)
 # ===========================================================================
 
 _reg(CatalogEntry("dkb", "banking", "DKB online-banking PIN",

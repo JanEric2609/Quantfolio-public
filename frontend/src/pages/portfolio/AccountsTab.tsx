@@ -43,7 +43,7 @@ function DkbDiagnosticsSummary() {
     <Link
       to="/settings/status#dkb"
       className={`inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${config.color}`}
-      title={`${latest.summary} — open Control Center → Status → Bank sync for full diagnostics`}
+      title={`${latest.summary} — open Control Center → Status → Bank & broker sync for full diagnostics`}
     >
       <Icon size={12} aria-hidden="true" />
       <span>{config.label}</span>
@@ -56,7 +56,7 @@ function ConnectionRow({ name, status, children }: { name: string; status?: Reac
   return (
     <div className="flex flex-col gap-2 py-2 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="w-20 shrink-0 text-sm font-medium text-text-primary">{name}</span>
+        <span className="w-24 shrink-0 whitespace-nowrap text-sm font-medium text-text-primary">{name}</span>
         {status}
       </div>
       <div className="flex min-w-0 items-center sm:justify-end">{children}</div>
