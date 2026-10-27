@@ -197,7 +197,7 @@ function PageIntro({ page, dkbConnected }: { page: SettingsPageMeta; dkbConnecte
       <Note icon={Info}>
         Sync history and FinTS diagnostics are on{" "}
         <Link to="/settings/status#dkb" className="text-accent hover:underline">
-          Status › Bank sync
+          Status › Bank &amp; broker sync
         </Link>
         . Start a sync from{" "}
         <Link to="/portfolio/accounts" className="text-accent hover:underline">

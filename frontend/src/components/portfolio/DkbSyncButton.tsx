@@ -105,7 +105,7 @@ export function DkbSyncButton({ showState = false, showTestPid = true }: {
         </Button>
       )}
       {showDiagnosticsLink && (
-        <Button asChild variant="outline" size="sm" className="w-full sm:w-auto" disabled={sync.isPending} title="Open Control Center → Status → Bank sync">
+        <Button asChild variant="outline" size="sm" className="w-full sm:w-auto" disabled={sync.isPending} title="Open Control Center → Status → Bank & broker sync">
           <Link to="/settings/status#dkb">Diagnostics</Link>
         </Button>
       )}

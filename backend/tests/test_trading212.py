@@ -252,6 +252,7 @@ def test_sync_writes_positions_cash_ledger_and_pies(fake):
     assert rows["fill:1"].activity_type == "buy" and rows["fill:1"].amount == Decimal("-501")
     assert rows["fill:1"].fees == Decimal("1")
     assert rows["fill:1"].price == Decimal("50")  # 55 USD at the fill's own rate
+    assert rows["fill:1"].description == "Buy CMG"  # reads like Scalable's "Buy EUNL" in the activity list
     assert rows["dividend:div-1"].activity_type == "dividend" and rows["dividend:div-1"].amount == Decimal("4")
     assert json.loads(rows["dividend:div-1"].raw_json)["gross"] == "5.0"
     # The deposit before the first sync is history: the opening balance holds it.

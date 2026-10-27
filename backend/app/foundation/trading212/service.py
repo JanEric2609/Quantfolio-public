@@ -530,7 +530,7 @@ def _write_ledger(db: Session, user_id: str, account_id: str, depot: ConnectedAc
             value = price * f.quantity
         amount = -(value or Decimal("0")) if f.side == "BUY" else (value or Decimal("0"))
         created += add("fill", f.id, depot, activity_type="buy" if f.side == "BUY" else "sell", date=day,
-                       amount=amount, currency=f.account_currency, description=f.name or (f.isin or ""),
+                       amount=amount, currency=f.account_currency, description=f"{f.side.title()} {f.name or f.isin or ''}".strip()[:300],
                        isin=f.isin, quantity=f.quantity, price=price, fees=f.fees or None,
                        review_state="trusted" if f.isin else "needs_review",
                        raw_json=json.dumps(f.raw, default=str))

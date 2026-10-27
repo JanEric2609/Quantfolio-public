@@ -19,6 +19,7 @@ import { cn } from "../../lib/utils";
 import { DataCoveragePanel } from "./components/DataCoveragePanel";
 import { DkbDiagnosticsPanel } from "./components/DkbDiagnosticsPanel";
 import { DkbSyncLogsTable } from "./components/DkbSyncLogsTable";
+import { BrokerSyncLogsTable } from "./components/BrokerSyncLogsTable";
 import { ResearchExtractsPanel } from "./components/ResearchExtractsPanel";
 import { useAttention, useSettingsModel } from "./lib/schema";
 
@@ -57,7 +58,7 @@ export function StatusPage() {
             ["providers", "Data providers"],
             ["ai", "AI models"],
             ["extracts", "Research extracts"],
-            ["dkb", "Bank sync"],
+            ["dkb", "Bank & broker sync"],
             ["coverage", "Price coverage"],
           ].map(([id, label]) => (
             <a key={id} href={`#${id}`} className="text-accent hover:underline">
@@ -74,11 +75,15 @@ export function StatusPage() {
       <Section id="extracts" title="Research extracts" description="Point-in-time data behind Discover's insider, analyst-revision and factor signals. The WRDS exports are refreshed by hand; a stale one leaves its signal empty.">
         <ResearchExtractsPanel />
       </Section>
-      <Section id="dkb" title="Bank sync" description="FinTS self-test and the history of DKB syncs.">
+      <Section id="dkb" title="Bank & broker sync" description="FinTS self-test and the history of DKB syncs, then the Scalable and Trading 212 syncs.">
         <DkbDiagnosticsPanel />
         <div className="rounded-lg border border-border bg-surface p-4">
-          <h4 className="mb-3 text-sm font-medium">Sync history</h4>
+          <h4 className="mb-3 text-sm font-medium">DKB sync history</h4>
           <DkbSyncLogsTable />
+        </div>
+        <div className="rounded-lg border border-border bg-surface p-4">
+          <h4 className="mb-3 text-sm font-medium">Scalable and Trading 212 sync history</h4>
+          <BrokerSyncLogsTable />
         </div>
       </Section>
       <Section id="coverage" title="Price coverage" description="How much bar history is stored per symbol. Pick a symbol to see its range, gaps and source.">
