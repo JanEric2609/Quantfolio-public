@@ -31,7 +31,8 @@ describe("heldAt", () => {
   });
 
   it("falls back to the holding's own sync source before the positions load", () => {
-    expect(heldAt({ isin: "IE00BK5BQT80", source: "broker_sync" }, depots)).toEqual(["scalable"]);
+    // Scalable and Trading 212 share "broker_sync": no guess until a position names the depot.
+    expect(heldAt({ isin: "IE00BK5BQT80", source: "broker_sync" }, depots)).toEqual([]);
     expect(heldAt({ isin: "IE00BK5BQT80", source: "dkb_sync" }, new Map())).toEqual(["dkb"]);
   });
 

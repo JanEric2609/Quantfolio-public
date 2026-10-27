@@ -14,18 +14,18 @@ import { usePriceMoves } from "../../../hooks/usePriceMoves";
 import { HoldingDetailSheet } from "./HoldingDetailSheet";
 import { BrokerBadge, brokerOf } from "../../../components/portfolio/BrokerFilter";
 
-// A "broker_sync" holding without a synced position left to name its depot was Scalable's (the first generic broker).
-const SYNC_SOURCES: Record<string, string> = { dkb_sync: "dkb", broker_sync: "scalable" };
+// Scalable and Trading 212 both write "broker_sync", so only a synced position can name its depot.
+const SYNC_SOURCES: Record<string, string | null> = { dkb_sync: "dkb", broker_sync: null };
 
 /**
  * Where a holding sits: the depots of the synced positions with its ISIN (a
- * synced holding sums every depot), else what its own source says. A
- * hand-entered holding is "manual" even when a depot holds the same ISIN.
+ * synced holding sums every depot), else what its own source says (nothing for
+ * "broker_sync"). A hand-entered holding is "manual" even when a depot holds the same ISIN.
  */
 export function heldAt(holding: Pick<Holding, "isin" | "source">, depotsByIsin: Map<string, string[]>): string[] {
   const synced = holding.source ? SYNC_SOURCES[holding.source] : undefined;
-  if (!synced) return ["manual"];
-  return (holding.isin && depotsByIsin.get(holding.isin)) || [synced];
+  if (synced === undefined) return ["manual"];
+  return (holding.isin && depotsByIsin.get(holding.isin)) || (synced ? [synced] : []);
 }
 
 export function resolveLatestPrice(quotePrice: number | undefined, avgBuyPriceRaw: string | null): number | null {

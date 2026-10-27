@@ -3272,9 +3272,9 @@ export interface MonthlyPlan {
   min_order_eur: number;
   drift_band_pp?: number | null;
   contribution_mode?: "savings_plan" | "manual_orders";
-  broker?: "dkb" | "scalable";
+  broker?: "dkb" | "scalable" | "trading212";
   broker_label?: string;
-  broker_choice?: "auto" | "dkb" | "scalable";
+  broker_choice?: "auto" | "dkb" | "scalable" | "trading212";
   brokers_connected?: string[];
   sleeves: PlanSleeve[];
   actions: PlanAction[];
