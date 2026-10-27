@@ -21,7 +21,7 @@ times) is shown back next to it. The worker's daily job sends a Telegram
 message when the level gets worse, when a recovery is complete, and when a
 savings plan stops or core units are sold during a fall.
 
-Information only: nothing here trades, and DKB and Scalable stay read-only.
+Information only: nothing here trades, and every broker stays read-only.
 """
 from __future__ import annotations
 

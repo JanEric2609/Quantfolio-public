@@ -46,7 +46,7 @@ export function RealHoldingsView() {
       <EmptyState
         icon={Database}
         title="No synced positions found"
-        description="Sync DKB or Scalable Capital first, then backfill price data to activate analytics."
+        description="Sync DKB, Scalable Capital or Trading 212 first, then backfill price data to activate analytics."
         actionLabel={backfill.isRunning ? "Backfilling..." : "Backfill prices now"}
         onAction={() => backfill.start()}
       />

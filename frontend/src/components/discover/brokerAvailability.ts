@@ -1,6 +1,6 @@
 /** Per-broker tradeability from a candidate's ``tradeable_json`` (decision/discover/tradeability.py). */
 export interface BrokerAvailability {
-  key: "dkb" | "scalable";
+  key: "dkb" | "scalable" | "trading212";
   label: string;
   likely: boolean | null;
   confidence: string;
@@ -8,7 +8,7 @@ export interface BrokerAvailability {
   url: string | null;
 }
 
-const LABELS = { dkb: "DKB", scalable: "Scalable" } as const;
+const LABELS = { dkb: "DKB", scalable: "Scalable", trading212: "Trading 212" } as const;
 
 function str(v: unknown): string | null {
   return typeof v === "string" && v ? v : null;
@@ -16,13 +16,14 @@ function str(v: unknown): string | null {
 
 /**
  * One row per broker. Runs before 2026-10 stored only the DKB verdict at the
- * top level; those show DKB alone rather than guessing Scalable.
+ * top level; those show DKB alone rather than guessing Scalable. Trading 212
+ * has a row once its sync stored the instrument list.
  */
 export function brokerAvailability(tradeable: Record<string, unknown> | null | undefined): BrokerAvailability[] {
   if (!tradeable || Object.keys(tradeable).length === 0) return [];
   const brokers = tradeable.brokers;
   if (brokers && typeof brokers === "object") {
-    return (["dkb", "scalable"] as const)
+    return (["dkb", "scalable", "trading212"] as const)
       .filter((key) => key in (brokers as Record<string, unknown>))
       .map((key) => {
         const b = (brokers as Record<string, Record<string, unknown>>)[key];

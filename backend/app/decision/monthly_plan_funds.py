@@ -205,8 +205,8 @@ ACC_DIST_NOTE = (
     "certificate) covers the gains it hardly matters — nothing is taxed either "
     "way. Once it no longer covers you, accumulating funds defer tax through "
     "the yearly Vorabpauschale instead of paying out distributions, so "
-    "accumulating is the default. Check the certificate is on file with both "
-    "DKB and Scalable, and note its renewal date."
+    "accumulating is the default. Check the certificate is on file with every "
+    "broker you invest through (DKB, Scalable, Trading 212), and note its renewal date."
 )
 
 

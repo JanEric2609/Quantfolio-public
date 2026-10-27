@@ -397,16 +397,3 @@ def map_pie(summary: dict[str, Any], detail: Any, positions_by_ticker: dict[str,
 
 def _str(value: Decimal | None) -> str | None:
     return str(value) if value is not None else None
-
-
-def map_instrument_types(body: Any, isins: set[str]) -> dict[str, str]:
-    """ISIN → T212 instrument type (ETF, STOCK, …) for the ISINs asked for."""
-    out: dict[str, str] = {}
-    for item in body if isinstance(body, list) else []:
-        if not isinstance(item, dict):
-            continue
-        isin = _isin(item.get("isin"))
-        kind = str(item.get("type") or "").upper()
-        if isin in isins and kind:
-            out[isin] = kind
-    return out

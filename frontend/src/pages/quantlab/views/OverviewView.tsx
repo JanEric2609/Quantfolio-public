@@ -167,7 +167,7 @@ export function OverviewView() {
             <div>
               <h2 className="text-sm font-semibold text-text-primary">Your book, time-weighted (start = 100)</h2>
               <p className="text-[11px] text-text-muted">
-                DKB and Scalable together, in EUR. Purchases and sales are money in or out, never return; the
+                DKB, Scalable and Trading 212 together, in EUR. Purchases and sales are money in or out, never return; the
                 benchmark is rebased to the same start.
               </p>
             </div>

@@ -24,7 +24,7 @@ type ManualTaxEventValues = {
   withheld_eur: number;
   foreign_wht_eur: number;
   realised_gain_eur: string;
-  institution: "none" | "dkb" | "scalable" | "other";
+  institution: "none" | "dkb" | "scalable" | "trading212" | "other";
   notes: string;
 };
 
@@ -33,9 +33,10 @@ const BANKS: { value: ManualTaxEventValues["institution"]; label: string }[] = [
   { value: "none", label: "Not set" },
   { value: "dkb", label: "DKB" },
   { value: "scalable", label: "Scalable Capital" },
+  { value: "trading212", label: "Trading 212" },
   { value: "other", label: "Another bank" },
 ];
-const BANK_LABEL: Record<string, string> = { dkb: "DKB", scalable: "Scalable", other: "Other" };
+const BANK_LABEL: Record<string, string> = { dkb: "DKB", scalable: "Scalable", trading212: "Trading 212", other: "Other" };
 
 const eventTypes: TaxEvent["event_type"][] = [
   "dividend",

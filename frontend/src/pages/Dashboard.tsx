@@ -13,7 +13,7 @@ import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group";
 import { LineChart } from "../components/charts/LineChart";
 import { DonutChart } from "../components/charts/DonutChart";
 import { DkbSyncButton } from "../components/portfolio/DkbSyncButton";
-import { BrokerBadge, BrokerFilterToggle, matchesBroker, useBrokerFilter } from "../components/portfolio/BrokerFilter";
+import { BrokerBadge, BrokerFilterToggle, brokerOf, matchesBroker, useBrokerFilter } from "../components/portfolio/BrokerFilter";
 import { RegimeBadge } from "../components/portfolio/RegimeBadge";
 import { type PortfolioRange, usePortfolioHistory } from "../hooks/usePortfolioHistory";
 import { usePriceMoves } from "../hooks/usePriceMoves";
@@ -63,7 +63,8 @@ export function Dashboard() {
     .map((position) => ({ position, move: position.symbol ? moves.data?.[position.symbol] : undefined }))
     .sort((a, b) => b.position.current_value - a.position.current_value)
     .slice(0, 5);
-  const syncedAccounts = wealth.data?.accounts?.filter((item) => item.source === "dkb" || item.source === "scalable") ?? [];
+  const syncedAccounts = wealth.data?.accounts?.filter((item) => brokerOf(item.source)) ?? [];
+  const syncedBrokers = (wealth.data?.by_broker ?? []).filter((row) => brokerOf(row.source));
   const cashflowNet = wealth.data?.cashflow_30d?.net;
 
   return (
@@ -209,10 +210,11 @@ export function Dashboard() {
 
       <Card>
         <CardHeader><CardTitle>Synced depots</CardTitle></CardHeader>
-        <CardContent className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2 xl:grid-cols-5">
+        <CardContent className="grid grid-cols-1 gap-3 text-sm md:grid-cols-2 xl:grid-cols-3">
           <MirrorMetric label="Accounts mirrored" value={String(syncedAccounts.length)} />
-          <MirrorMetric label="DKB securities value" value={formatCurrency(wealth.data?.dkb_security_value, reportCurrency)} />
-          <MirrorMetric label="Scalable securities value" value={formatCurrency(wealth.data?.broker_security_value ?? 0, reportCurrency)} />
+          {syncedBrokers.map((row) => (
+            <MirrorMetric key={row.source} label={`${row.label} securities value`} value={formatCurrency(row.securities, reportCurrency)} />
+          ))}
           <MirrorMetric label="Manual external value" value={formatCurrency(wealth.data?.manual_value, reportCurrency)} />
           <MirrorMetric label="Snapshot" value={wealth.data?.last_snapshot ? formatDate(wealth.data.last_snapshot) : "Not recorded"} />
         </CardContent>

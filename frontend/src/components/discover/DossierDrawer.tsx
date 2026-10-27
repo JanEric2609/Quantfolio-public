@@ -57,7 +57,7 @@ function BrokerTradeability({ tradeable, symbol }: { tradeable: Record<string, u
               return (
                 <li key={b.key} className="space-y-1" data-testid={`broker-${b.key}`}>
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-semibold text-text-primary w-16">{b.label}</span>
+                    <span className="text-xs font-semibold text-text-primary w-20">{b.label}</span>
                     <Badge className={`text-xs ${badge.className}`}>{badge.label}</Badge>
                     {b.url && (
                       <a

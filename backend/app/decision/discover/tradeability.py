@@ -1,10 +1,12 @@
 """Tradeability assessor for Discover pipeline.
 
 Determines whether a candidate is likely tradeable at each of the user's
-brokers (DKB and Scalable Capital): funds by domicile (PRIIPs), shares by
-listing venue, with a provider registry lookup for listings outside the EU and
-the US. The result carries one badge per broker; the pipeline drops a
-candidate only when neither broker is likely to offer it.
+brokers. DKB and Scalable Capital are judged by rule: funds by domicile
+(PRIIPs), shares by listing venue, with a provider registry lookup for
+listings outside the EU and the US. Trading 212 publishes its instrument list,
+so once the sync has stored it the answer there is looked up, not guessed.
+The result carries one badge per broker; the pipeline drops a candidate only
+when no broker is likely to offer it.
 """
 from __future__ import annotations
 
@@ -13,6 +15,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.foundation.broker_instruments import APP_URL, Trading212Listings
 from app.foundation.instrument_taxonomy import classify_instrument
 from app.foundation.recommendation_execution import dkb_search_url, scalable_security_url
 from app.foundation.providers.registry import build_provider_registry
@@ -98,6 +101,26 @@ def unknown(isin: str | None, error: str) -> dict[str, Any]:
     }
 
 
+def _trading212(t212: Trading212Listings, isin: str | None) -> dict[str, Any] | None:
+    """The Trading 212 badge from its instrument list; None before the first sync stored one."""
+    if not t212.loaded:
+        return None
+    listed = t212.listed(isin)
+    if listed is None:
+        return {"likely": None, "confidence": "unknown", "note": "No ISIN to look up in Trading 212's list",
+                "url": None}
+    if not listed:
+        return {"likely": False, "confidence": "high", "note": "Not in Trading 212's instrument list", "url": None}
+    currency = t212.currency(isin)
+    note = "In Trading 212's instrument list"
+    if currency and currency != "EUR":
+        note += f"; trades in {currency}, so each order pays the 0.15 % currency conversion"
+    url = t212.url(isin)
+    if url == APP_URL:
+        note += f"; search {isin} in the app"
+    return {"likely": True, "confidence": "high", "note": note, "url": url}
+
+
 def assess(
     db: Session,
     symbol: str,
@@ -105,7 +128,7 @@ def assess(
     name: str,
     instrument_type: str | None = None,
 ) -> dict[str, Any]:
-    """Assess whether a candidate is likely tradeable at DKB and at Scalable.
+    """Assess whether a candidate is likely tradeable at DKB, at Scalable and at Trading 212.
 
     Funds and single shares follow different rules:
 
@@ -199,9 +222,12 @@ def assess(
             "url": scalable_security_url(isin),
         },
     }
+    t212 = _trading212(Trading212Listings(db), isin)
+    if t212 is not None:
+        brokers["trading212"] = t212
     likely = any(b["likely"] for b in brokers.values())
     order = ("low", "medium", "high")
-    confidence = max((b["confidence"] for b in brokers.values()), key=order.index)
+    confidence = max((b["confidence"] for b in brokers.values() if b["confidence"] in order), key=order.index)
     manual_check_url = dkb_search_url(isin)
 
     logger.debug(

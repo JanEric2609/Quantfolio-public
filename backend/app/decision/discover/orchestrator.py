@@ -515,7 +515,7 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
             else:
                 cand.status = "rejected"
                 cand.reject_stage = "tradeability_gate"
-                cand.reject_reason = "Not likely tradeable at DKB or Scalable"
+                cand.reject_reason = "Not likely tradeable at any of your brokers"
 
         if len(tradeable_shortlisted) < LLM_MAX_CANDIDATES:
             cand_by_symbol = {c.symbol: c for c in candidates}
@@ -572,7 +572,7 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
                 else:
                     cand.status = "rejected"
                     cand.reject_stage = "tradeability_gate"
-                    cand.reject_reason = "Not likely tradeable at DKB or Scalable"
+                    cand.reject_reason = "Not likely tradeable at any of your brokers"
 
         shortlisted = tradeable_shortlisted
         db.commit()

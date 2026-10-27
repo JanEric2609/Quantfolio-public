@@ -454,7 +454,7 @@ def list_pending_recommendations(
                 "resurfaced": rec.id in resurfaced,
                 "isin": recommendation_isin(rec),
                 "side": execution_side(rec),
-                "links": broker_links(recommendation_isin(rec)),
+                "links": broker_links(recommendation_isin(rec), db),
             }
         )
     return {"items": items, "total": len(pending), "research_count": len(research_tickers)}
@@ -496,7 +496,7 @@ def submit_advisor_feedback(
     return {
         "ok": True,
         "new_state": action,
-        "links": broker_links(recommendation_isin(rec)) if action == "accepted" else [],
+        "links": broker_links(recommendation_isin(rec), db) if action == "accepted" else [],
         "execution": execution,
     }
 

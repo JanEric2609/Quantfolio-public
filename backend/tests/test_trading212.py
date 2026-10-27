@@ -111,8 +111,9 @@ def _api() -> dict[str, Any]:
             "settings": {"id": 77, "name": "Dividends", "dividendCashAction": "TO_ACCOUNT_CASH", "goal": 1000},
         },
         "/equity/metadata/instruments": [
-            {"isin": CMG, "ticker": "CMG_US_EQ", "type": "STOCK"},
-            {"isin": VHYL, "ticker": "VHYLl_EQ", "type": "ETF"},
+            {"isin": CMG, "ticker": "CMG_US_EQ", "type": "STOCK", "currencyCode": "USD", "name": "Chipotle"},
+            {"isin": VHYL, "ticker": "VHYLl_EQ", "type": "ETF", "currencyCode": "USD"},
+            {"isin": VHYL, "ticker": "VGWDd_EQ", "type": "ETF", "currencyCode": "EUR"},
         ],
     }
 
@@ -407,17 +408,42 @@ def test_job_skips_without_an_owner_or_when_disabled():
     assert db.query(ConnectedAccount).count() == 0
 
 
-def test_the_monthly_plan_counts_trading212_cash_as_savings_not_buying_power(fake):
+def test_the_monthly_plan_counts_trading212_free_cash_as_buying_power(fake):
     from app.decision.monthly_plan import cash_state, connected_brokers
 
     db = _memory_db()
     user = _setup(db)
     t212.sync(db, user.id)
     state = cash_state(db, user.id, {"emergency_reserve_eur": 0})
-    assert state["savings_eur"] == pytest.approx(305)
-    assert "trading212" not in state["broker_cash_by_broker"]
-    # A Trading 212 depot alone is not a Scalable depot.
-    assert connected_brokers(db, user.id) == []
+    depot = db.query(ConnectedAccount).filter_by(source="trading212", account_type="depot").one()
+    free = json.loads(depot.raw_json)["cash"]["buying_power"]
+    # Free cash is money to invest there; cash already in a pie is not.
+    assert state["broker_cash_by_broker"]["trading212"] == pytest.approx(float(free))
+    assert state["savings_eur"] == 0
+    assert connected_brokers(db, user.id) == ["trading212"]
+
+
+def test_the_sync_stores_the_instrument_list_once_a_day(fake):
+    from app.foundation.broker_instruments import Trading212Listings
+    from app.foundation.models.entities import BrokerInstrument
+
+    db = _memory_db()
+    user = _setup(db)
+    log = t212.sync(db, user.id)
+    assert log["counts"]["instruments"] == 3
+    listings = Trading212Listings(db)
+    assert listings.listed(VHYL) is True
+    assert listings.currency(VHYL) == "EUR"  # the Xetra line beats the London one
+    assert listings.currency(CMG) == "USD"
+    assert listings.listed("IE00B4L5Y983") is False
+    assert listings.url(CMG) == "https://www.trading212.com/trading-instruments/invest/CMG.US"
+    # The positions' security types come from the stored list.
+    depot = db.query(ConnectedAccount).filter_by(source="trading212", account_type="depot").one()
+    assert json.loads(depot.raw_json)["security_types"] == {CMG: "STOCK", VHYL: "ETF"}
+
+    log = t212.sync(db, user.id)
+    assert "instruments" not in log["counts"]
+    assert db.query(BrokerInstrument).count() == 3
 
 
 def test_a_pie_list_that_is_not_a_list_keeps_the_last_read(fake):

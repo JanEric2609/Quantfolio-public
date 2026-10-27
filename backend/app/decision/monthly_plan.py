@@ -14,9 +14,10 @@ split into three sleeves (docs/archive/audits/2026-09-24-why-it-does-not-work §
 
 How new money reaches the book is the owner's choice (``plan_contribution_mode``,
 ``plan_broker``): a standing savings plan, or orders placed by hand each month,
-at DKB or Scalable Capital. Every action names its broker and that broker's fee;
-"auto" picks the cheapest synced depot for each buy, and a sale is made at the
-depot that holds the position (FIFO runs per depot). Positions at both brokers,
+at DKB, Scalable Capital or Trading 212. Every action names its broker and that
+broker's fee; "auto" picks the cheapest synced depot for each buy (Trading 212
+only for an ISIN its instrument list offers), and a sale is made at the depot
+that holds the position (FIFO runs per depot). Positions at every broker,
 and those entered by hand under Portfolio -> Holdings, all count toward the
 sleeves.
 
@@ -52,6 +53,7 @@ from sqlalchemy.orm import Session
 
 from app.foundation.allocation import allocate_contribution, drift_sales
 from app.foundation.broker_fees import SAVINGS_PLAN_FEE_EUR, order_fee_eur
+from app.foundation.broker_instruments import Trading212Listings
 from app.foundation.broker_status import load_raw
 from app.foundation.factor_evidence import TILT_EVIDENCE_REGION, latest_evidence_gate, latest_factor_evidence_cards
 from app.foundation.fx_rates import convert as fx_convert
@@ -99,9 +101,13 @@ SLEEVE_LABELS = {"core": "Core", "tilt": "Factor tilt", "satellite": "Stock pick
 
 # Where and how the monthly contribution is invested (plan settings).
 CONTRIBUTION_MODES = ("savings_plan", "manual_orders")
-BROKERS = ("dkb", "scalable")
+# In tie order: "auto" picks the cheapest, and an equal fee goes to the first.
+BROKERS = ("dkb", "scalable", "trading212")
 BROKER_CHOICES = ("auto", *BROKERS)
-BROKER_LABELS = {"dkb": "DKB", "scalable": "Scalable Capital"}
+BROKER_LABELS = {"dkb": "DKB", "scalable": "Scalable Capital", "trading212": "Trading 212"}
+# Where an order's money has to be first.
+BROKER_CASH_ACCOUNTS = {"dkb": "DKB giro account", "scalable": "Scalable cash account",
+                        "trading212": "Trading 212 cash account"}
 
 # Savings-plan frequencies as Scalable reports them, in executions per month.
 FREQUENCY_PER_MONTH = {
@@ -119,11 +125,9 @@ FREQUENCY_PER_MONTH = {
 }
 
 # Fees live in foundation/broker_fees.py (SAVINGS_PLAN_FEE_EUR, order_fee_eur).
-SATELLITE_BROKER_LABELS = {"dkb": "DKB", "scalable": "Scalable Capital"}
+SATELLITE_BROKER_LABELS = {"dkb": "DKB", "scalable": "Scalable Capital", "trading212": "Trading 212"}
 # Synced brokers that report savings plans.
 PLANS_SOURCES: tuple[str, ...] = ("scalable",)
-# Synced brokers whose cash account is a savings account, not buying power.
-SAVINGS_CASH_SOURCES = frozenset({"trading212"})
 
 # A plan whose next execution lies further back than this is treated as not
 # running (sc sends no paused flag): listed, but left out of the totals.
@@ -404,8 +408,8 @@ def connected_brokers(db: Session, user_id: str) -> list[str]:
     out: list[str] = []
     if db.query(DkbAccount.id).filter(DkbAccount.user_id == user_id, DkbAccount.type == "depot").first():
         out.append("dkb")
-    if any(a.source == "scalable" for a in _broker_depots(db, user_id)):
-        out.append("scalable")
+    sources = {a.source for a in _broker_depots(db, user_id)}
+    out.extend(b for b in BROKERS if b != "dkb" and b in sources)
     return out
 
 
@@ -434,14 +438,25 @@ def depot_label(db: Session, broker: str, account_id: str) -> str:
 
 def buy_broker(
     cfg: dict[str, Any], connected: list[str], kind: str, amount: float, name: str | None = None,
+    *, isin: str | None = None, t212: Trading212Listings | None = None,
 ) -> str:
-    """The broker a buy goes to: the owner's choice, or the cheapest synced depot."""
+    """The broker a buy goes to: the owner's choice, or the cheapest synced depot.
+
+    Trading 212 is a candidate only for an ISIN its instrument list (*t212*)
+    offers; its fee depends on the line's currency.
+    """
     if cfg["broker"] in BROKERS:
         return cfg["broker"]
-    candidates = connected or ["dkb"]
+    candidates = [
+        b for b in connected
+        if b != "trading212" or (t212 is not None and t212.listed(isin))
+    ] or [b for b in connected if b != "trading212"] or ["dkb"]
 
     def fee(broker: str) -> float:
-        return SAVINGS_PLAN_FEE_EUR[broker] if kind == "savings_plan" else order_fee_eur(broker, amount, name)
+        if kind == "savings_plan":
+            return SAVINGS_PLAN_FEE_EUR[broker]
+        currency = t212.currency(isin) if broker == "trading212" and t212 is not None else None
+        return order_fee_eur(broker, amount, name, currency=currency)
 
     return min(candidates, key=lambda b: (fee(b), BROKERS.index(b)))
 
@@ -539,7 +554,8 @@ def cash_state(db: Session, user_id: str, cfg: dict[str, Any]) -> dict[str, Any]
 
     Counts DKB Tagesgeld, broker savings accounts (Scalable's overnight
     account) and each broker's buying power (cash not already earmarked for
-    savings plans or open orders). The giro account is spending money and never
+    savings plans or open orders; Trading 212's free cash, which also earns
+    interest there). The giro account is spending money and never
     counts. With no reserve set nothing is investable: the plan does not guess
     how much cash the owner needs.
     """
@@ -553,12 +569,6 @@ def cash_state(db: Session, user_id: str, cfg: dict[str, Any]) -> dict[str, Any]
         .all()
     )
     savings += sum(float(a.balance or 0) for a in broker_accounts if a.account_type == "savings")
-    # Trading 212's uninvested cash earns interest like a Tagesgeld and new
-    # money goes to Scalable (decision of 2026-10-05): it counts as savings,
-    # never as buying power to invest there.
-    savings += sum(float(a.balance or 0) for a in broker_accounts
-                   if a.source in SAVINGS_CASH_SOURCES and a.account_type == "cash")
-    broker_accounts = [a for a in broker_accounts if a.source not in SAVINGS_CASH_SOURCES]
     broker_cash: dict[str, float] = {}
     cash_accounts = {a.external_id: a for a in broker_accounts if a.account_type == "cash" and a.external_id}
     depots = [a for a in broker_accounts if a.account_type == "depot"]
@@ -828,7 +838,10 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
     manual_mode = cfg["contribution_mode"] == "manual_orders"
     contribution_kind = "order" if manual_mode else "savings_plan"
     connected = connected_brokers(db, user_id)
-    broker = buy_broker(cfg, connected, contribution_kind, contribution)
+    t212 = Trading212Listings(db)
+    core_instrument = CORE_ETF_ISINS.get(cfg["core_isin"], "Passive core ETF")
+    broker = buy_broker(cfg, connected, contribution_kind, contribution, core_instrument,
+                        isin=cfg["core_isin"], t212=t212)
     broker_label = BROKER_LABELS[broker]
 
     # What already runs: the brokers' savings plans, per sleeve. A plan that is
@@ -910,8 +923,12 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
             broker=satellite_broker, broker_label=SATELLITE_BROKER_LABELS.get(satellite_broker),
         )
 
-    def order_note(source: str, amount: float, at: str, name: str | None = None) -> str:
-        fee = order_fee_eur(at, amount, name)
+    def fee_at(at: str, amount: float, name: str | None = None, isin: str | None = None) -> float:
+        currency = t212.currency(isin) if at == "trading212" else None
+        return order_fee_eur(at, amount, name, currency=currency)
+
+    def order_note(source: str, amount: float, at: str, name: str | None = None, isin: str | None = None) -> str:
+        fee = fee_at(at, amount, name, isin)
         if fee == 0:
             return f"{source} at {BROKER_LABELS[at]}, free of charge for this ETF."
         return f"{source} at {BROKER_LABELS[at]}; the {_fee_eur(fee)} fee is {100.0 * fee / amount:.1f} % of it."
@@ -932,14 +949,12 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
             ticker=ticker, isin=isin, note=note, broker=at, broker_label=BROKER_LABELS[at],
         )
 
-    core_instrument = CORE_ETF_ISINS.get(cfg["core_isin"], "Passive core ETF")
-
-    def order_at(amount: float, name: str | None = None) -> str:
-        return buy_broker(cfg, connected, "order", amount, name)
+    def order_at(amount: float, name: str | None = None, isin: str | None = None) -> str:
+        return buy_broker(cfg, connected, "order", amount, name, isin=isin, t212=t212)
 
     def core_contribution_note(amount: float) -> str:
         if manual_mode:
-            return order_note("This month's contribution: one order", amount, broker, core_instrument)
+            return order_note("This month's contribution: one order", amount, broker, core_instrument, cfg["core_isin"])
         running = plans_by_sleeve["core"]
         if core_covered:
             return f"Already covered: your savings plans at {plan_brokers} put {eur(running)} a month into the core."
@@ -982,26 +997,26 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
             core_contribution_note(split["core"]), broker,
         ))
     if reinvest["core"] > 0:
-        at = order_at(reinvest["core"], core_instrument)
+        at = order_at(reinvest["core"], core_instrument, cfg["core_isin"])
         actions.append(buy(
             "core", "order", reinvest["core"], core_instrument, cfg["core_ticker"], cfg["core_isin"],
-            order_note("One order from the sale proceeds", reinvest["core"], at, core_instrument), at,
+            order_note("One order from the sale proceeds", reinvest["core"], at, core_instrument, cfg["core_isin"]), at,
         ))
     if split["tilt"] > 0:
         for tilt_isin, amount in _split_tilt(positions["tilt"], cfg["tilt_isins"], split["tilt"]):
-            at = order_at(amount) if manual_mode else broker
+            at = order_at(amount, isin=tilt_isin) if manual_mode else broker
             actions.append(buy(
                 "tilt", contribution_kind, amount, _tilt_instrument(positions["tilt"], tilt_isin), None, tilt_isin,
-                order_note("One order", amount, at) if manual_mode
+                order_note("One order", amount, at, isin=tilt_isin) if manual_mode
                 else savings_plan_note("Run as a separate savings plan", amount),
                 at,
             ))
     if reinvest["tilt"] > 0:
         for tilt_isin, amount in _split_tilt(positions["tilt"], cfg["tilt_isins"], reinvest["tilt"]):
-            at = order_at(amount)
+            at = order_at(amount, isin=tilt_isin)
             actions.append(buy(
                 "tilt", "order", amount, _tilt_instrument(positions["tilt"], tilt_isin), None, tilt_isin,
-                order_note("One order from the sale proceeds", amount, at), at,
+                order_note("One order from the sale proceeds", amount, at, isin=tilt_isin), at,
             ))
     if split["satellite"] > 0:
         actions.append(satellite_order(split["satellite"], "One order."))
@@ -1015,7 +1030,7 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
     one_off = {k: 0.0 for k in SLEEVES}
     notes: list[str] = []
     if investable > 0:
-        at = order_at(investable, core_instrument)
+        at = order_at(investable, core_instrument, cfg["core_isin"])
         after_plan = {k: current[k] + split_shown[k] + reinvest[k] - sales.get(k, 0.0) for k in SLEEVES}
         planned = allocate_contribution(after_plan, targets, investable)
         if 0 < planned["satellite"] < cfg["min_order_eur"]:
@@ -1027,8 +1042,9 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
         core_amount = planned["core"]
         if planned["tilt"] > 0:
             for tilt_isin, amount in _split_tilt(positions["tilt"], cfg["tilt_isins"], planned["tilt"]):
-                if order_fee_eur(at, amount) <= 0.01 * amount:
-                    orders.append(("tilt", tilt_isin, amount, at))
+                tilt_at = order_at(amount, isin=tilt_isin)
+                if fee_at(tilt_at, amount, isin=tilt_isin) <= 0.01 * amount:
+                    orders.append(("tilt", tilt_isin, amount, tilt_at))
                 else:
                     core_amount += amount
         if planned["satellite"] > 0:
@@ -1036,7 +1052,7 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
                 orders.append(("satellite", None, planned["satellite"], satellite_broker))
             else:
                 core_amount += planned["satellite"]
-        if core_amount > 0 and order_fee_eur(at, core_amount, core_instrument) <= 0.01 * core_amount:
+        if core_amount > 0 and fee_at(at, core_amount, core_instrument, cfg["core_isin"]) <= 0.01 * core_amount:
             orders.insert(0, ("core", cfg["core_isin"], core_amount, at))
         if orders:
             source = f"Optional one-off from cash above your {eur(cash['emergency_reserve_eur'])} reserve: one order"
@@ -1049,17 +1065,17 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
                 elif sleeve == "core":
                     actions.append(buy(
                         "core", "one_off", amount, core_instrument, cfg["core_ticker"], isin,
-                        order_note(source, amount, broker_at, core_instrument), broker_at,
+                        order_note(source, amount, broker_at, core_instrument, isin), broker_at,
                     ))
                 else:
                     actions.append(buy(
                         "tilt", "one_off", amount, _tilt_instrument(positions["tilt"], isin), None, isin,
-                        order_note(source, amount, broker_at), broker_at,
+                        order_note(source, amount, broker_at, isin=isin), broker_at,
                     ))
             for broker_at, amount in need.items():
                 in_place = min(amount, cash["broker_cash_by_broker"].get(broker_at, 0.0))
                 if amount - in_place >= 1.0:
-                    account = "Scalable cash account" if broker_at == "scalable" else "DKB giro account"
+                    account = BROKER_CASH_ACCOUNTS.get(broker_at, "cash account")
                     notes.append(
                         f"For the one-off, move {eur(amount - in_place)} into your {account} first, from Tagesgeld "
                         f"or wherever the money sits; {eur(in_place)} is already free there."

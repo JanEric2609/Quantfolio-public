@@ -45,7 +45,7 @@ for, and every one is a GET:
 | `/equity/history/dividends` | 20 / min | dividends: EUR credit, gross per share |
 | `/equity/history/transactions` | 20 / min | deposits, withdrawals, fees, interest on cash |
 | `/equity/pies`, `/equity/pies/{id}` | 1 / 30 s, 1 / 5 s | pies (fail soft, see below) |
-| `/equity/metadata/instruments` | 1 / 50 s | instrument type (ETF, STOCK) for ISINs not seen before |
+| `/equity/metadata/instruments` | 1 / 50 s | the instrument list (ISIN, ticker, type, currency), at most once a day |
 
 Any other path raises `Trading212ReadOnlyViolation` before a request exists. That also covers a
 `nextPagePath` on another host or feed. The sync then switches itself off until someone has looked.
@@ -63,8 +63,10 @@ sequential.
   `live_positions` and `combined_positions` like Scalable's, so they count in net worth, allocation
   and the advisor's fit.
 - **Cash** goes to a `connected_accounts` row of type `cash`: available plus reserved plus the cash
-  held in pies. The monthly plan counts it as savings (it earns interest), never as buying power.
-  New money still goes to Scalable.
+  held in pies. The depot's `raw_json.cash.buying_power` is the free cash alone; the monthly plan
+  counts that as money to invest at Trading 212 (it also earns interest there).
+- **The instrument list** goes to `broker_instruments`, replaced as a whole at most once a day
+  (`foundation/broker_instruments.py`). The positions' security types come from it.
 - **History** goes to `activity_ledger_entries`, deduped on `trading212:<account>:<kind>:<id>`.
   - **Fills** are `buy` or `sell` in EUR. The price uses the fill's own FX rate, and fees come
     from `taxes[]`.
@@ -90,6 +92,22 @@ the income. The credit itself is what Trading 212 paid out. The API does not say
 credit is before or after US withholding, or after the German tax Trading 212 withholds, so each
 dividend row carries `withholding_unverified`. Compare the first one with the app before you rely
 on the tax cockpit's dividend figures. The Steuerbescheinigung stays the source of truth.
+
+## Trading 212 as a place to buy
+
+Since 2026-10-26 (owner decision) Trading 212 is a full broker, not only a mirror. Nothing is ever
+ordered; the app suggests and links, the owner places the order.
+
+- **Fees** (`foundation/broker_fees.py`): no commission; 0.15 % FX fee on a line not traded in EUR.
+  The plan takes the currency from the instrument list, preferring a EUR line (`EUNLd_EQ` over
+  `IWDAl_EQ`). Pies are modelled as free savings plans.
+- **Monthly plan** (`plan_broker`): Trading 212 can be chosen, and "auto" considers it for an ISIN
+  its list offers. On a tie (a free savings plan) Scalable keeps it; a single order usually goes to
+  Trading 212 (0 € against Scalable's 0.99 €) unless the FX fee is higher.
+- **Discover**: a third "where to buy" badge, looked up in the list rather than guessed from the
+  venue. No badge until the first sync has stored the list.
+- **Accepted recommendations** get a Trading 212 link when the list offers the ISIN: a US line's
+  public page (`trading-instruments/invest/AAPL.US`), else the web app, where the ISIN finds it.
 
 ## Pies (fail soft)
 

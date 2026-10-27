@@ -349,7 +349,7 @@ export type WealthSummary = {
   security_value: number;
   manual_value: number;
   dkb_security_value: number;
-  /** Securities at brokers synced besides DKB (Scalable Capital). */
+  /** Securities at brokers synced besides DKB (Scalable Capital, Trading 212). */
   broker_security_value?: number;
   accounts: {
     id: string;
@@ -364,7 +364,7 @@ export type WealthSummary = {
   }[];
   positions: {
     id: string;
-    /** "dkb", "scalable", or the source of a hand-entered holding ("manual", a CSV import). */
+    /** "dkb", "scalable", "trading212", or the source of a hand-entered holding ("manual", a CSV import). */
     source: string;
     /** Broker name for synced positions, e.g. "Scalable Capital". */
     broker?: string;
@@ -3272,9 +3272,9 @@ export interface MonthlyPlan {
   min_order_eur: number;
   drift_band_pp?: number | null;
   contribution_mode?: "savings_plan" | "manual_orders";
-  broker?: "dkb" | "scalable";
+  broker?: "dkb" | "scalable" | "trading212";
   broker_label?: string;
-  broker_choice?: "auto" | "dkb" | "scalable";
+  broker_choice?: "auto" | "dkb" | "scalable" | "trading212";
   brokers_connected?: string[];
   sleeves: PlanSleeve[];
   actions: PlanAction[];
