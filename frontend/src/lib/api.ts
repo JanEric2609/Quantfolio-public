@@ -3217,6 +3217,8 @@ export interface RunningSavingsPlan {
   /** False for a paused plan or one whose next run is overdue; it is listed but not counted. */
   running?: boolean;
   not_running_reason?: "paused" | "overdue" | null;
+  /** Read back from the orders the plan placed (Trading 212 has no savings-plan endpoint). */
+  inferred?: boolean;
 }
 
 export interface PlanSavingsPlans {
@@ -3860,7 +3862,35 @@ export interface ScalableReconcileRow {
   scalable_value: string | null;
   decision: "replace" | "keep_both" | null;
   quantity_matches: boolean;
+  /** The same row from any broker (Scalable answers with these too). */
+  source?: string;
+  broker_quantity?: string;
+  broker_value?: string | null;
 }
+
+/** A hand-entered holding that matches a synced position at one broker. */
+export interface BrokerReconcileRow {
+  holding_id: string;
+  source?: string;
+  isin: string;
+  name: string;
+  manual_quantity: string;
+  manual_value: string;
+  broker_quantity?: string;
+  broker_value?: string | null;
+  scalable_quantity?: string;
+  scalable_value?: string | null;
+  decision: "replace" | "keep_both" | null;
+  quantity_matches: boolean;
+}
+
+export type ReconcileBroker = "scalable" | "trading212";
+export const previewBrokerReconcile = (source: ReconcileBroker) => api<BrokerReconcileRow[]>(`/api/${source}/reconcile`);
+export const applyBrokerReconcile = (source: ReconcileBroker, decisions: Record<string, ScalableDecision>) =>
+  api<{ replaced: number; kept: number }>(`/api/${source}/reconcile`, {
+    method: "POST",
+    body: JSON.stringify({ decisions }),
+  });
 
 export type ScalableDecision = "replace" | "keep_both";
 
@@ -3980,6 +4010,20 @@ export interface Trading212Pie {
 export const getTrading212Status = () => api<Trading212Status>("/api/trading212/status");
 export const syncTrading212 = () => api<Trading212SyncLog>("/api/trading212/sync", { method: "POST" });
 export const getTrading212Pies = () => api<Trading212Pie[]>("/api/trading212/pies");
+/** Trading 212 has no savings-plan endpoint: each plan is read back from the orders it placed. */
+export interface Trading212SavingsPlan {
+  isin: string | null;
+  name: string;
+  amount: string | null;
+  /** DAILY, WEEKLY, BIWEEKLY, MONTHLY, or UNKNOWN until the plan has run twice. */
+  frequency: string | null;
+  next_execution_date: string | null;
+  last_execution_date: string | null;
+  runs: number;
+  pie: string | null;
+  inferred: boolean;
+}
+export const getTrading212SavingsPlans = () => api<Trading212SavingsPlan[]>("/api/trading212/savings-plans");
 /** Removes what the sync wrote (to start over with another account); the key stays. */
 export const resetTrading212Data = () =>
   api<{ removed: Record<string, number> }>("/api/trading212/data", { method: "DELETE" });

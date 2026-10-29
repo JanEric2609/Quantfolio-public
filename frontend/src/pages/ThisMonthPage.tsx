@@ -248,10 +248,15 @@ function PlanLine({ p }: { p: RunningSavingsPlan }) {
           {p.dynamization_rate ? ` · grows ${p.dynamization_rate} %/yr` : ""}
           {p.not_running_reason === "paused" ? " · paused" : ""}
           {p.not_running_reason === "overdue" ? " · overdue, no run seen" : ""}
+          {p.inferred ? " · read from its orders" : ""}
         </span>
       </span>
       <span className="shrink-0 tabular-nums text-text-primary">
-        {p.monthly_eur == null ? `${formatCurrency(p.amount_eur, "EUR")} ${p.frequency.toLowerCase()}` : `${formatCurrency(p.monthly_eur, "EUR")}/month`}
+        {p.monthly_eur != null
+          ? `${formatCurrency(p.monthly_eur, "EUR")}/month`
+          : p.frequency === "UNKNOWN"
+            ? `${formatCurrency(p.amount_eur, "EUR")}, ran once so far`
+            : `${formatCurrency(p.amount_eur, "EUR")} ${p.frequency.toLowerCase()}`}
       </span>
     </li>
   );

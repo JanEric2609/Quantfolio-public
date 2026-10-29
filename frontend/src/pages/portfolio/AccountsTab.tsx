@@ -2,8 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { AlertTriangle, CheckCircle2, Upload, XCircle } from "lucide-react";
 import { DkbSyncButton } from "../../components/portfolio/DkbSyncButton";
-import { ScalableReview, ScalableSavingsPlans, ScalableSyncButton, useScalableStatus } from "../../components/portfolio/ScalableSync";
-import { Trading212Pies, Trading212SyncButton, useTrading212Status } from "../../components/portfolio/Trading212Sync";
+import { BrokerSavingsPlans } from "../../components/portfolio/BrokerSavingsPlans";
+import { ScalableReview, ScalableSyncButton, useScalableStatus } from "../../components/portfolio/ScalableSync";
+import { Trading212Pies, Trading212Review, Trading212SyncButton, useTrading212Status } from "../../components/portfolio/Trading212Sync";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Card, CardContent } from "../../components/ui/card";
@@ -118,6 +119,7 @@ export function AccountsTab() {
   return (
     <div className="space-y-4">
       <ScalableReview />
+      <Trading212Review />
       <ConnectionsCard />
       <AccountsTable
         rightSlot={
@@ -126,7 +128,7 @@ export function AccountsTab() {
           </Button>
         }
       />
-      <ScalableSavingsPlans />
+      <BrokerSavingsPlans />
       <Trading212Pies />
     </div>
   );

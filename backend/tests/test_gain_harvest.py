@@ -232,3 +232,16 @@ def test_harvest_endpoint_and_settings_round_trip():
         assert body["estimate"] is True and body["not_tax_advice"] is True and body["enabled"] is True
     finally:
         app.dependency_overrides.clear()
+
+
+def test_a_trading212_line_in_another_currency_costs_its_fx_fee_not_a_bank_fee():
+    """No flat fee at Trading 212, but 0.15 % FX on the sale and again on the rebuy."""
+    lots = (OpenLot(date(2025, 1, 2), Decimal("10"), Decimal("500")),)
+    usd = Holding(isin="US1696561059", name="Chipotle", price_eur=Decimal("100"), teilfreistellung_pct=Decimal("0"),
+                  lots=lots, order_fee_eur=Decimal("0"), order_fee_rate=Decimal("0.0015"), bank="trading212")
+    eur = Holding(isin="US1696561059", name="Chipotle", price_eur=Decimal("100"), teilfreistellung_pct=Decimal("0"),
+                  lots=lots, order_fee_eur=Decimal("0"), bank="trading212")
+    [step_usd] = plan_gain_harvest([usd], Decimal("500"), _fee, Decimal("0"))
+    [step_eur] = plan_gain_harvest([eur], Decimal("500"), _fee, Decimal("0"))
+    assert step_usd.trading_cost_eur == Decimal("3.00")  # 2 × 0.15 % of 1 000 €
+    assert step_eur.trading_cost_eur == Decimal("0.00")

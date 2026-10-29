@@ -310,6 +310,7 @@ def sync(db: Session, user_id: str, *, trigger: str = "manual") -> dict[str, Any
         raise
 
     counts.update(sync_pies(db, user_id, client, positions))
+    counts.update(sync_savings_plans(db, user_id))
     from app.foundation.broker_sync import post_sync_steps
     from app.foundation.portfolio_service import invalidate_wealth_cache
 
@@ -694,6 +695,119 @@ def sync_pies(db: Session, user_id: str, client: Trading212Client,
         depot.raw_json = json.dumps(raw, default=str)
     db.commit()
     return {"pies": len(pies)}
+
+
+# --- savings plans, read back from the orders they placed -------------------
+
+# Trading 212 has no endpoint for recurring investments (nor for a pie's
+# auto-invest schedule), but every order says what placed it: a buy placed by
+# a schedule is AUTOINVEST (a pie) or INSTRUMENT_AUTOINVEST (one instrument).
+AUTOINVEST_ORIGINS = frozenset({"AUTOINVEST", "INSTRUMENT_AUTOINVEST"})
+PLAN_LOOKBACK_DAYS = 400
+# A plan whose last run is older than this has stopped: it is dropped, not listed.
+PLAN_GONE_DAYS = 120
+# Median days between runs -> the schedule Trading 212 offers.
+_FREQUENCY_BY_GAP: tuple[tuple[int, int, str], ...] = (
+    (1, 3, "DAILY"), (5, 9, "WEEKLY"), (12, 16, "BIWEEKLY"), (26, 35, "MONTHLY"),
+)
+_DAYS_BY_FREQUENCY = {"DAILY": 1, "WEEKLY": 7, "BIWEEKLY": 14, "MONTHLY": 30}
+
+
+def infer_savings_plans(db: Session, user_id: str, today: date | None = None) -> list[dict[str, Any]]:
+    """The recurring investments behind the scheduled buys of the last year, one per ISIN.
+
+    ``amount`` is the latest run; the frequency is the median gap between runs
+    (``UNKNOWN`` after one run, so the plan is listed but not counted); the
+    next run is the last one plus that gap. Each plan says it is ``inferred``.
+    """
+    today = today or date.today()
+    depot = depot_account(db, user_id)
+    if depot is None:
+        return []
+    rows = db.query(ActivityLedgerEntry).filter(
+        ActivityLedgerEntry.user_id == user_id,
+        ActivityLedgerEntry.connected_account_id == depot.id,
+        ActivityLedgerEntry.activity_type == "buy",
+        ActivityLedgerEntry.isin.is_not(None),
+        ActivityLedgerEntry.date >= today - timedelta(days=PLAN_LOOKBACK_DAYS),
+    )
+    runs: dict[str, dict[date, Decimal]] = {}
+    origin: dict[str, str] = {}
+    names: dict[str, str] = {}
+    for row in rows:
+        try:
+            raw = json.loads(row.raw_json or "{}")
+        except ValueError:
+            continue
+        placed_by = str(_obj(_obj(raw).get("order")).get("initiatedFrom") or "").upper()
+        if placed_by not in AUTOINVEST_ORIGINS:
+            continue
+        isin = str(row.isin).upper()
+        by_day = runs.setdefault(isin, {})
+        by_day[row.date] = by_day.get(row.date, Decimal("0")) + abs(Decimal(str(row.amount or 0)))
+        origin[isin] = placed_by
+        description = str(row.description or "")
+        names[isin] = description[4:] if description.startswith("Buy ") else description or isin
+
+    # The synced position's name is the instrument's full name; the order only carries its short one.
+    for isin, name in db.query(BrokerPosition.isin, BrokerPosition.name).filter(
+        BrokerPosition.connected_account_id == depot.id, BrokerPosition.isin.in_(list(runs)),
+    ):
+        if name:
+            names[str(isin).upper()] = name
+    pie_of: dict[str, str] = {}
+    for pie in db.query(BrokerPie).filter(BrokerPie.user_id == user_id, BrokerPie.source == SOURCE):
+        try:
+            instruments = json.loads(pie.instruments_json or "[]")
+        except ValueError:
+            instruments = []
+        for inst in instruments if isinstance(instruments, list) else []:
+            if isinstance(inst, dict) and inst.get("isin"):
+                pie_of.setdefault(str(inst["isin"]).upper(), pie.name)
+
+    plans: list[dict[str, Any]] = []
+    for isin, by_day in runs.items():
+        days = sorted(by_day)
+        last = days[-1]
+        if (today - last).days > PLAN_GONE_DAYS:
+            continue
+        gaps = sorted((b - a).days for a, b in zip(days, days[1:]))[-6:]
+        frequency = "UNKNOWN"
+        if gaps:
+            median = gaps[len(gaps) // 2]
+            frequency = next((f for lo, hi, f in _FREQUENCY_BY_GAP if lo <= median <= hi), "UNKNOWN")
+        step = _DAYS_BY_FREQUENCY.get(frequency)
+        pie = pie_of.get(isin) if origin[isin] == "AUTOINVEST" else None
+        plans.append({
+            "name": f"{names[isin]} (pie {pie})" if pie else names[isin],
+            "isin": isin,
+            "amount": str(by_day[last].quantize(Decimal("0.01"))),
+            "frequency": frequency,
+            "next_execution_date": (last + timedelta(days=step)).isoformat() if step else None,
+            "last_execution_date": last.isoformat(),
+            "runs": len(days),
+            "pie": pie,
+            "inferred": True,
+        })
+    return sorted(plans, key=lambda p: (p["pie"] or "", p["name"]))
+
+
+def sync_savings_plans(db: Session, user_id: str) -> dict[str, Any]:
+    """Store the plans read back from the orders on the depot, where the monthly plan reads every broker's."""
+    depot = depot_account(db, user_id)
+    if depot is None:
+        return {}
+    plans = infer_savings_plans(db, user_id)
+    raw = load_raw(depot)
+    raw["savings_plans"] = plans
+    raw["plans_synced_at"] = datetime.now(UTC).isoformat()
+    depot.raw_json = json.dumps(raw, default=str)
+    db.commit()
+    return {"savings_plans": len(plans)}
+
+
+def savings_plans(db: Session, user_id: str) -> list[dict[str, Any]]:
+    return list(load_raw(depot_account(db, user_id)).get("savings_plans") or [])
 
 
 def pies(db: Session, user_id: str) -> list[dict[str, Any]]:

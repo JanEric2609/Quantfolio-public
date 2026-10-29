@@ -94,6 +94,10 @@ class ScalableReconcileRowOut(BaseModel):
     scalable_value: str | None = None
     decision: str | None = None
     quantity_matches: bool
+    # The same row for any broker: Trading 212 answers with these too.
+    source: str | None = None
+    broker_quantity: str | None = None
+    broker_value: str | None = None
 
 
 class ScalableReconcileIn(BaseModel):

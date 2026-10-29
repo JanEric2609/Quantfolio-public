@@ -308,3 +308,98 @@ def ingest_broker_tax_events(db: Session, user_id: str, *, source: str, lot_sour
                     continue
             withholding(row, tax, row.isin)
     return result
+
+
+def broker_depot(db: Session, user_id: str, source: str) -> Any:
+    """The broker's first depot account for *user_id*, or None before its first sync."""
+    from app.foundation.models.entities import ConnectedAccount
+
+    return (
+        db.query(ConnectedAccount)
+        .filter(ConnectedAccount.user_id == user_id, ConnectedAccount.source == source,
+                ConnectedAccount.account_type == "depot")
+        .order_by(ConnectedAccount.created_at)
+        .first()
+    )
+
+
+def reconciliation_preview(db: Session, user_id: str, source: str) -> list[dict[str, Any]]:
+    """Manual holdings that match a position synced from *source* (dry run, writes nothing).
+
+    Such a position is held back until the owner decides, so nothing counts twice.
+    """
+    from app.foundation.live_positions import broker_positions, manual_holdings_filter, reconcile_decisions
+    from app.foundation.models.entities import Holding, Portfolio
+    from app.foundation.portfolio_utils import holding_market_value
+
+    positions = {p.isin.upper(): p for p in broker_positions(db, user_id, source=source)}
+    if not positions:
+        return []
+    decisions = reconcile_decisions(broker_depot(db, user_id, source))
+    manual = (
+        db.query(Holding)
+        .join(Portfolio, Holding.portfolio_id == Portfolio.id)
+        .filter(Portfolio.user_id == user_id, manual_holdings_filter(), Holding.isin.is_not(None))
+        .all()
+    )
+    out: list[dict[str, Any]] = []
+    for h in manual:
+        pos = positions.get((h.isin or "").upper())
+        if pos is None:
+            continue
+        broker_value = str(pos.current_value) if pos.current_value is not None else None
+        out.append({
+            "holding_id": h.id,
+            "source": source,
+            "isin": pos.isin,
+            "name": pos.name,
+            "manual_quantity": str(h.quantity),
+            "manual_value": str(round(Decimal(str(holding_market_value(db, h))), 2)),
+            "broker_quantity": str(pos.quantity),
+            "broker_value": broker_value,
+            # The names the Scalable API has always answered with.
+            "scalable_quantity": str(pos.quantity),
+            "scalable_value": broker_value,
+            "decision": decisions.get(pos.isin.upper()),
+            "quantity_matches": Decimal(h.quantity) == Decimal(pos.quantity),
+        })
+    return out
+
+
+def apply_reconciliation(db: Session, user_id: str, source: str, decisions: dict[str, str]) -> dict[str, int]:
+    """Apply the owner's decision per manual holding id: ``replace`` or ``keep_both``."""
+    from app.foundation.models.entities import Holding
+
+    preview = {row["holding_id"]: row for row in reconciliation_preview(db, user_id, source)}
+    depot = broker_depot(db, user_id, source)
+    if depot is None:
+        return {"replaced": 0, "kept": 0}
+    try:
+        raw = json.loads(depot.raw_json or "{}")
+    except ValueError:
+        raw = {}
+    raw = raw if isinstance(raw, dict) else {}
+    previous = raw.get("reconcile")
+    stored: dict[str, str] = dict(previous) if isinstance(previous, dict) else {}
+    replaced = kept = 0
+    for holding_id, decision in decisions.items():
+        row = preview.get(holding_id)
+        if row is None or decision not in {"replace", "keep_both"}:
+            continue
+        stored[row["isin"]] = decision
+        if decision == "replace":
+            holding = db.get(Holding, holding_id)
+            if holding is not None:
+                db.delete(holding)
+                replaced += 1
+        else:
+            kept += 1
+    raw["reconcile"] = stored
+    depot.raw_json = json.dumps(raw, default=str)
+    db.commit()
+    from app.foundation.portfolio_service import invalidate_wealth_cache, sync_dkb_to_wealth_ledger
+
+    if replaced:
+        sync_dkb_to_wealth_ledger(db, user_id)
+    invalidate_wealth_cache(user_id)
+    return {"replaced": replaced, "kept": kept}

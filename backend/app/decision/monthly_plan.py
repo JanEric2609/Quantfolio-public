@@ -62,7 +62,7 @@ from app.foundation.models.entities import BrokerSyncLog, ConnectedAccount, DkbA
 from app.foundation.portfolio_utils import holding_market_value
 from app.foundation.settings import get_public_settings
 from app.decision.fund_tracking import stored_peer_td
-from app.decision.monthly_plan_funds import ACC_DIST_NOTE, suggest_all
+from app.decision.monthly_plan_funds import ACC_DIST_NOTE, CANDIDATES, suggest_all
 from app.decision.plan_rules import MIX_NOTE
 
 logger = logging.getLogger(__name__)
@@ -111,6 +111,7 @@ BROKER_CASH_ACCOUNTS = {"dkb": "DKB giro account", "scalable": "Scalable cash ac
 
 # Savings-plan frequencies as Scalable reports them, in executions per month.
 FREQUENCY_PER_MONTH = {
+    "DAILY": 252 / 12,  # Trading 212 runs a daily plan on trading days
     "WEEKLY": 52 / 12,
     "BIWEEKLY": 26 / 12,
     "EVERY_TWO_WEEKS": 26 / 12,
@@ -127,7 +128,7 @@ FREQUENCY_PER_MONTH = {
 # Fees live in foundation/broker_fees.py (SAVINGS_PLAN_FEE_EUR, order_fee_eur).
 SATELLITE_BROKER_LABELS = {"dkb": "DKB", "scalable": "Scalable Capital", "trading212": "Trading 212"}
 # Synced brokers that report savings plans.
-PLANS_SOURCES: tuple[str, ...] = ("scalable",)
+PLANS_SOURCES: tuple[str, ...] = ("scalable", "trading212")
 
 # A plan whose next execution lies further back than this is treated as not
 # running (sc sends no paused flag): listed, but left out of the totals.
@@ -511,8 +512,16 @@ def running_savings_plans(
                 "dynamization_rate": rate if rate else None,
                 "running": not_running is None,
                 "not_running_reason": not_running,
+                # Trading 212 has no savings-plan endpoint: read back from the orders the plan placed.
+                "inferred": bool(item.get("inferred")),
             })
     return out
+
+
+def trading212_fund_isins(db: Session) -> set[str]:
+    """The suggested funds Trading 212 lists, so a plan could run there; empty before its list is loaded."""
+    listings = Trading212Listings(db)
+    return {c.isin for c in CANDIDATES if listings.listed(c.isin)}
 
 
 def plans_freshness(db: Session, user_id: str) -> dict[str, Any]:
@@ -523,22 +532,25 @@ def plans_freshness(db: Session, user_id: str) -> dict[str, Any]:
     """
     stamps = [load_raw(a).get("plans_synced_at") for a in _broker_depots(db, user_id)]
     stamps = [s for s in stamps if isinstance(s, str) and s]
-    last = (
-        db.query(BrokerSyncLog)
-        .filter(
-            # Only a broker that syncs savings plans says whether the fetch failed.
-            BrokerSyncLog.user_id == user_id, BrokerSyncLog.source.in_(PLANS_SOURCES),
-            BrokerSyncLog.state.in_(("success", "warning")),
-        )
-        .order_by(BrokerSyncLog.started_at.desc())
-        .first()
-    )
+    # Each broker's own latest sync says whether its fetch failed: a newer sync
+    # at another broker must not hide it.
     failed = False
-    if last is not None:
+    for source in PLANS_SOURCES:
+        last = (
+            db.query(BrokerSyncLog)
+            .filter(
+                BrokerSyncLog.user_id == user_id, BrokerSyncLog.source == source,
+                BrokerSyncLog.state.in_(("success", "warning")),
+            )
+            .order_by(BrokerSyncLog.started_at.desc())
+            .first()
+        )
+        if last is None:
+            continue
         try:
-            failed = bool(json.loads(last.counts_json or "{}").get("plans_unavailable"))
+            failed = failed or bool(json.loads(last.counts_json or "{}").get("plans_unavailable"))
         except ValueError:
-            failed = False
+            pass
     return {"synced_at": min(stamps) if stamps else None, "last_fetch_failed": failed}
 
 
@@ -1118,7 +1130,12 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
                     "unlocked yet (target 0 %). The plan would put that money into the core."
                 )
         for p in plans:
-            if p["monthly_eur"] is None:
+            if p["monthly_eur"] is None and p["frequency"] == "UNKNOWN":
+                notes.append(
+                    f"The {p['name']} savings plan at {p['broker_label']} has run once so far; its schedule "
+                    "shows after the next run, until then it is left out of the totals."
+                )
+            elif p["monthly_eur"] is None:
                 notes.append(
                     f"The {p['name']} savings plan runs {p['frequency'].lower()}, a schedule the plan does not "
                     "know, so it is left out of the totals."
@@ -1228,7 +1245,7 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
         "notes": notes,
         "never_sells": not sales,
         "not_investment_advice": True,
-        "suggested_funds": suggest_all(cfg["tilt_isins"], stored_peer_td(db)),
+        "suggested_funds": suggest_all(cfg["tilt_isins"], stored_peer_td(db), trading212_fund_isins(db)),
         "acc_dist_note": ACC_DIST_NOTE,
         "mix_note": MIX_NOTE,
         "etf_suggestions": _etf_suggestions(db, holdings, book, cfg),

@@ -81,3 +81,12 @@ def test_tilt_override_flows_through_the_plan():
     tilt = next(s for s in plan["suggested_funds"] if s["sleeve"] == "tilt")
     assert tilt["isin"] == "IE00BF4RFH31" and tilt["overridden"] is True
     assert len(CANDIDATES) > 0
+
+
+def test_a_fund_trading212_lists_names_its_plan_there_too():
+    from app.decision.monthly_plan_funds import suggest_fund
+
+    plain = suggest_fund("core")
+    listed = suggest_fund("core", trading212_isins={plain.isin})
+    assert "DKB + Scalable savings plans" in plain.why and "Trading 212" not in plain.why
+    assert "DKB + Scalable + Trading 212 savings plans" in listed.why

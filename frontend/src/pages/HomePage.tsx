@@ -84,8 +84,11 @@ function StatusStrip() {
 
   const syncHours = Number(settings.data?.settings?.scalable_sync_hours) || DEFAULT_SCALABLE_SYNC_HOURS;
   // A sync button appears only when that broker is stale or its sync failed.
+  // A review of positions also entered by hand is no failed sync: syncing again would not settle it.
   const failed = (source: string) =>
-    (attention.data?.items ?? []).some((i) => i.severity !== "info" && i.id.toLowerCase().includes(source));
+    (attention.data?.items ?? []).some(
+      (i) => i.severity !== "info" && i.id.toLowerCase().includes(source) && !i.id.endsWith("-review"),
+    );
   const syncNeeded: Record<string, boolean> = {};
   for (const row of wealth.data?.by_broker ?? []) {
     if (row.source === "dkb") syncNeeded.dkb = isStale(row.last_synced, DKB_STALE_HOURS) || failed("dkb");

@@ -1215,9 +1215,10 @@ _LOTS_MATCH_TOLERANCE = Decimal("0.005")
 NV_EXPIRY_WARNING_DAYS = 60
 
 
-# Brokers with one flat fee per order (decision/monthly_plan.py keeps the same
-# price list): Scalable Capital FREE broker, 0.99 EUR on its European venue.
-_FLAT_ORDER_FEE_EUR = {"scalable": Decimal("0.99")}
+# Brokers with one flat fee per order (foundation/broker_fees.py keeps the same
+# price list): Scalable Capital FREE broker, 0.99 EUR on its European venue;
+# Trading 212 none, only its FX fee on a line in another currency (below).
+_FLAT_ORDER_FEE_EUR = {"scalable": Decimal("0.99"), "trading212": Decimal("0")}
 
 
 def _harvest_order_fee(notional: Decimal) -> Decimal:
@@ -1228,7 +1229,7 @@ def _harvest_order_fee(notional: Decimal) -> Decimal:
 
 
 def _depot_positions(db: Session, user_id: str) -> list[Any]:
-    """Every synced depot position (DKB and Scalable Capital), one entry per broker.
+    """Every synced depot position (DKB, Scalable Capital and Trading 212), one entry per broker.
 
     FIFO applies per depot, so an ISIN held at two brokers stays two entries,
     and ``_harvest_holdings`` gives each only the lots booked to its own depot.
@@ -1251,6 +1252,13 @@ def _harvest_holdings(
     skipped: list[dict[str, Any]] = []
     warnings: list[dict[str, str]] = []
     positions = _depot_positions(db, user_id)
+    from app.foundation.broker_fees import TRADING212_FX_FEE_RATE
+    from app.foundation.trading212_status import depot_account as t212_depot, load_raw as t212_raw
+
+    # The currency each Trading 212 line trades in: a sale converts it back, at its FX fee.
+    raw_currency = t212_raw(t212_depot(db, user_id)).get("instrument_currency")
+    t212_currency = {str(k).upper(): str(v).upper() for k, v in (raw_currency or {}).items()} \
+        if isinstance(raw_currency, dict) else {}
     depots_per_isin: dict[str, int] = {}
     for pos in positions:
         key = (pos.isin or "").upper()
@@ -1258,6 +1266,10 @@ def _harvest_holdings(
     for pos in positions:
         source = getattr(pos, "source", "dkb")
         order_fee = _FLAT_ORDER_FEE_EUR.get(source)
+        fee_rate = (
+            Decimal(str(TRADING212_FX_FEE_RATE))
+            if source == "trading212" and t212_currency.get((pos.isin or "").upper(), "EUR") != "EUR" else None
+        )
         if source != "dkb":
             # Say where to sell: the harvest is a sale at that broker.
             pos = replace(pos, name=f"{pos.name} · {pos.broker_label}")
@@ -1288,6 +1300,7 @@ def _harvest_holdings(
                     for lot in lots
                 ),
                 order_fee_eur=order_fee,
+                order_fee_rate=fee_rate,
                 bank=source,
             ))
             continue
@@ -1307,6 +1320,7 @@ def _harvest_holdings(
             lots=(OpenLot(date.min, qty, qty * Decimal(pos.avg_buy_price)),),
             average_cost_only=True,
             order_fee_eur=order_fee,
+            order_fee_rate=fee_rate,
             bank=source,
         ))
     return holdings, skipped, warnings
