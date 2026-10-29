@@ -809,73 +809,13 @@ def savings_plans(db: Session, user_id: str) -> list[dict[str, Any]]:
 
 def reconciliation_preview(db: Session, user_id: str) -> list[dict[str, Any]]:
     """Manual holdings that match a synced Scalable position (dry-run, writes nothing)."""
-    from app.foundation.live_positions import manual_holdings_filter, reconcile_decisions
-    from app.foundation.models.entities import Holding, Portfolio
-    from app.foundation.portfolio_utils import holding_market_value
+    from app.foundation.broker_sync import reconciliation_preview as preview
 
-    positions = {
-        p.isin.upper(): p for p in db.query(BrokerPosition).filter(
-            BrokerPosition.user_id == user_id, BrokerPosition.source == SOURCE
-        ).all()
-    }
-    if not positions:
-        return []
-    decisions = reconcile_decisions(depot_account(db, user_id))
-    manual = (
-        db.query(Holding)
-        .join(Portfolio, Holding.portfolio_id == Portfolio.id)
-        .filter(Portfolio.user_id == user_id, manual_holdings_filter(), Holding.isin.is_not(None))
-        .all()
-    )
-    out: list[dict[str, Any]] = []
-    for h in manual:
-        pos = positions.get((h.isin or "").upper())
-        if pos is None:
-            continue
-        out.append({
-            "holding_id": h.id,
-            "isin": pos.isin,
-            "name": pos.name,
-            "manual_quantity": str(h.quantity),
-            "manual_value": str(round(Decimal(str(holding_market_value(db, h))), 2)),
-            "scalable_quantity": str(pos.quantity),
-            "scalable_value": str(pos.current_value) if pos.current_value is not None else None,
-            "decision": decisions.get(pos.isin.upper()),
-            "quantity_matches": Decimal(h.quantity) == Decimal(pos.quantity),
-        })
-    return out
+    return preview(db, user_id, SOURCE)
 
 
 def apply_reconciliation(db: Session, user_id: str, decisions: dict[str, str]) -> dict[str, int]:
     """Apply the owner's decision per manual holding id: ``replace`` or ``keep_both``."""
-    preview = {row["holding_id"]: row for row in reconciliation_preview(db, user_id)}
-    depot = depot_account(db, user_id)
-    if depot is None:
-        return {"replaced": 0, "kept": 0}
-    raw = _load_raw(depot)
-    previous = raw.get("reconcile")
-    stored: dict[str, str] = dict(previous) if isinstance(previous, dict) else {}
-    replaced = kept = 0
-    from app.foundation.models.entities import Holding
+    from app.foundation.broker_sync import apply_reconciliation as apply
 
-    for holding_id, decision in decisions.items():
-        row = preview.get(holding_id)
-        if row is None or decision not in {"replace", "keep_both"}:
-            continue
-        stored[row["isin"]] = decision
-        if decision == "replace":
-            holding = db.get(Holding, holding_id)
-            if holding is not None:
-                db.delete(holding)
-                replaced += 1
-        else:
-            kept += 1
-    raw["reconcile"] = stored
-    depot.raw_json = json.dumps(raw, default=str)
-    db.commit()
-    from app.foundation.portfolio_service import invalidate_wealth_cache, sync_dkb_to_wealth_ledger
-
-    if replaced:
-        sync_dkb_to_wealth_ledger(db, user_id)
-    invalidate_wealth_cache(user_id)
-    return {"replaced": replaced, "kept": kept}
+    return apply(db, user_id, SOURCE, decisions)

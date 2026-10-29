@@ -10933,6 +10933,11 @@
             "title": "Frequency",
             "type": "string"
           },
+          "inferred": {
+            "default": false,
+            "title": "Inferred",
+            "type": "boolean"
+          },
           "isin": {
             "anyOf": [
               {
@@ -11606,6 +11611,28 @@
       },
       "ScalableReconcileRowOut": {
         "properties": {
+          "broker_quantity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broker Quantity"
+          },
+          "broker_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broker Value"
+          },
           "decision": {
             "anyOf": [
               {
@@ -11655,6 +11682,17 @@
               }
             ],
             "title": "Scalable Value"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
           }
         },
         "required": [
@@ -16630,6 +16668,114 @@
         "title": "Trading212ProbeStepOut",
         "type": "object"
       },
+      "Trading212ReconcileIn": {
+        "properties": {
+          "decisions": {
+            "additionalProperties": {
+              "enum": [
+                "replace",
+                "keep_both"
+              ],
+              "type": "string"
+            },
+            "title": "Decisions",
+            "type": "object"
+          }
+        },
+        "required": [
+          "decisions"
+        ],
+        "title": "Trading212ReconcileIn",
+        "type": "object"
+      },
+      "Trading212ReconcileResultOut": {
+        "properties": {
+          "kept": {
+            "title": "Kept",
+            "type": "integer"
+          },
+          "replaced": {
+            "title": "Replaced",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "replaced",
+          "kept"
+        ],
+        "title": "Trading212ReconcileResultOut",
+        "type": "object"
+      },
+      "Trading212ReconcileRowOut": {
+        "properties": {
+          "broker_quantity": {
+            "title": "Broker Quantity",
+            "type": "string"
+          },
+          "broker_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broker Value"
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision"
+          },
+          "holding_id": {
+            "title": "Holding Id",
+            "type": "string"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "manual_quantity": {
+            "title": "Manual Quantity",
+            "type": "string"
+          },
+          "manual_value": {
+            "title": "Manual Value",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "quantity_matches": {
+            "title": "Quantity Matches",
+            "type": "boolean"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "holding_id",
+          "source",
+          "isin",
+          "name",
+          "manual_quantity",
+          "manual_value",
+          "broker_quantity",
+          "quantity_matches"
+        ],
+        "title": "Trading212ReconcileRowOut",
+        "type": "object"
+      },
       "Trading212ResetOut": {
         "properties": {
           "removed": {
@@ -16644,6 +16790,93 @@
           "removed"
         ],
         "title": "Trading212ResetOut",
+        "type": "object"
+      },
+      "Trading212SavingsPlanOut": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "frequency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frequency"
+          },
+          "inferred": {
+            "default": true,
+            "title": "Inferred",
+            "type": "boolean"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "last_execution_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Execution Date"
+          },
+          "name": {
+            "default": "",
+            "title": "Name",
+            "type": "string"
+          },
+          "next_execution_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Execution Date"
+          },
+          "pie": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pie"
+          },
+          "runs": {
+            "default": 0,
+            "title": "Runs",
+            "type": "integer"
+          }
+        },
+        "title": "Trading212SavingsPlanOut",
         "type": "object"
       },
       "Trading212StatusOut": {
@@ -33355,6 +33588,98 @@
           }
         },
         "summary": "Get Positions",
+        "tags": [
+          "trading212"
+        ]
+      }
+    },
+    "/api/trading212/reconcile": {
+      "get": {
+        "description": "Dry run: hand-entered holdings that match a synced Trading 212 position. Writes nothing.",
+        "operationId": "get_reconcile_api_trading212_reconcile_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Trading212ReconcileRowOut"
+                  },
+                  "title": "Response Get Reconcile Api Trading212 Reconcile Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Reconcile",
+        "tags": [
+          "trading212"
+        ]
+      },
+      "post": {
+        "description": "Apply the owner's confirmed decisions (``replace`` deletes the manual row).",
+        "operationId": "post_reconcile_api_trading212_reconcile_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Trading212ReconcileIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trading212ReconcileResultOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Reconcile",
+        "tags": [
+          "trading212"
+        ]
+      }
+    },
+    "/api/trading212/savings-plans": {
+      "get": {
+        "description": "Recurring investments read back from the orders they placed (the API has no plan endpoint).",
+        "operationId": "get_savings_plans_api_trading212_savings_plans_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Trading212SavingsPlanOut"
+                  },
+                  "title": "Response Get Savings Plans Api Trading212 Savings Plans Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Savings Plans",
         "tags": [
           "trading212"
         ]

@@ -143,6 +143,7 @@ def status(db: Session, user_id: str) -> dict[str, Any]:
         "portfolio_id": raw.get("portfolio_id") or settings.get("scalable_portfolio_id") or None,
         "tracking_since": raw.get("tracking_since"),
         "positions": positions,
-        "pending_reconciliation": len(pending_reconciliation(db, user_id)),
+        # Only Scalable's own: each broker's review lists its own positions.
+        "pending_reconciliation": len([p for p in pending_reconciliation(db, user_id) if p.source == "scalable"]),
         "read_only": True,
     }

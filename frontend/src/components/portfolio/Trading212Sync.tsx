@@ -14,6 +14,7 @@ import {
   type Trading212Status,
 } from "../../lib/api";
 import { formatCurrency, formatDateTime } from "../../lib/format";
+import { BrokerReview } from "./BrokerReview";
 
 const STATE_BADGE: Record<Trading212State, { variant: "success" | "warning" | "danger" | "secondary"; label: string }> = {
   ready: { variant: "success", label: "synced" },
@@ -110,7 +111,26 @@ export function Trading212Pies() {
     queryFn: getTrading212Pies,
     enabled: Boolean(status.data?.enabled && status.data.pies),
   });
-  if (!pies.data?.length) return null;
+  if (!pies.data?.length) {
+    // No pie stored because the read failed: say so instead of showing nothing.
+    if (!status.data?.enabled || !status.data.pies_unavailable) return null;
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Trading 212 pies</CardTitle>
+          <CardDescription>
+            Trading 212 did not answer the pie read, so no pies are shown. Positions in pies still count. If your API
+            key was created without the Pies permission, create a new one with it (Orders still off).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild variant="outline" size="sm">
+            <Link to="/settings/bank?connection=trading212">Open Trading 212 settings</Link>
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
   return (
     <Card>
       <CardHeader>
@@ -181,4 +201,10 @@ export function Trading212Pies() {
       </CardContent>
     </Card>
   );
+}
+
+/** Trading 212 positions also entered by hand (the shared review, anchored at #trading212-review). */
+export function Trading212Review() {
+  const status = useTrading212Status();
+  return <BrokerReview source="trading212" enabled={Boolean(status.data?.positions)} />;
 }
