@@ -116,6 +116,34 @@ into `broker_pies`, replacing the last read. If the pie read fails, the last goo
 its date, the sync log says `pies unavailable`, and the sync still succeeds. The Control Center
 shows an item once the pies have been unreadable for more than 7 days. The Accounts page shows each
 pie's value, result, cash, dividend setting and goal, and target vs actual share per holding.
+When no pie is stored because the read failed, the Accounts page says so (usually a key without
+the Pies permission) instead of showing nothing.
+
+## Savings plans (read back from orders)
+
+The API has no endpoint for recurring investments or a pie's auto-invest schedule. Every order
+says what placed it, though: `initiatedFrom` is `AUTOINVEST` for a pie's scheduled buy and
+`INSTRUMENT_AUTOINVEST` for a one-instrument recurring investment. After each sync,
+`sync_savings_plans` reads the scheduled buys of the last 400 days from the ledger, one plan per
+ISIN:
+
+- **amount**: the latest run (in EUR, as booked);
+- **frequency**: the median gap between runs (daily, weekly, every two weeks, monthly), or
+  `UNKNOWN` after a single run, so the plan is listed but not counted until it has run twice;
+- **next run**: the last run plus that gap; a plan that misses it by more than 3 days shows as
+  overdue, and one with no run for 120 days is dropped;
+- **pie**: the pie that holds the ISIN, for a pie's buys.
+
+They are stored in the depot's `raw_json.savings_plans`, like Scalable's, so the monthly plan,
+This month and the Accounts page read every broker's plans the same way, marked "read from its
+orders". `GET /api/trading212/savings-plans` returns them.
+
+## Positions also entered by hand
+
+A synced position whose ISIN matches a hand-entered holding is held back until the owner decides,
+as at Scalable (`broker_sync.reconciliation_preview` / `apply_reconciliation`, shared by both):
+`GET/POST /api/trading212/reconcile`, the review card on Portfolio › Accounts
+(`#trading212-review`) and the `trading212-review` Control Center item.
 
 ## Control Center items
 
@@ -124,4 +152,5 @@ pie's value, result, cash, dividend setting and goal, and target vs actual share
 - `trading212-scope`: the key lacks a permission, or the IP is not allowed (403).
 - `trading212-failed`: the last sync failed.
 - `trading212-stale`: no successful sync for two sync intervals.
+- `trading212-review`: synced positions match hand-entered holdings and wait for a decision.
 - `trading212-pies`: the pies have been unreadable for more than 7 days.

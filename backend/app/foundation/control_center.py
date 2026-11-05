@@ -430,6 +430,14 @@ def _trading212_items(db: Session, settings: dict[str, Any], items: list[Attenti
             "Positions and cash at Trading 212 are only as current as the last sync.",
             "/portfolio/accounts", "Sync now",
         ))
+    if state["pending_reconciliation"]:
+        n = state["pending_reconciliation"]
+        items.append(AttentionItem(
+            "trading212-review", "warning",
+            f"{n} Trading 212 position{'s' if n > 1 else ''} match{'' if n > 1 else 'es'} a hand-entered holding",
+            "They aren't counted until you choose: replace the manual row, or keep both.",
+            "/portfolio/accounts#trading212-review", "Review",
+        ))
     if state["pies_stale"]:
         items.append(AttentionItem(
             "trading212-pies", "info", "Trading 212 pies unreadable for over a week",

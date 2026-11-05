@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import (
     ActivityLedgerEntry,
+    ApiKey,
     Asset,
     ConnectedAccount,
     DkbAccount,
@@ -687,6 +688,18 @@ def sync_dkb_to_wealth_ledger(db: Session, user_id: str) -> dict[str, int]:
     return {"accounts": len(accounts), "ledger_created": ledger_created}
 
 
+def connected_brokers(db: Session) -> list[str]:
+    """Brokers set up on this installation: a sync switched on or a credential stored."""
+    from app.foundation.settings import get_public_settings
+
+    settings = get_public_settings(db)
+    stored = {service for (service,) in db.query(ApiKey.service).filter(ApiKey.service.in_(("dkb", "trading212")))}
+    return [
+        source for source in BROKER_LABELS
+        if source in stored or settings.get(f"{source}_enabled")
+    ]
+
+
 def invalidate_wealth_cache(user_id: str) -> None:
     """Drop *user_id*'s cached wealth summary (this process only) after a sync wrote new data."""
     _wealth_cache.pop(user_id, None)
@@ -792,6 +805,10 @@ def wealth_summary(db: Session, user_id: str) -> dict:
     for position in positions:
         source = position["source"] if position["source"] in BROKER_LABELS else "manual"
         _row(source)["securities"] += Decimal(str(position["current_value"]))
+    # A connected broker gets its row before its first sync too, so Home lists
+    # it (with its Sync button) rather than only the brokers that hold something.
+    for source in connected_brokers(db):
+        _row(source)
     for account in accounts:
         row = _row(account.source if account.source in BROKER_LABELS else "manual")
         if account.account_type != "depot":

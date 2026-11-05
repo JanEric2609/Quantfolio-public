@@ -15,7 +15,7 @@ vi.mock("../../lib/api", () => ({
     error_code: "no_session", last_sync_at: null, last_success_at: null, stale: false,
     portfolio_id: "pf-1", tracking_since: "2026-09-30", positions: 2, pending_reconciliation: 1, read_only: true,
   }),
-  previewScalableReconcile: async () => [
+  previewBrokerReconcile: async () => [
     {
       holding_id: "h1", isin: "IE00B4L5Y983", name: "iShares Core MSCI World", manual_quantity: "10",
       manual_value: "1000", scalable_quantity: "10", scalable_value: "1000", decision: null, quantity_matches: true,
@@ -25,7 +25,7 @@ vi.mock("../../lib/api", () => ({
       manual_value: "300", scalable_quantity: "5", scalable_value: "500", decision: "keep_both", quantity_matches: false,
     },
   ],
-  applyScalableReconcile: (decisions: Record<string, string>) => apply(decisions),
+  applyBrokerReconcile: (_source: string, decisions: Record<string, string>) => apply(decisions),
   syncScalable: vi.fn(),
   getScalableSavingsPlans: async () => [],
 }));

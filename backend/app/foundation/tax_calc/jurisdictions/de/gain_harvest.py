@@ -109,7 +109,10 @@ class Holding:
     # A flat fee per order at this holding's broker; None uses the planner's
     # ``order_fee`` schedule.
     order_fee_eur: Decimal | None = None
-    # The bank holding it ("dkb", "scalable"): each applies its own
+    # A fee as a share of the order on top (Trading 212's FX fee on a line in
+    # another currency); None charges none.
+    order_fee_rate: Decimal | None = None
+    # The bank holding it ("dkb", "scalable", "trading212"): each applies its own
     # Freistellungsauftrag or NV certificate, so the room can differ per bank.
     bank: str | None = None
 
@@ -190,6 +193,8 @@ def plan_gain_harvest(
             continue
         notional = qty * holding.price_eur
         fee = holding.order_fee_eur if holding.order_fee_eur is not None else order_fee(notional)
+        if holding.order_fee_rate:
+            fee += notional * holding.order_fee_rate
         cost = 2 * fee + 2 * notional * spread_bps / Decimal("10000")
         step = HarvestStep(
             isin=holding.isin, name=holding.name,

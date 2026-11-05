@@ -28,6 +28,9 @@ vi.mock("../../lib/api", () => ({
   syncScalable: vi.fn(),
   getTrading212Status: async () => ({ enabled: false, state: "disabled" }),
   getTrading212Pies: async () => [],
+  getTrading212SavingsPlans: async () => [],
+  previewBrokerReconcile: async () => [],
+  applyBrokerReconcile: vi.fn(),
   syncTrading212: vi.fn(),
   resetTrading212Data: vi.fn(),
 }));

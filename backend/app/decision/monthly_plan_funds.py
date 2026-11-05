@@ -14,7 +14,7 @@ deliberate code change a reviewer can see.
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Mapping
 
 
@@ -33,6 +33,8 @@ class FundCandidate:
     note: str = ""
     #: The Xetra (or, failing that, EUR) listing whose closes measure tracking difference; "" when none.
     ticker: str = ""
+    #: Trading 212 runs a plan (a pie) on anything it lists; set from its instrument list, not curated.
+    trading212_savings_plan: bool = False
 
 
 # Curated; TER, size and replication checked against justETF on 2026-10-12.
@@ -167,16 +169,16 @@ def score_fund(c: FundCandidate, peer_td: Mapping[str, float] | None = None) -> 
     size = _clamp01(math.log10(c.size_eur_bn + 1.0) / math.log10(11.0))
     replication = _REPLICATION_SCORE.get(c.replication, 0.0)
     volume = _clamp01(math.log10(c.xetra_volume_eur_m + 1.0) / math.log10(101.0))
-    plan = 1.0 if (c.dkb_savings_plan or c.scalable_savings_plan) else 0.0
+    plan = 1.0 if (c.dkb_savings_plan or c.scalable_savings_plan or c.trading212_savings_plan) else 0.0
     domicile = 0.0 if us_withholding_drag(c) else 1.0
     return (W_TER * ter + W_TD * td + W_SIZE * size + W_REPLICATION * replication + W_VOLUME * volume
             + W_PLAN * plan + W_DOMICILE * domicile)
 
 
 def _why(c: FundCandidate, score: float, override: bool = False, td_pct: float | None = None) -> str:
-    plans = "DKB + Scalable savings plans" if (c.dkb_savings_plan and c.scalable_savings_plan) \
-        else "DKB savings plan" if c.dkb_savings_plan \
-        else "Scalable savings plan" if c.scalable_savings_plan else "no savings plan"
+    at = [name for name, ok in (("DKB", c.dkb_savings_plan), ("Scalable", c.scalable_savings_plan),
+                                ("Trading 212", c.trading212_savings_plan)) if ok]
+    plans = (f"{' + '.join(at)} savings plan{'s' if len(at) > 1 else ''}" if at else "no savings plan")
     cost = f"running cost about {c.ter_pct:.2f} %" if c.sleeve == "gold" else f"TER {c.ter_pct:.2f} %"
     size = f"€{c.size_eur_bn:g}bn" if c.size_eur_bn > 0 else "size n/a"
     line = f"{c.name} ({c.isin}): {cost}, {size}, {c.replication} replication, {plans}."
@@ -210,7 +212,12 @@ ACC_DIST_NOTE = (
 )
 
 
-def _rank(sleeve: str, peer_td: Mapping[str, float] | None) -> list[FundCandidate]:
+def _with_trading212(c: FundCandidate, trading212_isins: set[str] | None) -> FundCandidate:
+    return replace(c, trading212_savings_plan=True) if trading212_isins and c.isin in trading212_isins else c
+
+
+def _rank(sleeve: str, peer_td: Mapping[str, float] | None,
+          trading212_isins: set[str] | None = None) -> list[FundCandidate]:
     """The sleeve's candidates, best first.
 
     Tracking difference is measured against funds of the same index, so it
@@ -218,7 +225,7 @@ def _rank(sleeve: str, peer_td: Mapping[str, float] | None) -> list[FundCandidat
     without it (core mixes MSCI World and FTSE All-World, a tilt sleeve several
     factor indexes); within an index, tracking difference then picks the fund.
     """
-    pool = [c for c in CANDIDATES if c.sleeve == sleeve]
+    pool = [_with_trading212(c, trading212_isins) for c in CANDIDATES if c.sleeve == sleeve]
     by_index: dict[str, list[FundCandidate]] = {}
     for c in pool:
         by_index.setdefault(c.index, []).append(c)
@@ -228,14 +235,15 @@ def _rank(sleeve: str, peer_td: Mapping[str, float] | None) -> list[FundCandidat
 
 
 def suggest_fund(sleeve: str, override_isins: set[str] | None = None,
-                 peer_td: Mapping[str, float] | None = None) -> FundSuggestion:
+                 peer_td: Mapping[str, float] | None = None,
+                 trading212_isins: set[str] | None = None) -> FundSuggestion:
     """The suggested fund for *sleeve* with its one-line reason; *peer_td* as in :func:`score_fund`."""
     if sleeve == "satellite":
         return FundSuggestion(
             sleeve="satellite", isin=None, name="Single stocks",
             why="No fund: the satellite holds single stocks, unlocked only by the evidence gate.",
         )
-    ranked = _rank(sleeve, peer_td)
+    ranked = _rank(sleeve, peer_td, trading212_isins)
     td = peer_td or {}
     ordered = sorted((override_isins or set()))
     if ordered:
@@ -243,6 +251,7 @@ def suggest_fund(sleeve: str, override_isins: set[str] | None = None,
         first = ordered[0]
         known = next((c for c in CANDIDATES if c.isin == first and c.sleeve == sleeve), None)
         if known is not None:
+            known = _with_trading212(known, trading212_isins)
             return FundSuggestion(sleeve, known.isin, known.name,
                                   _why(known, score_fund(known, peer_td), override=True,
                                        td_pct=td.get(known.isin)) + shared,
@@ -261,7 +270,11 @@ def suggest_fund(sleeve: str, override_isins: set[str] | None = None,
                           _why(best, score_fund(best, peer_td), td_pct=td.get(best.isin)))
 
 
-def suggest_all(tilt_isins: set[str] | None = None, peer_td: Mapping[str, float] | None = None) -> list[dict]:
-    """Suggestions for every sleeve, as plain dicts for the plan response."""
-    return [asdict(suggest_fund(s, tilt_isins if s == "tilt" else None, peer_td))
+def suggest_all(tilt_isins: set[str] | None = None, peer_td: Mapping[str, float] | None = None,
+                trading212_isins: set[str] | None = None) -> list[dict]:
+    """Suggestions for every sleeve, as plain dicts for the plan response.
+
+    *trading212_isins*: the candidates Trading 212 lists (a plan runs there as a pie).
+    """
+    return [asdict(suggest_fund(s, tilt_isins if s == "tilt" else None, peer_td, trading212_isins))
             for s in ("core", "tilt", "satellite")]

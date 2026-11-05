@@ -6,7 +6,7 @@ sends allow-listed GET requests (see ``foundation/trading212/client.py``).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.foundation.auth import current_user
 from app.foundation.core.db import get_db
+from app.foundation.broker_sync import apply_reconciliation, reconciliation_preview
 from app.foundation.live_positions import broker_positions
 from app.foundation.models.entities import User
 from app.foundation.trading212 import service as t212
@@ -201,3 +202,57 @@ def get_pies(db: Session = Depends(get_db), user: User = Depends(current_user)) 
             "cash", "invested", "value", "result", "result_pct", "dividends_gained", "dividends_reinvested",
             "dividends_in_cash", "goal"} else v) for k, v in pie.items()})
     return out
+
+
+class Trading212ReconcileRowOut(BaseModel):
+    holding_id: str
+    source: str
+    isin: str
+    name: str
+    manual_quantity: str
+    manual_value: str
+    broker_quantity: str
+    broker_value: str | None = None
+    decision: str | None = None
+    quantity_matches: bool
+
+
+class Trading212ReconcileIn(BaseModel):
+    # manual holding id -> decision
+    decisions: dict[str, Literal["replace", "keep_both"]]
+
+
+class Trading212ReconcileResultOut(BaseModel):
+    replaced: int
+    kept: int
+
+
+@router.get("/reconcile", response_model=list[Trading212ReconcileRowOut])
+def get_reconcile(db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[dict[str, Any]]:
+    """Dry run: hand-entered holdings that match a synced Trading 212 position. Writes nothing."""
+    return reconciliation_preview(db, user.id, "trading212")
+
+
+@router.post("/reconcile", response_model=Trading212ReconcileResultOut)
+def post_reconcile(payload: Trading212ReconcileIn, db: Session = Depends(get_db),
+                   user: User = Depends(current_user)) -> dict[str, int]:
+    """Apply the owner's confirmed decisions (``replace`` deletes the manual row)."""
+    return apply_reconciliation(db, user.id, "trading212", dict(payload.decisions))
+
+
+class Trading212SavingsPlanOut(BaseModel):
+    isin: str | None = None
+    name: str = ""
+    amount: str | None = None
+    frequency: str | None = None
+    next_execution_date: str | None = None
+    last_execution_date: str | None = None
+    runs: int = 0
+    pie: str | None = None
+    inferred: bool = True
+
+
+@router.get("/savings-plans", response_model=list[Trading212SavingsPlanOut])
+def get_savings_plans(db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[dict[str, Any]]:
+    """Recurring investments read back from the orders they placed (the API has no plan endpoint)."""
+    return t212.savings_plans(db, user.id)

@@ -548,7 +548,7 @@ def test_saving_the_trading212_key_switches_the_sync_on_unless_the_save_sets_the
         app.dependency_overrides.clear()
 
 
-def test_savings_plan_freshness_reads_only_the_scalable_log(fake):
+def test_savings_plan_freshness_reads_each_brokers_own_log(fake):
     from app.decision.monthly_plan import plans_freshness
     from app.foundation.models.entities import BrokerSyncLog
 
@@ -585,3 +585,122 @@ def test_removing_the_synced_data_lets_another_account_sync(fake):
     log = t212.sync(db, user.id)
     assert log["state"] == "success"
     assert trading212_status.depot_account(db, user.id).external_id == "999"
+
+
+# --- savings plans, read back from the orders they placed -------------------
+
+
+def _ago(days: int) -> str:
+    return (datetime.now(UTC) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _scheduled(fill_id: int, isin: str, ticker: str, net: str, days_ago: int, origin: str) -> dict:
+    item = _order(fill_id, isin, ticker, "BUY", "1", net, net, when=_ago(days_ago))
+    item["order"]["initiatedFrom"] = origin
+    return item
+
+
+def test_savings_plans_are_read_back_from_the_orders_their_schedule_placed(fake):
+    from app.decision.monthly_plan import plan_settings, running_savings_plans
+
+    fake.data["/equity/history/orders"] = [[
+        # The pie "Dividends" auto-invests VHYL monthly; the last run was 50 €.
+        _scheduled(10, VHYL, "VHYLl_EQ", "40", 65, "AUTOINVEST"),
+        _scheduled(11, VHYL, "VHYLl_EQ", "40", 35, "AUTOINVEST"),
+        _scheduled(12, VHYL, "VHYLl_EQ", "50", 5, "AUTOINVEST"),
+        # A one-instrument plan that has run once: listed, schedule not known yet.
+        _scheduled(13, CMG, "CMG_US_EQ", "25", 3, "INSTRUMENT_AUTOINVEST"),
+        # A plan that stopped long ago is gone, and a buy placed by hand is no plan.
+        _scheduled(14, "IE00B4L5Y983", "EUNLd_EQ", "30", 300, "INSTRUMENT_AUTOINVEST"),
+        _scheduled(15, "IE00B4L5Y983", "EUNLd_EQ", "30", 270, "INSTRUMENT_AUTOINVEST"),
+        _order(16, CMG, "CMG_US_EQ", "BUY", "1", "60", "60", when=_ago(20)),
+    ]]
+    db = _memory_db()
+    user = _setup(db)
+    t212.sync(db, user.id)
+
+    plans = {p["isin"]: p for p in t212.savings_plans(db, user.id)}
+    assert set(plans) == {VHYL, CMG}
+    vhyl = plans[VHYL]
+    assert vhyl["frequency"] == "MONTHLY" and vhyl["amount"] == "50.00" and vhyl["runs"] == 3
+    assert vhyl["pie"] == "Dividends" and "(pie Dividends)" in vhyl["name"]
+    assert vhyl["next_execution_date"] == (datetime.now(UTC).date() - timedelta(days=5) + timedelta(days=30)).isoformat()
+    assert plans[CMG]["frequency"] == "UNKNOWN" and plans[CMG]["next_execution_date"] is None
+
+    # The monthly plan reads them like Scalable's: VHYL counts 50 € a month, CMG is listed but not counted.
+    running = {p["isin"]: p for p in running_savings_plans(db, user.id, plan_settings(db))}
+    assert running[VHYL]["broker"] == "trading212" and running[VHYL]["monthly_eur"] == 50.0
+    assert running[VHYL]["inferred"] is True and running[VHYL]["running"] is True
+    assert running[CMG]["monthly_eur"] is None
+
+
+def test_a_daily_plan_is_read_from_its_recent_gaps_and_an_odd_schedule_is_not_called_new(fake):
+    from app.decision.monthly_plan import build_monthly_plan, plan_settings, running_savings_plans
+
+    eunl = "IE00B4L5Y983"
+    fake.data["/equity/history/orders"] = [[
+        # Daily now, after a stretch of four-day gaps and a pause: the six largest gaps would read 4 days.
+        *[_scheduled(20 + i, VHYL, "VHYLl_EQ", "5", d, "INSTRUMENT_AUTOINVEST")
+          for i, d in enumerate([30, 26, 22, 18, 5, 4, 3, 2, 1])],
+        # Three runs 20 days apart: no Trading 212 schedule, and not a plan that ran once.
+        *[_scheduled(40 + i, eunl, "EUNLd_EQ", "30", d, "INSTRUMENT_AUTOINVEST") for i, d in enumerate([45, 25, 5])],
+    ]]
+    db = _memory_db()
+    user = _setup(db)
+    t212.sync(db, user.id)
+
+    plans = {p["isin"]: p for p in t212.savings_plans(db, user.id)}
+    assert plans[VHYL]["frequency"] == "DAILY"
+    assert plans[eunl]["frequency"] == "UNKNOWN" and plans[eunl]["runs"] == 3
+    running = {p["isin"]: p for p in running_savings_plans(db, user.id, plan_settings(db))}
+    assert running[VHYL]["monthly_eur"] is not None
+    assert running[eunl]["runs"] == 3
+    notes = " ".join(build_monthly_plan(db, user.id)["notes"])
+    assert "has run 3 times, but not on a schedule" in notes and "has run once so far" not in notes
+
+
+def test_a_hand_entered_holding_matching_a_trading212_position_can_be_reconciled(fake):
+    from fastapi.testclient import TestClient
+
+    from app.foundation.auth import current_user
+    from app.foundation.core.db import get_db
+    from app.foundation.models.entities import Holding
+    from app.foundation.portfolio_service import main_portfolio
+    from app.main import app
+
+    db = _memory_db()
+    user = _setup(db)
+    manual = Holding(portfolio_id=main_portfolio(db, user.id).id, isin=CMG, name="Chipotle", asset_type="stock",
+                     quantity=Decimal("10"), avg_buy_price=Decimal("50"), source="manual")
+    db.add(manual)
+    db.commit()
+    t212.sync(db, user.id)
+    assert trading212_status.status(db, user.id)["pending_reconciliation"] == 1
+    from app.foundation import broker_status
+    from app.foundation.control_center import attention_items
+
+    # Counted at Trading 212, where the review lists it, and not at Scalable.
+    assert broker_status.status(db, user.id)["pending_reconciliation"] == 0
+    review = [i for i in attention_items(db) if i["id"] == "trading212-review"]
+    assert review and review[0]["href"].endswith("#trading212-review")
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[current_user] = lambda: user
+    try:
+        client = TestClient(app)
+        preview = client.get("/api/trading212/reconcile").json()
+        assert [(r["isin"], r["source"], r["quantity_matches"]) for r in preview] == [(CMG, "trading212", True)]
+        done = client.post("/api/trading212/reconcile", json={"decisions": {manual.id: "replace"}}).json()
+    finally:
+        app.dependency_overrides.clear()
+    assert done == {"replaced": 1, "kept": 0}
+    assert trading212_status.status(db, user.id)["pending_reconciliation"] == 0
+
+
+def test_a_connected_broker_has_its_home_row_before_its_first_sync():
+    from app.foundation.portfolio_service import wealth_summary
+
+    db = _memory_db()
+    user = _setup(db)  # key saved and switched on, nothing synced yet
+    rows = {r["source"]: r for r in wealth_summary(db, user.id)["by_broker"]}
+    assert rows["trading212"]["total"] == 0 and rows["trading212"]["last_synced"] is None
+    assert "scalable" not in rows  # never set up
