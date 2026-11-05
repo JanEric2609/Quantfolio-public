@@ -11,10 +11,11 @@ import { RegimeChip } from "../components/regime/RegimeChip";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Progress } from "../components/ui/progress";
 import { Skeleton } from "../components/ui/skeleton";
 import { useNotifications, usePendingRecommendations } from "../hooks/useDecideItems";
 import { api, getMonthlyPlan, getSettings, type WealthSummary } from "../lib/api";
-import { formatCurrency } from "../lib/format";
+import { formatCurrency, formatMonth } from "../lib/format";
 import { timeAgo } from "../lib/relativeTime";
 import { useAttention } from "./settings/lib/schema";
 
@@ -186,30 +187,55 @@ function DecideTeaser() {
   );
 }
 
+const wholeEur = (value: number) => `${Math.round(value).toLocaleString("de-DE")} €`;
+
 function ThisMonthCard() {
   const plan = useQuery({ queryKey: ["plan", "month"], queryFn: getMonthlyPlan });
   const data = plan.data;
+  const needed = data?.savings_plans?.core_needed_eur ?? 0;
+  const running = data?.savings_plans?.by_sleeve?.core ?? 0;
+  const showCoverage = needed > 0 && running > 0 && running < needed - 0.5;
 
   return (
     <Card className={data?.no_change ? "border-success/40" : undefined}>
-      <CardHeader className="space-y-2 pb-3">
-        <CardTitle className="flex items-center gap-2 text-[1rem]"><CalendarCheck className="h-4 w-4" aria-hidden="true" /> This month</CardTitle>
-        {data && (
+      <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 pb-3">
+        <CardTitle className="flex items-center gap-2 text-[1rem]">
+          <CalendarCheck className="h-4 w-4" aria-hidden="true" /> This month
+          {data?.month && <span className="text-sm font-normal text-text-secondary">{formatMonth(data.month)}</span>}
+        </CardTitle>
+        {data && (data.no_change || !data.never_sells) && (
           <div className="flex flex-wrap items-center gap-2">
             {data.no_change && <Badge variant="success">No change</Badge>}
-            <Badge variant={data.never_sells ? "secondary" : "warning"}>{data.never_sells ? "No sale" : "Rebalance"}</Badge>
+            {!data.never_sells && <Badge variant="warning">Rebalance</Badge>}
           </div>
         )}
       </CardHeader>
-      <CardContent className="space-y-3">
-        {plan.isLoading ? (
-          <Skeleton className="h-16 w-full" />
-        ) : plan.isError || !data ? (
-          <InlineError message="Could not load this month's plan." onRetry={() => plan.refetch()} />
-        ) : (
-          <p className="text-[1rem] leading-snug text-text-primary">{data.headline}</p>
-        )}
-        <Button asChild variant="outline" className="h-11 w-full sm:w-auto">
+      <CardContent className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between md:gap-8">
+        <div className="min-w-0 max-w-2xl space-y-3 md:flex-1">
+          {plan.isLoading ? (
+            <Skeleton className="h-16 w-full" />
+          ) : plan.isError || !data ? (
+            <InlineError message="Could not load this month's plan." onRetry={() => plan.refetch()} />
+          ) : (
+            <>
+              <p className="text-lg font-medium leading-snug text-text-primary">{data.headline}</p>
+              {showCoverage && (
+                <div className="space-y-1.5">
+                  <Progress
+                    value={running}
+                    max={needed}
+                    className="bg-border"
+                    aria-label="Core savings plans compared with the monthly target"
+                  />
+                  <p className="text-sm text-text-secondary">
+                    {wholeEur(running)} of {wholeEur(needed)} a month runs today
+                  </p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        <Button asChild className="h-11 w-full shrink-0 md:w-auto">
           <Link to="/plan">Open the plan <ArrowRight className="ml-1.5 h-4 w-4" aria-hidden="true" /></Link>
         </Button>
       </CardContent>

@@ -160,6 +160,21 @@ describe("HomePage", () => {
     expect(await screen.findByText(PLAN.headline)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /open the plan/i })).toHaveAttribute("href", "/plan");
     expect(screen.getByText("No change")).toBeInTheDocument();
+    expect(screen.queryByText("No sale")).not.toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("shows how much of the core target the savings plans cover", async () => {
+    mocks.getMonthlyPlan.mockResolvedValue({
+      ...PLAN,
+      no_change: false,
+      headline: "Raise your core savings plans by 85 € to 95 € a month (now 10 €).",
+      savings_plans: { core_needed_eur: 95, by_sleeve: { core: 10 } },
+    } as unknown as MonthlyPlan);
+    renderHome();
+
+    expect(await screen.findByText("10 € of 95 € a month runs today")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "10");
   });
 
   it("teases Decide with what is waiting", async () => {

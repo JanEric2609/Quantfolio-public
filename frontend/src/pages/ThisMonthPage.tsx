@@ -248,14 +248,14 @@ function PlanLine({ p }: { p: RunningSavingsPlan }) {
           {p.dynamization_rate ? ` · grows ${p.dynamization_rate} %/yr` : ""}
           {p.not_running_reason === "paused" ? " · paused" : ""}
           {p.not_running_reason === "overdue" ? " · overdue, no run seen" : ""}
-          {p.inferred ? " · read from its orders" : ""}
+          {p.declared ? " · set by you" : p.inferred ? " · read from its orders" : ""}
         </span>
       </span>
       <span className="shrink-0 tabular-nums text-text-primary">
         {p.monthly_eur != null
           ? `${formatCurrency(p.monthly_eur, "EUR")}/month`
           : p.frequency === "UNKNOWN"
-            ? `${formatCurrency(p.amount_eur, "EUR")}, ${(p.runs ?? 0) > 1 ? "schedule not recognised" : "ran once so far"}`
+            ? `${formatCurrency(p.amount_eur, "EUR")}, ${p.pie_id ? "not counted" : (p.runs ?? 0) > 1 ? "schedule not recognised" : "ran once so far"}`
             : `${formatCurrency(p.amount_eur, "EUR")} ${p.frequency.toLowerCase()}`}
       </span>
     </li>
@@ -443,11 +443,7 @@ export function ThisMonthPage() {
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
             {data.no_change && <Badge variant="success">No change</Badge>}
-            {data.never_sells ? (
-              <Badge variant="secondary">No sale</Badge>
-            ) : (
-              <Badge variant="warning">Rebalance</Badge>
-            )}
+            {!data.never_sells && <Badge variant="warning">Rebalance</Badge>}
           </div>
           <CardTitle className="pt-2 text-2xl leading-snug">{data.headline}</CardTitle>
           {!data.has_holdings && (

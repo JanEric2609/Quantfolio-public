@@ -711,6 +711,39 @@ _FREQUENCY_BY_GAP: tuple[tuple[int, int, str], ...] = (
     (1, 3, "DAILY"), (5, 9, "WEEKLY"), (12, 16, "BIWEEKLY"), (26, 35, "MONTHLY"),
 )
 _DAYS_BY_FREQUENCY = {"DAILY": 1, "WEEKLY": 7, "BIWEEKLY": 14, "MONTHLY": 30}
+# The owner's word on a pie's plan, by pie id: {"amount": "70.00", "frequency": "MONTHLY"}.
+# Pie buys cannot say it: a funding or a one-off top-up is marked exactly like a scheduled run.
+PIE_PLANS_KEY = "trading212_pie_plans"
+
+
+def _regular_frequency(days: list[date]) -> str:
+    """A pie's schedule, only from three runs or more whose last two gaps agree; else ``UNKNOWN``."""
+    gaps = [(b - a).days for a, b in zip(days, days[1:])][-2:]
+    if len(gaps) < 2 or abs(gaps[0] - gaps[1]) > 3:
+        return "UNKNOWN"
+    return next((f for lo, hi, f in _FREQUENCY_BY_GAP if lo <= max(gaps) <= hi), "UNKNOWN")
+
+
+def pie_plan_settings(db: Session) -> dict[str, dict[str, Any]]:
+    stored = get_public_settings(db).get(PIE_PLANS_KEY)
+    return stored if isinstance(stored, dict) else {}
+
+
+def set_pie_plan(db: Session, user_id: str, pie_id: str, amount: Decimal | None, frequency: str | None) -> bool:
+    """Record (or, with no amount, forget) the owner's word on a pie's plan. Nothing reaches Trading 212."""
+    exists = db.query(BrokerPie.id).filter(
+        BrokerPie.user_id == user_id, BrokerPie.source == SOURCE, BrokerPie.external_id == pie_id,
+    ).first()
+    if exists is None:
+        return False
+    stored = dict(pie_plan_settings(db))
+    if amount is None:
+        stored.pop(pie_id, None)
+    else:
+        stored[pie_id] = {"amount": str(amount), "frequency": frequency}
+    upsert_public_settings(db, {PIE_PLANS_KEY: stored or None})
+    sync_savings_plans(db, user_id)
+    return True
 
 
 def infer_savings_plans(db: Session, user_id: str, today: date | None = None) -> list[dict[str, Any]]:
@@ -765,7 +798,43 @@ def infer_savings_plans(db: Session, user_id: str, today: date | None = None) ->
             if isinstance(inst, dict) and inst.get("isin"):
                 pie_of.setdefault(str(inst["isin"]).upper(), pie.name)
 
+    pie_id_of: dict[str, str] = {}
+    for pie in db.query(BrokerPie).filter(BrokerPie.user_id == user_id, BrokerPie.source == SOURCE):
+        pie_id_of[pie.name] = pie.external_id
+    # A pie's buys are one plan: split per stock, its funding and top-ups would each read as a small schedule.
+    pie_runs: dict[str, dict[date, dict[str, Decimal]]] = {}
+    for isin in [i for i in runs if origin[i] == "AUTOINVEST" and pie_of.get(i) in pie_id_of]:
+        for day, amount in runs.pop(isin).items():
+            pie_runs.setdefault(pie_of[isin], {}).setdefault(day, {})[isin] = amount
+
+    declared = pie_plan_settings(db)
     plans: list[dict[str, Any]] = []
+    for pie_name, by_day_isin in pie_runs.items():
+        days = sorted(by_day_isin)
+        last = days[-1]
+        if (today - last).days > PLAN_GONE_DAYS:
+            continue
+        frequency = _regular_frequency(days)
+        amount = sum(by_day_isin[last].values(), Decimal("0"))
+        pie_id = pie_id_of[pie_name]
+        own = declared.get(pie_id)
+        if own:
+            amount, frequency = Decimal(str(own["amount"])), str(own["frequency"])
+        step = _DAYS_BY_FREQUENCY.get(frequency)
+        plans.append({
+            "name": f"Pie {pie_name}",
+            "isin": None,
+            "amount": str(amount.quantize(Decimal("0.01"))),
+            "frequency": frequency,
+            "next_execution_date": (last + timedelta(days=step)).isoformat() if step else None,
+            "last_execution_date": last.isoformat(),
+            "runs": len(days),
+            "pie": pie_name,
+            "pie_id": pie_id,
+            "declared": bool(own),
+            "inferred": True,
+            "holdings": {i: str(v) for i, v in by_day_isin[last].items()},
+        })
     for isin, by_day in runs.items():
         days = sorted(by_day)
         last = days[-1]
