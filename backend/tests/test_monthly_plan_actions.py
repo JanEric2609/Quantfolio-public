@@ -12,7 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.decision.monthly_plan_store import open_actions_for, snapshot_monthly_plan
+from app.decision.monthly_plan_store import open_actions_for, snapshot_missing_months, snapshot_monthly_plan
 from app.foundation.core.db import Base
 from app.foundation.models.entities import (
     DkbAccount,
@@ -84,6 +84,16 @@ def _user_with_position(db, qty: str = "10"):
     db.add(pos)
     db.commit()
     return user, pos
+
+
+def test_the_daily_job_stores_a_month_once_and_catches_up_on_a_late_day():
+    db = _memory_db()
+    user, _ = _user_with_position(db)
+    assert snapshot_missing_months(db, now=NOW) == 1
+    rows = db.query(MonthlyPlanAction).filter_by(user_id=user.id).all()
+    assert rows and {r.month for r in rows} == {NOW.strftime("%Y-%m")}
+    assert snapshot_missing_months(db, now=NOW) == 0
+    assert db.query(MonthlyPlanAction).count() == len(rows)
 
 
 def test_snapshot_is_idempotent_per_month():

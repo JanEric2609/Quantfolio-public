@@ -6,13 +6,16 @@ action by ``foundation.recommendation_execution.detect_executions``.
 """
 from __future__ import annotations
 
-from datetime import datetime
+import logging
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.decision.monthly_plan import build_monthly_plan
-from app.foundation.models.entities import MonthlyPlanAction
+from app.foundation.models.entities import MonthlyPlanAction, User
+
+logger = logging.getLogger(__name__)
 
 
 def _norm(value: Any) -> str:
@@ -54,6 +57,40 @@ def snapshot_monthly_plan(
     for row in rows:
         db.refresh(row)
     return rows
+
+
+def snapshot_missing_months(db: Session, *, now: datetime | None = None) -> int:
+    """Store this month's plan for each user who has no rows for it yet; returns how many.
+
+    Once a user has rows the month stays as it was first planned, so later
+    changes to the plan do not add to it. A month with no actions is retried
+    the next day, and a missed day (worker down, no network) catches up.
+    """
+    month = (now or datetime.now(UTC)).strftime("%Y-%m")
+    stored = {
+        user_id
+        for (user_id,) in db.query(MonthlyPlanAction.user_id)
+        .filter(MonthlyPlanAction.month == month)
+        .distinct()
+    }
+    created = 0
+    for (user_id,) in db.query(User.id).all():
+        if user_id not in stored and snapshot_monthly_plan(db, user_id, now=now):
+            created += 1
+    return created
+
+
+def register_monthly_plan_snapshot_job(scheduler: Any | None = None) -> str:
+    """Daily at 07:10 UTC, after the 06:30 price backfill."""
+    from app.foundation.jobs import register_cron_job
+
+    def _inner() -> None:
+        from app.foundation.core.db import SessionLocal
+
+        with SessionLocal() as db:
+            logger.info("monthly_plan_snapshot: stored for %s user(s)", snapshot_missing_months(db))
+
+    return register_cron_job("monthly_plan_snapshot", _inner, scheduler=scheduler, hour=7, minute=10)
 
 
 def open_actions_for(

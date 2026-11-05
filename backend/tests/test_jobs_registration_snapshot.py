@@ -30,6 +30,7 @@ from app.lab.alphacrafter.jobs import (
     register_alphacrafter_tuning_job,
 )
 from app.decision.crash_guard import register_crash_guard_job
+from app.decision.monthly_plan_store import register_monthly_plan_snapshot_job
 from app.decision.trade_check import register_trade_check_job
 from app.decision.discover.jobs import (
     register_analyst_estimates_snapshot_job,
@@ -145,6 +146,7 @@ EXPECTED_REGISTRATIONS = {
     "snapshot_paper_portfolios": {"trigger": "cron", "hour": 0, "minute": 0},
     "price_backfill_daily": {"trigger": "cron", "hour": 6, "minute": 30},
     "crash_guard_daily": {"trigger": "cron", "hour": 7, "minute": 0},
+    "monthly_plan_snapshot": {"trigger": "cron", "hour": 7, "minute": 10},
     "trade_check_daily": {"trigger": "cron", "hour": 22, "minute": 30},
     "bar_repull_weekly": {"trigger": "cron", "day_of_week": "sun", "hour": 5, "minute": 0},
     "scalable_sync": {"trigger": "interval", "hours": 1},
@@ -231,6 +233,7 @@ def _drive_all_registrations(sched):
     returns["snapshot_paper_portfolios"] = register_snapshot_paper_portfolios_job(sched)
     returns["price_backfill_daily"] = register_price_backfill_daily_job(sched)
     returns["crash_guard_daily"] = register_crash_guard_job(sched)
+    returns["monthly_plan_snapshot"] = register_monthly_plan_snapshot_job(sched)
     returns["trade_check_daily"] = register_trade_check_job(sched)
     returns["bar_repull_weekly"] = register_bar_repull_job(sched)
     returns["scalable_sync"] = register_scalable_sync_job(sched)
