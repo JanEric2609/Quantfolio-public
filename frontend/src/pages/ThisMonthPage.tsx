@@ -255,7 +255,7 @@ function PlanLine({ p }: { p: RunningSavingsPlan }) {
         {p.monthly_eur != null
           ? `${formatCurrency(p.monthly_eur, "EUR")}/month`
           : p.frequency === "UNKNOWN"
-            ? `${formatCurrency(p.amount_eur, "EUR")}, ran once so far`
+            ? `${formatCurrency(p.amount_eur, "EUR")}, ${(p.runs ?? 0) > 1 ? "schedule not recognised" : "ran once so far"}`
             : `${formatCurrency(p.amount_eur, "EUR")} ${p.frequency.toLowerCase()}`}
       </span>
     </li>

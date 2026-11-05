@@ -112,6 +112,7 @@ export function Trading212Pies() {
     enabled: Boolean(status.data?.enabled && status.data.pies),
   });
   if (!pies.data?.length) {
+    if (pies.isLoading) return null;
     // No pie stored because the read failed: say so instead of showing nothing.
     if (!status.data?.enabled || !status.data.pies_unavailable) return null;
     return (

@@ -3219,6 +3219,7 @@ export interface RunningSavingsPlan {
   not_running_reason?: "paused" | "overdue" | null;
   /** Read back from the orders the plan placed (Trading 212 has no savings-plan endpoint). */
   inferred?: boolean;
+  runs?: number | null;
 }
 
 export interface PlanSavingsPlans {

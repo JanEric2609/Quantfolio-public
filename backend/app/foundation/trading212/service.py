@@ -771,7 +771,8 @@ def infer_savings_plans(db: Session, user_id: str, today: date | None = None) ->
         last = days[-1]
         if (today - last).days > PLAN_GONE_DAYS:
             continue
-        gaps = sorted((b - a).days for a, b in zip(days, days[1:]))[-6:]
+        # The six most recent gaps, so a weekend or holiday does not read a daily plan as weekly.
+        gaps = sorted([(b - a).days for a, b in zip(days, days[1:])][-6:])
         frequency = "UNKNOWN"
         if gaps:
             median = gaps[len(gaps) // 2]

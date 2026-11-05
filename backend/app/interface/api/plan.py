@@ -71,6 +71,7 @@ class RunningSavingsPlan(BaseModel):
     running: bool = True
     not_running_reason: str | None = None  # paused | overdue
     inferred: bool = False  # read back from the orders the plan placed (Trading 212)
+    runs: int | None = None  # how many runs were read back (inferred plans only)
 
 
 class RunningSavingsPlans(BaseModel):

@@ -10991,6 +10991,17 @@
             "title": "Running",
             "type": "boolean"
           },
+          "runs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runs"
+          },
           "sleeve": {
             "title": "Sleeve",
             "type": "string"

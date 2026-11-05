@@ -514,6 +514,7 @@ def running_savings_plans(
                 "not_running_reason": not_running,
                 # Trading 212 has no savings-plan endpoint: read back from the orders the plan placed.
                 "inferred": bool(item.get("inferred")),
+                "runs": item.get("runs") if isinstance(item.get("runs"), int) else None,
             })
     return out
 
@@ -1130,10 +1131,15 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
                     "unlocked yet (target 0 %). The plan would put that money into the core."
                 )
         for p in plans:
-            if p["monthly_eur"] is None and p["frequency"] == "UNKNOWN":
+            if p["monthly_eur"] is None and p["frequency"] == "UNKNOWN" and (p.get("runs") or 0) <= 1:
                 notes.append(
                     f"The {p['name']} savings plan at {p['broker_label']} has run once so far; its schedule "
                     "shows after the next run, until then it is left out of the totals."
+                )
+            elif p["monthly_eur"] is None and p["frequency"] == "UNKNOWN":
+                notes.append(
+                    f"The {p['name']} savings plan at {p['broker_label']} has run {p['runs']} times, but not on a "
+                    "schedule the plan recognises; it is left out of the totals."
                 )
             elif p["monthly_eur"] is None:
                 notes.append(

@@ -634,6 +634,31 @@ def test_savings_plans_are_read_back_from_the_orders_their_schedule_placed(fake)
     assert running[CMG]["monthly_eur"] is None
 
 
+def test_a_daily_plan_is_read_from_its_recent_gaps_and_an_odd_schedule_is_not_called_new(fake):
+    from app.decision.monthly_plan import build_monthly_plan, plan_settings, running_savings_plans
+
+    eunl = "IE00B4L5Y983"
+    fake.data["/equity/history/orders"] = [[
+        # Daily now, after a stretch of four-day gaps and a pause: the six largest gaps would read 4 days.
+        *[_scheduled(20 + i, VHYL, "VHYLl_EQ", "5", d, "INSTRUMENT_AUTOINVEST")
+          for i, d in enumerate([30, 26, 22, 18, 5, 4, 3, 2, 1])],
+        # Three runs 20 days apart: no Trading 212 schedule, and not a plan that ran once.
+        *[_scheduled(40 + i, eunl, "EUNLd_EQ", "30", d, "INSTRUMENT_AUTOINVEST") for i, d in enumerate([45, 25, 5])],
+    ]]
+    db = _memory_db()
+    user = _setup(db)
+    t212.sync(db, user.id)
+
+    plans = {p["isin"]: p for p in t212.savings_plans(db, user.id)}
+    assert plans[VHYL]["frequency"] == "DAILY"
+    assert plans[eunl]["frequency"] == "UNKNOWN" and plans[eunl]["runs"] == 3
+    running = {p["isin"]: p for p in running_savings_plans(db, user.id, plan_settings(db))}
+    assert running[VHYL]["monthly_eur"] is not None
+    assert running[eunl]["runs"] == 3
+    notes = " ".join(build_monthly_plan(db, user.id)["notes"])
+    assert "has run 3 times, but not on a schedule" in notes and "has run once so far" not in notes
+
+
 def test_a_hand_entered_holding_matching_a_trading212_position_can_be_reconciled(fake):
     from fastapi.testclient import TestClient
 

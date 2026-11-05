@@ -53,7 +53,9 @@ export function BrokerSavingsPlans() {
       isin: plan.isin,
       amount: plan.amount,
       schedule: [
-        plan.frequency && SCHEDULE[plan.frequency] ? SCHEDULE[plan.frequency] : "schedule shows after the next run",
+        plan.frequency && SCHEDULE[plan.frequency]
+          ? SCHEDULE[plan.frequency]
+          : plan.runs > 1 ? "schedule not recognised" : "schedule shows after the next run",
         plan.next_execution_date ? `next ${formatDate(plan.next_execution_date)}` : null,
       ].filter(Boolean).join(", "),
       inferred: plan.inferred,
