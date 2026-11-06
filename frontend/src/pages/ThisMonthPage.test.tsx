@@ -80,7 +80,7 @@ describe("ThisMonthPage", () => {
 
     expect(await screen.findByText(plan.headline)).toBeInTheDocument();
     expect(screen.getByText("No change")).toBeInTheDocument();
-    expect(screen.getByText("No sale")).toBeInTheDocument();
+    expect(screen.queryByText("No sale")).not.toBeInTheDocument();
     expect(screen.getByText("Savings plan")).toBeInTheDocument();
     expect(screen.getByText("iShares Core MSCI World (Acc)")).toBeInTheDocument();
     for (const label of ["Core", "Factor tilt", "Stock picks"]) {

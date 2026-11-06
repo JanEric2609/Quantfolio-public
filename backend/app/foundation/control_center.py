@@ -167,7 +167,7 @@ def _worker_items(db: Session, heartbeat: dict[str, Any] | None, now: datetime, 
 # Optional market-data providers: the app runs on yfinance without them, so a
 # problem here is information unless the key itself is refused.
 _OPTIONAL_DATA_PROVIDERS = {
-    "alphavantage", "finnhub", "eod", "twelvedata", "databento", "tiingo", "alpaca", "massive", "fred",
+    "alphavantage", "finnhub", "eod", "twelvedata", "databento", "tiingo", "alpaca", "massive", "fred", "openbb",
 }
 # Providers whose connection probe changed (it used to ask every one for the
 # XETRA ETF EUNL.DE). A stored result without a probe symbol is from the old

@@ -126,6 +126,14 @@ def test_optional_provider_failure_severity_follows_the_code(monkeypatch):
     assert by_id["connection-twelvedata"]["severity"] == "info"
 
 
+def test_a_failed_openbb_probe_is_information_because_openbb_is_optional(monkeypatch):
+    monkeypatch.setattr("app.foundation.control_center._extract_items", lambda clock, items: None)
+    db = _memory_db()
+    record_connection_test(db, "openbb", False, "unavailable", reason="http_error", probe_symbol="n/a")
+
+    assert {i["id"]: i for i in attention_items(db)}["connection-openbb"]["severity"] == "info"
+
+
 def test_unconfigured_provider_with_old_failed_test_is_ignored(monkeypatch):
     monkeypatch.setattr("app.foundation.control_center._extract_items", lambda clock, items: None)
     db = _memory_db()

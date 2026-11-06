@@ -619,19 +619,53 @@ def test_savings_plans_are_read_back_from_the_orders_their_schedule_placed(fake)
     user = _setup(db)
     t212.sync(db, user.id)
 
-    plans = {p["isin"]: p for p in t212.savings_plans(db, user.id)}
-    assert set(plans) == {VHYL, CMG}
-    vhyl = plans[VHYL]
-    assert vhyl["frequency"] == "MONTHLY" and vhyl["amount"] == "50.00" and vhyl["runs"] == 3
-    assert vhyl["pie"] == "Dividends" and "(pie Dividends)" in vhyl["name"]
-    assert vhyl["next_execution_date"] == (datetime.now(UTC).date() - timedelta(days=5) + timedelta(days=30)).isoformat()
+    plans = {p["pie"] or p["isin"]: p for p in t212.savings_plans(db, user.id)}
+    assert set(plans) == {"Dividends", CMG}
+    pie = plans["Dividends"]
+    assert pie["frequency"] == "MONTHLY" and pie["amount"] == "50.00" and pie["runs"] == 3
+    assert pie["isin"] is None and pie["name"] == "Pie Dividends" and pie["declared"] is False
+    assert pie["next_execution_date"] == (datetime.now(UTC).date() - timedelta(days=5) + timedelta(days=30)).isoformat()
     assert plans[CMG]["frequency"] == "UNKNOWN" and plans[CMG]["next_execution_date"] is None
 
-    # The monthly plan reads them like Scalable's: VHYL counts 50 € a month, CMG is listed but not counted.
-    running = {p["isin"]: p for p in running_savings_plans(db, user.id, plan_settings(db))}
-    assert running[VHYL]["broker"] == "trading212" and running[VHYL]["monthly_eur"] == 50.0
-    assert running[VHYL]["inferred"] is True and running[VHYL]["running"] is True
+    # The monthly plan reads them like Scalable's: the pie counts 50 € a month, CMG is listed but not counted.
+    running = {p["pie_id"] or p["isin"]: p for p in running_savings_plans(db, user.id, plan_settings(db))}
+    assert running[pie["pie_id"]]["broker"] == "trading212" and running[pie["pie_id"]]["monthly_eur"] == 50.0
+    assert running[pie["pie_id"]]["inferred"] is True and running[pie["pie_id"]]["running"] is True
     assert running[CMG]["monthly_eur"] is None
+
+
+def test_a_pies_funding_and_top_ups_do_not_read_as_a_schedule_until_the_owner_sets_one(fake):
+    from app.decision.monthly_plan import plan_settings, running_savings_plans
+
+    # As on prod: funding on two days, a top-up, then the one real run. The gaps 1, 8, 3 are no schedule.
+    fake.data["/equity/history/orders"] = [[
+        _scheduled(50, VHYL, "VHYLl_EQ", "100", 15, "AUTOINVEST"),
+        _scheduled(51, VHYL, "VHYLl_EQ", "600", 14, "AUTOINVEST"),
+        _scheduled(52, VHYL, "VHYLl_EQ", "45", 6, "AUTOINVEST"),
+        _scheduled(53, VHYL, "VHYLl_EQ", "74.28", 3, "AUTOINVEST"),
+    ]]
+    db = _memory_db()
+    user = _setup(db)
+    t212.sync(db, user.id)
+
+    plan = t212.savings_plans(db, user.id)[0]
+    assert plan["frequency"] == "UNKNOWN" and plan["runs"] == 4
+    cfg = plan_settings(db)
+    assert running_savings_plans(db, user.id, cfg)[0]["monthly_eur"] is None
+
+    # The owner's word counts, and a later sync keeps it.
+    assert t212.set_pie_plan(db, user.id, plan["pie_id"], Decimal("70"), "MONTHLY") is True
+    t212.sync(db, user.id)
+    plan = t212.savings_plans(db, user.id)[0]
+    assert plan["amount"] == "70.00" and plan["frequency"] == "MONTHLY" and plan["declared"] is True
+    assert plan["next_execution_date"] == (datetime.now(UTC).date() - timedelta(days=3) + timedelta(days=30)).isoformat()
+    running = running_savings_plans(db, user.id, cfg)[0]
+    assert running["monthly_eur"] == 70.0 and running["declared"] is True and running["sleeve"] == "satellite"
+
+    # Forgetting it goes back to what the orders show; an unknown pie is refused.
+    assert t212.set_pie_plan(db, user.id, plan["pie_id"], None, None) is True
+    assert t212.savings_plans(db, user.id)[0]["frequency"] == "UNKNOWN"
+    assert t212.set_pie_plan(db, user.id, "no-such-pie", Decimal("70"), "MONTHLY") is False
 
 
 def test_a_daily_plan_is_read_from_its_recent_gaps_and_an_odd_schedule_is_not_called_new(fake):

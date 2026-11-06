@@ -10918,6 +10918,11 @@
             "title": "Broker Label",
             "type": "string"
           },
+          "declared": {
+            "default": false,
+            "title": "Declared",
+            "type": "boolean"
+          },
           "dynamization_rate": {
             "anyOf": [
               {
@@ -10985,6 +10990,17 @@
               }
             ],
             "title": "Not Running Reason"
+          },
+          "pie_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pie Id"
           },
           "running": {
             "default": true,
@@ -16520,6 +16536,40 @@
         "title": "Trading212PieOut",
         "type": "object"
       },
+      "Trading212PiePlanIn": {
+        "properties": {
+          "amount_eur": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 1000000.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,7}|(?=[\\d.]{1,10}0*$)\\d{0,7}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Amount Eur"
+          },
+          "frequency": {
+            "default": "MONTHLY",
+            "enum": [
+              "DAILY",
+              "WEEKLY",
+              "BIWEEKLY",
+              "MONTHLY"
+            ],
+            "title": "Frequency",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount_eur"
+        ],
+        "title": "Trading212PiePlanIn",
+        "type": "object"
+      },
       "Trading212PositionOut": {
         "properties": {
           "avg_buy_price": {
@@ -16816,6 +16866,11 @@
             ],
             "title": "Amount"
           },
+          "declared": {
+            "default": false,
+            "title": "Declared",
+            "type": "boolean"
+          },
           "frequency": {
             "anyOf": [
               {
@@ -16880,6 +16935,17 @@
               }
             ],
             "title": "Pie"
+          },
+          "pie_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pie Id"
           },
           "runs": {
             "default": 0,
@@ -33574,6 +33640,108 @@
           }
         },
         "summary": "Get Pies",
+        "tags": [
+          "trading212"
+        ]
+      }
+    },
+    "/api/trading212/pies/{pie_id}/plan": {
+      "delete": {
+        "description": "Forget the owner's word on a pie's plan, back to what its orders show.",
+        "operationId": "delete_pie_plan_api_trading212_pies__pie_id__plan_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pie_id",
+            "required": true,
+            "schema": {
+              "title": "Pie Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Trading212SavingsPlanOut"
+                  },
+                  "title": "Response Delete Pie Plan Api Trading212 Pies  Pie Id  Plan Delete",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Pie Plan",
+        "tags": [
+          "trading212"
+        ]
+      },
+      "put": {
+        "description": "Say what a pie's recurring plan is. Stored in Quantfolio only; nothing reaches Trading 212.",
+        "operationId": "put_pie_plan_api_trading212_pies__pie_id__plan_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pie_id",
+            "required": true,
+            "schema": {
+              "title": "Pie Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Trading212PiePlanIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Trading212SavingsPlanOut"
+                  },
+                  "title": "Response Put Pie Plan Api Trading212 Pies  Pie Id  Plan Put",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Pie Plan",
         "tags": [
           "trading212"
         ]

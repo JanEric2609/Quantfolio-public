@@ -6,6 +6,7 @@ sends allow-listed GET requests (see ``foundation/trading212/client.py``).
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -249,10 +250,35 @@ class Trading212SavingsPlanOut(BaseModel):
     last_execution_date: str | None = None
     runs: int = 0
     pie: str | None = None
+    pie_id: str | None = None
+    declared: bool = False  # amount and schedule are the owner's word, not read from the orders
     inferred: bool = True
 
 
 @router.get("/savings-plans", response_model=list[Trading212SavingsPlanOut])
 def get_savings_plans(db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[dict[str, Any]]:
     """Recurring investments read back from the orders they placed (the API has no plan endpoint)."""
+    return t212.savings_plans(db, user.id)
+
+
+class Trading212PiePlanIn(BaseModel):
+    amount_eur: Decimal = Field(gt=0, le=1_000_000, max_digits=9, decimal_places=2)
+    frequency: Literal["DAILY", "WEEKLY", "BIWEEKLY", "MONTHLY"] = "MONTHLY"
+
+
+@router.put("/pies/{pie_id}/plan", response_model=list[Trading212SavingsPlanOut])
+def put_pie_plan(pie_id: str, payload: Trading212PiePlanIn, db: Session = Depends(get_db),
+                 user: User = Depends(current_user)) -> list[dict[str, Any]]:
+    """Say what a pie's recurring plan is. Stored in Quantfolio only; nothing reaches Trading 212."""
+    if not t212.set_pie_plan(db, user.id, pie_id, payload.amount_eur, payload.frequency):
+        raise HTTPException(status_code=404, detail="Pie not found")
+    return t212.savings_plans(db, user.id)
+
+
+@router.delete("/pies/{pie_id}/plan", response_model=list[Trading212SavingsPlanOut])
+def delete_pie_plan(pie_id: str, db: Session = Depends(get_db),
+                    user: User = Depends(current_user)) -> list[dict[str, Any]]:
+    """Forget the owner's word on a pie's plan, back to what its orders show."""
+    if not t212.set_pie_plan(db, user.id, pie_id, None, None):
+        raise HTTPException(status_code=404, detail="Pie not found")
     return t212.savings_plans(db, user.id)

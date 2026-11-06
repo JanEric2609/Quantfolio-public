@@ -125,14 +125,21 @@ The API has no endpoint for recurring investments or a pie's auto-invest schedul
 says what placed it, though: `initiatedFrom` is `AUTOINVEST` for a pie's scheduled buy and
 `INSTRUMENT_AUTOINVEST` for a one-instrument recurring investment. After each sync,
 `sync_savings_plans` reads the scheduled buys of the last 400 days from the ledger, one plan per
-ISIN:
+pie, and one per ISIN for a one-instrument plan or a pie the pie read does not know:
 
 - **amount**: the latest run (in EUR, as booked);
 - **frequency**: the median gap between runs (daily, weekly, every two weeks, monthly), or
   `UNKNOWN` after a single run, so the plan is listed but not counted until it has run twice;
 - **next run**: the last run plus that gap; a plan that misses it by more than 3 days shows as
   overdue, and one with no run for 120 days is dropped;
-- **pie**: the pie that holds the ISIN, for a pie's buys.
+- **a pie's sleeve**: the sleeve most of its last run went into.
+
+A pie's funding and one-off top-ups are marked `AUTOINVEST` exactly like its scheduled runs, so a
+pie's schedule is read only from three runs or more whose last two gaps agree. Its last run may
+also spend other cash the pie holds, so that amount can exceed the plan's. Otherwise the pie is
+listed but not counted, and the owner sets its amount and frequency on Portfolio › Accounts
+(`PUT /api/trading212/pies/{id}/plan`, `DELETE` forgets it). That is stored in Quantfolio only, in
+the `trading212_pie_plans` app setting, and overrides what the orders show.
 
 They are stored in the depot's `raw_json.savings_plans`, like Scalable's, so the monthly plan,
 This month and the Accounts page read every broker's plans the same way, marked "read from its

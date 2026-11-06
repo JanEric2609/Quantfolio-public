@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type MarketHistoryPoint } from "../lib/api";
+import { MARKET_REQUEST_LIMIT, mapLimit } from "../lib/mapLimit";
 
 export type PriceMove = {
   latest?: number;
@@ -13,7 +14,7 @@ export function usePriceMoves(tickers: (string | undefined)[]) {
   return useQuery({
     queryKey: ["market-price-moves", symbols],
     queryFn: async () => {
-      const rows = await Promise.all(symbols.map(async (symbol) => {
+      const rows = await mapLimit(symbols, MARKET_REQUEST_LIMIT, async (symbol) => {
         const history = await api<MarketHistoryPoint[]>(`/api/market/history/${symbol}?days=7`);
         const latest = history.at(-1)?.close;
         const previous = history.at(-2)?.close;
@@ -24,7 +25,7 @@ export function usePriceMoves(tickers: (string | undefined)[]) {
           delta,
           deltaPct: delta != null && previous ? delta / previous : undefined,
         }] as const;
-      }));
+      });
       return Object.fromEntries(rows) as Record<string, PriceMove>;
     },
     enabled: symbols.length > 0,

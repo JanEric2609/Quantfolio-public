@@ -3220,6 +3220,10 @@ export interface RunningSavingsPlan {
   /** Read back from the orders the plan placed (Trading 212 has no savings-plan endpoint). */
   inferred?: boolean;
   runs?: number | null;
+  /** Set on a Trading 212 pie's plan, one row for the whole pie. */
+  pie_id?: string | null;
+  /** Amount and schedule are the owner's word, not read from the orders. */
+  declared?: boolean;
 }
 
 export interface PlanSavingsPlans {
@@ -4022,9 +4026,20 @@ export interface Trading212SavingsPlan {
   last_execution_date: string | null;
   runs: number;
   pie: string | null;
+  /** Set on a pie's plan, one row for the whole pie. */
+  pie_id?: string | null;
+  /** Amount and schedule are the owner's word, not read from the orders. */
+  declared?: boolean;
   inferred: boolean;
 }
 export const getTrading212SavingsPlans = () => api<Trading212SavingsPlan[]>("/api/trading212/savings-plans");
+export const setTrading212PiePlan = (pieId: string, amountEur: number, frequency: string) =>
+  api<Trading212SavingsPlan[]>(`/api/trading212/pies/${encodeURIComponent(pieId)}/plan`, {
+    method: "PUT",
+    body: JSON.stringify({ amount_eur: amountEur, frequency }),
+  });
+export const clearTrading212PiePlan = (pieId: string) =>
+  api<Trading212SavingsPlan[]>(`/api/trading212/pies/${encodeURIComponent(pieId)}/plan`, { method: "DELETE" });
 /** Removes what the sync wrote (to start over with another account); the key stays. */
 export const resetTrading212Data = () =>
   api<{ removed: Record<string, number> }>("/api/trading212/data", { method: "DELETE" });

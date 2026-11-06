@@ -469,6 +469,18 @@ def _plan_date(value: Any) -> date | None:
         return None
 
 
+def _plan_sleeve(item: dict[str, Any], isin: str, cfg: dict[str, Any]) -> str:
+    """A plan's sleeve; a pie's is the one most of its last run went into."""
+    holdings = item.get("holdings")
+    if not isinstance(holdings, dict) or not holdings:
+        return classify(isin, cfg)
+    weight: dict[str, float] = {}
+    for held, amount in holdings.items():
+        sleeve = classify(str(held).upper(), cfg)
+        weight[sleeve] = weight.get(sleeve, 0.0) + _as_float(amount, 0.0)
+    return max(weight, key=lambda s: weight[s])
+
+
 def running_savings_plans(
     db: Session, user_id: str, cfg: dict[str, Any], *, today: date | None = None,
 ) -> list[dict[str, Any]]:
@@ -504,7 +516,7 @@ def running_savings_plans(
                 "broker_label": BROKER_LABELS.get(account.source, account.institution or account.source),
                 "name": str(item.get("name") or isin or "Savings plan"),
                 "isin": isin or None,
-                "sleeve": classify(isin, cfg),
+                "sleeve": _plan_sleeve(item, isin, cfg),
                 "amount_eur": _round_eur(amount),
                 "frequency": frequency,
                 "monthly_eur": _round_eur(amount * per_month) if per_month is not None else None,
@@ -515,6 +527,8 @@ def running_savings_plans(
                 # Trading 212 has no savings-plan endpoint: read back from the orders the plan placed.
                 "inferred": bool(item.get("inferred")),
                 "runs": item.get("runs") if isinstance(item.get("runs"), int) else None,
+                "pie_id": item.get("pie_id"),
+                "declared": bool(item.get("declared")),
             })
     return out
 
@@ -1131,7 +1145,12 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
                     "unlocked yet (target 0 %). The plan would put that money into the core."
                 )
         for p in plans:
-            if p["monthly_eur"] is None and p["frequency"] == "UNKNOWN" and (p.get("runs") or 0) <= 1:
+            if p["monthly_eur"] is None and p.get("pie_id"):
+                notes.append(
+                    f"{p['name']} at {p['broker_label']}: its orders do not show whether this is a recurring plan, "
+                    "so it is left out of the totals. If it is, set its amount under Portfolio → Accounts."
+                )
+            elif p["monthly_eur"] is None and p["frequency"] == "UNKNOWN" and (p.get("runs") or 0) <= 1:
                 notes.append(
                     f"The {p['name']} savings plan at {p['broker_label']} has run once so far; its schedule "
                     "shows after the next run, until then it is left out of the totals."
