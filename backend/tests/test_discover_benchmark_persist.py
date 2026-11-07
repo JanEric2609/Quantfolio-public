@@ -120,6 +120,7 @@ def test_benchmark_symbols_deduped_against_candidates(monkeypatch):
     assert requested == [
         pipeline._BENCHMARK_US,
         *[s for s in pipeline._benchmark_symbols() if s != pipeline._BENCHMARK_US],
+        "USDEUR=X",
     ]
 
 

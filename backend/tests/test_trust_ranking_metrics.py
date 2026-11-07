@@ -48,7 +48,7 @@ def _seed_run(db, user, run, day, *, strength, rng, backfilled=False):
         comp = float(i) / 40
         snap = _snap(db, user, run, day, f"S{i}", composite=comp, picked=i >= 35, sector=("Tech", "Health")[i % 2],
                      backfilled=backfilled)
-        for h in (5, 10, 21, 63):
+        for h in (5, 10, 21, 63, 126):
             _out(db, snap, h, strength * comp * h / 21 + float(rng.normal(0, 0.01)))
     for i in range(12):
         snap = _snap(db, user, run, day, f"E{i}", composite=float(i), group="etf", backfilled=backfilled)
@@ -80,7 +80,7 @@ def test_metrics_measure_a_ranking_that_works_and_keep_backfill_apart():
     assert live["n_runs"] == 21 and live["n_cohort_runs"] == 20
     assert live["ic"]["n_runs"] == 20 and live["ic"]["mean"] > 0.5
     assert live["ic"]["t_nw"] > 3 and live["ic"]["share_positive"] == 1.0
-    assert [d["horizon_days"] for d in live["ic_decay"]] == [5, 10, 21, 63]
+    assert [d["horizon_days"] for d in live["ic_decay"]] == [5, 10, 21, 63, 126]
     assert all(d["mean_ic"] > 0 for d in live["ic_decay"])
     assert live["sector_neutral_ic"]["mean"] > 0.3
     q = [x["mean_excess"] for x in live["quintiles"]]

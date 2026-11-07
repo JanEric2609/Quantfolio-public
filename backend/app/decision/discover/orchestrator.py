@@ -35,8 +35,12 @@ from app.decision.discover.predictor import store_prediction
 from app.decision.discover.shadow_ledger import capture_snapshot, discover_stamp
 from app.decision.discover.pipeline import (
     LLM_MAX_CANDIDATES,
+    INDUSTRY_CAP,
+    LANE_FUND,
     attach_earnings_calendar,
+    candidate_industry,
     candidate_sector,
+    fund_slots_for,
     run_candidate_pipeline,
     sector_cap_for,
 )
@@ -45,6 +49,8 @@ from app.decision.discover.tradeability import assess as assess_tradeability
 from app.decision.discover.tradeability import unknown as unknown_tradeability
 from app.decision.discover.config import get_or_seed_active_config
 from app.decision.discover.universe import build_universe
+from app.foundation.broker_instruments import isin_for_us_ticker
+from app.foundation.data_engineering.pit_fundamentals import resolve_isin_for_symbol
 from app.foundation.instrument_taxonomy import classify_instrument
 from app.foundation.providers import build_provider_registry
 from app.foundation.settings import get_public_settings
@@ -432,8 +438,14 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
                     if result.get("reject_stage") is None and result.get("sector_capped"):
                         cand.reject_stage = "sector_cap"
                         cand.reject_reason = (
-                            f"Sector cap: {sector_cap_for(LLM_MAX_CANDIDATES)} higher-ranked "
-                            f"{candidate_sector(result)} names already shortlisted"
+                            f"Sector or industry cap: at most {sector_cap_for(LLM_MAX_CANDIDATES)} per sector "
+                            f"({candidate_sector(result)}) and {INDUSTRY_CAP} per industry "
+                            f"({candidate_industry(result)})"
+                        )
+                    elif result.get("reject_stage") is None and result.get("fund_slots_full"):
+                        cand.reject_stage = "fund_slots"
+                        cand.reject_reason = (
+                            f"Funds compete only with funds: {fund_slots_for(LLM_MAX_CANDIDATES)} slots, all taken"
                         )
                     elif result.get("reject_stage") is None:
                         cand.reject_stage = "shortlist_limit"
@@ -469,6 +481,7 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
 
         for cand in shortlisted:
             cancel_token.raise_if_cancelled()
+            _fill_isin(db, cand)
             try:
                 tradeable = assess_tradeability(
                     db, cand.symbol, cand.isin, cand.name or cand.symbol,
@@ -532,10 +545,17 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
             # own shortlist, or a rejected slot would reopen the sector bet.
             sector_cap = sector_cap_for(LLM_MAX_CANDIDATES)
             sector_counts: dict[str, int] = {}
+            industry_counts: dict[str, int] = {}
+            fund_count = 0
             for kept in tradeable_shortlisted:
-                kept_sector = candidate_sector(result_by_symbol.get(kept.symbol) or {})
+                kept_result = result_by_symbol.get(kept.symbol) or {}
+                kept_sector = candidate_sector(kept_result)
                 if kept_sector is not None:
                     sector_counts[kept_sector] = sector_counts.get(kept_sector, 0) + 1
+                kept_industry = candidate_industry(kept_result)
+                if kept_industry is not None:
+                    industry_counts[kept_industry] = industry_counts.get(kept_industry, 0) + 1
+                fund_count += kept_result.get("lane") == LANE_FUND
             for result in backfill_pool:
                 if len(tradeable_shortlisted) >= LLM_MAX_CANDIDATES:
                     break
@@ -545,6 +565,13 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
                 sector = candidate_sector(result)
                 if sector is not None and sector_counts.get(sector, 0) >= sector_cap:
                     continue
+                industry = candidate_industry(result)
+                if industry is not None and industry_counts.get(industry, 0) >= INDUSTRY_CAP:
+                    continue
+                is_fund = result.get("lane") == LANE_FUND
+                if is_fund and fund_count >= fund_slots_for(LLM_MAX_CANDIDATES):
+                    continue
+                _fill_isin(db, cand)
                 try:
                     tradeable_res = assess_tradeability(
                         db, cand.symbol, cand.isin, cand.name or cand.symbol,
@@ -569,6 +596,9 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
                     tradeable_shortlisted.append(cand)
                     if sector is not None:
                         sector_counts[sector] = sector_counts.get(sector, 0) + 1
+                    if industry is not None:
+                        industry_counts[industry] = industry_counts.get(industry, 0) + 1
+                    fund_count += is_fund
                 else:
                     cand.status = "rejected"
                     cand.reject_stage = "tradeability_gate"
@@ -899,6 +929,23 @@ def submit_discover_job(db: Session, user_id: str, focus: str | None = None) -> 
     submit_job(run_discover, args=(run.id,), job_id=f"discover_{run.id}")
     logger.info("Submitted discover job %s for user %s focus=%s", run.id, user_id, focus)
     return run.id
+
+
+def _fill_isin(db: Session, cand: DiscoverCandidate) -> None:
+    """Find a missing ISIN: the security master, then Trading 212's line for a US ticker.
+
+    The screener gives US stocks no ISIN, so all 10 stocks of the 2026-11-05 run
+    showed "unknown" at Trading 212 and had no broker link. Best-effort.
+    """
+    if cand.isin:
+        return
+    try:
+        cand.isin = resolve_isin_for_symbol(db, cand.symbol) or (
+            isin_for_us_ticker(db, cand.symbol) if "." not in cand.symbol else None
+        )
+    except Exception:  # noqa: BLE001 - a missing ISIN only leaves the badge unknown
+        db.rollback()
+        logger.debug("ISIN lookup failed for %s", cand.symbol, exc_info=True)
 
 
 def _attach_earnings(db: Session, cand: DiscoverCandidate) -> None:

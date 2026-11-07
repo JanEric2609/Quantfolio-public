@@ -8,7 +8,7 @@ any UPDATE, see migration ``0130_trust_evidence_ledgers``):
   shortlisted and picked, and the entry close. The ``DiscoverCandidate`` rows
   are working state that later stages rewrite; this table is the evidence.
 * ``candidate_outcome`` — one resolved forward return per snapshot and horizon
-  (5, 10, 21, 63 trading days), in EUR, with the passive core's return over the
+  (5, 10, 21, 63, 126 trading days), in EUR, with the passive core's return over the
   same window.
 * ``trust_daily_active_returns`` — the calendar-time daily series the
   pre-registered tests bet on: the mean daily active return of every open call

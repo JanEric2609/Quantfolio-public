@@ -12,7 +12,15 @@ reason code, stored as ``fallback_reason`` when the template is used:
 * ``ungrounded_number`` — a number that is not in the fact sheet;
 * ``macro``             — rate-direction words the macro facts do not support;
 * ``contradiction``     — bearish wording on a ``long`` dossier;
-* ``ticker``            — a near-miss of the candidate's own ticker ("DDDOG" for DDOG).
+* ``ticker``            — a near-miss of the candidate's own ticker ("DDDOG" for DDOG);
+* ``mislabel``          — a true figure under the wrong name, or a claim the data does
+  not carry ("3-month momentum" for the 12-1 month figure, "strong momentum" at
+  the 55th percentile, a raw internal code). All 15 theses of the 2026-11-05 run
+  passed the checks above, and several of them read like this (Discover audit,
+  2026-11-06).
+
+A risk that only says a data feed is missing (``ml_signal_unavailable``, "ML
+signal unavailable") is dropped from the risks: it is no risk of the company.
 
 Pure: no DB, no network.
 """
@@ -38,6 +46,40 @@ _CUT_WORDS = re.compile(r"\brate cuts?\b|\bfalling (interest )?rates\b|\blower (
                         r"\brate reductions?\b", re.I)
 _CAPS_TOKEN = re.compile(r"\b[A-Z]{2,7}\b")
 _BEARISH = re.compile(r"\bneutral stance\b|\bbearish\b|\bavoid\b|\bsell\b(?!-off)", re.I)
+
+_INTERNAL_CODE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
+_DATA_FEEDS = (
+    r"(?:ml|machine[- ]learning) (?:signal|model)|alpha ?crafter|validated factors?|"
+    r"insider (?:data|signal)|estimate data|sentiment data|analyst data"
+)
+_DATA_GAP_RISK = re.compile(
+    rf"\b(?:{_DATA_FEEDS})\b[^.]*\b(?:unavailable|missing|absent|not available)\b|"
+    rf"\b(?:unavailable|missing|absent|lack of|absence of|no)\b[^.]*\b(?:{_DATA_FEEDS})\b",
+    re.I,
+)
+# (?<!\d-) leaves "12-1 month momentum", the one momentum figure the facts carry.
+_WRONG_MOMENTUM_PERIOD = re.compile(
+    r"(?<!\d-)\b(?:\d{1,2}|one|three|six|twelve)[- ]months?\s+(?:\w+\s+)?momentum\b|"
+    r"\b(?:12|twelve)[- ]month\s+(?:gain|rise|increase|return)\b",
+    re.I,
+)
+_DRAWDOWN_AS_LIMIT = re.compile(r"\bdrawdown\b[^.]{0,40}\b(?:capped|limited to|cannot exceed|floor)\b", re.I)
+_RATIO_AS_RETURN = re.compile(r"\breturns?\s+of\s+[-+−]?\d?\.\d+\b(?!\s*%)", re.I)
+_BETA_AS_CORRELATION = re.compile(
+    r"\bbeta\b[^.]{0,60}\b(?:suggests?|indicates?|shows?|implies?)\b[^.]{0,30}\bcorrelat", re.I,
+)
+_MARKET_IMPLIED_ESTIMATE = re.compile(r"\bmarket[- ]implied\s+(?:estimates?|forecasts?|expected returns?)\b", re.I)
+_REGIME_AFFINITY = re.compile(r"\bregime affinity\b", re.I)
+_HORIZON_NONSENSE = re.compile(r"\bexceed\w*\s+the\s+\d+-month horizon\b", re.I)
+_STRONG_MOMENTUM = re.compile(r"\b(?:strong|robust|exceptional|high)\b[^.]{0,20}\bmomentum\b", re.I)
+_DIVERSIFIER_CLAIM = re.compile(r"(?<!little )(?<!limited )(?<!no )(?<!not )(?<!low )(?<!poor )\bdiversif", re.I)
+_HOLDINGS_CLAIM = re.compile(r"\bholdings?\b[^.]*", re.I)
+_NOT_A_HOLDING = frozenset({"ETF", "ETC", "MSCI", "UCITS", "USD", "EUR", "GBP", "FTSE", "ESG"})
+
+#: "Strong momentum" needs at least this rank; below it, the figure speaks for itself.
+STRONG_MOMENTUM_RANK = 0.8
+#: A weekly correlation with the book from here on is no diversifier.
+DIVERSIFIER_MAX_CORRELATION = 0.5
 
 #: Absolute and relative tolerance of a grounded number (in the unit shown).
 ABS_TOLERANCE = 0.15
@@ -176,6 +218,49 @@ def ticker_problem(text: str, symbol: str | None, facts_text: str) -> str | None
     return None
 
 
+def is_data_gap_risk(risk: str) -> bool:
+    """A "risk" that only reports a missing data feed or carries a raw internal code."""
+    return bool(_INTERNAL_CODE.search(risk) or _DATA_GAP_RISK.search(risk))
+
+
+def mislabel_problems(
+    text: str,
+    facts_text: str = "",
+    *,
+    momentum_rank: float | None = None,
+    correlation: float | None = None,
+    is_fund: bool = False,
+) -> list[str]:
+    """True figures under the wrong name, and claims the data does not carry."""
+    problems: list[str] = []
+    fixed_rules = (
+        (_INTERNAL_CODE, "'{}' is an internal code; say it in words or leave it out"),
+        (_WRONG_MOMENTUM_PERIOD, "'{}': the only momentum figure given is 12-1 month; call it that"),
+        (_DRAWDOWN_AS_LIMIT, "'{}': a past drawdown is what happened, not a limit"),
+        (_RATIO_AS_RETURN, "'{}': that figure is a ratio or correlation, not a return"),
+        (_BETA_AS_CORRELATION, "'{}': beta is not correlation; they are given separately"),
+        (_MARKET_IMPLIED_ESTIMATE, "'{}': the estimate is cash plus beta times the equity premium plus a small "
+                                   "share of the trailing return; do not call it market-implied"),
+        (_REGIME_AFFINITY, "'{}' does not separate candidates; leave it out"),
+        (_HORIZON_NONSENSE, "'{}' has no meaning; name the actual risk"),
+    )
+    for pattern, message in fixed_rules:
+        m = pattern.search(text)
+        if m:
+            problems.append(message.format(m.group(0)))
+    m = _STRONG_MOMENTUM.search(text)
+    if m and momentum_rank is not None and momentum_rank < STRONG_MOMENTUM_RANK:
+        problems.append(f"'{m.group(0)}' overstates a momentum rank of {momentum_rank:.2f}")
+    if correlation is not None and correlation >= DIVERSIFIER_MAX_CORRELATION and _DIVERSIFIER_CLAIM.search(text):
+        problems.append(f"a diversification claim needs a low correlation with the portfolio; it is {correlation:.2f}")
+    if is_fund:
+        for claim in _HOLDINGS_CLAIM.findall(text):
+            for token in _CAPS_TOKEN.findall(claim):
+                if token not in _NOT_A_HOLDING and not re.search(rf"\b{re.escape(token)}\b", facts_text):
+                    problems.append(f"holding '{token}' is not in the holdings given")
+    return problems
+
+
 def check_thesis(
     thesis: str,
     key_risks: list[str],
@@ -184,10 +269,13 @@ def check_thesis(
     macro: dict[str, Any] | None,
     direction: str,
     symbol: str | None = None,
+    momentum_rank: float | None = None,
+    correlation: float | None = None,
+    is_fund: bool = False,
 ) -> ThesisCheck:
     """Clean and check a thesis and its risks; the first failing rule names the reason."""
     trimmed = trim_to_sentence(thesis)
-    risks = [r.strip() for r in key_risks if isinstance(r, str) and r.strip()]
+    risks = [r.strip() for r in key_risks if isinstance(r, str) and r.strip() and not is_data_gap_risk(r)]
     if trimmed is None:
         return ThesisCheck(thesis, risks, "truncated", ["the thesis has no complete sentence"])
     result = ThesisCheck(trimmed, risks)
@@ -214,4 +302,12 @@ def check_thesis(
         if problem:
             result.reason, result.problems = "ticker", [problem]
             return result
+    problems = [
+        p for t in texts
+        for p in mislabel_problems(
+            t, facts_text, momentum_rank=momentum_rank, correlation=correlation, is_fund=is_fund,
+        )
+    ]
+    if problems:
+        result.reason, result.problems = "mislabel", problems
     return result
