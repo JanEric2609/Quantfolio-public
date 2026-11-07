@@ -187,6 +187,12 @@ also tightens some sectors. `data_quality.py` reports which signals a name and a
 run went without; a dossier states its horizon, while the track record scores the
 estimate over 21 trading days and the trust ledger records 126 as well.
 
+### Claims, recent falls and insider selling (review of run dd3fe7b9, 2026-11-07)
+
+- A thesis loses a sentence with an unsupported claim instead of being rejected for it: diversification at a correlation from 0.5, "downside protection", "market-implied", "alpha factors". A thesis left under 40 characters is still rejected. Rejected text goes to the worker log.
+- `key_risks` always carry, whoever writes them: gate volatility above 60 %, a close at least 20 % below the 3-month high (`fall_from_3m_high`, which 12-1 momentum cannot show), correlation from 0.5, and net insider selling of at least 0.25 % of market value over 90 days (a judgement, not a tested signal). A stated volatility counts as one risk however it is worded.
+- `pit_insider_signal_for_symbol` counts a trade once: a joint Form 4 repeats it per reporting owner.
+
 ### Dossier text and shortlist details (review of run 4b6f5ebf, 2026-11-07)
 
 - Known field names in a thesis are put in plain words (`thesis_checks.plain_field_names`); any other code is still rejected. The prompt carries no `trailing_1m_annualized_return`, revenue growth in percent, and insiders as a count of buyers.

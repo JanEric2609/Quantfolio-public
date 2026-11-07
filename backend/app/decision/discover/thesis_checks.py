@@ -93,18 +93,22 @@ _RATIO_AS_RETURN = re.compile(r"\breturns?\s+of\s+[-+−]?\d?\.\d+\b(?!\s*%)", r
 _BETA_AS_CORRELATION = re.compile(
     r"\bbeta\b[^.]{0,60}\b(?:suggests?|indicates?|shows?|implies?)\b[^.]{0,30}\bcorrelat", re.I,
 )
-_MARKET_IMPLIED_ESTIMATE = re.compile(r"\bmarket[- ]implied\s+(?:estimates?|forecasts?|expected returns?)\b", re.I)
+_MARKET_IMPLIED_ESTIMATE = re.compile(r"\bmarket[- ]implied\b", re.I)
+#: A low beta over a past window is no protection, and the facts carry no stress test.
+_DOWNSIDE_PROTECTION = re.compile(r"\bdownside protection\b", re.I)
+#: No validated factors feed the dossier; "low alpha factors" describes missing data.
+_ALPHA_FACTORS = re.compile(r"\balpha factors?\b", re.I)
 _REGIME_AFFINITY = re.compile(r"\bregime affinity\b", re.I)
 _HORIZON_NONSENSE = re.compile(r"\bexceed\w*\s+the\s+\d+-month horizon\b", re.I)
 _STRONG_MOMENTUM = re.compile(r"\b(?:strong|robust|exceptional|high)\b[^.]{0,20}\bmomentum\b", re.I)
 # "Diversified" describes what is inside a fund or a company, which can be true at
 # any correlation; only a claim about the portfolio needs a low one.
 _DIVERSIFIER_CLAIM = re.compile(
-    r"(?<!little )(?<!limited )(?<!no )(?<!not )(?<!low )(?<!poor )\bdiversif(?:ier|iers|ication|ying|ies|y)\b", re.I,
+    r"(?<!little )(?<!limited )(?<!no )(?<!not )(?<!low )(?<!poor )(?<!minimal )(?<!reduced )(?<!less )\bdiversif(?:ier|iers|ication|ying|ies|y)\b", re.I,
 )
 _INSIDER_CLUSTER = re.compile(r"\binsiders?\b[^.]{0,30}\bcluster|\bcluster\b[^.]{0,20}\b(?:buy|buys|buying|insiders?)\b", re.I)
 _HIGH_DEBT = re.compile(r"\b(?:high|elevated|heavy|significant)\b[^.]{0,25}\b(?:debt|leverage)\b", re.I)
-_DEBT_EQUITY_LINE = re.compile(r"\bdebt[- ](?:to[- ])?equity\b|\bd/e\b|\bleverage\b", re.I)
+_DEBT_EQUITY_LINE = re.compile(r"\bdebt[- ](?:to[- ])?equity\b|\bdebt ratio\b|\bd/e\b|\bleverage\b", re.I)
 _SCORE_AS_RISK = re.compile(r"\b(?:fundamentals?|composite|portfolio fit|fit|momentum|analyst) scores?\b", re.I)
 _HOLDINGS_CLAIM = re.compile(r"\bholdings?\b[^.]*", re.I)
 _NOT_A_HOLDING = frozenset({"ETF", "ETC", "MSCI", "UCITS", "USD", "EUR", "GBP", "FTSE", "ESG"})
@@ -117,6 +121,8 @@ DIVERSIFIER_MAX_CORRELATION = 0.5
 HIGH_DEBT_EQUITY_PCT = 100.0
 #: A cluster of insiders takes more than one buyer.
 MIN_CLUSTER_BUYERS = 2
+#: Shorter than this, what is left of a thesis after a removal is no thesis.
+MIN_KEPT_THESIS_CHARS = 40
 
 #: Absolute and relative tolerance of a grounded number (in the unit shown).
 ABS_TOLERANCE = 0.15
@@ -282,6 +288,8 @@ def mislabel_problems(
                                    "share of the trailing return; do not call it market-implied"),
         (_REGIME_AFFINITY, "'{}' does not separate candidates; leave it out"),
         (_HORIZON_NONSENSE, "'{}' has no meaning; name the actual risk"),
+        (_DOWNSIDE_PROTECTION, "'{}' is not in the data; a low beta over a past window protects nothing"),
+        (_ALPHA_FACTORS, "'{}': no validated factors are given; leave them out"),
     )
     for pattern, message in fixed_rules:
         m = pattern.search(text)
@@ -309,6 +317,29 @@ def plain_field_names(text: str) -> str:
     return _KNOWN_CODE.sub(lambda m: _CODE_WORDS[m.group(0)], text)
 
 
+def _unsupported_claim(text: str, correlation: float | None) -> bool:
+    """A claim the data cannot carry, whatever else the sentence says."""
+    if _MARKET_IMPLIED_ESTIMATE.search(text) or _DOWNSIDE_PROTECTION.search(text) or _ALPHA_FACTORS.search(text):
+        return True
+    return (
+        correlation is not None
+        and correlation >= DIVERSIFIER_MAX_CORRELATION
+        and bool(_DIVERSIFIER_CLAIM.search(text))
+    )
+
+
+def without_unsupported_sentences(thesis: str, correlation: float | None = None) -> str:
+    """``thesis`` less the sentences with an unsupported claim; unchanged if too little is left.
+
+    In run dd3fe7b9 (2026-11-07) the model wrote a diversification claim on both
+    attempts for 3 of 5 funds, and their true figures went with it to the template.
+    A thesis of nothing but such claims stays as it is and is rejected by the checks.
+    """
+    sentences = re.split(r"(?<=[.!?])\s+", thesis.strip())
+    kept = " ".join(s for s in sentences if not _unsupported_claim(s, correlation))
+    return kept if len(kept) >= MIN_KEPT_THESIS_CHARS else thesis
+
+
 def is_false_risk(risk: str, de_ratio: float | None = None) -> bool:
     """A line that is not a risk: a score of ours, or ordinary debt presented as one."""
     if _SCORE_AS_RISK.search(risk):
@@ -333,9 +364,13 @@ def check_thesis(
     """Clean and check a thesis and its risks; the first failing rule names the reason."""
     trimmed = trim_to_sentence(plain_field_names(thesis or ""))
     named = [plain_field_names(r.strip()) for r in key_risks if isinstance(r, str) and r.strip()]
-    risks = [r for r in named if not is_data_gap_risk(r) and not is_false_risk(r, de_ratio)]
+    risks = [
+        r for r in named
+        if not is_data_gap_risk(r) and not is_false_risk(r, de_ratio) and not _unsupported_claim(r, correlation)
+    ]
     if trimmed is None:
         return ThesisCheck(thesis, risks, "truncated", ["the thesis has no complete sentence"])
+    trimmed = without_unsupported_sentences(trimmed, correlation)
     result = ThesisCheck(trimmed, risks)
     texts = [trimmed, *risks]
     if any(has_foreign_script(t) for t in texts):

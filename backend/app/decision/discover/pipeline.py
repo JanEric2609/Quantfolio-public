@@ -226,6 +226,7 @@ LLM_MAX_CANDIDATES = int(os.getenv("DISCOVER_LLM_MAX_CANDIDATES") or "15")
 # records a "concern" flag that lowers the composite rank and is surfaced to the LLM.
 _MOMENTUM_MIN = -0.20
 _VOL_MAX = 0.60
+_RECENT_HIGH_WINDOW_DAYS = 63  # about 3 months of trading days
 _EXCESS_MIN = -0.10
 _SHARPE_DELTA_MIN = -0.5
 _MDD_MAX = 0.30
@@ -1350,6 +1351,12 @@ def stage_momentum_quality(
     trailing_1m_returns = df["close"].iloc[-(trailing_1m_window + 1) :].pct_change().dropna().tolist()
     trailing_1m_annualized_return = annualised_return(trailing_1m_returns) if trailing_1m_returns else 0.0
 
+    # 12-1 momentum skips the latest month by design, so a stock can rank at the
+    # top while it is falling: Dell closed 537 on 09-30 and 329 on 11-06 at rank 0.99.
+    last_quarter = df["close"].iloc[-_RECENT_HIGH_WINDOW_DAYS:]
+    quarter_high = float(last_quarter.max())
+    fall_from_3m_high = 1.0 - float(last_quarter.iloc[-1]) / quarter_high if quarter_high > 0 else 0.0
+
     concerns: list[str] = []
     if fx_basis != "eur":
         concerns.append("momentum and volatility in the listing currency (no EUR rate)")
@@ -1363,6 +1370,7 @@ def stage_momentum_quality(
         "volatility_6m": round(vol, 4),
         "max_drawdown": round(mdd, 4),
         "trailing_1m_annualized_return": round(float(trailing_1m_annualized_return), 4),
+        "fall_from_3m_high": round(fall_from_3m_high, 4),
         "fx_basis": fx_basis,
         "bad_prints_dropped": bad_prints,
         "concerns": concerns,
