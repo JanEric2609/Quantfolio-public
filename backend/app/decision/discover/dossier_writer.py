@@ -22,7 +22,12 @@ from app.decision.discover.composite import ic_signal_usable
 from app.decision.discover.config import DEFAULT_PROMPT_TEMPLATE
 from app.decision.discover.data_quality import BOOK_EQUITY_CONCERN, data_quality_score
 from app.decision.discover.ledger import DEFAULT_HORIZON_DAYS
-from app.decision.discover.thesis_checks import check_thesis
+from app.decision.discover.listing import listing_currency
+from app.decision.discover.thesis_checks import (
+    DIVERSIFIER_MAX_CORRELATION,
+    MIN_CLUSTER_BUYERS,
+    check_thesis,
+)
 from app.foundation.expected_return import (
     EQUITY_PREMIUM_OVER_CASH,
     credibility_weight,
@@ -83,12 +88,13 @@ _THESIS_RULES = (
     "show that direction.\n"
     "- Direction and horizon are fixed by the system (above); do not argue the opposite stance.\n"
     "- The investor holds EUR. Mention currency risk only if the listing or reporting currency is not EUR.\n"
-    "- Name each figure as the facts name it. The only momentum figure is 12-1 month (never call it 1-month, "
-    "3-month or 12-month); momentum_rank is a percentile, not a return; trailing_1m_annualized_return is "
-    "annualised, not the month's move; correlation and beta are different figures; debt_equity is in percent; a "
-    "past drawdown is not a limit.\n"
+    "- Name every figure in plain words, never by its field name. The only momentum figure is 12-1 month (never "
+    "call it 1-month, 3-month or 12-month); the momentum rank is a percentile, not a return; correlation and beta "
+    "are different figures; debt-to-equity is in percent and below 100 % is not high; a past drawdown is not a "
+    "limit.\n"
     "- Call momentum strong only near the top of the candidates, and a position a diversifier only at a low "
-    "correlation with the portfolio. Name a fund's holdings only from the holdings given.\n"
+    "correlation with the portfolio. One insider buying is not a cluster. Name a fund's holdings only from the "
+    "holdings given.\n"
     "- key_risks are risks to the investment. A missing data feed is not one; leave those out. Write no codes "
     "with underscores.\n"
     "- English only.\n"
@@ -388,6 +394,14 @@ _CONCERN_PROMPT_REWORDS = {
 }
 
 
+def _number_or_none(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+#: A count of buyers, whatever the name says: "cluster" made one buyer read as a group (KMI, 2026-11-07).
+_INSIDER_BUYER_KEYS = frozenset({"cluster_buy_score", "insider_cluster_buy_score"})
+
+
 def _reword_concerns_for_prompt(value: Any) -> Any:
     """Deep-copy *value*, rewording the bare ``"short_history"`` concern token.
 
@@ -410,10 +424,20 @@ def _reword_concerns_for_prompt(value: Any) -> Any:
     if isinstance(value, dict):
         # regime_affinity is the same 1.0 for every candidate, and the model
         # sold it as "strong regime affinity"; data_quality is for the reader.
-        return {
-            k: _reword_concerns_for_prompt(v) for k, v in value.items()
-            if k not in ("regime_affinity", "data_quality")
-        }
+        # trailing_1m_annualized_return read -94 % to +439 % on 2026-11-07 and the
+        # model kept quoting it by its code; the anchor line names it when it is used.
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            if k in ("regime_affinity", "data_quality", "trailing_1m_annualized_return"):
+                continue
+            if k == "revenue_growth" and isinstance(v, (int, float)):
+                # A fraction here came back as "0.83 revenue growth" (NVDA, 2026-11-07).
+                out["revenue_growth_pct"] = round(v * 100.0, 1)
+            elif k in _INSIDER_BUYER_KEYS:
+                out["insider_buyers_30d"] = v
+            else:
+                out[k] = _reword_concerns_for_prompt(v)
+        return out
     return value
 
 
@@ -630,17 +654,38 @@ def _grounding_prompt_lines(scores: dict[str, Any], annual: dict[str, Any]) -> s
         lines.append("Analyst consensus: unavailable for this run — do not assume it is neutral or positive.")
 
     earnings_line = _earnings_text(sf)
-    if earnings_line:
+    if earnings_line and _earnings_is_near(sf):
         lines.append(
             f"{earnings_line} The price usually moves several times a normal day's range on the report; "
             "name it as event risk in key_risks."
+        )
+    elif earnings_line:
+        lines.append(f"{earnings_line} That is too far off to be a key risk; leave it out of key_risks.")
+
+    buyers = _as_dict(scores.get("insider_signal")).get("cluster_buy_score")
+    if isinstance(buyers, (int, float)) and 0 < buyers < MIN_CLUSTER_BUYERS:
+        lines.append("One insider bought in the last 30 days; that is one buyer, not a cluster.")
+
+    correlation = _as_dict(scores.get("portfolio_fit")).get("correlation")
+    if isinstance(correlation, (int, float)) and correlation >= DIVERSIFIER_MAX_CORRELATION:
+        lines.append(
+            f"Weekly correlation with the portfolio is {correlation:.2f}: this does not diversify the portfolio; "
+            "do not say it does."
         )
 
     return "".join(f"{line}\n" for line in lines)
 
 
 EARNINGS_IMMINENT_DAYS = 1
+#: A report further off than this is no key risk: over a 6-month horizon every
+#: stock reports, and 81 days away read as a warning on KMI (2026-11-07).
+EARNINGS_RISK_DAYS = 30
 _EARNINGS_HOURS = {"bmo": "before the open", "amc": "after the close", "dmh": "during market hours"}
+
+
+def _earnings_is_near(sf: dict[str, Any]) -> bool:
+    days = sf.get("days_to_earnings")
+    return isinstance(days, int) and 0 <= days <= EARNINGS_RISK_DAYS
 
 
 def _earnings_text(sf: dict[str, Any]) -> str | None:
@@ -933,10 +978,10 @@ def write_dossier(
         f"ML signal regime context: {json.dumps(ml_regime_context)}\n"
         f"Quantitative scores: {json.dumps(_reword_concerns_for_prompt(scores))}\n"
         f"{instrument_facts_lines}"
-        f"Fundamentals: {json.dumps(fundamentals)}\n"
+        f"Fundamentals: {json.dumps(_reword_concerns_for_prompt(fundamentals))}\n"
         f"Sentiment: {json.dumps(sentiment)}\n"
         f"Tradeability: {json.dumps(tradeable)}\n"
-        f"Signal breakdown (evaluated signals): {json.dumps(evaluated_signals)}\n"
+        f"Signal breakdown (evaluated signals): {json.dumps(_reword_concerns_for_prompt(evaluated_signals))}\n"
         f"{grounding_lines}"
         f"User profile: {json.dumps(profile)}\n"
         f"Macro facts: {json.dumps(macro) if macro else 'unavailable'}\n"
@@ -1005,14 +1050,17 @@ def write_dossier(
                         momentum_rank=mom_raw.get("momentum_rank"),
                         correlation=portfolio_fit_raw.get("correlation"),
                         is_fund=instrument_type in ("etf", "fund"),
+                        de_ratio=_number_or_none(sf_scores.get("de_ratio")),
+                        insider_buyers=_number_or_none(insider_scores.get("cluster_buy_score")),
                     )
                     if check.ok:
                         candidate_dossier["thesis"] = check.thesis
                         # The data's own risks stay in, whatever the LLM wrote
                         # (plan 2026-10-14, M3).
                         earnings, data_risks = deterministic_risks(scores, signal_breakdown)
-                        candidate_dossier["key_risks"] = merge_risks(
-                            [*earnings, *data_risks], list(check.key_risks) or [_MARKET_RISK],
+                        candidate_dossier["key_risks"] = (
+                            merge_risks([*earnings, *data_risks], list(check.key_risks), drop_earnings=not earnings)
+                            or [_MARKET_RISK]
                         )[:_MAX_RISKS]
                         final_dossier = candidate_dossier
                         break
@@ -1754,9 +1802,11 @@ def _resolve_expected_return(
 RISK_DRAWDOWN_LIMIT = 0.30
 _MARKET_RISK = "Market risk: broad equity drawdowns affect the position."
 _EARNINGS_EVENT = re.compile(
-    r"\bearnings\b[^.]*\b(?:report|event|release|announcement|date|call)\b|\b(?:upcoming|next)\b[^.]*\bearnings\b",
+    r"\bearnings\b[^.]*\b(?:report|event|release|announcement|date|call)\b|\b(?:upcoming|next)\b[^.]*\bearnings\b|"
+    r"\bevent risk\b[^.]*\bearnings\b|\bearnings on \d",
     re.I,
 )
+_DRAWDOWN_RISK = re.compile(r"\bdrawdown\b", re.I)
 
 
 def deterministic_risks(
@@ -1769,8 +1819,9 @@ def deterministic_risks(
     caveat is spelled out.
     """
     earnings: list[str] = []
-    earnings_line = _earnings_text(_as_dict(scores.get("sentiment_fundamentals")))
-    if earnings_line:
+    sf = _as_dict(scores.get("sentiment_fundamentals"))
+    earnings_line = _earnings_text(sf)
+    if earnings_line and _earnings_is_near(sf):
         earnings.append(f"Earnings event: {earnings_line}")
     rest: list[str] = []
     drawdown = _as_dict(scores.get("verification_gate")).get("max_drawdown")
@@ -1795,18 +1846,52 @@ def deterministic_risks(
     return earnings, rest
 
 
-def merge_risks(required: list[str], written: list[Any]) -> list[str]:
+def merge_risks(required: list[str], written: list[Any], *, drop_earnings: bool = False) -> list[str]:
     """``required`` first, then the writer's own risks not already covered
     (compared on the first 40 characters, case-insensitive; every line about
-    the earnings event counts as one risk, however it is worded)."""
+    the earnings event, or about a drawdown, counts as one risk however it is
+    worded). ``drop_earnings`` also leaves out the writer's lines about the
+    report date, when the data shows none near enough to matter."""
     out: list[str] = []
     seen: set[str] = set()
     for risk in [*required, *(str(r) for r in written if r)]:
-        key = "earnings event" if _EARNINGS_EVENT.search(risk) else risk.strip().lower()[:40]
+        is_earnings = bool(_EARNINGS_EVENT.search(risk))
+        if is_earnings and drop_earnings:
+            continue
+        if is_earnings:
+            key = "earnings event"
+        elif _DRAWDOWN_RISK.search(risk):
+            key = "drawdown"
+        else:
+            key = risk.strip().lower()[:40]
         if key and key not in seen:
             seen.add(key)
             out.append(risk)
     return out
+
+
+def _template_thesis(symbol: str, scores: dict[str, Any], expected_return: Any, horizon_months: int) -> str:
+    """What the data says, in sentences that cannot be wrong: the template's thesis."""
+    mom = _as_dict(scores.get("momentum_quality"))
+    fit = _as_dict(scores.get("portfolio_fit"))
+    quant = _as_dict(scores.get("quant_signals"))
+    sentences: list[str] = []
+    momentum = mom.get("momentum_12_1m")
+    if isinstance(momentum, (int, float)):
+        rank = mom.get("momentum_rank")
+        rank_text = f", at percentile {rank * 100:.0f} of the candidates" if isinstance(rank, (int, float)) else ""
+        sentences.append(f"{symbol} returned {momentum * 100:+.1f}% over the 12-1 month window{rank_text}.")
+    correlation = fit.get("correlation")
+    beta = quant.get("market_beta_weekly")
+    if isinstance(correlation, (int, float)) and isinstance(beta, (int, float)):
+        sentences.append(f"Its weekly correlation with the portfolio is {correlation:.2f} and its market beta {beta:.2f}.")
+    elif isinstance(correlation, (int, float)):
+        sentences.append(f"Its weekly correlation with the portfolio is {correlation:.2f}.")
+    if isinstance(expected_return, (int, float)):
+        sentences.append(f"The system's estimate over {horizon_months} months is {expected_return:+.1f}%.")
+    if not sentences:
+        return f"Quantitative assessment of {symbol} based on pipeline scores."
+    return " ".join([*sentences, "This summary comes straight from the data, without a written analysis."])
 
 
 def deterministic_template(
@@ -1841,11 +1926,21 @@ def deterministic_template(
         annual=annual,
     )
     earnings, data_risks = deterministic_risks(scores, signal_breakdown)
+    is_fund = instrument_type in ("etf", "fund")
+    correlation = _as_dict(scores.get("portfolio_fit")).get("correlation")
     key_risks = [
         *earnings,
         _MARKET_RISK,
-        "Currency risk: non-EUR denominated assets carry FX exposure.",
-        "Concentration risk: single-name exposure may exceed diversification targets.",
+        *(
+            ["Currency risk: non-EUR denominated assets carry FX exposure."]
+            if listing_currency(symbol) != "EUR" else []
+        ),
+        # A fund is many names; what it can do is repeat what the portfolio already holds.
+        *(
+            ([f"Overlap: a weekly correlation of {correlation:.2f} with the portfolio adds little diversification."]
+             if isinstance(correlation, (int, float)) and correlation >= DIVERSIFIER_MAX_CORRELATION else [])
+            if is_fund else ["Concentration risk: single-name exposure may exceed diversification targets."]
+        ),
         *data_risks,
     ]
 
@@ -1856,7 +1951,7 @@ def deterministic_template(
         "conviction": composite,
         "horizon_months": horizon_months,
         "expected_return": resolved["expected_return_pct"],
-        "thesis": f"Quantitative assessment of {symbol} based on pipeline scores.",
+        "thesis": _template_thesis(symbol, scores, resolved["expected_return_pct"], horizon_months),
         "key_risks": key_risks,
         "signal_breakdown": signal_breakdown,
         "estimate": True,

@@ -43,6 +43,7 @@ from app.decision.discover.pipeline import (
     fund_slots_for,
     run_candidate_pipeline,
     sector_cap_for,
+    shortlist_order,
 )
 from app.decision.discover.state import DiscoveryState, make_stage_json
 from app.decision.discover.tradeability import assess as assess_tradeability
@@ -439,8 +440,11 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
                         cand.reject_stage = "sector_cap"
                         cand.reject_reason = (
                             f"Sector or industry cap: at most {sector_cap_for(LLM_MAX_CANDIDATES)} per sector "
-                            f"({candidate_sector(result)}) and {INDUSTRY_CAP} per industry "
-                            f"({candidate_industry(result)})"
+                            f"({candidate_sector(result)})"
+                            + (
+                                f" and {INDUSTRY_CAP} per industry ({candidate_industry(result)})"
+                                if candidate_industry(result) else ""
+                            )
                         )
                     elif result.get("reject_stage") is None and result.get("fund_slots_full"):
                         cand.reject_stage = "fund_slots"
@@ -538,7 +542,7 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
                     r for r in pipeline_results
                     if r.get("reject_stage") is None and r["symbol"] not in shortlisted_symbols
                 ),
-                key=lambda r: r.get("composite_score", 0.0),
+                key=shortlist_order,
                 reverse=True,
             )
             # The backfill honours the same per-sector cap as the pipeline's
