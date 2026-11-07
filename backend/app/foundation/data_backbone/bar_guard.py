@@ -283,6 +283,27 @@ def guard_bars(
     return result
 
 
+def spike_reversal_positions(closes: list[float], guard_class: str = "single_stock") -> set[int]:
+    """Positions of one-day prints above the class's move limit that the next bar takes back.
+
+    For a read of stored history, which :func:`guard_bars` does not touch: it
+    moves only the newest stored bar. The next bar is measured against the bar
+    before the spike, as in :func:`guard_bars`.
+    """
+    limit = MOVE_LIMITS.get(guard_class, MOVE_LIMITS["single_stock"])
+    bad: set[int] = set()
+    prev = 0
+    for i in range(1, len(closes) - 1):
+        c_prev, c_t, c_next = closes[prev], closes[i], closes[i + 1]
+        if c_prev > 0 and c_t > 0 and c_next > 0:
+            r0 = c_t / c_prev - 1.0
+            if abs(r0) > limit and _is_reversal(r0, c_next / c_t - 1.0):
+                bad.add(i)
+                continue
+        prev = i
+    return bad
+
+
 def confirms(quarantined_close: float, other_close: float | None) -> bool:
     """True when a second provider's close for the same date is within 1 %."""
     if other_close is None or other_close <= 0 or quarantined_close <= 0:

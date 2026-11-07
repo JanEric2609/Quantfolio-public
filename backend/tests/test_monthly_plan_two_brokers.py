@@ -7,7 +7,7 @@ plan), cash at both, and the Scalable Tagesgeld.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -445,7 +445,9 @@ def test_month_endpoint_carries_the_new_fields():
     db = _memory_db()
     user_id = _user(db)
     _dkb(db, user_id)
-    _scalable(db, user_id)
+    # This endpoint reads today's date: fixed dates would read as overdue plans one day.
+    upcoming = (datetime.now(UTC).date() + timedelta(days=7)).isoformat()
+    _scalable(db, user_id, plans=[{**plan, "next_execution_date": upcoming} for plan in OWNER_PLANS])
     upsert_public_settings(db, {"emergency_reserve_eur": 500})
     user = db.get(User, user_id)
     app.dependency_overrides[get_db] = lambda: db

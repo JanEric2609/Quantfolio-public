@@ -51,7 +51,8 @@ P0 forward-prediction ledger (#111) and skill snapshots (#112) are this
 context's foundation. The ledger has two writers: Discover's weekly
 shortlist (`portfolio_id` NULL) and the advisor's daily calls (one row per
 ticker and paper sleeve, under the Discover run's `run_id`). Discover's skill
-summary, snapshot and calibrator read only their own source; advisor rows are
+summary, snapshot, calibrator, track-record gate and recency penalty read only
+their own source (`portfolio_id` NULL; never filter on `run_id`); advisor rows are
 ranked per sleeve and date, and holds carry no IC. Dates overlap (21 trading
 days per call), so the IC t is Newey-West, the hit-rate interval is clustered
 by date, and both wait for `MIN_INDEPENDENT_WINDOWS` (12) non-overlapping
@@ -177,3 +178,11 @@ serves `lab.quant_lab.pooled_ml`, not per-ticker models:
   `stale_or_small_cross_section`.
 - `discover_ml_training` (Saturdays) refits the model from stored bars
   of the miner universe, with a 6-day cooldown.
+
+Shortlist (audit of the 2026-11-05 run): stocks and funds compete in their own
+lanes because their composites rest on seven and four signals. Funds take at most
+a third of the slots, stocks the rest; each industry gets one name. The industry
+label comes from the provider and can be coarse (Finnhub's "Energy"), so this cap
+also tightens some sectors. `data_quality.py` reports which signals a name and a
+run went without; a dossier states its horizon, while the track record scores the
+estimate over 21 trading days and the trust ledger records 126 as well.

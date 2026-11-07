@@ -14,7 +14,7 @@ def test_preingest_invokes_progress_callback(monkeypatch):
 
     # M0: warm-up covers candidates PLUS the benchmark ETFs (appended after).
     candidates = ["AAA", "BBB", "CCC", "DDD"]
-    expected = [*candidates, *pipeline._benchmark_symbols()]
+    expected = [*candidates, *pipeline._benchmark_symbols(), *pipeline._fx_pairs_for(candidates)]
     seen: list[tuple[int, int, str]] = []
 
     pipeline._preingest_candidates(candidates, progress=lambda done, total, sym: seen.append((done, total, sym)))

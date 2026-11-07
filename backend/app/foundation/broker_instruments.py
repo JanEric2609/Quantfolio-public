@@ -84,6 +84,17 @@ def instrument_types(db: Session, isins: set[str]) -> dict[str, str]:
     return {isin: kind for isin, kind in rows if kind}
 
 
+def isin_for_us_ticker(db: Session, symbol: str) -> str | None:
+    """The ISIN of a US-listed *symbol* (no venue suffix) from Trading 212's list, if it has the line."""
+    ticker = f"{symbol.strip().upper()}_US_EQ"
+    if not _US_TICKER.match(ticker):
+        return None
+    row = db.query(BrokerInstrument.isin).filter(
+        BrokerInstrument.source == SOURCE, BrokerInstrument.ticker == ticker,
+    ).first()
+    return row[0] if row else None
+
+
 class Trading212Listings:
     """Per-ISIN answers from the stored list, each ISIN queried once."""
 

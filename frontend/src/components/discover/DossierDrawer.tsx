@@ -93,6 +93,33 @@ function formatReturn(value: number | null): string {
   return formatPercentPoints(value, { digits: 1, signed: true });
 }
 
+/** How the breakdown's sum connects to the score shown at the top. */
+function repeatPenaltyText(dossier: DiscoverDossier): string {
+  const fraction = dossier.recency_penalty?.penalty_fraction ?? 0;
+  if (dossier.composite_raw == null || fraction <= 0) {
+    return "The contributions add up to the score before any repeat-suggestion penalty.";
+  }
+  const days = dossier.recency_penalty?.days_since_last;
+  return (
+    `The contributions add up to ${formatNumber(dossier.composite_raw, { digits: 3 })}. Discover also suggested ` +
+    `this name ${days == null ? "recently" : `${Math.round(days)} days ago`} and it has not clearly improved, ` +
+    `which takes off ${formatPercent(fraction, { digits: 0 })}.`
+  );
+}
+
+/** Which signals the score had to go without; silent when nothing that applies is missing. */
+function DataQualityNote({ dossier }: { dossier: DiscoverDossier }) {
+  const quality = dossier.data_quality;
+  if (!quality || quality.missing.length === 0) return null;
+  return (
+    <p data-testid="data-quality" className="mt-1 text-xs text-text-muted">
+      Scored on {formatPercent(quality.weight_share, { digits: 0 })} of the signal weight. Missing:{" "}
+      {quality.missing.join(", ")}.
+      {quality.run_gaps.length > 0 && ` Missing for almost every stock in this run: ${quality.run_gaps.join(", ")}.`}
+    </p>
+  );
+}
+
 function anchorKindLabel(kind: DiscoverDossier["expected_return_anchor_kind"]): string | null {
   if (kind === "trailing_3y_annualized_return") return "trailing 3-year annualized return";
   if (kind === "momentum_12_1m") return "trailing 12-1 month momentum";
@@ -253,6 +280,13 @@ export function DossierDrawer({ open, onClose, dossier, symbol, concerns, name, 
                   {dossier.skill_horizon.benchmark ? ` vs ${dossier.skill_horizon.benchmark}` : ""}.)
                 </p>
               )}
+              {dossier.lane_rank != null && (
+                <p data-testid="lane-rank" className="mt-1 text-xs text-text-muted">
+                  Ranked only among {dossier.lane === "fund" ? "funds" : "stocks"}: ahead of{" "}
+                  {formatPercent(dossier.lane_rank, { digits: 0 })} of them in this run.
+                </p>
+              )}
+              <DataQualityNote dossier={dossier} />
             </section>
 
             {/* Return estimate */}
@@ -260,7 +294,15 @@ export function DossierDrawer({ open, onClose, dossier, symbol, concerns, name, 
               <h4 className="text-sm font-semibold text-text-primary mb-2">
                 {headlineLabel(dossier.expected_return_anchor_kind)}{" "}
                 <span className="font-normal text-text-muted">({dossier.horizon_months}mo horizon)</span>
+                {dossier.expected_return_anchor_years != null && dossier.expected_return_anchor_years < 2.9 && (
+                  <span data-testid="anchor-years" className="font-normal text-text-muted">
+                    {" "}· trailing return covers {dossier.expected_return_anchor_years} years
+                  </span>
+                )}
               </h4>
+              {dossier.scoring_note && (
+                <p data-testid="scoring-note" className="mb-2 text-xs text-text-muted">{dossier.scoring_note}</p>
+              )}
               <div className="flex items-center gap-3">
                 <span className="text-2xl font-bold text-text-primary">
                   {formatReturn(dossier.expected_return)}
@@ -427,7 +469,7 @@ export function DossierDrawer({ open, onClose, dossier, symbol, concerns, name, 
                   </CardContent>
                 </Card>
                 <p className="text-xs text-text-muted mt-1">
-                  The contributions add up to the score before any repeat-suggestion penalty.
+                  {repeatPenaltyText(dossier)}
                 </p>
               </section>
             )}

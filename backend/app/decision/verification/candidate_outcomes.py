@@ -28,11 +28,12 @@ from app.foundation.models.entities import CandidateOutcome, DiscoverCandidateSn
 
 logger = logging.getLogger(__name__)
 
-HORIZONS = (5, 10, 21, 63)
+#: 126 trading days is the six months a dossier's return estimate is stated over.
+HORIZONS = (5, 10, 21, 63, 126)
 GRACE_DAYS = 30
 MAX_ENTRY_GAP_DAYS = 7
-#: Snapshots older than this cannot still be waiting (63 trading days + grace).
-_LOOKBACK_DAYS = 200
+#: Snapshots older than this cannot still be waiting (126 trading days + grace).
+_LOOKBACK_DAYS = 290
 _PAD_DAYS = 15
 
 

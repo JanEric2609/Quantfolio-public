@@ -38,7 +38,8 @@ from app.decision.discover.composite import (
     derive_signals_from_scores,
 )
 from app.decision.discover.config import get_or_seed_active_config
-from app.decision.discover.listing import is_eu_listing
+from app.decision.discover.data_quality import BOOK_EQUITY_CONCERN, stamp_data_quality
+from app.decision.discover.listing import is_eu_listing, listing_currency
 from app.foundation.data_backbone.listing_currency import resolve_currency
 from app.decision.discover.regime_gate import MacroRegimeGate
 from app.foundation.etf_overlap import pairwise_overlap
@@ -147,7 +148,15 @@ def _apply_recency_penalty(
 
     last = (
         db.query(DiscoveryPrediction)
-        .filter(DiscoveryPrediction.user_id == user_id, DiscoveryPrediction.symbol == symbol)
+        .filter(
+            DiscoveryPrediction.user_id == user_id,
+            DiscoveryPrediction.symbol == symbol,
+            # Discover's own rows. The advisor cycle writes to the same ledger
+            # with a portfolio_id and no composite_raw, so its call on MPC on
+            # 2026-10-05 hid Discover's last score and blocked the exemption
+            # (Discover audit, 2026-11-06).
+            DiscoveryPrediction.portfolio_id.is_(None),
+        )
         .order_by(DiscoveryPrediction.predicted_at.desc())
         .first()
     )
@@ -248,6 +257,19 @@ def _benchmark_symbols() -> list[str]:
     return _ordered_unique(
         [_BENCHMARK_EUROPE, _BENCHMARK_US, _BENCHMARK_GLOBAL_ETF, _BENCHMARK_JAPAN, *bond_refs]
     )
+
+
+def _fx_pairs_for(symbols: list[str]) -> list[str]:
+    """The ``USD<ccy>=X`` series the EUR restatement of *symbols* needs.
+
+    Warmed like any other symbol, so a pair gets its full window once and then
+    only the missing days. Nothing else ingests a pair over a long window:
+    USDJPY=X was first stored by the universe's 10-day market-cap lookup, so
+    every Tokyo listing had a few weeks of EUR closes and failed portfolio fit
+    (Discover audit, 2026-11-06).
+    """
+    currencies = {"EUR", *(listing_currency(s) for s in symbols)} - {"USD", ""}
+    return [f"USD{ccy}=X" for ccy in sorted(currencies)]
 
 
 def _ordered_unique(symbols: list[str]) -> list[str]:
@@ -369,7 +391,7 @@ def _preingest_candidates(
     """
     if not symbols:
         return {"requested": 0, "ok": 0, "failed": []}
-    symbols = _ordered_unique([*symbols, *_benchmark_symbols()])
+    symbols = _ordered_unique([*symbols, *_benchmark_symbols(), *_fx_pairs_for(symbols)])
     total = len(symbols)
     logger.info("pre-ingest: warming bar-price cache for %d symbols", total)
     executor = ThreadPoolExecutor(max_workers=_PREINGEST_MAX_WORKERS)
@@ -1049,6 +1071,30 @@ def _sane_revenue_growth(
     return rg, None
 
 
+_BOOK_MAX_PB = 50.0
+_BOOK_MAX_DE_PCT = 1000.0
+_BOOK_MAX_ROE = 1.0
+_BOOK_LEVERED_DE_PCT = 300.0
+
+
+def _book_ratios_unreliable(
+    pb: float | None, roe: float | None, de: float | None, *, sector: str | None, industry: str | None,
+) -> bool:
+    """True when buybacks or losses have left book equity near zero.
+
+    PM's P/B of 2936 and D/E of 18608 % on 2026-11-05 scored as data (Discover
+    audit, 2026-11-06). A high ROE alone is real (NVDA 110 % with D/E 15 %), so
+    it counts only with heavy leverage. A bank's debt/equity is its business:
+    high leverage does not mark its equity as near zero.
+    """
+    if pb is not None and pb > _BOOK_MAX_PB:
+        return True
+    if roe is not None and de is not None and roe > _BOOK_MAX_ROE and de > _BOOK_LEVERED_DE_PCT:
+        return True
+    financial = bool(_FINANCIALS.search(f"{sector or ''} {industry or ''}"))
+    return de is not None and de > _BOOK_MAX_DE_PCT and not financial
+
+
 def stage_sentiment_fundamentals(
     db: Session,
     symbol: str,
@@ -1126,6 +1172,12 @@ def stage_sentiment_fundamentals(
         if rg_concern:
             result["concerns"].append(rg_concern)
 
+        if _book_ratios_unreliable(pb, roe, de, sector=result["sector"], industry=result["industry"]):
+            # The ratios divide by almost nothing: they say nothing about value,
+            # profitability or debt, so they are neither scored nor shown.
+            pb = roe = de = None
+            result["concerns"].append(BOOK_EQUITY_CONCERN)
+
         result["pe"] = pe
         result["pb"] = pb
         result["roe"] = roe
@@ -1191,7 +1243,30 @@ def stage_sentiment_fundamentals(
 # Stage 2 — momentum quality (backward-looking)
 # ---------------------------------------------------------------------------
 
-def _closes_in_eur(db: Session, symbol: str, df: pd.DataFrame) -> tuple[pd.DataFrame, str]:
+#: Days of closes every risk and momentum figure of one candidate is measured on.
+_RISK_WINDOW_DAYS = 400
+
+
+def _without_spike_reversals(db: Session, symbol: str, df: pd.DataFrame, *, is_etf: bool) -> tuple[pd.DataFrame, int]:
+    """``df`` without one-day bad prints, and how many it dropped.
+
+    The ingest guard moves only the newest stored bar to quarantine and reads the
+    move limit from the ``Asset`` row. XDEQ.DE's 2025-10-24 close (79.54 between
+    68.21 and 68.96) has neither, and gave a false 15.8 % drawdown.
+    """
+    from app.foundation.data_backbone.bar_guard import guard_class_for, spike_reversal_positions
+
+    guard_class = guard_class_for(db, symbol)
+    if is_etf and guard_class == "single_stock":
+        guard_class = "equity_etf"
+    bad = spike_reversal_positions([float(c) for c in df["close"]], guard_class)
+    if not bad:
+        return df, 0
+    logger.info("Dropped %d bad print(s) from %s", len(bad), symbol)
+    return df.iloc[[i for i in range(len(df)) if i not in bad]], len(bad)
+
+
+def _closes_in_eur(db: Session, symbol: str, df: pd.DataFrame, *, fx_days: int = 430) -> tuple[pd.DataFrame, str]:
     """``df`` with ``close`` restated in EUR, and ``"eur"``; or the frame as it
     was and ``"local"`` when no rate covers it (better a flagged local series
     than dropping the candidate)."""
@@ -1199,7 +1274,7 @@ def _closes_in_eur(db: Session, symbol: str, df: pd.DataFrame) -> tuple[pd.DataF
 
     closes = {str(d)[:10]: float(c) for d, c in zip(df["date"], df["close"]) if float(c) > 0}
     try:
-        eur, _ccy = eur_prices.to_eur(db, symbol, closes, days=430)
+        eur, _ccy = eur_prices.to_eur(db, symbol, closes, days=fx_days)
     except Exception:  # noqa: BLE001 - an FX outage must not fail the stage
         logger.debug("stage_momentum_quality: EUR restatement failed for %s", symbol, exc_info=True)
         eur = {}
@@ -1215,6 +1290,8 @@ def _closes_in_eur(db: Session, symbol: str, df: pd.DataFrame) -> tuple[pd.DataF
 def stage_momentum_quality(
     db: Session,
     symbol: str,
+    *,
+    is_etf: bool = False,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Compute 12-1m momentum, 6m volatility, max drawdown.
 
@@ -1223,7 +1300,7 @@ def stage_momentum_quality(
     genuine inability to compute (no price data) is a hard failure.
     """
     logger.debug("stage_momentum_quality: %s", symbol)
-    rows = market_history(db, symbol, days=400)
+    rows = market_history(db, symbol, days=_RISK_WINDOW_DAYS)
     if not rows:
         return None, "momentum_quality: no price data"
 
@@ -1232,6 +1309,7 @@ def stage_momentum_quality(
         return None, "momentum_quality: no close prices"
 
     df = df.dropna(subset=["close"]).sort_values("date")
+    df, bad_prints = _without_spike_reversals(db, symbol, df, is_etf=is_etf)
     # In EUR, like the benchmark legs and the owner's own returns: a dollar
     # stock's momentum otherwise ranked on its dollar move (plan 2026-10-14, M4).
     df, fx_basis = _closes_in_eur(db, symbol, df)
@@ -1286,6 +1364,7 @@ def stage_momentum_quality(
         "max_drawdown": round(mdd, 4),
         "trailing_1m_annualized_return": round(float(trailing_1m_annualized_return), 4),
         "fx_basis": fx_basis,
+        "bad_prints_dropped": bad_prints,
         "concerns": concerns,
     }
     logger.debug("stage_momentum_quality: %s mom=%.2f vol=%.2f concerns=%d", symbol, momentum, vol, len(concerns))
@@ -1518,6 +1597,7 @@ def stage_backtest_vs_benchmark(
     scores = {
         "excess_return_annual": round(excess, 4),
         "candidate_return_annual": round(cand_ann, 4),
+        "candidate_return_years": round(years, 1),
         "sharpe_delta": round(sharpe_delta, 4),
         "candidate_sharpe": round(cand_sharpe, 4),
         "benchmark_sharpe": round(bench_sharpe, 4),
@@ -1543,6 +1623,8 @@ def stage_backtest_vs_benchmark(
 def stage_verification_gate(
     db: Session,
     symbol: str,
+    *,
+    is_etf: bool = False,
 ) -> tuple[dict[str, Any] | None, str | None]:
     """Verification-style risk assessment on the candidate's own price history.
 
@@ -1551,11 +1633,16 @@ def stage_verification_gate(
     inability to compute (no data / too few returns) is a hard failure.
     """
     logger.debug("stage_verification_gate: %s", symbol)
-    rows = market_history(db, symbol, days=365)
+    rows = market_history(db, symbol, days=_RISK_WINDOW_DAYS)
     if not rows:
         return None, "verification_gate: no price data"
 
     df = pd.DataFrame(rows).dropna(subset=["close"]).sort_values("date")
+    # The same window and currency as stage_momentum_quality: a dollar stock's
+    # risk used to be its dollar risk over a shorter window, so one dossier
+    # carried two different drawdowns (Discover audit, 2026-11-06).
+    df, _bad_prints = _without_spike_reversals(db, symbol, df, is_etf=is_etf)
+    df, fx_basis = _closes_in_eur(db, symbol, df)
     if len(df) < 60:
         return None, f"verification_gate: only {len(df)} rows (< 60)"
 
@@ -1580,6 +1667,7 @@ def stage_verification_gate(
         "volatility": round(vol, 4),
         "max_drawdown": round(mdd, 4),
         "sharpe": round(sharpe, 4),
+        "fx_basis": fx_basis,
         "concerns": concerns,
     }
     logger.debug("stage_verification_gate: %s vol=%.2f mdd=%.2f concerns=%d", symbol, vol, mdd, len(concerns))
@@ -1871,11 +1959,9 @@ def stage_portfolio_fit(
 
     cand_df = pd.DataFrame(cand_rows).dropna(subset=["close"]).sort_values("date")
     # In EUR like the portfolio matrix: correlation as an investor in EUR sees it.
-    from app.foundation.eur_prices import to_eur
-
-    eur, _ccy = to_eur(db, symbol, {str(d)[:10]: float(c) for d, c in zip(cand_df["date"], cand_df["close"])})
-    if eur:
-        cand_df = pd.DataFrame({"date": list(eur), "close": list(eur.values())}).sort_values("date")
+    # A gap in the FX history falls back to flagged local closes: it says nothing
+    # about the candidate, so it must not reject it.
+    cand_df, fx_basis = _closes_in_eur(db, symbol, cand_df, fx_days=_FIT_HISTORY_DAYS + 30)
     if len(cand_df) < 60:
         return None, f"portfolio_fit: candidate only {len(cand_df)} rows"
 
@@ -1959,6 +2045,7 @@ def stage_portfolio_fit(
         "correlation": round(corr, 4),
         "correlation_basis": "weekly",
         "correlation_weeks": len(common),
+        "fx_basis": fx_basis,
         "weight_basis": weight_basis,
         "overlap": round(overlap, 4) if is_etf else None,
         "fit_score": round(fit_score, 4),
@@ -2329,7 +2416,7 @@ def run_candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_momentum_quality(db, symbol)
+            s, r = stage_momentum_quality(db, symbol, is_etf=is_etf)
             if r:
                 reject_stage = "momentum_quality"
                 reject_reason = r
@@ -2356,7 +2443,7 @@ def run_candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_verification_gate(db, symbol)
+            s, r = stage_verification_gate(db, symbol, is_etf=is_etf)
             if r:
                 reject_stage = "verification_gate"
                 reject_reason = r
@@ -2453,6 +2540,7 @@ def run_candidate_pipeline(
             "reject_stage": reject_stage,
             "reject_reason": reject_reason,
             "composite_score": round(composite, 4),
+            "lane": LANE_FUND if is_etf else LANE_STOCK,
         }
 
         if results_out is not None:
@@ -2501,16 +2589,18 @@ def run_candidate_pipeline(
             scores["recency_penalty"] = recency_detail
         result["composite_score"] = round(composite, 4)
 
-    # Rank all evaluable candidates by composite and hand the best N to the LLM,
-    # at most sector_cap_for(N) per sector. Quality gates are advisory now, so
+    stamp_data_quality(shortlisted, weights=signal_weights)
+
+    # Rank all evaluable candidates by composite and hand the best N to the LLM:
+    # stocks and funds in their own lanes, at most sector_cap_for(N) per sector
+    # and INDUSTRY_CAP per industry. Quality gates are advisory now, so
     # "evaluable" means the candidate had enough data to score — not that it
     # cleared a quality bar.
     shortlisted.sort(key=lambda x: x["composite_score"], reverse=True)
-    selected, capped = apply_sector_cap(shortlisted, LLM_MAX_CANDIDATES)
-    for result in capped:
-        result["sector_capped"] = True
+    assign_lane_ranks(shortlisted)
+    selected, capped = select_shortlist(shortlisted, LLM_MAX_CANDIDATES)
     logger.info(
-        "run_candidate_pipeline: %d evaluable of %d, handing top %d to LLM (%d skipped by sector cap)",
+        "run_candidate_pipeline: %d evaluable of %d, handing top %d to LLM (%d skipped by a cap)",
         len(shortlisted), total, len(selected), len(capped),
     )
     return selected
@@ -2531,6 +2621,16 @@ MOMENTUM_RANK_MIN_CANDIDATES = 20
 # momentum (Moskowitz & Grinblatt 1999), so an uncapped momentum-weighted
 # ranking turns into one sector bet.
 SECTOR_CAP_FRACTION = 0.2
+
+# At most this many names from one industry. A sector cap let PM and MO (both
+# tobacco, weekly correlation 0.58) and ELV and CI (both health insurers, 0.46)
+# through on 2026-11-05: two slots for one bet (Discover audit, 2026-11-06).
+INDUSTRY_CAP = 1
+
+LANE_STOCK = "stock"
+LANE_FUND = "fund"
+#: The share of the shortlist funds may take while stocks are left to fill it.
+FUND_SHARE = 1 / 3
 
 
 #: ETF classes that are not ranked on momentum against equities (D4).
@@ -2626,8 +2726,58 @@ def candidate_sector(result: dict[str, Any]) -> str | None:
     return sector if isinstance(sector, str) and sector else None
 
 
+def candidate_industry(result: dict[str, Any]) -> str | None:
+    """Industry recorded by stage_sentiment_fundamentals, or None (funds, gaps)."""
+    scores = result.get("scores")
+    sf = scores.get("sentiment_fundamentals") if isinstance(scores, dict) else None
+    industry = sf.get("industry") if isinstance(sf, dict) else None
+    return industry if isinstance(industry, str) and industry else None
+
+
 def sector_cap_for(limit: int) -> int:
     return max(2, int(limit * SECTOR_CAP_FRACTION))
+
+
+def fund_slots_for(limit: int) -> int:
+    """How many of a shortlist of *limit* names may be funds while stocks are left to fill it."""
+    return max(1, int(limit * FUND_SHARE))
+
+
+def assign_lane_ranks(ranked: list[dict[str, Any]]) -> None:
+    """Stamp ``scores["lane_rank"]``: the percentile of the composite within the candidate's own lane."""
+    for lane in (LANE_STOCK, LANE_FUND):
+        members = [r for r in ranked if r.get("lane", LANE_STOCK) == lane]
+        ordered = sorted(members, key=lambda r: r["composite_score"])
+        for position, result in enumerate(ordered):
+            if isinstance(result.get("scores"), dict):
+                result["scores"]["lane"] = lane
+                result["scores"]["lane_rank"] = round((position + 0.5) / len(ordered), 4)
+
+
+def select_shortlist(
+    ranked: list[dict[str, Any]], limit: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The shortlist from *ranked* (best first): (selected, capped).
+
+    A fund is scored on four signals and a stock on seven, so their composites
+    are not comparable: IS3S.DE ranked first on 2026-11-05 partly because of it
+    (Discover audit, 2026-11-06). Each lane therefore competes only with itself.
+    Funds take at most :func:`fund_slots_for`, stocks the rest; slots a lane
+    cannot fill go to the other.
+    """
+    funds = [r for r in ranked if r.get("lane") == LANE_FUND]
+    stocks = [r for r in ranked if r.get("lane") != LANE_FUND]
+    picked_funds = funds[: fund_slots_for(limit)]
+    picked_stocks, capped = apply_sector_cap(stocks, limit, already_selected=picked_funds)
+    spare = limit - len(picked_funds) - len(picked_stocks)
+    extra_funds = funds[len(picked_funds):][: max(0, spare)]
+    for result in capped:
+        result["sector_capped"] = True
+    for result in funds[len(picked_funds) + len(extra_funds):]:
+        result["fund_slots_full"] = True
+    selected = [*picked_funds, *extra_funds, *picked_stocks]
+    selected.sort(key=lambda x: x["composite_score"], reverse=True)
+    return selected, capped
 
 
 def apply_sector_cap(
@@ -2639,25 +2789,35 @@ def apply_sector_cap(
     ``sector_cap_for(limit)`` per sector counting *already_selected*.
 
     Returns ``(selected, capped)``: *capped* holds the better-ranked results
-    skipped because their sector was full, so callers can say why. Results
-    without a sector (funds, missing fundamentals) are never capped.
+    skipped because their sector or industry was full, so callers can say why.
+    Results without a sector or industry (funds, missing fundamentals) are
+    never capped on it.
     """
     cap = sector_cap_for(limit)
     counts: dict[str, int] = {}
+    industries: dict[str, int] = {}
     for result in already_selected or []:
         sector = candidate_sector(result)
         if sector is not None:
             counts[sector] = counts.get(sector, 0) + 1
+        industry = candidate_industry(result)
+        if industry is not None:
+            industries[industry] = industries.get(industry, 0) + 1
     selected: list[dict[str, Any]] = []
     capped: list[dict[str, Any]] = []
     for result in ranked:
         if len(selected) + len(already_selected or []) >= limit:
             break
         sector = candidate_sector(result)
-        if sector is not None and counts.get(sector, 0) >= cap:
+        industry = candidate_industry(result)
+        if (sector is not None and counts.get(sector, 0) >= cap) or (
+            industry is not None and industries.get(industry, 0) >= INDUSTRY_CAP
+        ):
             capped.append(result)
             continue
         if sector is not None:
             counts[sector] = counts.get(sector, 0) + 1
+        if industry is not None:
+            industries[industry] = industries.get(industry, 0) + 1
         selected.append(result)
     return selected, capped

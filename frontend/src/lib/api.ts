@@ -3012,7 +3012,35 @@ export interface DiscoverDossier {
   recommendation_label?: string | null;
   /** Years of live data needed to tell skill from luck at this tracking error. */
   skill_horizon?: DiscoverSkillHorizon | null;
+  /** Score before the repeat-suggestion penalty; the breakdown adds up to it. */
+  composite_raw?: number | null;
+  recency_penalty?: DiscoverRecencyPenalty | null;
+  /** Stocks and funds are ranked apart; lane_rank is the percentile within the lane. */
+  lane?: "stock" | "fund" | null;
+  lane_rank?: number | null;
+  data_quality?: DiscoverDataQuality | null;
+  /** Price-history coverage times the share of signal weight with data, 0-1. */
+  data_quality_score?: number | null;
+  /** Years the trailing-return anchor really covers. */
+  expected_return_anchor_years?: number | null;
+  /** How the track record scores the estimate, next to the dossier's own horizon. */
+  scoring_note?: string | null;
   created_at: string | null;
+}
+
+export interface DiscoverRecencyPenalty {
+  penalty_fraction: number;
+  days_since_last: number | null;
+  last_composite: number | null;
+  exempt_reason: string | null;
+}
+
+export interface DiscoverDataQuality {
+  weight_share: number;
+  /** Signals that apply to this instrument and had no data. */
+  missing: string[];
+  /** Those almost no stock in the run had: a data problem of the run. */
+  run_gaps: string[];
 }
 
 export interface DiscoverSkillHorizon {

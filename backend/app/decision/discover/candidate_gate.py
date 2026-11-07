@@ -179,7 +179,9 @@ def evaluate_track_record(
     """
     clock = now or datetime.now(UTC)
     cohort = [
-        r for r in db.query(DiscoveryPrediction).all()
+        # Discover's own rows: the advisor cycle's calls (portfolio_id set) carry
+        # no instrument type, so they used to fall into the equity cohort.
+        r for r in db.query(DiscoveryPrediction).filter(DiscoveryPrediction.portfolio_id.is_(None)).all()
         if r.predicted_at is not None
         and _resolve_cohort_instrument_type(r.features_json) == instrument_type
     ]

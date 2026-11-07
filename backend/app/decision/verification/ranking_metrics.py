@@ -8,7 +8,7 @@ rows and their ``candidate_outcome`` forward returns:
   the evaluable **stocks** of runs with at least 30 of them; the mean IC with a
   Newey-West t (lag 5 runs: weekly runs, 21-day windows overlap), the ICIR and
   the share of runs with IC > 0;
-* IC decay across 5/10/21/63 trading days;
+* IC decay across 5/10/21/63/126 trading days;
 * quintile mean excess returns, and the picked names against the rest of the
   evaluable stocks (run-paired);
 * sector-neutral IC (ranks demeaned within sector);
@@ -36,7 +36,7 @@ from app.decision.verification.daily_ledger import MIN_RANKING_STOCKS
 from app.foundation import forecast_verification as fv
 from app.foundation.models.entities import CandidateOutcome, DiscoverCandidateSnapshot
 
-HORIZONS = (5, 10, 21, 63)
+HORIZONS = (5, 10, 21, 63, 126)
 MAIN_HORIZON = 21
 #: Newey-West lag in runs for the mean IC (ADR 0018 §5).
 IC_HAC_LAG = 5

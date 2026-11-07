@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -19,6 +20,8 @@ from app.decision.discover.candidate_gate import (
 )
 from app.decision.discover.composite import ic_signal_usable
 from app.decision.discover.config import DEFAULT_PROMPT_TEMPLATE
+from app.decision.discover.data_quality import BOOK_EQUITY_CONCERN, data_quality_score
+from app.decision.discover.ledger import DEFAULT_HORIZON_DAYS
 from app.decision.discover.thesis_checks import check_thesis
 from app.foundation.expected_return import (
     EQUITY_PREMIUM_OVER_CASH,
@@ -80,6 +83,14 @@ _THESIS_RULES = (
     "show that direction.\n"
     "- Direction and horizon are fixed by the system (above); do not argue the opposite stance.\n"
     "- The investor holds EUR. Mention currency risk only if the listing or reporting currency is not EUR.\n"
+    "- Name each figure as the facts name it. The only momentum figure is 12-1 month (never call it 1-month, "
+    "3-month or 12-month); momentum_rank is a percentile, not a return; trailing_1m_annualized_return is "
+    "annualised, not the month's move; correlation and beta are different figures; debt_equity is in percent; a "
+    "past drawdown is not a limit.\n"
+    "- Call momentum strong only near the top of the candidates, and a position a diversifier only at a low "
+    "correlation with the portfolio. Name a fund's holdings only from the holdings given.\n"
+    "- key_risks are risks to the investment. A missing data feed is not one; leave those out. Write no codes "
+    "with underscores.\n"
     "- English only.\n"
 )
 
@@ -151,6 +162,9 @@ class DossierOutputModel(BaseModel):
     not_financial_advice: bool = True
 
 
+SKILL_HORIZON_CEILING_YEARS = 100
+
+
 def skill_horizon(tracking_error: Any, benchmark: Any) -> dict[str, Any] | None:
     """Years of live data a t of 2 needs at this tracking error: (2 * TE / alpha)^2.
 
@@ -160,14 +174,21 @@ def skill_horizon(tracking_error: Any, benchmark: Any) -> dict[str, Any] | None:
         return None
     te = float(tracking_error)
     years = {f"alpha_{int(a * 100)}pct": round((2.0 * te / a) ** 2, 1) for a in (0.01, 0.02)}
+
+    def about(value: float) -> str:
+        # A figure this rough has no decimals; "657.9 years" only sounded measured.
+        if value >= SKILL_HORIZON_CEILING_YEARS:
+            return f"more than {SKILL_HORIZON_CEILING_YEARS} years"
+        return f"about {value:.0f} years" if value >= 10 else f"about {value:g} years"
+
     return {
         "tracking_error": round(te, 4),
         "benchmark": benchmark,
         "basis": "weekly active returns, last 2 years",
         "years": years,
         "text": (
-            f"At this tracking error ({te:.0%}/yr), a 2 %/yr edge needs about {years['alpha_2pct']:g} years "
-            f"of live data to show, a 1 %/yr edge about {years['alpha_1pct']:g}."
+            f"At this tracking error ({te:.0%}/yr), a 2 %/yr edge needs {about(years['alpha_2pct'])} "
+            f"of live data to show, a 1 %/yr edge {about(years['alpha_1pct'])}."
         ),
     }
 
@@ -350,6 +371,23 @@ _SHORT_HISTORY_PROMPT_REWORD = (
 )
 
 
+#: Raw concern codes the model copied into key_risks word for word on 2026-11-05.
+_CONCERN_PROMPT_REWORDS = {
+    "alphacrafter_no_validated_factors": "(data note, not a risk) no validated alpha factors in this run",
+    "insider_data_unavailable": "(data note, not a risk) no insider-trading data for this name in this run",
+    "ml_signal_unavailable": "(data note, not a risk) no ML signal in this run",
+    "estimate_data_unavailable": "(data note, not a risk) no estimate-revision data for this name in this run",
+    "analyst_unavailable": "(data note, not a risk) no analyst consensus for this name in this run",
+    "fundamentals_unavailable": "(data note, not a risk) no fundamentals for this name in this run",
+    "sentiment_unavailable": "(data note, not a risk) no news sentiment for this name in this run",
+    "revenue_growth_unreliable": "(data note, not a risk) the provider's revenue growth is unreliable and was dropped",
+    "book_equity_near_zero": (
+        "book equity is near zero after buybacks or losses, so P/B, ROE and debt/equity are not meaningful "
+        "and are not given; do not cite them"
+    ),
+}
+
+
 def _reword_concerns_for_prompt(value: Any) -> Any:
     """Deep-copy *value*, rewording the bare ``"short_history"`` concern token.
 
@@ -364,11 +402,18 @@ def _reword_concerns_for_prompt(value: Any) -> Any:
     """
     if isinstance(value, list):
         return [
-            _SHORT_HISTORY_PROMPT_REWORD if v == "short_history" else _reword_concerns_for_prompt(v)
+            _SHORT_HISTORY_PROMPT_REWORD if v == "short_history"
+            else _CONCERN_PROMPT_REWORDS[v] if isinstance(v, str) and v in _CONCERN_PROMPT_REWORDS
+            else _reword_concerns_for_prompt(v)
             for v in value
         ]
     if isinstance(value, dict):
-        return {k: _reword_concerns_for_prompt(v) for k, v in value.items()}
+        # regime_affinity is the same 1.0 for every candidate, and the model
+        # sold it as "strong regime affinity"; data_quality is for the reader.
+        return {
+            k: _reword_concerns_for_prompt(v) for k, v in value.items()
+            if k not in ("regime_affinity", "data_quality")
+        }
     return value
 
 
@@ -462,6 +507,9 @@ _ANCHOR_KIND_TEXT: dict[str, str] = {
 
 def _pct(value: Any, digits: int = 1) -> str:
     return f"{float(value):+.{digits}f}%" if isinstance(value, (int, float)) else "n/a"
+
+
+FULL_ANCHOR_YEARS = 2.9
 
 
 def _grounding_prompt_lines(scores: dict[str, Any], annual: dict[str, Any]) -> str:
@@ -591,6 +639,7 @@ def _grounding_prompt_lines(scores: dict[str, Any], annual: dict[str, Any]) -> s
     return "".join(f"{line}\n" for line in lines)
 
 
+EARNINGS_IMMINENT_DAYS = 1
 _EARNINGS_HOURS = {"bmo": "before the open", "amc": "after the close", "dmh": "during market hours"}
 
 
@@ -603,6 +652,12 @@ def _earnings_text(sf: dict[str, Any]) -> str | None:
     window_end = sf.get("earnings_date_to")
     when = f"{report_day} to {window_end} (not confirmed)" if isinstance(window_end, str) else report_day
     hour = _EARNINGS_HOURS.get(str(sf.get("earnings_hour")))
+    if days <= EARNINGS_IMMINENT_DAYS:
+        # CI reported on its 2026-11-05 run date: the score could not see the results.
+        return (
+            f"Next earnings report: {when}{', ' + hour if hour else ''}, {days} days from now, so the price and "
+            "analyst targets used here may predate the results."
+        )
     return f"Next earnings report: {when}{', ' + hour if hour else ''}, {days} days from now."
 
 
@@ -685,6 +740,10 @@ def write_dossier(
         for key in ("sector", "industry"):
             if not fundamentals.get(key) and sf_scores.get(key):
                 fundamentals[key] = sf_scores[key]
+        if BOOK_EQUITY_CONCERN in (sf_scores.get("concerns") or []):
+            # Not shown either: the prompt would otherwise narrate a P/B of 2936.
+            for key in ("pb_ratio", "roe", "debt_equity"):
+                fundamentals.pop(key, None)
     ml_scores = _as_dict(scores.get("ml_signal"))
     ml_regime_context = _as_dict(ml_scores.get("regime_context"))
     estimate_revision_scores = _as_dict(scores.get("estimate_revision_signal"))
@@ -806,6 +865,16 @@ def write_dossier(
 
     evaluated_signals = {k: v for k, v in signal_breakdown.items() if v is not None}
     grounding_lines = _grounding_prompt_lines(scores, annual_estimate)
+    if (
+        annual_estimate.get("anchor_kind") == "trailing_3y_annualized_return"
+        and isinstance(backtest_raw.get("candidate_return_years"), (int, float))
+        and backtest_raw["candidate_return_years"] < FULL_ANCHOR_YEARS
+    ):
+        # GEV's "3-year" return on 2026-11-05 covered 2.6 years.
+        grounding_lines += (
+            f"The trailing return covers only {backtest_raw['candidate_return_years']} years of history, "
+            "not 3; say so if you cite it.\n"
+        )
 
     candidate_isin = candidate.get("isin") if isinstance(candidate, dict) else getattr(candidate, "isin", None)
     instrument_facts = _gather_instrument_facts(db, symbol, candidate_isin, instrument_type, fundamentals)
@@ -883,6 +952,11 @@ def write_dossier(
         {"role": "user", "content": context},
     ]
 
+    quality_score = data_quality_score(
+        _as_dict(scores.get("history_ingest")).get("coverage"), scores.get("data_quality"),
+    )
+    anchor_years = backtest_raw.get("candidate_return_years")
+
     final_dossier: dict[str, Any] | None = None
     generated_by = "llm"
     fallback_reason: str | None = None
@@ -928,6 +1002,9 @@ def write_dossier(
                         macro=macro,
                         direction=direction,
                         symbol=symbol,
+                        momentum_rank=mom_raw.get("momentum_rank"),
+                        correlation=portfolio_fit_raw.get("correlation"),
+                        is_fund=instrument_type in ("etf", "fund"),
                     )
                     if check.ok:
                         candidate_dossier["thesis"] = check.thesis
@@ -935,7 +1012,7 @@ def write_dossier(
                         # (plan 2026-10-14, M3).
                         earnings, data_risks = deterministic_risks(scores, signal_breakdown)
                         candidate_dossier["key_risks"] = merge_risks(
-                            [*earnings, *data_risks], list(check.key_risks),
+                            [*earnings, *data_risks], list(check.key_risks) or [_MARKET_RISK],
                         )[:_MAX_RISKS]
                         final_dossier = candidate_dossier
                         break
@@ -1012,6 +1089,20 @@ def write_dossier(
     # drove the score rather than a hand-picked subset of inputs.
     composite_inputs = scores.get("composite_inputs")
     final_dossier["composite_breakdown"] = composite_inputs if isinstance(composite_inputs, list) else None
+    # The breakdown adds up to the score before the recency penalty: say how
+    # the two connect (Discover audit, 2026-11-06: ROST summed to 0.613, scored 0.539).
+    final_dossier["composite_raw"] = scores.get("composite_raw")
+    final_dossier["recency_penalty"] = recency_penalty or None
+    final_dossier["lane"] = scores.get("lane")
+    final_dossier["lane_rank"] = scores.get("lane_rank")
+    final_dossier["data_quality"] = _as_dict(scores.get("data_quality")) or None
+    final_dossier["expected_return_anchor_years"] = (
+        anchor_years if resolved["anchor_kind"] == "trailing_3y_annualized_return" else None
+    )
+    final_dossier["scoring_note"] = (
+        f"The track record scores this estimate restated over {DEFAULT_HORIZON_DAYS} trading days. "
+        f"The {horizon_months}-month outcome is recorded in the trust ledger after 126 trading days."
+    )
     final_dossier["signal_breakdown"] = signal_breakdown
     # Non-directional macro/volatility regime context (authoritative substitute
     # signal for passive ETFs whose directional ML model is unavailable by design).
@@ -1019,6 +1110,7 @@ def write_dossier(
     final_dossier["expected_return_anchor_kind"] = resolved["anchor_kind"]
     if resolved["band"] is not None:
         final_dossier["expected_return_band"] = resolved["band"]
+    final_dossier["data_quality_score"] = quality_score
     # Provenance: the UI must be able to distinguish a genuine LLM thesis
     # from the deterministic quant template.
     final_dossier["generated_by"] = generated_by
@@ -1067,7 +1159,7 @@ def write_dossier(
             }),
             backtest_json="{}",
             mode="discover",
-            data_quality_score=__import__("decimal").Decimal(str(_as_dict(scores.get("history_ingest")).get("coverage", 0.0))),
+            data_quality_score=__import__("decimal").Decimal(str(quality_score)),
             risk_score=__import__("decimal").Decimal(str(_as_dict(scores.get("momentum_quality")).get("volatility_6m", 0.5))),
             portfolio_fit_score=(
                 None if (fit_value := _as_dict(scores.get("portfolio_fit")).get("fit_score")) is None
@@ -1659,6 +1751,14 @@ def _resolve_expected_return(
     }
 
 
+RISK_DRAWDOWN_LIMIT = 0.30
+_MARKET_RISK = "Market risk: broad equity drawdowns affect the position."
+_EARNINGS_EVENT = re.compile(
+    r"\bearnings\b[^.]*\b(?:report|event|release|announcement|date|call)\b|\b(?:upcoming|next)\b[^.]*\bearnings\b",
+    re.I,
+)
+
+
 def deterministic_risks(
     scores: dict[str, Any], signal_breakdown: dict[str, Any],
 ) -> tuple[list[str], list[str]]:
@@ -1673,6 +1773,12 @@ def deterministic_risks(
     if earnings_line:
         earnings.append(f"Earnings event: {earnings_line}")
     rest: list[str] = []
+    drawdown = _as_dict(scores.get("verification_gate")).get("max_drawdown")
+    if isinstance(drawdown, (int, float)) and drawdown > RISK_DRAWDOWN_LIMIT:
+        rest.append(
+            f"Drawdown: fell {drawdown:.1%} peak to trough in the window measured, past the "
+            f"{RISK_DRAWDOWN_LIMIT:.0%} the quality check allows."
+        )
     cluster_score = signal_breakdown.get("insider_cluster_buy_score")
     if cluster_score:
         rest.append(
@@ -1691,11 +1797,12 @@ def deterministic_risks(
 
 def merge_risks(required: list[str], written: list[Any]) -> list[str]:
     """``required`` first, then the writer's own risks not already covered
-    (compared on the first 40 characters, case-insensitive)."""
+    (compared on the first 40 characters, case-insensitive; every line about
+    the earnings event counts as one risk, however it is worded)."""
     out: list[str] = []
     seen: set[str] = set()
     for risk in [*required, *(str(r) for r in written if r)]:
-        key = risk.strip().lower()[:40]
+        key = "earnings event" if _EARNINGS_EVENT.search(risk) else risk.strip().lower()[:40]
         if key and key not in seen:
             seen.add(key)
             out.append(risk)
@@ -1736,7 +1843,7 @@ def deterministic_template(
     earnings, data_risks = deterministic_risks(scores, signal_breakdown)
     key_risks = [
         *earnings,
-        "Market risk: broad equity drawdowns affect the position.",
+        _MARKET_RISK,
         "Currency risk: non-EUR denominated assets carry FX exposure.",
         "Concentration risk: single-name exposure may exceed diversification targets.",
         *data_risks,

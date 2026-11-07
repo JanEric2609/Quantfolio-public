@@ -241,6 +241,45 @@ describe("DossierDrawer score drivers and estimate composition (ADR 0017)", () =
     expect(table.textContent).toContain("Risk-adjusted 3y vs benchmark");
   });
 
+  it("connects the breakdown to the score and names what the run lacked", () => {
+    render(
+      <DossierDrawer
+        open
+        onClose={() => {}}
+        dossier={dossierFixture({
+          composite_breakdown: [{ signal: "momentum", score: 0.99, weight: 0.1765, contribution: 0.1747 }],
+          composite_raw: 0.613,
+          recency_penalty: { penalty_fraction: 0.12, days_since_last: 31, last_composite: 0.6, exempt_reason: null },
+          lane: "stock",
+          lane_rank: 0.92,
+          data_quality: { weight_share: 0.74, missing: ["insider trading"], run_gaps: ["insider trading"] },
+          expected_return_anchor_years: 2.6,
+          scoring_note: "The track record scores this estimate restated over 21 trading days.",
+        })}
+        symbol="ROST"
+      />,
+    );
+
+    expect(screen.getByText(/31 days ago and it has not clearly improved/)).toBeInTheDocument();
+    expect(screen.getByTestId("lane-rank")).toHaveTextContent("Ranked only among stocks");
+    expect(screen.getByTestId("data-quality")).toHaveTextContent("Missing for almost every stock in this run: insider trading");
+    expect(screen.getByTestId("anchor-years")).toHaveTextContent("2.6 years");
+    expect(screen.getByTestId("scoring-note")).toHaveTextContent("21 trading days");
+  });
+
+  it("stays quiet when no signal that applies is missing", () => {
+    render(
+      <DossierDrawer
+        open
+        onClose={() => {}}
+        dossier={dossierFixture({ data_quality: { weight_share: 1, missing: [], run_gaps: [] } })}
+        symbol="IS3S.DE"
+      />,
+    );
+
+    expect(screen.queryByTestId("data-quality")).not.toBeInTheDocument();
+  });
+
   it("explains the estimate as market-implied prior plus a credibility share", () => {
     render(
       <DossierDrawer
