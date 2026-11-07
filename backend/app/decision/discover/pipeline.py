@@ -2596,7 +2596,7 @@ def run_candidate_pipeline(
     # and INDUSTRY_CAP per industry. Quality gates are advisory now, so
     # "evaluable" means the candidate had enough data to score — not that it
     # cleared a quality bar.
-    shortlisted.sort(key=lambda x: x["composite_score"], reverse=True)
+    shortlisted.sort(key=shortlist_order, reverse=True)
     assign_lane_ranks(shortlisted)
     selected, capped = select_shortlist(shortlisted, LLM_MAX_CANDIDATES)
     logger.info(
@@ -2727,11 +2727,45 @@ def candidate_sector(result: dict[str, Any]) -> str | None:
 
 
 def candidate_industry(result: dict[str, Any]) -> str | None:
-    """Industry recorded by stage_sentiment_fundamentals, or None (funds, gaps)."""
+    """Industry recorded by stage_sentiment_fundamentals, or None (funds, gaps).
+
+    A label that only repeats the sector is no industry. Finnhub files every US
+    energy name under "Energy", so on 2026-11-07 KMI (a pipeline) capped out XOM
+    (an oil major) while TTE.PA ("Oil & Gas Integrated") passed. Those names keep
+    the sector cap alone.
+    """
     scores = result.get("scores")
     sf = scores.get("sentiment_fundamentals") if isinstance(scores, dict) else None
-    industry = sf.get("industry") if isinstance(sf, dict) else None
-    return industry if isinstance(industry, str) and industry else None
+    if not isinstance(sf, dict):
+        return None
+    industry, sector = sf.get("industry"), sf.get("sector")
+    if not isinstance(industry, str) or not industry:
+        return None
+    if isinstance(sector, str) and _label_key(industry) == _label_key(sector):
+        return None
+    return industry
+
+
+def _label_key(label: str) -> str:
+    """"Health Care" and "Healthcare" are one label."""
+    return "".join(ch for ch in label.lower() if ch.isalpha())
+
+
+def shortlist_order(result: dict[str, Any]) -> tuple[float, float, str]:
+    """Sort key, best last: composite, then portfolio fit, then the symbol.
+
+    Composites are rounded, so ties happen: XDEQ.DE and SPYY.DE both scored
+    0.5218 on 2026-11-07 and list order alone gave the slot to the one closer
+    to the portfolio. One key for every sort keeps ranks and slots in step.
+    """
+    scores = result.get("scores")
+    fit = scores.get("portfolio_fit") if isinstance(scores, dict) else None
+    fit_score = fit.get("fit_score") if isinstance(fit, dict) else None
+    return (
+        float(result.get("composite_score") or 0.0),
+        float(fit_score) if isinstance(fit_score, (int, float)) else 0.0,
+        str(result.get("symbol") or ""),
+    )
 
 
 def sector_cap_for(limit: int) -> int:
@@ -2747,7 +2781,7 @@ def assign_lane_ranks(ranked: list[dict[str, Any]]) -> None:
     """Stamp ``scores["lane_rank"]``: the percentile of the composite within the candidate's own lane."""
     for lane in (LANE_STOCK, LANE_FUND):
         members = [r for r in ranked if r.get("lane", LANE_STOCK) == lane]
-        ordered = sorted(members, key=lambda r: r["composite_score"])
+        ordered = sorted(members, key=shortlist_order)
         for position, result in enumerate(ordered):
             if isinstance(result.get("scores"), dict):
                 result["scores"]["lane"] = lane
@@ -2776,7 +2810,7 @@ def select_shortlist(
     for result in funds[len(picked_funds) + len(extra_funds):]:
         result["fund_slots_full"] = True
     selected = [*picked_funds, *extra_funds, *picked_stocks]
-    selected.sort(key=lambda x: x["composite_score"], reverse=True)
+    selected.sort(key=shortlist_order, reverse=True)
     return selected, capped
 
 

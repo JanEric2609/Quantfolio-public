@@ -186,3 +186,10 @@ label comes from the provider and can be coarse (Finnhub's "Energy"), so this ca
 also tightens some sectors. `data_quality.py` reports which signals a name and a
 run went without; a dossier states its horizon, while the track record scores the
 estimate over 21 trading days and the trust ledger records 126 as well.
+
+### Dossier text and shortlist details (review of run 4b6f5ebf, 2026-11-07)
+
+- Known field names in a thesis are put in plain words (`thesis_checks.plain_field_names`); any other code is still rejected. The prompt carries no `trailing_1m_annualized_return`, revenue growth in percent, and insiders as a count of buyers.
+- `key_risks` leave out missing data feeds, our own scores, debt-to-equity below 100 %, and earnings more than `EARNINGS_RISK_DAYS` away. Each earnings event and drawdown counts once.
+- The fallback template states momentum, correlation, beta and the estimate from the data. A fund gets no single-name risk, and only a listing outside EUR gets a currency risk.
+- An industry label that only repeats the sector does not count as an industry, so those names meet the sector cap alone (`candidate_industry`). `shortlist_order` is the one sort key: composite, then portfolio fit, then symbol.

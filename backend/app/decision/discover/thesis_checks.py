@@ -48,8 +48,33 @@ _CAPS_TOKEN = re.compile(r"\b[A-Z]{2,7}\b")
 _BEARISH = re.compile(r"\bneutral stance\b|\bbearish\b|\bavoid\b|\bsell\b(?!-off)", re.I)
 
 _INTERNAL_CODE = re.compile(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b")
+#: Field names the model copies from its facts. The figure beside one is true, so
+#: a plain name is enough; rejecting the text for it left 4 of 5 funds on the
+#: template in run 4b6f5ebf (2026-11-07). Any other code is still rejected.
+_CODE_WORDS = {
+    "momentum_rank": "momentum rank",
+    "momentum_12_1m": "12-1 month momentum",
+    "trailing_1m_annualized_return": "trailing 1-month annualized return",
+    "trailing_3y_annualized_return": "trailing 3-year annualized return",
+    "market_beta_weekly": "weekly market beta",
+    "market_beta": "market beta",
+    "volatility_6m": "6-month volatility",
+    "max_drawdown": "maximum drawdown",
+    "fit_score": "portfolio fit score",
+    "debt_equity": "debt-to-equity",
+    "de_ratio": "debt-to-equity",
+    "revenue_growth_pct": "revenue growth",
+    "revenue_growth": "revenue growth",
+    "pe_ratio": "P/E",
+    "pb_ratio": "P/B",
+    "forward_pe": "forward P/E",
+    "analyst_upside": "analyst upside",
+    "analyst_target": "analyst target",
+    "insider_buyers_30d": "insiders buying in the last 30 days",
+}
+_KNOWN_CODE = re.compile(r"\b(?:" + "|".join(sorted(_CODE_WORDS, key=len, reverse=True)) + r")\b")
 _DATA_FEEDS = (
-    r"(?:ml|machine[- ]learning) (?:signal|model)|alpha ?crafter|validated factors?|"
+    r"(?:ml|machine[- ]learning) (?:signal|model)|alpha ?crafter|validated (?:alpha )?factors?|alpha factors?|"
     r"insider (?:data|signal)|estimate data|sentiment data|analyst data"
 )
 _DATA_GAP_RISK = re.compile(
@@ -72,7 +97,15 @@ _MARKET_IMPLIED_ESTIMATE = re.compile(r"\bmarket[- ]implied\s+(?:estimates?|fore
 _REGIME_AFFINITY = re.compile(r"\bregime affinity\b", re.I)
 _HORIZON_NONSENSE = re.compile(r"\bexceed\w*\s+the\s+\d+-month horizon\b", re.I)
 _STRONG_MOMENTUM = re.compile(r"\b(?:strong|robust|exceptional|high)\b[^.]{0,20}\bmomentum\b", re.I)
-_DIVERSIFIER_CLAIM = re.compile(r"(?<!little )(?<!limited )(?<!no )(?<!not )(?<!low )(?<!poor )\bdiversif", re.I)
+# "Diversified" describes what is inside a fund or a company, which can be true at
+# any correlation; only a claim about the portfolio needs a low one.
+_DIVERSIFIER_CLAIM = re.compile(
+    r"(?<!little )(?<!limited )(?<!no )(?<!not )(?<!low )(?<!poor )\bdiversif(?:ier|iers|ication|ying|ies|y)\b", re.I,
+)
+_INSIDER_CLUSTER = re.compile(r"\binsiders?\b[^.]{0,30}\bcluster|\bcluster\b[^.]{0,20}\b(?:buy|buys|buying|insiders?)\b", re.I)
+_HIGH_DEBT = re.compile(r"\b(?:high|elevated|heavy|significant)\b[^.]{0,25}\b(?:debt|leverage)\b", re.I)
+_DEBT_EQUITY_LINE = re.compile(r"\bdebt[- ](?:to[- ])?equity\b|\bd/e\b|\bleverage\b", re.I)
+_SCORE_AS_RISK = re.compile(r"\b(?:fundamentals?|composite|portfolio fit|fit|momentum|analyst) scores?\b", re.I)
 _HOLDINGS_CLAIM = re.compile(r"\bholdings?\b[^.]*", re.I)
 _NOT_A_HOLDING = frozenset({"ETF", "ETC", "MSCI", "UCITS", "USD", "EUR", "GBP", "FTSE", "ESG"})
 
@@ -80,6 +113,10 @@ _NOT_A_HOLDING = frozenset({"ETF", "ETC", "MSCI", "UCITS", "USD", "EUR", "GBP", 
 STRONG_MOMENTUM_RANK = 0.8
 #: A weekly correlation with the book from here on is no diversifier.
 DIVERSIFIER_MAX_CORRELATION = 0.5
+#: Debt-to-equity (in percent) from which debt can be called high: debt equals equity.
+HIGH_DEBT_EQUITY_PCT = 100.0
+#: A cluster of insiders takes more than one buyer.
+MIN_CLUSTER_BUYERS = 2
 
 #: Absolute and relative tolerance of a grounded number (in the unit shown).
 ABS_TOLERANCE = 0.15
@@ -230,6 +267,8 @@ def mislabel_problems(
     momentum_rank: float | None = None,
     correlation: float | None = None,
     is_fund: bool = False,
+    de_ratio: float | None = None,
+    insider_buyers: float | None = None,
 ) -> list[str]:
     """True figures under the wrong name, and claims the data does not carry."""
     problems: list[str] = []
@@ -253,12 +292,28 @@ def mislabel_problems(
         problems.append(f"'{m.group(0)}' overstates a momentum rank of {momentum_rank:.2f}")
     if correlation is not None and correlation >= DIVERSIFIER_MAX_CORRELATION and _DIVERSIFIER_CLAIM.search(text):
         problems.append(f"a diversification claim needs a low correlation with the portfolio; it is {correlation:.2f}")
+    if de_ratio is not None and de_ratio < HIGH_DEBT_EQUITY_PCT and _HIGH_DEBT.search(text):
+        problems.append(f"debt-to-equity of {de_ratio:.1f} % is not high")
+    if insider_buyers is not None and insider_buyers < MIN_CLUSTER_BUYERS and _INSIDER_CLUSTER.search(text):
+        problems.append(f"{int(insider_buyers)} insider(s) bought; that is not a cluster")
     if is_fund:
         for claim in _HOLDINGS_CLAIM.findall(text):
             for token in _CAPS_TOKEN.findall(claim):
                 if token not in _NOT_A_HOLDING and not re.search(rf"\b{re.escape(token)}\b", facts_text):
                     problems.append(f"holding '{token}' is not in the holdings given")
     return problems
+
+
+def plain_field_names(text: str) -> str:
+    """``text`` with the known field names in plain words."""
+    return _KNOWN_CODE.sub(lambda m: _CODE_WORDS[m.group(0)], text)
+
+
+def is_false_risk(risk: str, de_ratio: float | None = None) -> bool:
+    """A line that is not a risk: a score of ours, or ordinary debt presented as one."""
+    if _SCORE_AS_RISK.search(risk):
+        return True
+    return de_ratio is not None and de_ratio < HIGH_DEBT_EQUITY_PCT and bool(_DEBT_EQUITY_LINE.search(risk))
 
 
 def check_thesis(
@@ -272,10 +327,13 @@ def check_thesis(
     momentum_rank: float | None = None,
     correlation: float | None = None,
     is_fund: bool = False,
+    de_ratio: float | None = None,
+    insider_buyers: float | None = None,
 ) -> ThesisCheck:
     """Clean and check a thesis and its risks; the first failing rule names the reason."""
-    trimmed = trim_to_sentence(thesis)
-    risks = [r.strip() for r in key_risks if isinstance(r, str) and r.strip() and not is_data_gap_risk(r)]
+    trimmed = trim_to_sentence(plain_field_names(thesis or ""))
+    named = [plain_field_names(r.strip()) for r in key_risks if isinstance(r, str) and r.strip()]
+    risks = [r for r in named if not is_data_gap_risk(r) and not is_false_risk(r, de_ratio)]
     if trimmed is None:
         return ThesisCheck(thesis, risks, "truncated", ["the thesis has no complete sentence"])
     result = ThesisCheck(trimmed, risks)
@@ -306,6 +364,7 @@ def check_thesis(
         p for t in texts
         for p in mislabel_problems(
             t, facts_text, momentum_rank=momentum_rank, correlation=correlation, is_fund=is_fund,
+            de_ratio=de_ratio, insider_buyers=insider_buyers,
         )
     ]
     if problems:
