@@ -437,6 +437,25 @@ def _planned_trades(rows: pd.DataFrame) -> pd.Series:
     return cast(pd.Series, rows["plan_10b5_1"]).eq(True).fillna(False).astype(bool)
 
 
+#: What one trade looks like across the reporting owners of a joint Form 4. The
+#: extract has no accession number; holdings after the trade keep two people who
+#: happen to trade the same size at the same price apart.
+_SAME_TRADE_COLUMNS = (
+    "filing_date", "transaction_date", "transaction_code", "shares", "price_per_share", "shares_held_after",
+)
+
+
+def _one_row_per_trade(rows: pd.DataFrame) -> pd.DataFrame:
+    """One row for each trade reported by several joint filers.
+
+    A joint Form 4 repeats every trade once per reporting owner: Silver Lake's
+    entities reported each Dell sale up to 13 times, so the 90-day flow read
+    -4.89bn USD where the sales came to -1.02bn (run dd3fe7b9, 2026-11-07).
+    """
+    columns = [c for c in _SAME_TRADE_COLUMNS if c in rows.columns]
+    return cast(pd.DataFrame, rows.drop_duplicates(subset=columns))
+
+
 def pit_insider_signal_for_symbol(
     db: Session, symbol: str, dates: pd.Index
 ) -> pd.DataFrame | None:
@@ -448,7 +467,8 @@ def pit_insider_signal_for_symbol(
     own look-ahead warning). Restricted to open-market P/S transactions
     (:data:`OPEN_MARKET_TRANSACTION_CODES`), with routine traders
     (:func:`_classify_routine_insiders`) and trades from filings that ticked
-    the Rule 10b5-1 plan box (:func:`_planned_trades`) excluded.
+    the Rule 10b5-1 plan box (:func:`_planned_trades`) excluded, and each
+    trade counted once (:func:`_one_row_per_trade`).
 
     Per requested date, over the trailing windows below (as of that date):
 
@@ -471,7 +491,7 @@ def pit_insider_signal_for_symbol(
 
     ticker_match = ticker_match.dropna(subset=["filing_date", "transaction_date"]).copy()
     routine = _classify_routine_insiders(ticker_match).reindex(ticker_match.index, fill_value=False)
-    opportunistic = cast(pd.DataFrame, ticker_match[~(routine | _planned_trades(ticker_match))])
+    opportunistic = _one_row_per_trade(cast(pd.DataFrame, ticker_match[~(routine | _planned_trades(ticker_match))]))
 
     original_index = pd.DatetimeIndex(dates)
     naive_dates = (

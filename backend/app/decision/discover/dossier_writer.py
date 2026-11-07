@@ -559,7 +559,7 @@ def _grounding_prompt_lines(scores: dict[str, Any], annual: dict[str, Any]) -> s
         )
         lines.append(
             "System forward estimate (annual, before scaling to horizon_months): "
-            f"{_pct(components.get('er_annual_pct'))} = market-implied "
+            f"{_pct(components.get('er_annual_pct'))} = a prior of "
             f"{_pct(components.get('prior_pct'))} (cash {_pct(components.get('risk_free_pct'), 2)} + "
             f"adjusted beta {components.get('beta') if components.get('beta') is not None else 'n/a'} x "
             f"equity premium {_pct(components.get('equity_premium_pct'))}) + "
@@ -673,6 +673,13 @@ def _grounding_prompt_lines(scores: dict[str, Any], annual: dict[str, Any]) -> s
             "do not say it does."
         )
 
+    fall = mom.get("fall_from_3m_high")
+    if isinstance(fall, (int, float)) and fall >= RECENT_FALL_LIMIT:
+        lines.append(
+            f"Latest closing price is {fall * 100:.1f}% below the highest close of the last 3 months. The 12-1 "
+            "month momentum skips the latest month and does not show this; say so if you cite momentum."
+        )
+
     return "".join(f"{line}\n" for line in lines)
 
 
@@ -680,6 +687,8 @@ EARNINGS_IMMINENT_DAYS = 1
 #: A report further off than this is no key risk: over a 6-month horizon every
 #: stock reports, and 81 days away read as a warning on KMI (2026-11-07).
 EARNINGS_RISK_DAYS = 30
+#: A fall from the 3-month high from which it is worth a line.
+RECENT_FALL_LIMIT = 0.20
 _EARNINGS_HOURS = {"bmo": "before the open", "amc": "after the close", "dmh": "during market hours"}
 
 
@@ -1059,7 +1068,11 @@ def write_dossier(
                         # (plan 2026-10-14, M3).
                         earnings, data_risks = deterministic_risks(scores, signal_breakdown)
                         candidate_dossier["key_risks"] = (
-                            merge_risks([*earnings, *data_risks], list(check.key_risks), drop_earnings=not earnings)
+                            merge_risks(
+                                [*earnings, *data_risks],
+                                without_false_listing_risk(symbol, list(check.key_risks)),
+                                drop_earnings=not earnings,
+                            )
                             or [_MARKET_RISK]
                         )[:_MAX_RISKS]
                         final_dossier = candidate_dossier
@@ -1067,7 +1080,10 @@ def write_dossier(
                     content_rejections.append(check.reason or "invalid")
                     content_problems = check.problems
                     last_error = f"{check.reason}: {'; '.join(check.problems)}"
-                    logger.info("Dossier thesis for %s rejected: %s", symbol, last_error)
+                    logger.info(
+                        "Dossier thesis for %s rejected: %s; text: %s",
+                        symbol, last_error, (candidate_dossier.get("thesis") or "")[:400],
+                    )
                     if len(content_rejections) > _MAX_CONTENT_RETRIES:
                         break
                 except ValidationError as exc:
@@ -1800,13 +1816,26 @@ def _resolve_expected_return(
 
 
 RISK_DRAWDOWN_LIMIT = 0.30
+RISK_VOLATILITY_LIMIT = 0.60
+#: Net insider selling over the 90-day window, as a share of market value, from
+#: which it is worth a line. A judgement, not a tested signal.
+INSIDER_SELLING_RISK_SHARE = 0.0025
 _MARKET_RISK = "Market risk: broad equity drawdowns affect the position."
 _EARNINGS_EVENT = re.compile(
     r"\bearnings\b[^.]*\b(?:report|event|release|announcement|date|call)\b|\b(?:upcoming|next)\b[^.]*\bearnings\b|"
     r"\bevent risk\b[^.]*\bearnings\b|\bearnings on \d",
     re.I,
 )
+_LISTING_CURRENCY_RISK = re.compile(r"\blisting currency\b|\b(?:currency|fx)\b[^.]*\blisting\b|\blisting\b[^.]*\b(?:currency|fx)\b", re.I)
 _DRAWDOWN_RISK = re.compile(r"\bdrawdown\b", re.I)
+# With a figure, and not a currency's: "FX volatility" is another risk.
+_VOLATILITY_RISK = re.compile(r"(?<!fx )(?<!currency )\bvolatility\b(?:[^.]|\.\d)*?(?<=\d)\s?%", re.I)
+
+
+def _usd_amount(value: float) -> str:
+    if value >= 1e9:
+        return f"${value / 1e9:.2f}bn"
+    return f"${value / 1e6:.1f}m"
 
 
 def deterministic_risks(
@@ -1830,11 +1859,32 @@ def deterministic_risks(
             f"Drawdown: fell {drawdown:.1%} peak to trough in the window measured, past the "
             f"{RISK_DRAWDOWN_LIMIT:.0%} the quality check allows."
         )
+    volatility = _as_dict(scores.get("verification_gate")).get("volatility")
+    if isinstance(volatility, (int, float)) and volatility > RISK_VOLATILITY_LIMIT:
+        rest.append(
+            f"Volatility: {volatility:.1%} a year, past the {RISK_VOLATILITY_LIMIT:.0%} the quality check allows."
+        )
+    fall = _as_dict(scores.get("momentum_quality")).get("fall_from_3m_high")
+    if isinstance(fall, (int, float)) and fall >= RECENT_FALL_LIMIT:
+        rest.append(f"Recent fall: the latest close is {fall:.1%} below the highest close of the last 3 months.")
+    correlation = _as_dict(scores.get("portfolio_fit")).get("correlation")
+    if isinstance(correlation, (int, float)) and correlation >= DIVERSIFIER_MAX_CORRELATION:
+        rest.append(f"Overlap: a weekly correlation of {correlation:.2f} with the portfolio adds little diversification.")
     cluster_score = signal_breakdown.get("insider_cluster_buy_score")
     if cluster_score:
         rest.append(
             f"Insider activity: {int(cluster_score)} distinct insider(s) opportunistically bought in "
             "the trailing 30 days (SEC filings, best-effort ticker match)."
+        )
+    flow = _as_dict(scores.get("insider_signal")).get("net_insider_flow_usd")
+    market_cap = sf.get("market_cap")
+    if (
+        isinstance(flow, (int, float)) and isinstance(market_cap, (int, float)) and market_cap > 0
+        and -flow / market_cap >= INSIDER_SELLING_RISK_SHARE
+    ):
+        rest.append(
+            f"Insider selling: a net {_usd_amount(-flow)} sold in the trailing 90 days, {-flow / market_cap:.2%} of "
+            "market value (SEC filings, best-effort ticker match; routine and planned trades left out)."
         )
     sue = signal_breakdown.get("estimate_sue")
     if sue is not None and abs(sue) >= 1.0:
@@ -1846,11 +1896,21 @@ def deterministic_risks(
     return earnings, rest
 
 
+def without_false_listing_risk(symbol: str, risks: list[str]) -> list[str]:
+    """A euro listing has no listing-currency risk: ABI.BR carried one in run dd3fe7b9.
+
+    What a fund holds abroad is another matter, and such a line stays.
+    """
+    if listing_currency(symbol) != "EUR":
+        return risks
+    return [r for r in risks if not _LISTING_CURRENCY_RISK.search(r)]
+
+
 def merge_risks(required: list[str], written: list[Any], *, drop_earnings: bool = False) -> list[str]:
     """``required`` first, then the writer's own risks not already covered
     (compared on the first 40 characters, case-insensitive; every line about
-    the earnings event, or about a drawdown, counts as one risk however it is
-    worded). ``drop_earnings`` also leaves out the writer's lines about the
+    the earnings event, a drawdown or a stated volatility counts as one risk
+    however it is worded). ``drop_earnings`` also leaves out the writer's lines about the
     report date, when the data shows none near enough to matter."""
     out: list[str] = []
     seen: set[str] = set()
@@ -1862,6 +1922,8 @@ def merge_risks(required: list[str], written: list[Any], *, drop_earnings: bool 
             key = "earnings event"
         elif _DRAWDOWN_RISK.search(risk):
             key = "drawdown"
+        elif _VOLATILITY_RISK.search(risk):
+            key = "volatility"
         else:
             key = risk.strip().lower()[:40]
         if key and key not in seen:
@@ -1927,7 +1989,6 @@ def deterministic_template(
     )
     earnings, data_risks = deterministic_risks(scores, signal_breakdown)
     is_fund = instrument_type in ("etf", "fund")
-    correlation = _as_dict(scores.get("portfolio_fit")).get("correlation")
     key_risks = [
         *earnings,
         _MARKET_RISK,
@@ -1935,12 +1996,8 @@ def deterministic_template(
             ["Currency risk: non-EUR denominated assets carry FX exposure."]
             if listing_currency(symbol) != "EUR" else []
         ),
-        # A fund is many names; what it can do is repeat what the portfolio already holds.
-        *(
-            ([f"Overlap: a weekly correlation of {correlation:.2f} with the portfolio adds little diversification."]
-             if isinstance(correlation, (int, float)) and correlation >= DIVERSIFIER_MAX_CORRELATION else [])
-            if is_fund else ["Concentration risk: single-name exposure may exceed diversification targets."]
-        ),
+        # A fund is many names; the overlap with the portfolio, if any, is among the data's risks.
+        *([] if is_fund else ["Concentration risk: single-name exposure may exceed diversification targets."]),
         *data_risks,
     ]
 
