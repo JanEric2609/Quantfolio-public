@@ -418,6 +418,11 @@ def set_target_allocation(
             status_code=400,
             detail=f"Target allocation percentages must sum to 100.0 (got {total:.2f})",
         )
+    types = [item.asset_type for item in body]
+    if len(types) != len(set(types)):
+        # One row per asset class (a unique key); a repeat used to reach the
+        # database and fail there as a 500.
+        raise HTTPException(status_code=400, detail="Each asset class may appear only once")
     db.query(TargetAllocation).filter(TargetAllocation.user_id == user.id).delete()
     rows: list[TargetAllocation] = []
     for item in body:
