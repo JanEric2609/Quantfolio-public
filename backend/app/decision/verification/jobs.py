@@ -109,7 +109,9 @@ def run_weekly_ledger() -> dict[str, Any]:
     from app.decision.verification.candidate_outcomes import resolve_candidate_outcomes
     from app.decision.verification.daily_ledger import (
         SERIES_RANKING,
+        SERIES_RANKING_EF,
         SERIES_SELECTION,
+        SERIES_SELECTION_W,
         freeze_user_series,
         ledger_users,
     )
@@ -127,13 +129,27 @@ def run_weekly_ledger() -> dict[str, Any]:
         # The selection series reads the same ~300 closes as the ranking one,
         # so it shares this weekly price pass (its days are frozen from the
         # snapshots, which were fixed at issue; a later freeze changes nothing).
+        # The lower-noise designs of the 2026-11-08 amendment read the same
+        # closes plus the year before each issue (already stored: the run's
+        # history ingest keeps five years).
+        series = (SERIES_RANKING, SERIES_SELECTION, SERIES_SELECTION_W, SERIES_RANKING_EF)
         ranking = {
-            user_id: freeze_user_series(db, user_id, (SERIES_RANKING, SERIES_SELECTION), refresh=True)
+            user_id: freeze_user_series(db, user_id, series, refresh=True)
             for user_id in ledger_users(db)
         }
+        # The Discover BUY gate reads this stored copy (it may not import this package).
+        from app.decision.verification.daily_tests import store_buy_gate_evidence
+
+        try:
+            buy_gate = store_buy_gate_evidence(db, ledger_users(db))
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("trust_weekly_ledger: storing the BUY gate evidence failed")
+            buy_gate = {}
         # The factor study (ADR 0018 §8) was withdrawn on 2026-10-14: the
         # selection family against matched non-picks does its job.
-        return {"candidate_outcomes": outcomes, "ranking": ranking}
+        return {"candidate_outcomes": outcomes, "ranking": ranking, "buy_gate": buy_gate}
     finally:
         db.close()
 

@@ -739,6 +739,8 @@ def _selection_scope(sel: dict[str, Any]) -> str:
     """Same sector, unless some days had to compare against other sectors."""
     k = int(sel.get("n_fallback_days") or 0)
     if not k:
+        if sel.get("series") == "selection_w":
+            return "same run, same sector, the most similar in beta, volatility and momentum"
         return "same run, same sector"
     return f"same run; same sector except on {_days(k)}, when other sectors stood in"
 
@@ -782,7 +784,8 @@ def _headline(tests: dict[str, Any], today: date) -> str:
             f"Evidence of harm: Discover's picks have done worse than simply holding your ETF "
             f"(e = {f1['e_harm']:,.0f} over {_days(f1['n_days'])})."
         )
-    sel = tests.get("selection") or {}
+    # The primary selection design since ADR 0018's amendment of 2026-11-08.
+    sel = tests.get("selection_weighted") or tests.get("selection") or {}
     n = int(sel.get("n_days") or 0)
     state = sel.get("state")
     # A verdict before the noise check's last look is provisional (ADR 0018 §11).

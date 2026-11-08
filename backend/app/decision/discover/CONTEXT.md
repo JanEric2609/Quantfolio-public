@@ -104,6 +104,16 @@ to a BUY verdict (`discover_verdict`): a `proven` cohort buys, and every
 other candidate is `WATCH`. The composite ranks but never decides, because
 its level moves with every weight change (ADR 0017 follow-up 3).
 
+**Since ADR 0018's amendment of 2026-11-08 stocks are judged differently**:
+`equity` reads the trust ledger's primary selection test (`selection_w`: each
+pick against its five most similar same-sector non-picks, precision-weighted,
+daily, from 2026-11-09). BUY needs e >= 100 after at least 126 observed days,
+no harm, futility, noise-check or F1-harm guard, and the hit-rate floor. The
+weekly trust ledger job stores that evidence in `app_settings`
+(`trust_buy_gate_json`) because `discover` may not import `verification`;
+`_stored_selection_evidence` reads it. The block-mean result stays in the
+gate as `legacy`; funds, bonds and cash still use it.
+
 A real **per-candidate** in-sample/out-of-sample split inside
 `stage_alpha_miner` (as opposed to the per-*cohort* gate above, which judges
 already-resolved history, not the candidate's own factor evaluation) is
@@ -187,6 +197,13 @@ also tightens some sectors. `data_quality.py` reports which signals a name and a
 run went without; a dossier states its horizon, while the track record scores the
 estimate over 21 trading days and the trust ledger records 126 as well.
 
+### Run memo, figures by code, shadow signals (plan 2026-11-08, `docs/plan-discover-speed-and-grounded-text.md`)
+
+- `run_candidate_pipeline` holds a run memo: each symbol's history is read once at its longest window and shorter windows are cut from it (`_history`), the book's weekly return and the held ETFs' holdings are built once (`_run_cached`), and an ingest forgets the symbol so its new bars are read. Outside a run nothing is memoised. Run 4f3ddca7 spent 11.5 of 13 minutes rebuilding the 56-holding price matrix for each of 248 candidates. The run logs one `run_candidate_pipeline timings` line per run: seconds per stage, history reads, memo hits.
+- The pre-ingest warms the `USD<ccy>=X` pair of every held ticker's currency as well (`fx_symbols`). No `USDCAD=X` existed, so the four Canadian holdings were missing from every portfolio-fit correlation.
+- Dossier figures are written by code (`dossier_facts.py`): the model sees keyed phrases (`{momentum}` = "a +29.1 % price return over the 12 months to a month ago, above the middle of this run's candidates"), cites them by key and writes no digit. `render` substitutes them, drops the lead-in words a phrase already carries ("its", "high", a repeated opening) and drops a sentence that writes its own figure or an unknown key; `check_thesis` still runs on the result. Descriptor bins are fixed in code (momentum: strongest from 0.8, as `STRONG_MOMENTUM_RANK`). The jump and a recent fall are part of the momentum phrase, so citing momentum cannot leave them out. `DISCOVER_DOSSIER_SLOTS=0` restores the old prompt.
+- Shadow signals, stored per candidate and in the snapshot's `components_json["shadow_signals"]`, never read by the composite: residual momentum (Blitz, Huij & Martens 2011, CAPM residuals vs the benchmark), last close / 52-week high (George & Hwang 2004), information discreteness, momentum without the largest day, the slope-winsorized beta (Welch 2022), the book-volatility change per unit of weight moved into the candidate (`marginal_vol` = rho * sigma_C - sigma_P) and the correlation in the book's falling weeks (Ang & Chen 2002). `verification.ranking_metrics.shadow_signal_ics` and `scripts/shadow_signal_ics.py` give their per-run rank IC with a Newey-West t.
+
 ### Jumps, lottery stocks and one beta (review of run 4f3ddca7, 2026-11-08)
 
 - `stage_verification_gate` rejects a candidate past `VOL_REJECT` (100 % a year); 60-100 % stays a flagged risk. In the run only MRNA (187 %) was past it, the next was 88 %. Very high volatility and large daily gains predict low later returns (Ang, Hodrick, Xing and Zhang 2006; Bali, Cakici and Whitelaw 2011); the 100 % line is a judgement.
@@ -206,3 +223,21 @@ estimate over 21 trading days and the trust ledger records 126 as well.
 - `key_risks` leave out missing data feeds, our own scores, debt-to-equity below 100 %, and earnings more than `EARNINGS_RISK_DAYS` away. Each earnings event and drawdown counts once.
 - The fallback template states momentum, correlation, beta and the estimate from the data. A fund gets no single-name risk, and only a listing outside EUR gets a currency risk.
 - An industry label that only repeats the sector does not count as an industry, so those names meet the sector cap alone (`candidate_industry`). `shortlist_order` is the one sort key: composite, then portfolio fit, then symbol.
+
+## MSCI World universe (plan 2026-11-08, §6)
+
+The stock pool adds MSCI World's ~1,250 constituents to the static index
+lists (which held 770 unique names). `foundation/index_universe.py` reloads
+them weekly from the SPDR holdings file and maps each ISIN to its home
+listing's Yahoo symbol: a ticker the app already knows for the ISIN first,
+else OpenFIGI with the country's exchange code, paced under the free tier.
+`index_universe_members.symbol_ok` is cleared when Yahoo has no prices, and
+such members stay out. The system cap is 1800 (migration 0145).
+
+`jobs.register_discover_universe_prefetch_job` (01:15 UTC) keeps the large
+pool warm: member reload when a week old, then for every pool stock and
+currency pair, paced at 0.6 s: bar catch-up, fundamentals past their 7-day
+cache and analyst targets past 3 days (`foundation/analyst_cache.py`, which
+the run reads first). The run's pre-ingest skips a series already holding
+the last completed weekday (`_bars_current`), and each candidate's cached
+history is dropped once its stages are done. `UNIVERSE_RULE_VERSION` is 3.

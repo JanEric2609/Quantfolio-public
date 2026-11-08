@@ -292,3 +292,141 @@ def register_discover_ml_training_job(scheduler: Any | None = None) -> str:
         "discover_ml_training", discover_ml_training_inner,
         scheduler=scheduler, day_of_week="sat", hour=3, minute=0,
     )
+
+
+#: The prefetch stops after this long, whatever is left (it resumes the next night).
+PREFETCH_MAX_SECONDS = 3 * 3600
+#: Seconds between symbols: about 1,500 names in under an hour, far below Yahoo's burst limit.
+PREFETCH_PACE_S = 0.6
+#: MSCI World's members are reloaded when the stored ones are older than this.
+MEMBERS_MAX_AGE_DAYS = 7
+#: A member whose symbol had no prices is tried again after this many days.
+RECHECK_DAYS = 30
+
+
+def discover_universe_prefetch_inner(
+    db: Any,
+    *,
+    now: Any | None = None,
+    pace: float = PREFETCH_PACE_S,
+    max_seconds: float = PREFETCH_MAX_SECONDS,
+    refresh: Any | None = None,
+    ingest: Any | None = None,
+    fundamentals: Any | None = None,
+    analyst: Any | None = None,
+    has_bars: Any | None = None,
+) -> dict[str, Any]:
+    """Keep the large universe warm overnight (plan 2026-11-08, §6).
+
+    1. Reloads MSCI World's members (``foundation.index_universe``) when the
+       stored ones are a week old.
+    2. For every universe stock (the members and the static index lists) and
+       the currency pairs they quote in: catches up the price bars, refreshes
+       fundamentals older than their 7-day cache, and analyst targets older
+       than 3 days. A member whose symbol gets no bars is marked
+       ``symbol_ok = False`` and left out of the universe until a recheck.
+
+    Paced and bounded by *max_seconds*, so the morning run finds warm caches
+    instead of asking Yahoo for 1,500 names at once. The callables are
+    injectable for tests.
+    """
+    import time
+    from datetime import UTC, datetime, timedelta
+
+    from app.decision.discover import pipeline, universe
+    from app.foundation import analyst_cache, index_universe
+    from app.foundation.market import fundamentals as market_fundamentals
+    from app.foundation.models.entities import IndexUniverseMember
+    from app.foundation.providers.registry import build_provider_registry
+
+    clock = now or datetime.now(UTC)
+    started = time.monotonic()
+    report: dict[str, Any] = {"members_refresh": None, "symbols": 0, "bars_failed": 0, "marked_unpriced": 0,
+                              "stopped_early": False}
+
+    members = db.query(IndexUniverseMember).filter(IndexUniverseMember.index_key == index_universe.INDEX_KEY).all()
+    newest = max((m.updated_at for m in members if m.updated_at), default=None)
+    if newest is not None and newest.tzinfo is None:
+        newest = newest.replace(tzinfo=UTC)
+    if newest is None or clock - newest > timedelta(days=MEMBERS_MAX_AGE_DAYS):
+        try:
+            report["members_refresh"] = (refresh or index_universe.refresh_members)(db)
+            db.commit()
+        except Exception:  # noqa: BLE001 - yesterday's members still make a universe
+            db.rollback()
+            logger.exception("discover_universe_prefetch: member refresh failed")
+
+    recheck_before = clock - timedelta(days=RECHECK_DAYS)
+
+    def due(m: Any) -> bool:
+        if m.symbol_ok:
+            return True
+        checked = m.checked_at.replace(tzinfo=UTC) if m.checked_at and m.checked_at.tzinfo is None else m.checked_at
+        return checked is None or checked < recheck_before
+
+    rows = db.query(IndexUniverseMember).filter(IndexUniverseMember.symbol.isnot(None)).all()
+    member_symbols = {m.symbol.upper() for m in rows if due(m)}
+    static = (
+        universe._DAX40 + universe._EUROSTOXX50 + universe._SP100 + universe._NASDAQ100 + universe._EU_MIDCAP
+        + universe._US_MIDCAP + universe._STOXX600 + universe._FTSE100 + universe._CAC40 + universe._SP500
+        + universe._NIKKEI225
+    )
+    stocks = pipeline._ordered_unique([*sorted(member_symbols), *(s.upper() for s in static)])
+    fx = pipeline._fx_pairs_for(stocks)
+    ingest_one = ingest or pipeline._preingest_one
+    from app.foundation.market import history as market_history
+
+    stored_bars = has_bars or (lambda s: market_history(db, s, days=60, allow_live=False))
+    fund = fundamentals or (lambda s: market_fundamentals(db, s))
+    estimates = analyst or (lambda s: build_provider_registry(db).get_analyst_estimates(s))
+
+    for i, symbol in enumerate([*fx, *stocks]):
+        if time.monotonic() - started > max_seconds:
+            report["stopped_early"] = True
+            break
+        is_stock = symbol not in fx
+        try:
+            _, ok = ingest_one(symbol)
+        except Exception:  # noqa: BLE001 - one symbol never stops the rest
+            ok = False
+        if not ok:
+            report["bars_failed"] += 1
+        if symbol in member_symbols:
+            # A failed fetch (a throttle, an outage) does not make a symbol
+            # unpriced: only one with no stored bars at all is marked.
+            priced = ok or bool(stored_bars(symbol))
+            index_universe.mark_checked(db, symbol, priced)
+            if not priced:
+                report["marked_unpriced"] += 1
+        if ok and is_stock:
+            try:
+                fund(symbol)
+                analyst_cache.get_or_fetch(db, symbol, estimates)
+            except Exception:  # noqa: BLE001
+                db.rollback()
+                logger.debug("discover_universe_prefetch: fundamentals/analyst failed for %s", symbol, exc_info=True)
+        report["symbols"] += 1
+        if i % 20 == 19:
+            db.commit()
+        if pace:
+            time.sleep(pace)
+    db.commit()
+    logger.info("discover_universe_prefetch: %s", report)
+    return report
+
+
+def register_discover_universe_prefetch_job(scheduler: Any | None = None) -> str:
+    """Register the nightly universe prefetch (01:15 UTC; plan 2026-11-08, §6)."""
+    from app.foundation.core.db import SessionLocal
+
+    def _inner() -> None:
+        db = SessionLocal()
+        try:
+            discover_universe_prefetch_inner(db)
+        except Exception:
+            logger.exception("discover_universe_prefetch job failed")
+            db.rollback()
+        finally:
+            db.close()
+
+    return register_cron_job("discover_universe_prefetch", _inner, scheduler=scheduler, hour=1, minute=15)

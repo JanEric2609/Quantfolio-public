@@ -294,4 +294,50 @@ def build_ranking_metrics(db: Session, user_id: str) -> dict[str, Any]:
     }
 
 
-__all__ = ["build_ranking_metrics"]
+def shadow_signal_ics(db: Session, user_id: str, *, horizon: int = MAIN_HORIZON) -> dict[str, dict[str, Any]]:
+    """Per-run rank IC of each shadow signal against the forward EUR return (plan 2026-11-08, WP3).
+
+    The signals Discover records but does not rank on (``shadow_ledger.SHADOW_SIGNAL_KEYS``),
+    measured like the composite: evaluable stocks of live runs with at least
+    ``MIN_RANKING_STOCKS`` priced names, Spearman IC per run, mean with a Newey-West t.
+    The raw IC is reported; for ``marginal_vol`` and ``information_discreteness`` a
+    negative IC is the published direction. Descriptive: a signal enters the
+    composite only by a separate decision (t > 3, ADR 0018).
+    """
+    rows = (
+        db.query(DiscoverCandidateSnapshot.id, DiscoverCandidateSnapshot.run_id, DiscoverCandidateSnapshot.components_json)
+        .filter(
+            DiscoverCandidateSnapshot.user_id == user_id,
+            DiscoverCandidateSnapshot.evaluable.is_(True),
+            DiscoverCandidateSnapshot.instrument_group == "stock",
+            DiscoverCandidateSnapshot.backfilled.is_(False),
+        )
+        .all()
+    )
+    records = []
+    for snapshot_id, run_id, components in rows:
+        signals = (components or {}).get("shadow_signals") if isinstance(components, dict) else None
+        if isinstance(signals, dict):
+            records.extend((snapshot_id, run_id, k, float(v)) for k, v in signals.items() if isinstance(v, (int, float)))
+    if not records:
+        return {}
+    sig = pd.DataFrame.from_records(records, columns=["snapshot_id", "run_id", "signal", "value"])
+    outs = (
+        db.query(CandidateOutcome.snapshot_id, CandidateOutcome.ret_eur)
+        .filter(CandidateOutcome.user_id == user_id, CandidateOutcome.horizon_days == horizon)
+        .all()
+    )
+    ret = pd.DataFrame.from_records([tuple(r) for r in outs], columns=["snapshot_id", "ret"])
+    merged = sig.merge(ret, on="snapshot_id", how="inner")
+    merged = _rows(merged, merged["ret"].notna())
+    out: dict[str, dict[str, Any]] = {}
+    for name, by_signal in merged.groupby("signal"):
+        ics = [
+            ic for _run, df in by_signal.groupby("run_id")
+            if len(df) >= MIN_RANKING_STOCKS and (ic := _spearman(df, "value", "ret")) is not None
+        ]
+        out[str(name)] = {"horizon_days": horizon, **_ic_summary(ics)}
+    return out
+
+
+__all__ = ["build_ranking_metrics", "shadow_signal_ics"]

@@ -20,6 +20,7 @@ from app.decision.discover.jobs import (
     register_analyst_estimates_snapshot_job,
     register_discover_ml_training_job,
     register_discover_refresh_job,
+    register_discover_universe_prefetch_job,
     register_discovery_resolution_job,
     register_discovery_review_job,
 )
@@ -1096,6 +1097,7 @@ def build_scheduler() -> Any:
     register_discovery_review_job(scheduler)
     register_discover_ml_training_job(scheduler)
     register_analyst_estimates_snapshot_job(scheduler)
+    register_discover_universe_prefetch_job(scheduler)
     register_monthly_envelope_rollover_job(scheduler)
     register_telegram_daily_reminder_job(scheduler)
     register_telegram_polling_job(scheduler)

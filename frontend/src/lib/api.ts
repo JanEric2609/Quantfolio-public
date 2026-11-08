@@ -1645,7 +1645,8 @@ export interface TrustTimeToKnow {
 
 export interface TrustFamilyTest {
   family: TrustFamilyKey;
-  series: "ideas" | "ranking" | "advisor";
+  /** ranking_ef: covariance-efficient ranking weights (ADR 0018 amendment of 2026-11-08). */
+  series: "ideas" | "ranking" | "advisor" | "ranking_ef";
   role: "primary" | "secondary";
   /** F1 since ADR 0018's amendment of 2026-10-14: shown as an alarm (harm or a large edge). */
   alarm_only?: boolean;
@@ -1687,7 +1688,12 @@ export interface TrustDailyTests {
   min_days_for_state: number;
   horizon_days: number;
   families: TrustFamilyTest[];
+  /** The frozen 2026-10-14 selection design; secondary since 2026-11-08. */
   selection?: TrustSelectionTest | null;
+  /** selection_w: matched, precision-weighted picks; the primary selection test since 2026-11-08. */
+  selection_weighted?: TrustSelectionTest | null;
+  /** F2 on ranking_ef; the primary ranking test since 2026-11-08. */
+  ranking_efficient?: TrustFamilyTest | null;
   mandates?: TrustMandateTest[];
   paired?: TrustPairedComparison | null;
   factor_neutral?: TrustFactorNeutral | null;
@@ -1710,8 +1716,8 @@ export interface TrustNoiseCheck {
 /** S (picks vs same-run, same-sector non-picks) and U (futility) on one series. */
 export interface TrustSelectionTest {
   family: "S";
-  series: "selection";
-  role: "primary";
+  series: "selection" | "selection_w";
+  role: "primary" | "secondary";
   question: string;
   futility_question: string;
   start: string;

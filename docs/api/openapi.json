@@ -2072,6 +2072,17 @@
             "title": "Prior Var",
             "type": "number"
           },
+          "ranking_efficient": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FamilyTestOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "F2 on ranking_ef (covariance-efficient weights), primary since the amendment of 2026-11-08."
+          },
           "selection": {
             "anyOf": [
               {
@@ -2080,7 +2091,19 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "The frozen selection design of 2026-10-14; secondary since 2026-11-08."
+          },
+          "selection_weighted": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SelectionTestOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "S and U on selection_w, the primary selection test since ADR 0018's amendment of 2026-11-08."
           },
           "sigma_ref": {
             "title": "Sigma Ref",
@@ -4122,7 +4145,8 @@
             "enum": [
               "ideas",
               "ranking",
-              "advisor"
+              "advisor",
+              "ranking_ef"
             ],
             "title": "Series",
             "type": "string"
@@ -12150,7 +12174,7 @@
         "type": "object"
       },
       "SelectionTestOut": {
-        "description": "S (picks against same-run, same-sector non-picks) and U (futility) on one series.",
+        "description": "S (picks against same-run, same-sector non-picks) and U (futility) on one series.\n\n``selection`` is the frozen design of 2026-10-14 (secondary since\n2026-11-08); ``selection_w`` the matched, precision-weighted one of the\n2026-11-08 amendment (primary).",
         "properties": {
           "clip": {
             "title": "Clip",
@@ -12282,8 +12306,11 @@
             "type": "boolean"
           },
           "role": {
-            "const": "primary",
             "default": "primary",
+            "enum": [
+              "primary",
+              "secondary"
+            ],
             "title": "Role",
             "type": "string"
           },
@@ -12299,8 +12326,11 @@
             "title": "Sd Daily"
           },
           "series": {
-            "const": "selection",
             "default": "selection",
+            "enum": [
+              "selection",
+              "selection_w"
+            ],
             "title": "Series",
             "type": "string"
           },

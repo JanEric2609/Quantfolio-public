@@ -43,7 +43,9 @@ from app.decision.verification.daily_ledger import (
     SERIES_ADVISOR,
     SERIES_IDEAS,
     SERIES_RANKING,
+    SERIES_RANKING_EF,
     SERIES_SELECTION,
+    SERIES_SELECTION_W,
     mandate_starts,
 )
 from app.foundation import forecast_verification as fv
@@ -86,14 +88,52 @@ class Family:
     series: str
     role: str  # "primary" | "secondary"
     question: str
+    #: First day an observation enters the e-values, the clip and the reference noise.
+    start: date = PRIMARY_TEST_START
+    clip: float = CLIP
+    sigma_ref: float = SIGMA_REF
+
+
+# ---------------------------------------------------------------------------
+# The lower-noise designs (ADR 0018, amendment of 2026-11-08). Chosen from the
+# outcome-blind noise study (docs/research/calibration/noise-study-2026-11-08.json:
+# random picks and scores, and the real runs' weights measured only on the
+# year before each issue), fixed before any value of these series was computed.
+# ---------------------------------------------------------------------------
+
+#: First day an observation of selection_w or ranking_ef enters an e-value:
+#: the first trading day after the amendment was merged.
+V2_TEST_START = date(2026, 11, 9)
+#: selection_w: 2.0 % per 21 days (between the study's 1.5 % scaled from the
+#: frozen 2.3 % and its 2.5 % for one run alone).
+SELECTION_W_SIGMA_REF = 0.020 / math.sqrt(21)
+#: ranking_ef: 2.1 % per 21 days (the study's 2.4 % for one run times the
+#: live ranking series' ratio of 0.86 for overlapping runs).
+RANKING_EF_SIGMA_REF = 0.021 / math.sqrt(21)
+#: 4.5 x the reference noise, rounded: 2 % a day for both.
+V2_CLIP = 0.02
+SELECTION_W_QUESTION = (
+    "Do Discover's picks beat the most similar stocks it could have picked instead "
+    "(same run, same sector, nearest in beta, volatility and momentum)?"
+)
+RANKING_EF_QUESTION = (
+    "Does Discover's score sort winners from losers, measured with the least noisy portfolio "
+    "that has the same exposure to the score?"
+)
 
 
 FAMILIES = (
     # F1 is an alarm since the amendment of 2026-10-14 (§6): it can catch harm
     # or a large edge; the headline comes from S and U (``alarm_only``).
     Family("F1", SERIES_IDEAS, "primary", "Do Discover's picks, held as issued, beat your passive core ETF?"),
-    Family("F2", SERIES_RANKING, "primary", "Does Discover's score sort winners from losers among every scored stock?"),
+    # The rank-weighted ranking test is secondary since the amendment of
+    # 2026-11-08: RANKING_EFFICIENT below asks its question with less noise.
+    Family("F2", SERIES_RANKING, "secondary", "Does Discover's score sort winners from losers among every scored stock?"),
     Family("F3", SERIES_ADVISOR, "secondary", "Do the advisor's directional calls beat your passive core ETF?"),
+)
+RANKING_EFFICIENT = Family(
+    "F2", SERIES_RANKING_EF, "primary", RANKING_EF_QUESTION,
+    start=V2_TEST_START, clip=V2_CLIP, sigma_ref=RANKING_EF_SIGMA_REF,
 )
 
 #: Assumed edges for the "time to know" forecast. Ideas and advisor: mean
@@ -118,10 +158,14 @@ def _years(days: int | None) -> float | None:
     return None if days is None else days / TRADING_DAYS_PER_YEAR
 
 
-def _forecast(series: str, sd_daily: float, measured_sd: bool) -> dict[str, Any]:
+def _forecast(series: str, sd_daily: float, measured_sd: bool, clip: float = CLIP) -> dict[str, Any]:
     within = tuple(y * TRADING_DAYS_PER_YEAR for y in WITHIN_YEARS)
     if series == SERIES_RANKING:
         grid, default, unit = IC_GRID, IC_DEFAULT, "rank_ic"
+        sd = sd_daily
+    elif series == SERIES_RANKING_EF:
+        # Its own reference noise until measured; the edge is the portfolio's excess per 21 days.
+        grid, default, unit = EDGE_GRID_21D, EDGE_DEFAULT_21D, "excess_per_21d"
         sd = sd_daily
     else:
         grid, default, unit = EDGE_GRID_21D, EDGE_DEFAULT_21D, "excess_per_21d"
@@ -132,7 +176,7 @@ def _forecast(series: str, sd_daily: float, measured_sd: bool) -> dict[str, Any]
 
     def run(assumption: float) -> fv.DaysToVerdict:
         return fv.days_to_verdict(
-            round(_sharpe_daily(series, assumption, sd), 6), sd, CLIP, THRESHOLD,
+            round(_sharpe_daily(series, assumption, sd), 6), sd, clip, THRESHOLD,
             prior_var=PRIOR_VAR, cap_factor=BET_CAP, within=within,
         )
 
@@ -141,7 +185,7 @@ def _forecast(series: str, sd_daily: float, measured_sd: bool) -> dict[str, Any]
         "assumption_unit": unit,
         "assumption": default,
         "ic_sd": IC_SD if series == SERIES_RANKING else None,
-        "basket_sd_21d": None if series == SERIES_RANKING or measured_sd else BASKET_SD_21D,
+        "basket_sd_21d": None if series in (SERIES_RANKING, SERIES_RANKING_EF) or measured_sd else BASKET_SD_21D,
         "sd_daily": sd,
         "sd_measured": measured_sd,
         "q10_days": main.q10,
@@ -244,11 +288,13 @@ SELECTION_QUESTION = "Do Discover's picks beat the stocks it could have picked i
 FUTILITY_QUESTION = "Is the picks' selection edge too small to pay for trading them?"
 
 
-def _observed(rows: list[TrustDailyActiveReturn]) -> tuple[list[date], list[float], int]:
-    """(days, values, days before T0) of the observed rows from :data:`PRIMARY_TEST_START`."""
+def _observed(
+    rows: list[TrustDailyActiveReturn], start: date = PRIMARY_TEST_START,
+) -> tuple[list[date], list[float], int]:
+    """(days, values, days before *start*) of the observed rows from *start*."""
     rows = sorted(rows, key=lambda r: r.day)
     obs = [r for r in rows if r.value is not None and r.n_open > 0]
-    live = [r for r in obs if r.day >= PRIMARY_TEST_START]
+    live = [r for r in obs if r.day >= start]
     return [r.day for r in live], [float(r.value) for r in live if r.value is not None], len(obs) - len(live)
 
 
@@ -287,13 +333,25 @@ def noise_check(values: list[float]) -> dict[str, Any]:
     return {"status": status, "failed_at_day": failed_at, "looks": looks}
 
 
-def selection_result(rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
-    """S (skill and harm, K = 2) and U (futility, K = 1) on the ``selection`` series."""
-    days, values, n_pre = _observed(rows)
+def selection_result(
+    rows: list[TrustDailyActiveReturn],
+    *,
+    series: str = SERIES_SELECTION,
+    start: date = PRIMARY_TEST_START,
+    sigma_ref: float = SELECTION_SIGMA_REF,
+    clip: float = SELECTION_CLIP,
+    question: str = SELECTION_QUESTION,
+) -> dict[str, Any]:
+    """S (skill and harm, K = 2) and U (futility, K = 1) on a selection series.
+
+    The defaults are the frozen ``selection`` series of 2026-10-14;
+    :func:`selection_weighted_result` passes the 2026-11-08 design's.
+    """
+    days, values, n_pre = _observed(rows, start)
     n = len(values)
     delta_d = FUTILITY_DELTA_21D / HORIZON_DAYS
-    skill, harm = _bet(values, SELECTION_CLIP)
-    _, futile = _bet(values, SELECTION_CLIP, shift=delta_d)
+    skill, harm = _bet(values, clip)
+    _, futile = _bet(values, clip, shift=delta_d)
     rejected = fv.e_bh([skill.final, harm.final], FDR_LEVEL)
     futility = futile.final >= FUTILITY_THRESHOLD
     noise = noise_check(values)
@@ -308,25 +366,26 @@ def selection_result(rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
     else:
         state = "too_early" if n < MIN_DAYS_FOR_STATE else "no_evidence"
     ci = fv.mean_ci_hac(values, fv.newey_west_lag(n), 0.9) if values else None
-    fallback = [int((r.detail_json or {}).get("n_fallback") or 0) for r in rows if r.day >= PRIMARY_TEST_START]
+    fallback = [int((r.detail_json or {}).get("n_fallback") or 0) for r in rows if r.day >= start]
     measured = n >= MIN_DAYS_FOR_STATE
-    sd = float(np.std(values, ddof=1)) if measured else SELECTION_SIGMA_REF
+    sd = float(np.std(values, ddof=1)) if measured else sigma_ref
     rho1 = fv.lag1_autocorrelation(values[:AR1_CHECK_DAYS]) if n >= AR1_CHECK_DAYS else None
     return {
         "family": "S",
-        "series": SERIES_SELECTION,
-        "role": "primary",
-        "question": SELECTION_QUESTION,
+        "series": series,
+        # The frozen design is secondary since the amendment of 2026-11-08.
+        "role": "primary" if series == SERIES_SELECTION_W else "secondary",
+        "question": question,
         "futility_question": FUTILITY_QUESTION,
-        "start": PRIMARY_TEST_START.isoformat(),
+        "start": start.isoformat(),
         "n_days": n,
         "n_days_pre_registration": n_pre,
         "first_day": days[0].isoformat() if days else None,
         "mean_21d": float(np.mean(values)) * HORIZON_DAYS if values else None,
         "mean_ci_21d": [ci[0] * HORIZON_DAYS, ci[1] * HORIZON_DAYS] if ci else None,
         "sd_daily": float(np.std(values, ddof=1)) if n >= 2 else None,
-        "clip": SELECTION_CLIP,
-        "sigma_ref": SELECTION_SIGMA_REF,
+        "clip": clip,
+        "sigma_ref": sigma_ref,
         "e_skill": skill.final,
         "e_harm": harm.final,
         "e_futility": futile.final,
@@ -341,8 +400,16 @@ def selection_result(rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
         "provisional": state in ("skill", "harm", "not_worth_following") and noise["status"] != "passed",
         "noise_check": noise,
         "path": _thin(days, skill.path, harm.path),
-        "time_to_know": time_to_know_grid(sd, SELECTION_CLIP, measured),
+        "time_to_know": time_to_know_grid(sd, clip, measured),
     }
+
+
+def selection_weighted_result(rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
+    """S and U on ``selection_w``, the primary selection design since 2026-11-08."""
+    return selection_result(
+        rows, series=SERIES_SELECTION_W, start=V2_TEST_START, sigma_ref=SELECTION_W_SIGMA_REF,
+        clip=V2_CLIP, question=SELECTION_W_QUESTION,
+    )
 
 
 def mandate_results(
@@ -424,34 +491,35 @@ GRID_MAX_YEARS = 40
 def series_result(family: Family, rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
     """Test, posterior and forecast for one family from its frozen rows."""
     rows = sorted(rows, key=lambda r: r.day)
-    pre = [r for r in rows if r.day < PRIMARY_TEST_START]
-    live = [r for r in rows if r.day >= PRIMARY_TEST_START]
+    pre = [r for r in rows if r.day < family.start]
+    live = [r for r in rows if r.day >= family.start]
     observed = [r for r in live if r.value is not None and r.n_open > 0]
     values = [float(r.value) for r in observed if r.value is not None]
     days = [r.day for r in observed]
     n = len(values)
+    clip = family.clip
 
-    y = (np.clip(np.asarray(values, dtype=float), -CLIP, CLIP) + CLIP) / (2.0 * CLIP)
+    y = (np.clip(np.asarray(values, dtype=float), -clip, clip) + clip) / (2.0 * clip)
     skill = fv.e_process_bernoulli(y, 0.5, PRIOR_VAR, cap_factor=BET_CAP)
     harm = fv.e_process_bernoulli(1.0 - y, 0.5, PRIOR_VAR, cap_factor=BET_CAP)
     rejected = fv.e_bh([skill.final, harm.final], FDR_LEVEL)
     state = _state(n, rejected[0], rejected[1])
 
     sd_measured = n >= MIN_DAYS_FOR_STATE
-    sd = float(np.std(values, ddof=1)) if sd_measured else SIGMA_REF
+    sd = float(np.std(values, ddof=1)) if sd_measured else family.sigma_ref
     if not sd > 0:
-        sd, sd_measured = SIGMA_REF, False
+        sd, sd_measured = family.sigma_ref, False
     ci = fv.mean_ci_hac(values, fv.newey_west_lag(n), 0.9) if values else None
     rho1 = fv.lag1_autocorrelation(values[:AR1_CHECK_DAYS]) if n >= AR1_CHECK_DAYS else None
     pre_values = [float(r.value) for r in pre if r.value is not None and r.n_open > 0]
-    clipped = int(np.sum(np.abs(np.asarray(values)) > CLIP)) if values else 0
+    clipped = int(np.sum(np.abs(np.asarray(values)) > clip)) if values else 0
     return {
         "family": family.key,
         "series": family.series,
         "role": family.role,
         "alarm_only": family.series == SERIES_IDEAS,
         "question": family.question,
-        "start": PRIMARY_TEST_START.isoformat(),
+        "start": family.start.isoformat(),
         "n_days": n,
         "n_empty_days": sum(1 for r in live if r.value is None or r.n_open == 0),
         "n_stale_days": sum(1 for r in observed if r.n_stale > 0),
@@ -477,7 +545,7 @@ def series_result(family: Family, rows: list[TrustDailyActiveReturn]) -> dict[st
         },
         "path": _thin(days, skill.path, harm.path),
         "posterior": _posterior(values),
-        "time_to_know": _forecast(family.series, sd, sd_measured),
+        "time_to_know": _forecast(family.series, sd, sd_measured, clip),
     }
 
 
@@ -543,14 +611,95 @@ def build_daily_tests(db: Session, user_id: str) -> dict[str, Any]:
         "horizon_days": HORIZON_DAYS,
         "families": [series_result(f, by_series[f.series]) for f in FAMILIES],
         "selection": selection_result(by_series[SERIES_SELECTION]),
+        "selection_weighted": selection_weighted_result(by_series[SERIES_SELECTION_W]),
+        "ranking_efficient": series_result(RANKING_EFFICIENT, by_series[SERIES_RANKING_EF]),
         "mandates": mandate_results(by_series, mandate_starts(db, user_id)),
         "paired": paired_comparison(by_series[SERIES_IDEAS], by_series[SERIES_ADVISOR]),
     }
 
 
+#: Where the weekly ledger job stores :func:`buy_gate_evidence` per user for the
+#: Discover BUY gate (internal state in ``app_settings``, no catalog entry):
+#: discover may not import this package (decision-loop independence).
+BUY_GATE_SETTING_KEY = "trust_buy_gate_json"
+#: The BUY gate's level: the owner's 1 % (2026-09-29), so the skill e-value must reach 100.
+BUY_EVIDENCE_ALPHA = 0.01
+#: The BUY gate waits for the noise check's second look (ADR 0018 §11). In
+#: 2,000 simulated 20-year null paths (amendment of 2026-11-08, §4) a false
+#: BUY slipped past the noise check in 8.1 % of overlap_21d paths when BUY could
+#: come from day 63, 3.7 % from day 126; 1.9 % / 1.8 % under AR(1) 0.15 and
+#: 0.3 % on iid noise either way.
+BUY_MIN_DAYS = NOISE_CHECK_LOOKS[1][0]
+
+
+def buy_gate_evidence(db: Session, user_id: str | None) -> dict[str, Any]:
+    """What the Discover BUY gate reads (ADR 0018, amendment of 2026-11-08, §4).
+
+    ``proven`` when ``selection_w``'s skill e-value has reached
+    ``1 / BUY_EVIDENCE_ALPHA`` after at least :data:`BUY_MIN_DAYS` observed
+    days, and no guard has fired: the selection harm rejection, the futility
+    rejection, a failed noise check, or F1's harm rejection against the
+    passive core. Otherwise ``insufficient_data`` (no observed day yet) or
+    ``unproven``.
+    """
+    query = db.query(TrustDailyActiveReturn).filter(
+        TrustDailyActiveReturn.series.in_((SERIES_SELECTION_W, SERIES_IDEAS)),
+    )
+    if user_id:
+        query = query.filter(TrustDailyActiveReturn.user_id == user_id)
+    rows = query.all()
+    sel = selection_weighted_result([r for r in rows if r.series == SERIES_SELECTION_W])
+    f1 = series_result(FAMILIES[0], [r for r in rows if r.series == SERIES_IDEAS])
+    threshold = 1.0 / BUY_EVIDENCE_ALPHA
+    guards = {
+        "selection_harm": sel["state"] == "harm",
+        "not_worth_following": sel["state"] == "not_worth_following",
+        "noise_check_failed": sel["noise_check"]["status"] == "failed",
+        "f1_harm": f1["state"] == "harm",
+    }
+    if sel["n_days"] == 0:
+        status = "insufficient_data"
+    elif sel["e_skill"] >= threshold and sel["n_days"] >= BUY_MIN_DAYS and not any(guards.values()):
+        status = "proven"
+    else:
+        status = "unproven"
+    return {
+        "status": status,
+        "series": SERIES_SELECTION_W,
+        "computed_on": date.today().isoformat(),
+        "start": sel["start"],
+        "n_days": sel["n_days"],
+        "min_days": BUY_MIN_DAYS,
+        "e_skill": sel["e_skill"],
+        "evidence_threshold": threshold,
+        "mean_21d": sel["mean_21d"],
+        "state": sel["state"],
+        "guards": guards,
+        "time_to_know": sel["time_to_know"],
+    }
+
+
+def store_buy_gate_evidence(db: Session, user_ids: list[str]) -> dict[str, str]:
+    """Write :func:`buy_gate_evidence` for each user under :data:`BUY_GATE_SETTING_KEY`; the caller commits."""
+    from app.foundation.settings import get_setting_row, upsert_public_settings
+
+    stored = get_setting_row(db, BUY_GATE_SETTING_KEY)
+    out = dict(stored) if isinstance(stored, dict) else {}
+    for user_id in user_ids:
+        out[user_id] = buy_gate_evidence(db, user_id)
+    upsert_public_settings(db, {BUY_GATE_SETTING_KEY: out})
+    return {u: out[u]["status"] for u in user_ids}
+
+
 __all__ = [
+    "BUY_EVIDENCE_ALPHA",
+    "BUY_GATE_SETTING_KEY",
+    "BUY_MIN_DAYS",
     "CLIP",
     "FAMILIES",
+    "RANKING_EFFICIENT",
+    "V2_TEST_START",
+    "buy_gate_evidence",
     "MIN_DAYS_FOR_STATE",
     "NOISE_CHECK_LOOKS",
     "PRIMARY_TEST_START",
@@ -560,6 +709,8 @@ __all__ = [
     "noise_check",
     "paired_comparison",
     "selection_result",
+    "selection_weighted_result",
     "series_result",
+    "store_buy_gate_evidence",
     "time_to_know_grid",
 ]

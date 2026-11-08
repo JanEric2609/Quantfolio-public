@@ -81,6 +81,8 @@ from .market import (
     Fundamental as Fundamental,
     ListingCurrency as ListingCurrency,
     IndexCurrencyWeights as IndexCurrencyWeights,
+    IndexUniverseMember as IndexUniverseMember,
+    AnalystConsensusCache as AnalystConsensusCache,
     MacroIndicator as MacroIndicator,
     PriceCache as PriceCache,
 )

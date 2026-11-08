@@ -699,6 +699,158 @@ later: a pick that stops trading is cash (active return −r_bench) for the rest
 under the old rule the first days of that outage were already frozen as stale. No test statistic,
 look or threshold depends on when a day is written.
 
+## Amendment of 2026-11-08 (lower-noise series, and the BUY gate reads them)
+
+**Observed when this was written** (plan `docs/plan-faster-evidence-2026-11-08.md`):
+- Only standard deviations of the live series were read, never a mean, an e-value or a state:
+  - over 16 observed days from T0, `selection` 3.76 % per 21 days, `ranking` 3.11 % and
+    `ideas` 3.59 %.
+- The Discover BUY gate (`discover/candidate_gate.py`) still ran the ADR 0017 block-mean test on
+  the picks against MSCI World:
+  - with its prior precision c = 2, nothing could be proven before nine 30-day blocks;
+  - at a 1 % monthly edge it was proven within three years about half the time.
+- No value of `selection_w` or `ranking_ef` had been computed, by any code, for any day.
+
+**Why.** For an anytime-valid test the evidence grows by at most ½ log(1 + μ²/σ²) per observation
+(Wang & Ramdas 2024, Prop. 6.5), so at a fixed edge the time to a verdict scales with σ².
+Observing more often within the same span adds nothing about the mean (Merton 1980). The only
+ways to know sooner without lowering the bar are therefore:
+- less noise per observation;
+- the test the owner acts on asking the least noisy question.
+
+### 1. The noise study (outcome-blind)
+
+`lab/calibration/noise_study.py` with `scripts/run_noise_study.py`; results in
+`docs/research/calibration/noise-study-2026-11-08.json`. It ran on the stored EUR closes of
+2026-11-08's 237 evaluable stocks over 761 trading days, in two parts:
+- **Random picks and scores.** 98 issues, 10 seeds. They have no edge, so the measured standard
+  deviation is the design's noise and nothing else.
+- **The nine live runs as issued.** Real composites and picks, so the portfolios carry the real
+  signal's factor tilts. Weights were fixed on the year two years before each issue and measured
+  on the year just before it. No return after any issue day entered.
+
+Real runs, standard deviation per 21 days of one run's portfolio:
+
+| Design | sd | Times faster at a fixed edge |
+|---|---|---|
+| `selection` (frozen: equal-weighted same-sector non-picks) | 3.90 % | 1 |
+| + hedge of the beta difference | 3.85 % | 1.02 |
+| + precision weights (1/var of each pick's trailing spread) | 2.73 % | 2.04 |
+| 5 nearest same-sector controls + precision weights | **2.50 %** | **2.44** |
+| `ranking` (frozen centred-rank weights) | 3.65 % | 1 |
+| Ledoit-Wolf-Zhao efficient weights, same rank exposure | **2.44 %** | **2.23** |
+| the same on a random 100 of the 237 stocks: rank / efficient | 4.05 % / 2.82 % | 0.81 / 1.67 |
+
+- Beta hedging buys almost nothing once controls share the sector, so it is not adopted. It
+  would also change the hypothesis to an alpha.
+- Efficient weights gain more from breadth, as Ledoit, Wolf & Zhao (2019) report: going from 100
+  to 237 stocks makes them 1.34 times faster against 1.23 for rank weights.
+- These figures include the duplicate and weight-cap rules of §2 and §3. Before those rules
+  were added (same day, same data) they were 2.48 % / ×2.47 and 2.43 % / ×2.21.
+
+### 2. The `selection_w` series (frozen rule)
+
+- **Source:** as `selection` (amendment of 2026-10-14, §2): one run's evaluable stocks, picks
+  `picked = true`, entry at close(*d*), 21 trading days, EUR, carried prices, frozen once.
+- **Window:** for each run, the 252 trading days of the passive core's calendar ending on the
+  last trading day before the issue day *d*.
+  - A stock is in the window when it has a close on or before the window's first day and one in
+    its last 5 days.
+  - Nothing from day *d* or later enters.
+- **Features:** each in-window stock's OLS beta to the passive core over the window, the
+  standard deviation of its last 63 daily returns, and 12-1 momentum. They are z-scored over the
+  run's in-window stocks (`foundation/evidence_weights.py:stock_features`).
+- **Controls:** the 5 nearest same-sector non-picks by Euclidean distance in feature space.
+  - With fewer than 3 in-window same-sector non-picks, the 5 nearest of all in-window non-picks
+    are used, counted as `n_fallback`.
+  - A pick without a full window keeps the 2026-10-14 rule's controls.
+- **Weight:** 1 / variance of the pick-minus-controls daily spread over the window's last 126
+  days. A pick without one takes the median weight of its run's other picks. Every weight is
+  capped at 4 times its run's median, so one very quiet pick cannot carry a day.
+- **Second listings:** a non-pick whose window returns correlate above 0.95 with another of the
+  run's stocks (a second share class, such as GOOG and GOOGL) is never a control: its spread
+  against its twin compares nothing.
+- **The day's observation:** r_s = Σ_i w_i (r_pick,i,s − mean_controls r_c,s) / Σ_i w_i over
+  the open picks. Every weight is fixed before the issue day, so under H0 (each pick's
+  conditional mean spread ≤ 0) the weighted mean's conditional mean is ≤ 0 and every
+  e-process stays valid.
+
+### 3. The `ranking_ef` series (frozen rule)
+
+- **Cohort:** each live run with at least 30 evaluable stocks in the window of §2.
+- **Second listings:** of two stocks whose window returns correlate above 0.95, the later in
+  symbol order is dropped (Ledoit, Wolf & Zhao drop such pairs); a cohort that falls below 30
+  is skipped.
+- **Signal:** m = their centred-rank weights (§5 of this ADR) over that set.
+- **Covariance:** C = the Ledoit-Wolf (2004) shrinkage of the window's daily returns.
+- **Weights:** w = argmin w′Cw subject to 1′w = 0 and m′w = m′m (Ledoit, Wolf & Zhao 2019,
+  "Efficient sorting"), held for 21 trading days with the ledger's calendar and carry rules.
+- The day's value is the mean over open cohorts, as for `ranking`.
+
+### 4. Tests
+
+| Family | Series | Start | σ_ref per 21 days | Clip | Bar | Role |
+|---|---|---|---|---|---|---|
+| **S** skill/harm, **U** futility | `selection_w` | **2026-11-09** | 2.0 % | 2 % a day | e-BH K = 2 at 5 % (e ≥ 40); U e ≥ 20, δ unchanged | **primary**, headline |
+| **F2** skill/harm | `ranking_ef` | **2026-11-09** | 2.1 % | 2 % a day | e-BH K = 2 (e ≥ 40) | **primary** |
+| S, U (2026-10-14 design) | `selection` | 2026-10-15 | unchanged | unchanged | unchanged | secondary, shown, no headline |
+| F2 (2026-10-14 design) | `ranking` | 2026-10-15 | unchanged | unchanged | unchanged | secondary |
+
+- **σ_ref** comes from the study, not from any live value of these series:
+  - `selection_w`'s 2.0 % lies between 1.5 % (the frozen 2.3 % times the study's ratio
+    2.50/3.90) and 2.5 % (one run alone);
+  - `ranking_ef`'s 2.1 % is the study's 2.44 % times 0.86, the live `ranking` series' ratio of
+    overlapping to single-run noise.
+- **Same machinery:** map, bettor, pseudo-variance 0.0121, cap 0.75/p0, the §11 noise check and
+  "provisional" before day 252.
+- **Start:** 2026-11-09 is the first trading day after this amendment was merged, so no day a
+  verdict bets on was computed by anyone before the rule was fixed. Earlier days of the new
+  series are written and shown "before pre-registration", as in §2.
+- **Multiplicity:** the old and new designs never form one claim. The new ones are the primary
+  tests; the old ones are records.
+
+**Calibration** (`docs/research/calibration/selection-w-calibration-2026-11-08.json`, harness of
+2026-10-14, 20 years):
+
+| False alarm, S2 at e ≥ 100 | iid | t(4)-GARCH | regime | AR(1) 0.15 | overlap_21d |
+|---|---|---|---|---|---|
+| Share of null paths that ever cross | 0.8 % | 0.9 % | 0.6 % | 2.8 % | 51 % |
+
+Median years to e ≥ 100:
+
+| Edge per 21 days | frozen `selection`, σ 2.3 % / 3.1 % | `selection_w`, σ × 0.636 |
+|---|---|---|
+| 0.5 % | 19.9 / 38.9 | 7.0 / 14.5 |
+| 1 % | 4.5 / 8.9 | **1.7 / 3.0** |
+| 2 % | 1.1 / 1.9 | **0.7 / 0.8** |
+
+### 5. The Discover BUY gate reads `selection_w` (stocks)
+
+- **Rule.** For instrument type `equity`, `candidate_gate.evaluate_track_record` is `proven` when
+  all of these hold:
+  - `selection_w`'s skill e-value has reached **100** (the owner's 1 %, unchanged);
+  - the series has at least **126** observed days, the noise check's second look;
+  - none of these guards has fired: the S harm rejection, the U futility rejection, a failed
+    noise check, or F1's harm rejection against MSCI World;
+  - and, as before, the resolved picks' hit rate is above 50 %.
+- **Why 126 days.** In 2,000 simulated 20-year null paths, a false BUY reached e ≥ 100 before
+  any noise-check look failed in:
+  - 8.1 % of overlap_21d paths when BUY could come from day 63, and 3.7 % from day 126;
+  - 1.9 % / 1.8 % of AR(1) 0.15 paths;
+  - 0.3 % of iid paths either way.
+- **Funds, bonds and cash** keep the block-mean gate: they are not in the selection series.
+- **Delivery.** The weekly ledger job stores the evidence per user in `app_settings`
+  (`trust_buy_gate_json`) and Discover reads that copy. The decision-loop independence
+  contract forbids `discover` from importing `verification`.
+- **The record.** The old block-mean result stays in every stock's gate as `legacy`.
+- **What a BUY now says:** the picks beat the most similar stocks Discover could have picked,
+  with the stated false-BUY rate, and nothing shows them doing worse than MSCI World. It no
+  longer says "proven to beat MSCI World". The basket's sector, region and style tilt is a risk
+  the owner takes, reported on the Trust page as tracking error.
+
+**What does not change:** every earlier series, test, threshold, δ and prior; the T0 of the
+families in the table above.
+
 ## Consequences
 
 **Gained.**

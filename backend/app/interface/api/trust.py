@@ -207,7 +207,7 @@ class PreRegistrationOut(BaseModel):
 
 class FamilyTestOut(BaseModel):
     family: Literal["F1", "F2", "F3"]
-    series: Literal["ideas", "ranking", "advisor"]
+    series: Literal["ideas", "ranking", "advisor", "ranking_ef"]
     role: Literal["primary", "secondary"]
     alarm_only: bool = Field(
         default=False,
@@ -270,11 +270,16 @@ class NoiseCheckOut(BaseModel):
 
 
 class SelectionTestOut(BaseModel):
-    """S (picks against same-run, same-sector non-picks) and U (futility) on one series."""
+    """S (picks against same-run, same-sector non-picks) and U (futility) on one series.
+
+    ``selection`` is the frozen design of 2026-10-14 (secondary since
+    2026-11-08); ``selection_w`` the matched, precision-weighted one of the
+    2026-11-08 amendment (primary).
+    """
 
     family: Literal["S"] = "S"
-    series: Literal["selection"] = "selection"
-    role: Literal["primary"] = "primary"
+    series: Literal["selection", "selection_w"] = "selection"
+    role: Literal["primary", "secondary"] = "primary"
     question: str
     futility_question: str
     start: str
@@ -388,7 +393,17 @@ class DailyTestsOut(BaseModel):
     min_days_for_state: int
     horizon_days: int
     families: list[FamilyTestOut]
-    selection: SelectionTestOut | None = None
+    selection: SelectionTestOut | None = Field(
+        default=None, description="The frozen selection design of 2026-10-14; secondary since 2026-11-08.",
+    )
+    selection_weighted: SelectionTestOut | None = Field(
+        default=None,
+        description="S and U on selection_w, the primary selection test since ADR 0018's amendment of 2026-11-08.",
+    )
+    ranking_efficient: FamilyTestOut | None = Field(
+        default=None,
+        description="F2 on ranking_ef (covariance-efficient weights), primary since the amendment of 2026-11-08.",
+    )
     mandates: list[MandateTestOut] = Field(default_factory=list)
     paired: PairedComparisonOut | None = None
     factor_neutral: FactorNeutralOut | None = Field(

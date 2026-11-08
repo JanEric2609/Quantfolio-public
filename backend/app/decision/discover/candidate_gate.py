@@ -46,6 +46,30 @@ Now:
 The expected-maximum deflation by the global trial count (finding F15) no
 longer applies: it corrected for choosing the best of many *configs*, and
 the cohort is no longer a config. Every evaluation is logged.
+
+Stocks since ADR 0018's amendment of 2026-11-08
+-----------------------------------------------
+
+The block-mean test above asks the slowest question there is (do the picks
+beat MSCI World?) with one observation a month, so it cannot say "proven"
+before nine blocks and, at a 1 % monthly edge, says it within three years
+about half the time. For **stocks** the BUY gate now reads the trust page's
+primary selection test instead (``verification.buy_gate_evidence``): each
+pick against the most similar same-sector stocks of the same run, observed
+daily, precision-weighted, starting 2026-11-09. The outcome-blind noise
+study (``docs/research/calibration/noise-study-2026-11-08.json``) puts that
+design at about 2.4 times the speed of the frozen selection series, which
+was itself about four times as fast as the comparison with MSCI World.
+
+What stays: the owner's 1 % level (e >= 100), the hit-rate floor, and no
+BUY at all while the selection test shows harm, says "not worth following",
+fails its noise check, or F1 shows harm against MSCI World. What is new: no
+BUY before 126 observed days (the noise check's second look, about six
+months), so a series whose daily values persist is caught before it can
+issue one in most simulated cases. The old
+block-mean result is still computed and returned as ``legacy`` for the
+record. Funds, bonds and cash keep the block-mean gate: they are not in the
+selection series.
 """
 from __future__ import annotations
 
@@ -164,19 +188,92 @@ def _utc(ts: datetime) -> datetime:
     return ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts.astimezone(UTC)
 
 
+#: Instrument types the selection-series gate applies to (the series holds stocks only).
+SELECTION_GATE_TYPES = frozenset({"equity"})
+
+
 def evaluate_track_record(
     db: Session,
     instrument_type: str,
     *,
+    user_id: str | None = None,
     min_blocks: int = DEFAULT_MIN_BLOCKS,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Whether Discover's picks of ``instrument_type`` have a proven edge.
 
     Returns a dict with ``status`` in ``{"insufficient_data", "proven",
-    "unproven"}`` and the evidence behind it (``blocks``, ``e_value``,
-    ``evidence_threshold``, ``mean_block_excess``, ``hit_rate``, ``n``).
+    "unproven"}`` and the evidence behind it. Stocks are judged on the
+    selection series (module docstring, amendment of 2026-11-08) with the
+    block-mean result kept under ``legacy``; other types on the block means
+    (``blocks``, ``e_value``, ``evidence_threshold``, ``mean_block_excess``,
+    ``hit_rate``, ``n``).
     """
+    legacy = _block_mean_track_record(db, instrument_type, min_blocks=min_blocks, now=now)
+    if instrument_type not in SELECTION_GATE_TYPES:
+        return legacy
+    evidence = _stored_selection_evidence(db, user_id)
+    hit_rate = legacy.get("hit_rate")
+    status = evidence["status"]
+    if status == "proven" and hit_rate is not None and hit_rate <= _MIN_HIT_RATE:
+        status = "unproven"
+    result = {
+        "status": status,
+        "cohort": "instrument_type",
+        "instrument_type": instrument_type,
+        "method": "selection_w_e_process",
+        "e_value": round(float(evidence["e_skill"]), 4),
+        "evidence_threshold": evidence["evidence_threshold"],
+        "n_days": evidence["n_days"],
+        "min_days": evidence["min_days"],
+        "start": evidence["start"],
+        "selection_state": evidence["state"],
+        "guards": evidence.get("guards") or {},
+        "computed_on": evidence.get("computed_on"),
+        "hit_rate": hit_rate,
+        "n": legacy.get("n"),
+        "legacy": legacy,
+    }
+    logger.info(
+        "candidate_gate: %s instrument_type=%s selection_w days=%d/%d e=%.3f (need %.0f) guards=%s hit_rate=%s",
+        status, instrument_type, evidence["n_days"], evidence["min_days"], evidence["e_skill"],
+        evidence["evidence_threshold"], [k for k, v in (evidence.get("guards") or {}).items() if v], hit_rate,
+    )
+    return result
+
+
+#: Written weekly by the trust ledger job (``verification.daily_tests.BUY_GATE_SETTING_KEY``).
+BUY_GATE_SETTING_KEY = "trust_buy_gate_json"
+
+
+def _stored_selection_evidence(db: Session, user_id: str | None) -> dict[str, Any]:
+    """The weekly job's ``buy_gate_evidence`` for *user_id*; "insufficient_data" when there is none.
+
+    Discover may not import the verification package (decision-loop
+    independence), so the weekly trust ledger job stores this copy. With
+    no user id the only stored user is used, as on a single-owner install.
+    """
+    from app.foundation.settings import get_setting_row
+
+    stored = get_setting_row(db, BUY_GATE_SETTING_KEY)
+    by_user = stored if isinstance(stored, dict) else {}
+    found = by_user.get(user_id) if user_id else (next(iter(by_user.values())) if len(by_user) == 1 else None)
+    if isinstance(found, dict) and "status" in found:
+        return found
+    return {
+        "status": "insufficient_data", "e_skill": 0.0, "evidence_threshold": 100.0, "n_days": 0,
+        "min_days": 126, "start": None, "state": "too_early", "guards": {},
+    }
+
+
+def _block_mean_track_record(
+    db: Session,
+    instrument_type: str,
+    *,
+    min_blocks: int = DEFAULT_MIN_BLOCKS,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """The block-mean e-process gate (ADR 0017, follow-up 4): every type before 2026-11-08, funds since."""
     clock = now or datetime.now(UTC)
     cohort = [
         # Discover's own rows: the advisor cycle's calls (portfolio_id set) carry
