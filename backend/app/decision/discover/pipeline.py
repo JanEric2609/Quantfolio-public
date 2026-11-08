@@ -15,6 +15,7 @@ import os
 import re
 import statistics
 import threading
+import time
 from pathlib import Path
 from collections.abc import Generator
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -79,6 +80,84 @@ def _safe_float(value: Any) -> float | None:
     if math.isnan(result) or math.isinf(result):
         return None
     return result
+
+
+# ---------------------------------------------------------------------------
+# Run memo: what every candidate of a run shares is read once (plan 2026-11-08, WP1)
+# ---------------------------------------------------------------------------
+#
+# Run 4f3ddca7 spent 11.5 of its 13 minutes in the candidate loop, ~2.8 s per
+# candidate: stage_portfolio_fit rebuilt the price matrix of all 56 holdings for
+# every one of the 248 candidates, and the stages read the candidate's and its
+# benchmark's history about 14 times between them. Inside run_candidate_pipeline
+# both are now read once; outside a run (tests, other callers) nothing changes.
+
+_RUN_STATE = threading.local()
+
+
+class _RunMemo:
+    def __init__(self) -> None:
+        #: symbol -> (days, rows): the longest window read so far.
+        self.history: dict[str, tuple[int, list[dict[str, Any]]]] = {}
+        self.values: dict[Any, Any] = {}
+        self.timings: dict[str, float] = {}
+        self.history_reads = 0
+        self.history_hits = 0
+
+
+def _run_memo() -> _RunMemo | None:
+    return getattr(_RUN_STATE, "memo", None)
+
+
+def _history(db: Session, symbol: str, *, days: int) -> list[dict[str, Any]]:
+    """``market_history(db, symbol, days=days)``, read once per run and symbol.
+
+    A shorter window is cut from the longest one read so far, with the same
+    cutoff ``market.history`` applies (``date >= today - days``); a longer one is
+    read again. Rows are copied, so a caller cannot change what the next one gets.
+    """
+    memo = _run_memo()
+    if memo is None:
+        return market_history(db, symbol, days=days)
+    key = symbol.upper()
+    cached = memo.history.get(key)
+    if cached is None or cached[0] < days:
+        rows = market_history(db, symbol, days=days)
+        memo.history_reads += 1
+        memo.history[key] = (days, list(rows or []))
+        return [dict(r) for r in rows or []]
+    memo.history_hits += 1
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    return [dict(r) for r in cached[1] if str(r.get("date"))[:10] >= cutoff]
+
+
+def _forget_history(symbol: str) -> None:
+    """Drop a symbol's cached rows (after an ingest has written new bars)."""
+    memo = _run_memo()
+    if memo is not None:
+        memo.history.pop(symbol.upper(), None)
+
+
+def _run_cached(key: Any, compute: Any) -> Any:
+    """``compute()`` once per run for ``key``; every call outside a run computes."""
+    memo = _run_memo()
+    if memo is None:
+        return compute()
+    if key not in memo.values:
+        memo.values[key] = compute()
+    return memo.values[key]
+
+
+def _timed(stage: str, fn: Any, *args: Any, **kwargs: Any) -> Any:
+    """Call a stage and add its wall time to the run's per-stage total."""
+    memo = _run_memo()
+    if memo is None:
+        return fn(*args, **kwargs)
+    start = time.perf_counter()
+    try:
+        return fn(*args, **kwargs)
+    finally:
+        memo.timings[stage] = memo.timings.get(stage, 0.0) + time.perf_counter() - start
 
 
 # Maximum composite-score reduction for a ticker recommended today (day 0);
@@ -230,6 +309,13 @@ _RECENT_HIGH_WINDOW_DAYS = 63  # about 3 months of trading days
 _EXCESS_MIN = -0.10
 _SHARPE_DELTA_MIN = -0.5
 _MDD_MAX = 0.30
+#: The one hard risk limit: past this annual volatility a candidate is rejected.
+VOL_REJECT = 1.00
+#: Momentum is "one jump" when a single day gained at least this much and gave at least
+#: this share of the 12-1 return. The share alone flagged 96 of 248 names in run
+#: 4f3ddca7 (a 5 % day is a third of a 15 % year); with both, 5: MRNA, DDOG, URI, PLTR, NXPI.
+JUMP_MIN_RETURN = 0.20
+JUMP_SHARE_LIMIT = 1.0 / 3.0
 
 # Benchmarks by asset class (plan 2026-10-12, D3). Stocks keep a region
 # benchmark (a German stock against the S&P 500 is penalised for being
@@ -365,6 +451,7 @@ def _preingest_one(symbol: str) -> tuple[str, bool]:
 def _preingest_candidates(
     symbols: list[str],
     progress: Any | None = None,
+    fx_symbols: list[str] | None = None,
 ) -> dict[str, Any]:
     """Warm the bar-prices cache for *symbols* plus the benchmark ETFs.
 
@@ -380,6 +467,10 @@ def _preingest_candidates(
 
     Args:
         symbols: candidate symbols to warm.
+        fx_symbols: further symbols whose quote currency needs its ``USD<ccy>=X``
+            series warmed, but not their own bars: the owner's holdings. Without
+            them no USDCAD=X was ever stored, and the four Canadian holdings fell
+            out of every portfolio-fit correlation (run 4f3ddca7, 2026-11-08).
         progress: optional callback ``progress(done, total, symbol)`` invoked as
             each symbol finishes warming. This lets the orchestrator surface a
             live counter during the (otherwise opaque) warm-up phase, which can
@@ -392,7 +483,7 @@ def _preingest_candidates(
     """
     if not symbols:
         return {"requested": 0, "ok": 0, "failed": []}
-    symbols = _ordered_unique([*symbols, *_benchmark_symbols(), *_fx_pairs_for(symbols)])
+    symbols = _ordered_unique([*symbols, *_benchmark_symbols(), *_fx_pairs_for([*symbols, *(fx_symbols or [])])])
     total = len(symbols)
     logger.info("pre-ingest: warming bar-price cache for %d symbols", total)
     executor = ThreadPoolExecutor(max_workers=_PREINGEST_MAX_WORKERS)
@@ -613,7 +704,7 @@ def stage_history_ingest(
     # Cache-first: check if warm-up already populated the DB for this symbol.
     # On gate failure we deliberately FALL THROUGH to a fresh ingest: the cache
     # may be partial and a provider fetch may repair it.
-    rows = market_history(db, symbol, days=_HISTORY_REQUEST_DAYS)
+    rows = _history(db, symbol, days=_HISTORY_REQUEST_DAYS)
     if rows:
         cached_scores, _cache_err = _evaluate_history_rows(rows, _HISTORY_REQUEST_DAYS)
         if cached_scores is not None:
@@ -625,12 +716,14 @@ def stage_history_ingest(
     # Fall through: call provider chain via ingester
     ingester = DataIngester(db)
     result = ingester.ingest_bar_prices(symbol, days=_HISTORY_REQUEST_DAYS)
+    # The run memo holds the rows read before the ingest; read what it wrote.
+    _forget_history(symbol)
 
     if not result.get("success"):
         # Provider failed, but whatever the DB still holds must satisfy the
         # identical gate — an outage must not silently bless shallow cache
         # rows either, and the gate's reason string stays machine-parseable.
-        fallback_rows = market_history(db, symbol, days=_HISTORY_REQUEST_DAYS)
+        fallback_rows = _history(db, symbol, days=_HISTORY_REQUEST_DAYS)
         if fallback_rows:
             scores, err = _evaluate_history_rows(fallback_rows, _HISTORY_REQUEST_DAYS)
             if scores is not None:
@@ -639,7 +732,7 @@ def stage_history_ingest(
         return None, f"history_ingest: {result.get('message', 'unknown error')}"
 
     # Fetch back from DB / cache to count actual closes
-    rows = market_history(db, symbol, days=_HISTORY_REQUEST_DAYS)
+    rows = _history(db, symbol, days=_HISTORY_REQUEST_DAYS)
     if not rows:
         return None, "history_ingest: no rows after ingestion"
 
@@ -1301,7 +1394,7 @@ def stage_momentum_quality(
     genuine inability to compute (no price data) is a hard failure.
     """
     logger.debug("stage_momentum_quality: %s", symbol)
-    rows = market_history(db, symbol, days=_RISK_WINDOW_DAYS)
+    rows = _history(db, symbol, days=_RISK_WINDOW_DAYS)
     if not rows:
         return None, "momentum_quality: no price data"
 
@@ -1357,6 +1450,13 @@ def stage_momentum_quality(
     quarter_high = float(last_quarter.max())
     fall_from_3m_high = 1.0 - float(last_quarter.iloc[-1]) / quarter_high if quarter_high > 0 else 0.0
 
+    jump = _largest_day_in_formation(df["close"], df["date"], momentum)
+    # Nearness to the 52-week high (George & Hwang 2004): predicted returns
+    # better than past return did, without the later reversal. Shadow only (WP3).
+    year = df["close"].iloc[-252:]
+    year_high = float(year.max())
+    high_52w_ratio = float(year.iloc[-1]) / year_high if year_high > 0 else None
+
     concerns: list[str] = []
     if fx_basis != "eur":
         concerns.append("momentum and volatility in the listing currency (no EUR rate)")
@@ -1371,12 +1471,115 @@ def stage_momentum_quality(
         "max_drawdown": round(mdd, 4),
         "trailing_1m_annualized_return": round(float(trailing_1m_annualized_return), 4),
         "fall_from_3m_high": round(fall_from_3m_high, 4),
+        "high_52w_ratio": round(high_52w_ratio, 4) if high_52w_ratio is not None else None,
+        **jump,
         "fx_basis": fx_basis,
         "bad_prints_dropped": bad_prints,
         "concerns": concerns,
     }
     logger.debug("stage_momentum_quality: %s mom=%.2f vol=%.2f concerns=%d", symbol, momentum, vol, len(concerns))
     return scores, None
+
+
+# ---------------------------------------------------------------------------
+# Shadow signals: recorded for every candidate, not ranked on (plan 2026-11-08, WP3)
+# ---------------------------------------------------------------------------
+#
+# Each has a published record; none has one here yet. Published anomalies lose
+# about a third of their return after publication (McLean & Pontiff 2016) and a
+# new factor needs t > 3 (Harvey, Liu & Zhu 2016), so they go into the shadow
+# snapshot of all ~240 candidates a run and are measured there first
+# (shadow_ledger.SHADOW_SIGNAL_KEYS). The composite does not read them.
+
+#: Months of returns behind the residual-momentum regression (Blitz, Huij & Martens 2011: 36).
+RESIDUAL_MOMENTUM_MIN_MONTHS = 24
+
+
+def _residual_momentum(dates: Any, cand_closes: Any, bench_closes: Any) -> float | None:
+    """Residual momentum (Blitz, Huij & Martens 2011), against the candidate's benchmark.
+
+    Month-end returns of both legs; the candidate's regressed on the
+    benchmark's over every month but the latest; the residuals of the eleven
+    months t-12..t-2 summed and divided by their standard deviation. Ranking on
+    what the market does not explain reduced momentum's crashes and about doubled
+    its risk-adjusted return in their 1926-2009 sample. CAPM residuals here: the
+    paper uses Fama-French factors, which are not stored in EUR.
+    """
+    frame = pd.DataFrame(
+        {"c": list(cand_closes), "b": list(bench_closes)}, index=pd.to_datetime(pd.Series(list(dates)))
+    ).astype(float)
+    monthly = frame.resample("ME").last().pct_change().dropna()
+    # The latest month is skipped, as in 12-1 momentum.
+    estimation = monthly.iloc[:-1]
+    if len(estimation) < RESIDUAL_MOMENTUM_MIN_MONTHS:
+        return None
+    x = estimation["b"].to_numpy()
+    y = estimation["c"].to_numpy()
+    x_dev = x - x.mean()
+    denom = float((x_dev**2).sum())
+    if denom <= 0:
+        return None
+    slope = float((x_dev * (y - y.mean())).sum()) / denom
+    residuals = y - (y.mean() + slope * x_dev)
+    formation = residuals[-11:]
+    spread = float(formation.std(ddof=1))
+    if not math.isfinite(spread) or spread <= 0:
+        return None
+    return float(formation.sum()) / spread
+
+
+def _welch_beta(cand_returns: list[float], bench_returns: list[float]) -> float | None:
+    """Slope-winsorized market beta (Welch 2022, "Simply Better Market Betas").
+
+    Each day's stock return is clipped to the band between -2 and +4 times that
+    day's market return, then an ordinary least-squares slope is fitted. It
+    forecast next year's beta better than OLS, Vasicek shrinkage and the
+    Blume adjustment in his tests, because one-day jumps no longer pull the slope.
+    """
+    if len(cand_returns) != len(bench_returns) or len(cand_returns) < 60:
+        return None
+    rc = pd.Series(cand_returns, dtype=float)
+    rm = pd.Series(bench_returns, dtype=float)
+    lo = pd.concat([-2.0 * rm, 4.0 * rm], axis=1).min(axis=1)
+    hi = pd.concat([-2.0 * rm, 4.0 * rm], axis=1).max(axis=1)
+    clipped = rc.clip(lower=lo, upper=hi)
+    var = float(rm.var(ddof=1))
+    if not math.isfinite(var) or var <= 0:
+        return None
+    return float(clipped.cov(rm)) / var
+
+
+def _largest_day_in_formation(closes: Any, dates: Any, momentum: float) -> dict[str, Any]:
+    """The 12-1 window's largest one-day gain, its share of the window's return, and its sign balance.
+
+    Momentum that arrives in one jump does not continue the way a steady climb does
+    (Da, Gurun and Warachka 2014, "Frog in the Pan"): MRNA ranked 0.998 in run
+    4f3ddca7 on +848 %, of which one day (2026-08-19, +177 %) gave about 45 %.
+    ``information_discreteness`` is their measure: sign of the return times
+    (share of falling days minus share of rising days); near -1 is a steady climb.
+    """
+    start = len(closes) - 252 if len(closes) >= 252 else 0
+    end = len(closes) - 21 if len(closes) >= 21 else len(closes) - 1
+    window = closes.iloc[start : end + 1].reset_index(drop=True)
+    window_dates = dates.iloc[start : end + 1].reset_index(drop=True)
+    rets = window.pct_change().iloc[1:]
+    if rets.empty:
+        return {}
+    i = int(rets.idxmax())
+    largest = float(rets.loc[i])
+    out: dict[str, Any] = {
+        "largest_day_return": round(largest, 4),
+        "largest_day_date": str(window_dates.iloc[i])[:10],
+        "information_discreteness": round(
+            math.copysign(1.0, momentum) * (float((rets < 0).mean()) - float((rets > 0).mean())), 4
+        ),
+    }
+    if momentum > 0 and largest > 0:
+        share = min(1.0, math.log1p(largest) / math.log1p(momentum))
+        out["largest_day_share"] = round(share, 4)
+        out["momentum_without_largest_day"] = round((1.0 + momentum) / (1.0 + largest) - 1.0, 4)
+        out["jump_driven"] = largest >= JUMP_MIN_RETURN and share >= JUMP_SHARE_LIMIT
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1490,7 +1693,7 @@ def _get_fx_series(db: Session, currency: str) -> "pd.DataFrame | None":
         # Nothing else re-ingests FX pairs: without this the stored series
         # froze (USDEUR=X at 2026-09-01) and was forward-filled for weeks.
         refresh_stale_bars(db, fx_symbol)
-        rows = market_history(db, fx_symbol, days=365 * 3 + 30)
+        rows = _history(db, fx_symbol, days=365 * 3 + 30)
         if rows:
             df = pd.DataFrame(rows).dropna(subset=["close"]).sort_values("date")
             df = df.assign(date=pd.to_datetime(df["date"]))
@@ -1550,8 +1753,8 @@ def stage_backtest_vs_benchmark(
         return _neutral("no benchmark for this asset class (diversifier, not scored on excess return)")
 
     days = 365 * 3 + 30
-    cand_rows = market_history(db, symbol, days=days)
-    bench_rows = [] if benchmark == ESTR_BENCHMARK else market_history(db, benchmark, days=days)
+    cand_rows = _history(db, symbol, days=days)
+    bench_rows = [] if benchmark == ESTR_BENCHMARK else _history(db, benchmark, days=days)
 
     if not cand_rows or (benchmark != ESTR_BENCHMARK and not bench_rows):
         return _neutral("benchmark or candidate price data unavailable")
@@ -1595,6 +1798,11 @@ def stage_backtest_vs_benchmark(
     active_t_stat = information_ratio * math.sqrt(years)
     cand_vol = annualised_volatility(cand_rets) if len(cand_rets) >= 2 else 0.0
     te_weekly = _weekly_tracking_error(merged)
+    try:
+        residual_momentum = _residual_momentum(merged["date"], merged["close_c"], merged["close_b"])
+    except Exception:  # noqa: BLE001 - a shadow signal must not fail the stage
+        logger.debug("residual momentum failed for %s", symbol, exc_info=True)
+        residual_momentum = None
 
     concerns: list[str] = stale_concerns
     if excess < _EXCESS_MIN:
@@ -1616,6 +1824,8 @@ def stage_backtest_vs_benchmark(
         "information_ratio": round(information_ratio, 4),
         "active_t_stat": round(active_t_stat, 4),
         "candidate_volatility_annual": round(cand_vol, 4),
+        # Shadow signal (WP3): recorded, not ranked on.
+        "residual_momentum": round(residual_momentum, 4) if residual_momentum is not None else None,
         "window_years": round(years, 2),
         "benchmark": benchmark,
         "concerns": concerns,
@@ -1637,11 +1847,12 @@ def stage_verification_gate(
     """Verification-style risk assessment on the candidate's own price history.
 
     Breaches of the conservative risk thresholds are recorded as advisory
-    ``concerns`` for the LLM agent rather than rejecting the candidate. Only the
-    inability to compute (no data / too few returns) is a hard failure.
+    ``concerns`` for the LLM agent rather than rejecting the candidate. The
+    hard failures are the inability to compute (no data / too few returns) and
+    a volatility past ``VOL_REJECT``.
     """
     logger.debug("stage_verification_gate: %s", symbol)
-    rows = market_history(db, symbol, days=_RISK_WINDOW_DAYS)
+    rows = _history(db, symbol, days=_RISK_WINDOW_DAYS)
     if not rows:
         return None, "verification_gate: no price data"
 
@@ -1662,6 +1873,13 @@ def stage_verification_gate(
     mdd_info = max_drawdown(rets)
     mdd = abs(mdd_info.get("max_drawdown", 0.0))
     sharpe = sharpe_ratio(rets)
+
+    if vol > VOL_REJECT:
+        # Past 60 % a stock is flagged; past 100 % it is a lottery ticket, the
+        # kind of stock that earns least afterwards (Ang et al. 2006 on
+        # idiosyncratic volatility, Bali et al. 2011 on the largest daily gain).
+        # MRNA at 187 % was the only one in run 4f3ddca7; the next was 88 %.
+        return None, f"verification_gate: volatility {vol:.0%} a year exceeds {VOL_REJECT:.0%}"
 
     concerns: list[str] = []
     if mdd > _MDD_MAX:
@@ -1711,8 +1929,8 @@ def _weekly_beta(db: Session, symbol: str, benchmark: str | None) -> float | Non
 
     if not benchmark or benchmark == ESTR_BENCHMARK:
         return None
-    cand_rows = market_history(db, symbol, days=_WEEKLY_BETA_DAYS)
-    bench_rows = market_history(db, benchmark, days=_WEEKLY_BETA_DAYS)
+    cand_rows = _history(db, symbol, days=_WEEKLY_BETA_DAYS)
+    bench_rows = _history(db, benchmark, days=_WEEKLY_BETA_DAYS)
     if not cand_rows or not bench_rows:
         return None
 
@@ -1749,7 +1967,7 @@ def stage_quant_signals(
     ``None``) — VaR/CVaR from the candidate's own history is always computed.
     """
     logger.debug("stage_quant_signals: %s", symbol)
-    rows = market_history(db, symbol, days=365)
+    rows = _history(db, symbol, days=365)
     if not rows:
         return None, "quant_signals: no price data"
 
@@ -1772,17 +1990,20 @@ def stage_quant_signals(
 
     # Market beta vs region-appropriate benchmark (fail-open to None).
     market_beta: float | None = None
+    market_beta_welch: float | None = None
     benchmark = _pick_benchmark(symbol, asset_class if asset_class is not None else is_etf)
     try:
         from app.foundation.etf_classes import ESTR_BENCHMARK
 
-        bench_rows = market_history(db, benchmark, days=365) if benchmark and benchmark != ESTR_BENCHMARK else []
+        bench_rows = _history(db, benchmark, days=365) if benchmark and benchmark != ESTR_BENCHMARK else []
         if bench_rows:
             legs = _eur_legs(db, symbol, cast(str, benchmark), rows, bench_rows, days=365)
             if len(legs) >= 60:
                 cand_r = legs["close_c"].pct_change().dropna()
                 bench_r = legs["close_b"].pct_change().dropna()
                 market_beta = beta_vs_benchmark(cand_r.tolist(), bench_r.tolist())
+                # Shadow signal (WP3): recorded, not used by the prior or the composite.
+                market_beta_welch = _welch_beta(cand_r.tolist(), bench_r.tolist())
     except Exception:
         logger.debug("stage_quant_signals: market beta failed for %s", symbol, exc_info=True)
 
@@ -1883,6 +2104,7 @@ def stage_quant_signals(
         # The canonical market beta (dossier prompt, expected-return prior);
         # market_beta above is the daily estimate, kept for continuity.
         "market_beta_weekly": round(market_beta_weekly, 4) if market_beta_weekly is not None else None,
+        "market_beta_welch": round(market_beta_welch, 4) if market_beta_welch is not None else None,
         "factor_betas": {k: round(v, 4) for k, v in factor_betas.items()} if factor_betas else None,
         "factor_fit": factor_fit,
         "factor_characteristics_score": factor_characteristics_score,
@@ -1902,6 +2124,17 @@ def stage_quant_signals(
 
 _FIT_HISTORY_DAYS = 730
 _FIT_MIN_WEEKS = 26
+
+
+def _held_tickers(db: Session, user_id: str) -> list[str]:
+    """Every ticker the owner holds at a broker (``live_positions``); empty on any failure."""
+    from app.foundation.live_positions import live_positions
+
+    try:
+        return list(dict.fromkeys(p.ticker.upper() for p in live_positions(db, user_id) if p.ticker))
+    except Exception:  # noqa: BLE001 - the warm-up must not fail on the inventory
+        logger.warning("pre-ingest: held tickers unavailable", exc_info=True)
+        return []
 
 
 def _held_etf_tickers(db: Session, user_id: str) -> list[str]:
@@ -1942,6 +2175,69 @@ def _book_weights(db: Session, user_id: str, tickers: list[str]) -> dict[str, fl
     return {t: v / total for t, v in values.items()}
 
 
+#: Weeks the book fell needed for a downside correlation.
+_DOWNSIDE_MIN_WEEKS = 12
+
+
+def _marginal_risk(cand: pd.Series, book: pd.Series, corr: float) -> dict[str, float | None]:
+    """What a small position in the candidate does to the book's risk (shadow signals, WP3).
+
+    ``marginal_vol``: moving a small weight e from the book P into C changes the
+    book's annual volatility by about e * (rho * sigma_C - sigma_P); the
+    derivative of sigma((1-e)P + eC) at e = 0. Negative means the position lowers
+    the book's risk. Correlation alone misses this: a very volatile stock at a low
+    correlation can still raise it.
+
+    ``downside_correlation``: the correlation over the weeks the book fell.
+    Correlations rise in falls (Ang & Chen 2002), so the full-sample figure
+    overstates the diversification that is there when it is needed.
+    """
+    sigma_c = float(cand.std(ddof=1)) * math.sqrt(52)
+    sigma_p = float(book.std(ddof=1)) * math.sqrt(52)
+    out: dict[str, float | None] = {"marginal_vol": None, "downside_correlation": None}
+    if math.isfinite(sigma_c) and math.isfinite(sigma_p) and sigma_p > 0:
+        out["marginal_vol"] = round(corr * sigma_c - sigma_p, 4)
+    falling = book < 0
+    if int(falling.sum()) >= _DOWNSIDE_MIN_WEEKS:
+        down = float(cast(pd.Series, cand.loc[falling]).corr(cast(pd.Series, book.loc[falling])))
+        out["downside_correlation"] = round(down, 4) if math.isfinite(down) else None
+    return out
+
+
+def _book_weekly_returns(db: Session, user_id: str) -> tuple[pd.Series, str] | None:
+    """The book's weekly EUR return at its real weights, and the weight basis; None without a book.
+
+    Equal weight only when no position value is known.
+    """
+    # build_real_price_matrix already yields a DatetimeIndex.
+    port_df = build_real_price_matrix(db, user_id, lookback_days=_FIT_HISTORY_DAYS)
+    if port_df is None or port_df.empty:
+        return None
+    port_rets = port_df.resample("W-FRI").last().pct_change(fill_method=None)
+    weights = _book_weights(db, user_id, list(port_rets.columns))
+    if weights is None:
+        return pd.Series(port_rets.mean(axis=1)).dropna(), "equal"
+    w = pd.Series(weights).reindex(port_rets.columns).fillna(0.0)
+    present = port_rets.notna()
+    # A week where a line has no price spreads its weight over the others.
+    denom = present.mul(w, axis=1).sum(axis=1)
+    weighted = (port_rets.fillna(0.0).mul(w, axis=1).sum(axis=1) / denom.where(denom > 0)).dropna()
+    # Not "value": the dossier model read that as a value-investing style.
+    return weighted, "market_value"
+
+
+def _held_etf_holdings(db: Session, user_id: str) -> list[list[dict[str, Any]]]:
+    """The holdings list of every ETF the owner holds that has a known composition."""
+    from app.foundation.etf_lookup import get_etf_composition
+
+    out: list[list[dict[str, Any]]] = []
+    for held_ticker in _held_etf_tickers(db, user_id):
+        held_comp = get_etf_composition(held_ticker)
+        if held_comp and held_comp.holdings:
+            out.append([{"ticker": hh.ticker, "weight": hh.weight} for hh in held_comp.holdings])
+    return out
+
+
 def stage_portfolio_fit(
     db: Session,
     user_id: str,
@@ -1961,7 +2257,7 @@ def stage_portfolio_fit(
     """
     logger.debug("stage_portfolio_fit: %s", symbol)
     # Candidate returns
-    cand_rows = market_history(db, symbol, days=_FIT_HISTORY_DAYS)
+    cand_rows = _history(db, symbol, days=_FIT_HISTORY_DAYS)
     if not cand_rows:
         return None, "portfolio_fit: no candidate price data"
 
@@ -1981,28 +2277,13 @@ def stage_portfolio_fit(
     cand_weekly = cand_df.set_index("date")["close"].astype(float).resample("W-FRI").last()
     cand_rets = cand_weekly.pct_change(fill_method=None).dropna()
 
-    # Portfolio price matrix (build_real_price_matrix already yields a DatetimeIndex)
-    port_df = build_real_price_matrix(db, user_id, lookback_days=_FIT_HISTORY_DAYS)
-    if port_df is None or port_df.empty:
+    # The book's weekly EUR return: the same for every candidate, built once a run.
+    book = _run_cached(("book_weekly", user_id), lambda: _book_weekly_returns(db, user_id))
+    if book is None:
         # No portfolio: no fit to measure. The component is dropped and the
         # composite renormalises (plan 2026-10-14, M5), not a neutral 0.5.
         return {"correlation": None, "overlap": None, "fit_score": None, "note": "no portfolio"}, None
-
-    # The book's weekly return at its real EUR weights (equal weight only when
-    # no position value is known).
-    port_rets = port_df.resample("W-FRI").last().pct_change(fill_method=None)
-    weights = _book_weights(db, user_id, list(port_rets.columns))
-    if weights is None:
-        port_weighted = pd.Series(port_rets.mean(axis=1)).dropna()
-        weight_basis = "equal"
-    else:
-        w = pd.Series(weights).reindex(port_rets.columns).fillna(0.0)
-        present = port_rets.notna()
-        # A week where a line has no price spreads its weight over the others.
-        denom = present.mul(w, axis=1).sum(axis=1)
-        port_weighted = (port_rets.fillna(0.0).mul(w, axis=1).sum(axis=1) / denom.where(denom > 0)).dropna()
-        # Not "value": the dossier model read that as a value-investing style.
-        weight_basis = "market_value"
+    port_weighted, weight_basis = book
 
     common = cand_rets.index.intersection(port_weighted.index)  # type: ignore[union-attr]
     if len(common) < _FIT_MIN_WEEKS:
@@ -2019,6 +2300,7 @@ def stage_portfolio_fit(
     corr = float(cand_rets.loc[common].corr(port_weighted.loc[common]))  # type: ignore[union-attr]
     if pd.isna(corr):
         corr = 0.0
+    risk = _marginal_risk(cand_rets.loc[common], port_weighted.loc[common], corr)  # type: ignore[union-attr]
 
     # ETF overlap check
     overlap = 0.0
@@ -2029,19 +2311,15 @@ def stage_portfolio_fit(
             cand_holdings = [{"ticker": hh.ticker, "weight": hh.weight} for hh in comp.holdings]
             # Held ETFs: every synced broker depot (Scalable's VWRA too) plus
             # holdings entered by hand, through live_positions (AGENTS.md).
-            held_etfs = _held_etf_tickers(db, user_id)
-            if held_etfs:
-                max_overlap = 0.0
-                for held_ticker in held_etfs:
-                    held_comp = get_etf_composition(held_ticker)
-                    if held_comp and held_comp.holdings:
-                        held_list = [{"ticker": hh.ticker, "weight": hh.weight} for hh in held_comp.holdings]
-                        try:
-                            ov = pairwise_overlap(cand_holdings, held_list)
-                            max_overlap = max(max_overlap, ov.get("overlap", 0.0))
-                        except Exception:
-                            continue
-                overlap = max_overlap
+            held_lists = _run_cached(("held_etf_holdings", user_id), lambda: _held_etf_holdings(db, user_id))
+            max_overlap = 0.0
+            for held_list in held_lists:
+                try:
+                    ov = pairwise_overlap(cand_holdings, held_list)
+                    max_overlap = max(max_overlap, ov.get("overlap", 0.0))
+                except Exception:
+                    continue
+            overlap = max_overlap
 
     # Fit score: 0-1, higher for low correlation and low overlap
     corr_penalty = max(0.0, min(1.0, (corr + 1.0) / 2.0))  # map [-1,1] -> [0,1]
@@ -2057,6 +2335,8 @@ def stage_portfolio_fit(
         "weight_basis": weight_basis,
         "overlap": round(overlap, 4) if is_etf else None,
         "fit_score": round(fit_score, 4),
+        # Shadow signals (WP3): recorded, not in fit_score.
+        **risk,
     }
     logger.debug("stage_portfolio_fit: %s fit_score=%.2f corr=%.2f overlap=%s", symbol, fit_score, corr, overlap if is_etf else "n/a")
     return scores, None
@@ -2296,6 +2576,44 @@ def run_candidate_pipeline(
 ) -> Generator[dict[str, Any], None, list[dict[str, Any]]]:
     """Generator that processes each candidate and yields per-candidate progress.
 
+    Runs :func:`_candidate_pipeline` with a run memo (history and the book read
+    once, see :class:`_RunMemo`) and logs the time each stage took in total.
+    """
+    memo = _RunMemo()
+    previous = _run_memo()
+    _RUN_STATE.memo = memo
+    started = time.perf_counter()
+    try:
+        selected = yield from _candidate_pipeline(
+            db, user_id, candidates, profile,
+            cancel_token=cancel_token, results_out=results_out,
+            preingest_progress=preingest_progress, run_id=run_id,
+        )
+    finally:
+        _RUN_STATE.memo = previous
+        if memo.timings:
+            logger.info(
+                "run_candidate_pipeline timings (%.1fs in all): %s; history reads %d, served from the run memo %d",
+                time.perf_counter() - started,
+                ", ".join(f"{k} {v:.1f}s" for k, v in sorted(memo.timings.items(), key=lambda kv: -kv[1])),
+                memo.history_reads, memo.history_hits,
+            )
+    return selected
+
+
+def _candidate_pipeline(
+    db: Session,
+    user_id: str,
+    candidates: list[dict[str, Any]],
+    profile: dict[str, Any] | None = None,
+    *,
+    cancel_token: Any | None = None,
+    results_out: list[dict[str, Any]] | None = None,
+    preingest_progress: Any | None = None,
+    run_id: str | None = None,
+) -> Generator[dict[str, Any], None, list[dict[str, Any]]]:
+    """The candidate loop behind :func:`run_candidate_pipeline`; yields per-candidate progress.
+
     Each yield has keys: ``index``, ``total``, ``symbol``, ``stage``,
     ``shortlisted_so_far``, ``benchmark_ingest`` (warm-up summary for the
     candidate + benchmark ETF price-cache pre-ingest).
@@ -2330,7 +2648,10 @@ def run_candidate_pipeline(
     # Note: _preingest_candidates also warms the benchmark ETFs (see its
     # docstring) — they are intentionally absent from `symbols` below.
     symbols = [c["symbol"] for c in candidates]
-    benchmark_ingest = _preingest_candidates(symbols, progress=preingest_progress)
+    benchmark_ingest = _timed(
+        "preingest", _preingest_candidates, symbols, progress=preingest_progress,
+        fx_symbols=_run_cached(("held_tickers", user_id), lambda: _held_tickers(db, user_id)),
+    )
 
     # Wire each candidate's provider-sourced ISIN (DiscoverCandidate.isin,
     # already in scope per-candidate below) into the security master so the
@@ -2380,7 +2701,7 @@ def run_candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_history_ingest(db, symbol)
+            s, r = _timed("history_ingest", stage_history_ingest, db, symbol)
             if r:
                 reject_stage = "history_ingest"
                 reject_reason = r
@@ -2391,7 +2712,7 @@ def run_candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_alpha_miner(db, symbol, run_id=run_id)
+            s, r = _timed("alpha_miner", stage_alpha_miner, db, symbol, run_id=run_id)
             if r:
                 reject_stage = "alpha_miner"
                 reject_reason = r
@@ -2402,7 +2723,7 @@ def run_candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_alpha_screener(db, symbol)
+            s, r = _timed("alpha_screener", stage_alpha_screener, db, symbol)
             if r:
                 reject_stage = "alpha_screener"
                 reject_reason = r
@@ -2413,7 +2734,7 @@ def run_candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_sentiment_fundamentals(db, symbol, is_etf=is_etf)
+            s, r = _timed("sentiment_fundamentals", stage_sentiment_fundamentals, db, symbol, is_etf=is_etf)
             if r:
                 reject_stage = "sentiment_fundamentals"
                 reject_reason = r
@@ -2424,7 +2745,7 @@ def run_candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_momentum_quality(db, symbol, is_etf=is_etf)
+            s, r = _timed("momentum_quality", stage_momentum_quality, db, symbol, is_etf=is_etf)
             if r:
                 reject_stage = "momentum_quality"
                 reject_reason = r
@@ -2440,7 +2761,7 @@ def run_candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_backtest_vs_benchmark(db, symbol, is_etf=is_etf, asset_class=asset_class)
+            s, r = _timed("backtest_vs_benchmark", stage_backtest_vs_benchmark, db, symbol, is_etf=is_etf, asset_class=asset_class)
             if r:
                 reject_stage = "backtest_vs_benchmark"
                 reject_reason = r
@@ -2451,7 +2772,7 @@ def run_candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_verification_gate(db, symbol, is_etf=is_etf)
+            s, r = _timed("verification_gate", stage_verification_gate, db, symbol, is_etf=is_etf)
             if r:
                 reject_stage = "verification_gate"
                 reject_reason = r
@@ -2462,7 +2783,7 @@ def run_candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_quant_signals(db, symbol, is_etf=is_etf, asset_class=asset_class)
+            s, r = _timed("quant_signals", stage_quant_signals, db, symbol, is_etf=is_etf, asset_class=asset_class)
             if r:
                 reject_stage = "quant_signals"
                 reject_reason = r
@@ -2480,7 +2801,7 @@ def run_candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_portfolio_fit(db, user_id, symbol, is_etf=is_etf)
+            s, r = _timed("portfolio_fit", stage_portfolio_fit, db, user_id, symbol, is_etf=is_etf)
             if r:
                 reject_stage = "portfolio_fit"
                 reject_reason = r
@@ -2491,7 +2812,7 @@ def run_candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_ml_signal(db, symbol)
+            s, r = _timed("ml_signal", stage_ml_signal, db, symbol)
             if r is None:
                 scores["ml_signal"] = s
 
@@ -2500,14 +2821,14 @@ def run_candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_estimate_revision_signal(db, symbol)
+            s, r = _timed("estimate_revision_signal", stage_estimate_revision_signal, db, symbol)
             if r is None:
                 scores["estimate_revision_signal"] = s
 
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = stage_insider_signal(db, symbol)
+            s, r = _timed("insider_signal", stage_insider_signal, db, symbol)
             if r is None:
                 scores["insider_signal"] = s
 
@@ -2661,6 +2982,14 @@ def _etf_plan_scope(db: Session) -> Any:
         return None
 
 
+def _momentum_for_rank(mom: dict[str, Any]) -> float:
+    """12-1 momentum, less its largest day when the stock's momentum is one jump (stored scores without it rank as before)."""
+    without = mom.get("momentum_without_largest_day")
+    if mom.get("jump_driven") is True and isinstance(without, (int, float)):
+        return float(without)
+    return float(mom["momentum_12_1m"])
+
+
 def assign_momentum_ranks(score_dicts: list[dict[str, Any]]) -> None:
     """Stamp ``momentum_quality.momentum_rank`` (mid-rank percentile in (0, 1)).
 
@@ -2669,7 +2998,7 @@ def assign_momentum_ranks(score_dicts: list[dict[str, Any]]) -> None:
     momentum signal. No-op below ``MOMENTUM_RANK_MIN_CANDIDATES``.
     """
     rankable = [
-        (sd["momentum_quality"], float(sd["momentum_quality"]["momentum_12_1m"]))
+        (sd["momentum_quality"], _momentum_for_rank(sd["momentum_quality"]))
         for sd in score_dicts
         if isinstance(sd.get("momentum_quality"), dict)
         and isinstance(sd["momentum_quality"].get("momentum_12_1m"), (int, float))

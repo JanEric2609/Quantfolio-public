@@ -111,6 +111,8 @@ def test_a_cjk_token_triggers_a_retry_that_is_then_used(monkeypatch):
 
 
 def test_two_rejections_fall_back_to_the_template_with_the_reason(monkeypatch):
+    # The old prompt (DISCOVER_DOSSIER_SLOTS=0): the figure reaches the grounding check.
+    monkeypatch.setenv("DISCOVER_DOSSIER_SLOTS", "0")
     db = _memory_db()
     _stub(monkeypatch, [
         {"conviction": 0.5, "thesis": "Analysts see consensus 0.27 upside.", "key_risks": []},
@@ -119,6 +121,18 @@ def test_two_rejections_fall_back_to_the_template_with_the_reason(monkeypatch):
     assert out["generated_by"] == "fallback"
     assert out["fallback_reason"] == "ungrounded_number"
     assert out["dossier"]["fallback_reason"] == "ungrounded_number"
+
+
+def test_a_thesis_of_its_own_figures_falls_back_as_own_figures(monkeypatch):
+    # With figures written by code a sentence that writes its own is dropped before the
+    # checks; a thesis of nothing else is counted as such, not as "truncated".
+    db = _memory_db()
+    _stub(monkeypatch, [
+        {"conviction": 0.5, "thesis": "Analysts see consensus 0.27 upside.", "key_risks": []},
+    ])
+    out = write_dossier(db, _candidate(), {"user_id": "u1"})
+    assert out["generated_by"] == "fallback"
+    assert out["fallback_reason"] == "own_figures"
 
 
 def test_skill_horizon_years_follow_two_te_over_alpha_squared():

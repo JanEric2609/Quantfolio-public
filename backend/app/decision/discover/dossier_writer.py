@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
@@ -21,6 +22,14 @@ from app.decision.discover.candidate_gate import (
 from app.decision.discover.composite import ic_signal_usable
 from app.decision.discover.config import DEFAULT_PROMPT_TEMPLATE
 from app.decision.discover.data_quality import BOOK_EQUITY_CONCERN, data_quality_score
+from app.decision.discover.dossier_facts import (
+    SLOT_RULES,
+    Fact,
+    allowed_digit_terms,
+    build_facts,
+    facts_prompt,
+    render,
+)
 from app.decision.discover.ledger import DEFAULT_HORIZON_DAYS
 from app.decision.discover.listing import listing_currency
 from app.decision.discover.thesis_checks import (
@@ -75,6 +84,11 @@ _PROMPT_THESIS_CHARS = 450
 DEFAULT_DOSSIER_HORIZON_MONTHS = 6
 #: Content-check retries before the deterministic template (D7: one retry).
 _MAX_CONTENT_RETRIES = 1
+
+
+def slots_enabled() -> bool:
+    """Figures written by code (``dossier_facts``); ``DISCOVER_DOSSIER_SLOTS=0`` restores the old prompt."""
+    return os.getenv("DISCOVER_DOSSIER_SLOTS", "1").strip().lower() not in ("0", "false", "no", "off")
 
 #: Rules appended to every dossier request in code, so they hold whatever
 #: prompt template is stored.
@@ -430,6 +444,10 @@ def _reword_concerns_for_prompt(value: Any) -> Any:
         for k, v in value.items():
             if k in ("regime_affinity", "data_quality", "trailing_1m_annualized_return"):
                 continue
+            # The facts name one market beta, the weekly one; the daily one beside it
+            # came back as a second beta in the same dossier (IS3S.DE 0.88 and 1.12, 2026-11-08).
+            if k == "market_beta" and isinstance(value.get("market_beta_weekly"), (int, float)):
+                continue
             if k == "revenue_growth" and isinstance(v, (int, float)):
                 # A fraction here came back as "0.83 revenue growth" (NVDA, 2026-11-07).
                 out["revenue_growth_pct"] = round(v * 100.0, 1)
@@ -680,6 +698,12 @@ def _grounding_prompt_lines(scores: dict[str, Any], annual: dict[str, Any]) -> s
             "month momentum skips the latest month and does not show this; say so if you cite momentum."
         )
 
+    jump = _jump_text(mom)
+    if jump:
+        lines.append(
+            f"One day, {jump} Momentum that comes from one jump tends not to continue; say so if you cite momentum."
+        )
+
     return "".join(f"{line}\n" for line in lines)
 
 
@@ -689,6 +713,14 @@ EARNINGS_IMMINENT_DAYS = 1
 EARNINGS_RISK_DAYS = 30
 #: A fall from the 3-month high from which it is worth a line.
 RECENT_FALL_LIMIT = 0.20
+def _jump_text(mom: dict[str, Any]) -> str | None:
+    """'One day gave much of the momentum', when the momentum stage says so; None otherwise."""
+    share, day, gain = mom.get("largest_day_share"), mom.get("largest_day_date"), mom.get("largest_day_return")
+    if mom.get("jump_driven") is not True or not isinstance(share, (int, float)) or not isinstance(gain, (int, float)):
+        return None
+    return f"{day} ({gain * 100:+.1f}%) gave {share * 100:.0f}% of the 12-1 month return."
+
+
 _EARNINGS_HOURS = {"bmo": "before the open", "amc": "after the close", "dmh": "during market hours"}
 
 
@@ -966,9 +998,8 @@ def write_dossier(
         annual=annual_estimate,
     )
     verdict = discover_verdict(track_record_gate)
-    direction = deterministic_direction(
-        resolved["expected_return_pct"], estr_over_horizon_pct(db, horizon_months), verdict,
-    )
+    cash_pct = estr_over_horizon_pct(db, horizon_months)
+    direction = deterministic_direction(resolved["expected_return_pct"], cash_pct, verdict)
     macro = _macro_facts(db)
 
     system_prompt: str
@@ -1000,6 +1031,32 @@ def write_dossier(
         f"\n{_THESIS_RULES}"
         "\nGenerate a research hypothesis as structured JSON matching the schema."
     )
+
+    slot_facts: list[Fact] | None = None
+    digit_terms: list[str] = []
+    if slots_enabled():
+        slot_facts = build_facts(
+            scores,
+            annual=annual_estimate,
+            expected_return_pct=resolved["expected_return_pct"],
+            horizon_months=horizon_months,
+            fundamentals=fundamentals,
+            macro=macro,
+            cash_pct=cash_pct,
+            earnings_text=_earnings_text(sf_scores),
+            earnings_near=_earnings_is_near(sf_scores),
+            is_fund=instrument_type in ("etf", "fund"),
+            recent_fall_limit=RECENT_FALL_LIMIT,
+        )
+        candidate_name = candidate.get("name") if isinstance(candidate, dict) else getattr(candidate, "name", None)
+        digit_terms = allowed_digit_terms(
+            symbol, candidate_name, instrument_facts.get("tracked_index"), instrument_facts.get("sector"),
+            instrument_facts.get("industry"),
+        )
+        context = _slot_context(
+            symbol, candidate, candidate_name, slot_facts, instrument_type, instrument_facts,
+            regime_text=_regime_text(db, regime_state), direction=direction,
+        )
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -1049,6 +1106,19 @@ def write_dossier(
                 try:
                     validated = DossierOutputModel.model_validate(_coerce_dossier(parsed))
                     candidate_dossier = validated.model_dump()
+                    slot_problems: list[str] = []
+                    if slot_facts is not None:
+                        candidate_dossier["thesis"], slot_problems = render(
+                            candidate_dossier.get("thesis") or "", slot_facts, digit_terms,
+                        )
+                        rendered_risks = []
+                        for risk in candidate_dossier.get("key_risks") or []:
+                            text, risk_problems = render(str(risk), slot_facts, digit_terms)
+                            if text and not risk_problems:
+                                rendered_risks.append(text)
+                        candidate_dossier["key_risks"] = rendered_risks
+                        if slot_problems:
+                            logger.info("Dossier for %s: sentences dropped: %s", symbol, "; ".join(slot_problems))
                     check = check_thesis(
                         candidate_dossier.get("thesis") or "",
                         list(candidate_dossier.get("key_risks") or []),
@@ -1062,6 +1132,12 @@ def write_dossier(
                         de_ratio=_number_or_none(sf_scores.get("de_ratio")),
                         insider_buyers=_number_or_none(insider_scores.get("cluster_buy_score")),
                     )
+                    if not check.ok and slot_problems:
+                        # Say why sentences went: a thesis emptied by its own figures is
+                        # not "truncated", and the rejection rate is counted per reason.
+                        if check.reason == "truncated":
+                            check.reason = "own_figures"
+                        check.problems = [*slot_problems, *check.problems]
                     if check.ok:
                         candidate_dossier["thesis"] = check.thesis
                         # The data's own risks stay in, whatever the LLM wrote
@@ -1178,6 +1254,8 @@ def write_dossier(
     # Provenance: the UI must be able to distinguish a genuine LLM thesis
     # from the deterministic quant template.
     final_dossier["generated_by"] = generated_by
+    # Which prompt wrote the text: figures by code (dossier_facts) or the old free text.
+    final_dossier["text_mode"] = "figures_by_code" if slot_facts is not None else "free_text"
     if fallback_reason:
         final_dossier["fallback_reason"] = fallback_reason
 
@@ -1867,6 +1945,9 @@ def deterministic_risks(
     fall = _as_dict(scores.get("momentum_quality")).get("fall_from_3m_high")
     if isinstance(fall, (int, float)) and fall >= RECENT_FALL_LIMIT:
         rest.append(f"Recent fall: the latest close is {fall:.1%} below the highest close of the last 3 months.")
+    jump = _jump_text(_as_dict(scores.get("momentum_quality")))
+    if jump:
+        rest.append(f"One-day jump: {jump}")
     correlation = _as_dict(scores.get("portfolio_fit")).get("correlation")
     if isinstance(correlation, (int, float)) and correlation >= DIVERSIFIER_MAX_CORRELATION:
         rest.append(f"Overlap: a weekly correlation of {correlation:.2f} with the portfolio adds little diversification.")
@@ -1930,6 +2011,63 @@ def merge_risks(required: list[str], written: list[Any], *, drop_earnings: bool 
             seen.add(key)
             out.append(risk)
     return out
+
+
+def _slot_context(
+    symbol: str,
+    candidate: Any,
+    name: str | None,
+    facts: list[Fact],
+    instrument_type: str,
+    instrument_facts: dict[str, Any],
+    *,
+    regime_text: str,
+    direction: str,
+) -> str:
+    """The user message in slot mode: words and keyed facts, no raw score dumps.
+
+    The JSON dumps of the old prompt are where the model found figures to copy
+    under the wrong name (TRV's "-$68.8 million"); every figure now reaches it
+    as a keyed phrase written by :mod:`dossier_facts`.
+    """
+    isin = candidate.get("isin") if isinstance(candidate, dict) else getattr(candidate, "isin", None)
+    keys = {f.key for f in facts}
+    if instrument_type in ("etf", "fund"):
+        holdings = [
+            str(h.get("name") or h.get("ticker"))
+            for h in (instrument_facts.get("top_holdings") or [])
+            if isinstance(h, dict) and (h.get("name") or h.get("ticker"))
+        ]
+        style = (instrument_facts.get("style") or {}).get("style")
+        described = (
+            f"Fund. Largest holdings: {', '.join(holdings) if holdings else 'not given (name none)'}\n"
+            f"Tracked index: {instrument_facts.get('tracked_index') or 'not given'}\n"
+            f"Style: {style or 'not established (do not guess)'}\n"
+            f"Listing currency: {instrument_facts.get('listing_currency') or 'not given'}; investor currency: EUR\n"
+        )
+    else:
+        described = (
+            f"Sector: {instrument_facts.get('sector') or 'not given'}\n"
+            f"Industry: {instrument_facts.get('industry') or 'not given'}\n"
+            f"Listing currency: {instrument_facts.get('listing_currency') or 'not given'}; reporting currency: "
+            f"{instrument_facts.get('reporting_currency') or 'not given'}; investor currency: EUR\n"
+        )
+    notes: list[str] = []
+    if "earnings" in keys and "too far off" not in next(f.text for f in facts if f.key == "earnings"):
+        notes.append("Name {earnings} in key_risks as event risk.")
+    return (
+        f"Candidate: {symbol} ({name or 'Unknown'})\n"
+        f"ISIN: {isin or 'not given'}\n"
+        f"{described}"
+        f"{regime_text}\n"
+        f"{facts_prompt(facts)}"
+        + "".join(f"{n}\n" for n in notes)
+        + f"Ticker: write it exactly as {symbol.split('.')[0].upper()}.\n"
+        f"Direction (fixed by the system): {direction}. Horizon: {{horizon}}. "
+        "System expected return over the horizon: {expected_return}.\n"
+        f"\n{SLOT_RULES}"
+        "\nGenerate a research hypothesis as structured JSON matching the schema."
+    )
 
 
 def _template_thesis(symbol: str, scores: dict[str, Any], expected_return: Any, horizon_months: int) -> str:
