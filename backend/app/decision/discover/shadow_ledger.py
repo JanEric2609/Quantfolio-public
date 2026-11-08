@@ -49,7 +49,11 @@ logger = logging.getLogger(__name__)
 #: 2026-10-14 (plan WP-A6): momentum and volatility in EUR (M4), portfolio fit
 #: at the book's real weights and dropped without a portfolio (M5). A cohort
 #: change that keeps the clock (ADR 0018 amendment of 2026-10-14, §7).
-COMPOSITE_FORMULA_VERSION = "adr0017.3-2026-10-14"
+#: 2026-11-08: momentum ranked without a one-day jump that makes a third of it,
+#: a 100 % volatility ceiling, stock and fund lanes with one name per industry,
+#: and the recency penalty on Discover's own picks only (#375-#378). Also a
+#: cohort change that keeps the clock (§7).
+COMPOSITE_FORMULA_VERSION = "adr0017.4-2026-11-08"
 #: 2: ETFs only for a plan line, one fund per index, held indices skipped (D4).
 UNIVERSE_RULE_VERSION = 2
 

@@ -106,6 +106,14 @@ _STRONG_MOMENTUM = re.compile(r"\b(?:strong|robust|exceptional|high)\b[^.]{0,20}
 _DIVERSIFIER_CLAIM = re.compile(
     r"(?<!little )(?<!limited )(?<!no )(?<!not )(?<!low )(?<!poor )(?<!minimal )(?<!reduced )(?<!less )\bdiversif(?:ier|iers|ication|ying|ies|y)\b", re.I,
 )
+#: "High correlation" or "substantial overlap" with the portfolio, the mirror of a diversifier claim.
+_HIGH_OVERLAP_CLAIM = re.compile(
+    r"\b(?:high|substantial|significant|strong|heavy|considerable)\b[^.]{0,30}\b(?:correlation|overlap)\b"
+    r"(?=[^.]*\b(?:portfolio|holdings|book)\b)|"
+    r"\b(?:portfolio|holdings|book)\b[^.]*\b(?:high|substantial|significant|strong|heavy|considerable)\b"
+    r"[^.]{0,30}\b(?:correlation|overlap)\b",
+    re.I,
+)
 _INSIDER_CLUSTER = re.compile(r"\binsiders?\b[^.]{0,30}\bcluster|\bcluster\b[^.]{0,20}\b(?:buy|buys|buying|insiders?)\b", re.I)
 _HIGH_DEBT = re.compile(r"\b(?:high|elevated|heavy|significant)\b[^.]{0,25}\b(?:debt|leverage)\b", re.I)
 _DEBT_EQUITY_LINE = re.compile(r"\bdebt[- ](?:to[- ])?equity\b|\bdebt ratio\b|\bd/e\b|\bleverage\b", re.I)
@@ -300,6 +308,8 @@ def mislabel_problems(
         problems.append(f"'{m.group(0)}' overstates a momentum rank of {momentum_rank:.2f}")
     if correlation is not None and correlation >= DIVERSIFIER_MAX_CORRELATION and _DIVERSIFIER_CLAIM.search(text):
         problems.append(f"a diversification claim needs a low correlation with the portfolio; it is {correlation:.2f}")
+    if correlation is not None and correlation < DIVERSIFIER_MAX_CORRELATION and _HIGH_OVERLAP_CLAIM.search(text):
+        problems.append(f"a correlation of {correlation:.2f} with the portfolio is not high")
     if de_ratio is not None and de_ratio < HIGH_DEBT_EQUITY_PCT and _HIGH_DEBT.search(text):
         problems.append(f"debt-to-equity of {de_ratio:.1f} % is not high")
     if insider_buyers is not None and insider_buyers < MIN_CLUSTER_BUYERS and _INSIDER_CLUSTER.search(text):
@@ -320,6 +330,8 @@ def plain_field_names(text: str) -> str:
 def _unsupported_claim(text: str, correlation: float | None) -> bool:
     """A claim the data cannot carry, whatever else the sentence says."""
     if _MARKET_IMPLIED_ESTIMATE.search(text) or _DOWNSIDE_PROTECTION.search(text) or _ALPHA_FACTORS.search(text):
+        return True
+    if correlation is not None and correlation < DIVERSIFIER_MAX_CORRELATION and _HIGH_OVERLAP_CLAIM.search(text):
         return True
     return (
         correlation is not None
