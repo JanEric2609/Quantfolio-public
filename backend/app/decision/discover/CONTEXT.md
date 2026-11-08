@@ -187,9 +187,16 @@ also tightens some sectors. `data_quality.py` reports which signals a name and a
 run went without; a dossier states its horizon, while the track record scores the
 estimate over 21 trading days and the trust ledger records 126 as well.
 
+### Jumps, lottery stocks and one beta (review of run 4f3ddca7, 2026-11-08)
+
+- `stage_verification_gate` rejects a candidate past `VOL_REJECT` (100 % a year); 60-100 % stays a flagged risk. In the run only MRNA (187 %) was past it, the next was 88 %. Very high volatility and large daily gains predict low later returns (Ang, Hodrick, Xing and Zhang 2006; Bali, Cakici and Whitelaw 2011); the 100 % line is a judgement.
+- `stage_momentum_quality` stores the 12-1 window's largest one-day gain, its date, its share of the window's return, the return without it, and Da, Gurun and Warachka's (2014) information discreteness. `jump_driven` is a day of at least `JUMP_MIN_RETURN` (20 %) giving at least a third of the return; such a stock is ranked on its return without that day, and its dossier names the day as a risk and in the prompt. Momentum from discrete news continued much less than a steady climb in their sample. With the share alone, 96 of 248 names were flagged; with both, 5 (MRNA, DDOG, URI, PLTR, NXPI). Stored scores without the field rank as before.
+- The prompt's score dump leaves out the daily `market_beta` when the weekly one exists: the facts name one beta, and IS3S quoted both.
+- "High correlation" or "substantial overlap" with the portfolio below a correlation of 0.5 costs its sentence or risk line, like a diversification claim from 0.5.
+
 ### Claims, recent falls and insider selling (review of run dd3fe7b9, 2026-11-07)
 
-- A thesis loses a sentence with an unsupported claim instead of being rejected for it: diversification at a correlation from 0.5, "downside protection", "market-implied", "alpha factors". A thesis left under 40 characters is still rejected. Rejected text goes to the worker log.
+- A thesis loses a sentence with an unsupported claim instead of being rejected for it: diversification at a correlation from 0.5, "downside protection", "market-implied", "alpha factors". A thesis left under 40 characters is still rejected. Rejected text goes to the log of the process that ran Discover (the API's for a manual run).
 - `key_risks` always carry, whoever writes them: gate volatility above 60 %, a close at least 20 % below the 3-month high (`fall_from_3m_high`, which 12-1 momentum cannot show), correlation from 0.5, and net insider selling of at least 0.25 % of market value over 90 days (a judgement, not a tested signal). A stated volatility counts as one risk however it is worded.
 - `pit_insider_signal_for_symbol` counts a trade once: a joint Form 4 repeats it per reporting owner.
 

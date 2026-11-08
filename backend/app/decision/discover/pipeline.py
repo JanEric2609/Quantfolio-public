@@ -230,6 +230,13 @@ _RECENT_HIGH_WINDOW_DAYS = 63  # about 3 months of trading days
 _EXCESS_MIN = -0.10
 _SHARPE_DELTA_MIN = -0.5
 _MDD_MAX = 0.30
+#: The one hard risk limit: past this annual volatility a candidate is rejected.
+VOL_REJECT = 1.00
+#: Momentum is "one jump" when a single day gained at least this much and gave at least
+#: this share of the 12-1 return. The share alone flagged 96 of 248 names in run
+#: 4f3ddca7 (a 5 % day is a third of a 15 % year); with both, 5: MRNA, DDOG, URI, PLTR, NXPI.
+JUMP_MIN_RETURN = 0.20
+JUMP_SHARE_LIMIT = 1.0 / 3.0
 
 # Benchmarks by asset class (plan 2026-10-12, D3). Stocks keep a region
 # benchmark (a German stock against the S&P 500 is penalised for being
@@ -1357,6 +1364,8 @@ def stage_momentum_quality(
     quarter_high = float(last_quarter.max())
     fall_from_3m_high = 1.0 - float(last_quarter.iloc[-1]) / quarter_high if quarter_high > 0 else 0.0
 
+    jump = _largest_day_in_formation(df["close"], df["date"], momentum)
+
     concerns: list[str] = []
     if fx_basis != "eur":
         concerns.append("momentum and volatility in the listing currency (no EUR rate)")
@@ -1371,12 +1380,46 @@ def stage_momentum_quality(
         "max_drawdown": round(mdd, 4),
         "trailing_1m_annualized_return": round(float(trailing_1m_annualized_return), 4),
         "fall_from_3m_high": round(fall_from_3m_high, 4),
+        **jump,
         "fx_basis": fx_basis,
         "bad_prints_dropped": bad_prints,
         "concerns": concerns,
     }
     logger.debug("stage_momentum_quality: %s mom=%.2f vol=%.2f concerns=%d", symbol, momentum, vol, len(concerns))
     return scores, None
+
+
+def _largest_day_in_formation(closes: Any, dates: Any, momentum: float) -> dict[str, Any]:
+    """The 12-1 window's largest one-day gain, its share of the window's return, and its sign balance.
+
+    Momentum that arrives in one jump does not continue the way a steady climb does
+    (Da, Gurun and Warachka 2014, "Frog in the Pan"): MRNA ranked 0.998 in run
+    4f3ddca7 on +848 %, of which one day (2026-08-19, +177 %) gave about 45 %.
+    ``information_discreteness`` is their measure: sign of the return times
+    (share of falling days minus share of rising days); near -1 is a steady climb.
+    """
+    start = len(closes) - 252 if len(closes) >= 252 else 0
+    end = len(closes) - 21 if len(closes) >= 21 else len(closes) - 1
+    window = closes.iloc[start : end + 1].reset_index(drop=True)
+    window_dates = dates.iloc[start : end + 1].reset_index(drop=True)
+    rets = window.pct_change().iloc[1:]
+    if rets.empty:
+        return {}
+    i = int(rets.idxmax())
+    largest = float(rets.loc[i])
+    out: dict[str, Any] = {
+        "largest_day_return": round(largest, 4),
+        "largest_day_date": str(window_dates.iloc[i])[:10],
+        "information_discreteness": round(
+            math.copysign(1.0, momentum) * (float((rets < 0).mean()) - float((rets > 0).mean())), 4
+        ),
+    }
+    if momentum > 0 and largest > 0:
+        share = min(1.0, math.log1p(largest) / math.log1p(momentum))
+        out["largest_day_share"] = round(share, 4)
+        out["momentum_without_largest_day"] = round((1.0 + momentum) / (1.0 + largest) - 1.0, 4)
+        out["jump_driven"] = largest >= JUMP_MIN_RETURN and share >= JUMP_SHARE_LIMIT
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1637,8 +1680,9 @@ def stage_verification_gate(
     """Verification-style risk assessment on the candidate's own price history.
 
     Breaches of the conservative risk thresholds are recorded as advisory
-    ``concerns`` for the LLM agent rather than rejecting the candidate. Only the
-    inability to compute (no data / too few returns) is a hard failure.
+    ``concerns`` for the LLM agent rather than rejecting the candidate. The
+    hard failures are the inability to compute (no data / too few returns) and
+    a volatility past ``VOL_REJECT``.
     """
     logger.debug("stage_verification_gate: %s", symbol)
     rows = market_history(db, symbol, days=_RISK_WINDOW_DAYS)
@@ -1662,6 +1706,13 @@ def stage_verification_gate(
     mdd_info = max_drawdown(rets)
     mdd = abs(mdd_info.get("max_drawdown", 0.0))
     sharpe = sharpe_ratio(rets)
+
+    if vol > VOL_REJECT:
+        # Past 60 % a stock is flagged; past 100 % it is a lottery ticket, the
+        # kind of stock that earns least afterwards (Ang et al. 2006 on
+        # idiosyncratic volatility, Bali et al. 2011 on the largest daily gain).
+        # MRNA at 187 % was the only one in run 4f3ddca7; the next was 88 %.
+        return None, f"verification_gate: volatility {vol:.0%} a year exceeds {VOL_REJECT:.0%}"
 
     concerns: list[str] = []
     if mdd > _MDD_MAX:
@@ -2661,6 +2712,14 @@ def _etf_plan_scope(db: Session) -> Any:
         return None
 
 
+def _momentum_for_rank(mom: dict[str, Any]) -> float:
+    """12-1 momentum, less its largest day when the stock's momentum is one jump (stored scores without it rank as before)."""
+    without = mom.get("momentum_without_largest_day")
+    if mom.get("jump_driven") is True and isinstance(without, (int, float)):
+        return float(without)
+    return float(mom["momentum_12_1m"])
+
+
 def assign_momentum_ranks(score_dicts: list[dict[str, Any]]) -> None:
     """Stamp ``momentum_quality.momentum_rank`` (mid-rank percentile in (0, 1)).
 
@@ -2669,7 +2728,7 @@ def assign_momentum_ranks(score_dicts: list[dict[str, Any]]) -> None:
     momentum signal. No-op below ``MOMENTUM_RANK_MIN_CANDIDATES``.
     """
     rankable = [
-        (sd["momentum_quality"], float(sd["momentum_quality"]["momentum_12_1m"]))
+        (sd["momentum_quality"], _momentum_for_rank(sd["momentum_quality"]))
         for sd in score_dicts
         if isinstance(sd.get("momentum_quality"), dict)
         and isinstance(sd["momentum_quality"].get("momentum_12_1m"), (int, float))

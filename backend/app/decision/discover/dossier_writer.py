@@ -430,6 +430,10 @@ def _reword_concerns_for_prompt(value: Any) -> Any:
         for k, v in value.items():
             if k in ("regime_affinity", "data_quality", "trailing_1m_annualized_return"):
                 continue
+            # The facts name one market beta, the weekly one; the daily one beside it
+            # came back as a second beta in the same dossier (IS3S.DE 0.88 and 1.12, 2026-11-08).
+            if k == "market_beta" and isinstance(value.get("market_beta_weekly"), (int, float)):
+                continue
             if k == "revenue_growth" and isinstance(v, (int, float)):
                 # A fraction here came back as "0.83 revenue growth" (NVDA, 2026-11-07).
                 out["revenue_growth_pct"] = round(v * 100.0, 1)
@@ -680,6 +684,12 @@ def _grounding_prompt_lines(scores: dict[str, Any], annual: dict[str, Any]) -> s
             "month momentum skips the latest month and does not show this; say so if you cite momentum."
         )
 
+    jump = _jump_text(mom)
+    if jump:
+        lines.append(
+            f"One day, {jump} Momentum that comes from one jump tends not to continue; say so if you cite momentum."
+        )
+
     return "".join(f"{line}\n" for line in lines)
 
 
@@ -689,6 +699,14 @@ EARNINGS_IMMINENT_DAYS = 1
 EARNINGS_RISK_DAYS = 30
 #: A fall from the 3-month high from which it is worth a line.
 RECENT_FALL_LIMIT = 0.20
+def _jump_text(mom: dict[str, Any]) -> str | None:
+    """'One day gave much of the momentum', when the momentum stage says so; None otherwise."""
+    share, day, gain = mom.get("largest_day_share"), mom.get("largest_day_date"), mom.get("largest_day_return")
+    if mom.get("jump_driven") is not True or not isinstance(share, (int, float)) or not isinstance(gain, (int, float)):
+        return None
+    return f"{day} ({gain * 100:+.1f}%) gave {share * 100:.0f}% of the 12-1 month return."
+
+
 _EARNINGS_HOURS = {"bmo": "before the open", "amc": "after the close", "dmh": "during market hours"}
 
 
@@ -1867,6 +1885,9 @@ def deterministic_risks(
     fall = _as_dict(scores.get("momentum_quality")).get("fall_from_3m_high")
     if isinstance(fall, (int, float)) and fall >= RECENT_FALL_LIMIT:
         rest.append(f"Recent fall: the latest close is {fall:.1%} below the highest close of the last 3 months.")
+    jump = _jump_text(_as_dict(scores.get("momentum_quality")))
+    if jump:
+        rest.append(f"One-day jump: {jump}")
     correlation = _as_dict(scores.get("portfolio_fit")).get("correlation")
     if isinstance(correlation, (int, float)) and correlation >= DIVERSIFIER_MAX_CORRELATION:
         rest.append(f"Overlap: a weekly correlation of {correlation:.2f} with the portfolio adds little diversification.")
