@@ -260,3 +260,22 @@ def test_sleeve_rebalance_keeps_an_unheld_unlocked_sleeve_visible(monkeypatch):
     assert row["action"] == "buy" and row["estimated_amount"] > 0 and "no fund chosen" in row["ticker"]
     empty = generate_rebalancing_suggestions(_sleeve_book()[0], "nobody", sleeve_plan=plan)
     assert empty["estimate"] is True and empty["not_tax_advice"] is True
+
+
+def test_hrp_with_two_instruments_is_inverse_variance():
+    """skfolio's HRP raised "argmax of an empty sequence" on two assets (prod, 2026-11-09)."""
+    rng = np.random.default_rng(3)
+    r = pd.DataFrame(rng.normal(0, 0.01, (400, 2)) * [1.0, 2.0], columns=["A", "B"])
+    out = allocation_candidates(r, {})
+    assert not out.get("errors")
+    hrp = out["methods"]["hrp"]["weights"]
+    assert hrp["A"] == pytest.approx(0.8, abs=0.03)  # 1/σ² with σ_B = 2σ_A
+
+
+def test_a_cap_of_one_over_n_gives_equal_weights_without_solver_errors():
+    rng = np.random.default_rng(4)
+    r = pd.DataFrame(rng.normal(0, 0.01, (400, 6)), columns=list("ABCDEF"))
+    out = allocation_candidates(r, {}, max_weight=1 / 6)
+    assert not out.get("errors")
+    for kind in ("min_variance", "erc", "hrp"):
+        assert all(w == pytest.approx(1 / 6) for w in out["methods"][kind]["weights"].values())

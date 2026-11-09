@@ -191,3 +191,14 @@ pattern for `max_turnover_pct` and `max_sell_pct_of_position`.
   window after window (i.e. the cap binds every cycle, not occasionally),
   that is a signal the underlying LLM decision quality — not the guardrail —
   needs attention next.
+
+## Amendment 2026-11-09: positions bought inside the window
+
+The window-start value was reconstructed as `current + sells − buys`, which is
+about 0 for a position bought inside the window, so the cumulative cap froze
+every new position for the full 28 days. On prod this left the advisor sleeve
+unable to sell TTE.PA/ENI.MI (bought 2026-10-15) to fund a new candidate, and
+reported the block as "computed quantity rounded to zero"; Mandate B's NEM sell
+was cut to €60 the same way. The window-start value is now
+`max(current + sells − buys, buys)`: a fresh buy may be trimmed by the same third
+within the window, never more. A sell the cap blocks says "sell cap exhausted".

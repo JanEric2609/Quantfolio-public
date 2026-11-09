@@ -2583,6 +2583,8 @@ export interface MandateJournalEntry {
   source: "review" | "competition";
   estimate: true;
   not_financial_advice: true;
+  /** Made before the last paper reset: kept as a record, not about the current book. */
+  earlier_run?: boolean;
 }
 
 export interface MandateAccuracy {
@@ -3674,6 +3676,8 @@ export interface NTrialsSummaryResponse {
   /** Independent search families: a lower bound on independent tests. */
   effective?: number;
   by_context: Record<string, number>;
+  /** Discover factor-scoring rows (ac_trial_ledger) that `resolved` also counts. */
+  ac_trial_count?: number;
   hurdle_observations?: number;
   /** Annualised Sharpe the best of N skill-less trials reaches by luck. */
   hurdle_curve?: Array<{ n_trials: number; sharpe_hurdle: number }>;

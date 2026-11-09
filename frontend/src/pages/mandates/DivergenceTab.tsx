@@ -14,7 +14,7 @@ import {
   type MandateDivergence,
   type MandateAdviceCardUpdateResponse,
 } from "../../lib/api";
-import type { MandatesOutletContext } from "./MandatesHub";
+import { MANDATES, portfolioOf, type MandateLetter, type MandatesOutletContext } from "./mandateContext";
 
 function HoldingsDiffTable({
   title,
@@ -54,7 +54,24 @@ function HoldingsDiffTable({
 }
 
 export function DivergenceTab() {
-  const { portfolioId, mandate } = useOutletContext<MandatesOutletContext>();
+  const { portfolios, portfoliosLoading } = useOutletContext<MandatesOutletContext>();
+  if (portfoliosLoading) return <Card className="p-6 text-sm text-text-muted">Loading mandates…</Card>;
+  return (
+    <div className="space-y-8">
+      {MANDATES.map((m) => (
+        <section key={m} className="space-y-3" aria-label={`Mandate ${m} divergence`}>
+          <h2 className="text-sm font-semibold text-text-primary">Mandate {m}</h2>
+          <MandateDivergence mandate={m} portfolioId={portfolioOf(portfolios, m)?.id ?? null} />
+        </section>
+      ))}
+      <p className="text-[11px] text-text-muted">
+        Estimate · not financial advice. Nothing here is ever executed at a broker — trades are always yours to make.
+      </p>
+    </div>
+  );
+}
+
+function MandateDivergence({ mandate, portfolioId }: { mandate: MandateLetter; portfolioId: string | null }) {
   const queryClient = useQueryClient();
 
   const divergenceQuery = useQuery({
@@ -187,11 +204,6 @@ export function DivergenceTab() {
           )}
         </div>
       )}
-
-      <p className="text-[11px] text-text-muted">
-        Estimate · not financial advice. Nothing here is ever executed at DKB — trades are always
-        yours to make.
-      </p>
     </div>
   );
 }

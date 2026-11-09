@@ -153,10 +153,9 @@ export function OverviewTab() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-text-secondary max-w-2xl">
-        Two independently reviewed LLM paper portfolios (mandate A and mandate B), each mirroring
-        your real DKB holdings as their starting basis. Trigger a review to run a bounded LLM
-        tool-loop that ends in a buy/sell/hold decision, gated by risk and portfolio checks —
-        nothing here ever executes at DKB.
+        Two LLM paper portfolios, side by side. Each started from your real holdings and is reviewed
+        once a week: a bounded LLM tool loop ends in a buy, sell or hold, gated by risk and portfolio
+        checks. Paper only — nothing here is ever executed at a broker.
       </p>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {MANDATES.map((m) => (

@@ -323,6 +323,14 @@ def _plan_decision(
             if sell_caps is not None
             else current_value * max_sell_pct_of_position
         )
+        if sell_cap <= 0:
+            # ADR 0013: a position bought inside the trailing window has a
+            # window-start value of ~0, so nothing of it may be sold until the
+            # window has passed. Say so instead of "rounded to zero".
+            return None, (
+                f"sell cap exhausted (ADR 0013: bought or already sold within the last "
+                f"{DEFAULT_CUMULATIVE_SELL_WINDOW_DAYS} days, or at the core floor)"
+            )
         if abs(delta_value) > sell_cap:
             # Multi-cycle conviction required to fully exit a position — see
             # DEFAULT_MAX_SELL_PCT_OF_POSITION / DEFAULT_MAX_CUMULATIVE_SELL_PCT

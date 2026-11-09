@@ -273,4 +273,32 @@ describe("ThisMonthPage", () => {
     expect(screen.getByText(/FTSE 100/)).toBeInTheDocument();
     expect(screen.getByText(/FTSE All-World by VWRA.L/)).toBeInTheDocument();
   });
+
+  it("answers the month first: where the money goes per broker, then the plan against its targets", async () => {
+    loadPlan = async () => ({
+      ...plan,
+      no_change: false,
+      headline: "Put 1.000 € into your core this month.",
+      actions: [
+        { sleeve: "core", kind: "order", amount_eur: 600, instrument: "MSCI World", ticker: "EUNL.DE", isin: "IE00B4L5Y983", note: "n", broker: "scalable", broker_label: "Scalable Capital" },
+        { sleeve: "core", kind: "order", amount_eur: 400, instrument: "FTSE All-World", ticker: "VWCE.DE", isin: "IE00BK5BQT80", note: "n", broker: "trading212", broker_label: "Trading 212" },
+        { sleeve: "core", kind: "one_off", amount_eur: 2000, instrument: "MSCI World", ticker: "EUNL.DE", isin: "IE00B4L5Y983", note: "n", broker: "scalable", broker_label: "Scalable Capital" },
+      ],
+    });
+    renderPage();
+
+    const where = await screen.findByTestId("month-where");
+    // The optional one-off is not part of this month's answer.
+    expect(where).toHaveTextContent(/600.*at Scalable Capital.*400.*at Trading 212/);
+    expect(where).not.toHaveTextContent("2.600");
+    const core = screen.getByTestId("sleeve-core");
+    expect(core).toHaveTextContent(/now 100 %.*→ 100 %.*target 100 %/);
+    expect(core).toHaveTextContent("this month");
+    expect(screen.getByTestId("sleeve-satellite")).toHaveTextContent("locked");
+    // The action card comes before the plan view, and the plan view before the details.
+    const action = screen.getByTestId("month-action");
+    const planView = screen.getByTestId("month-plan-vs-target");
+    expect(action.compareDocumentPosition(planView) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "More detail" })).toBeInTheDocument();
+  });
 });

@@ -55,13 +55,13 @@ def _advisor_portfolio(db, user) -> PaperPortfolio:
 
 
 def _resolved_prediction(
-    db, user, *, conviction, expected, realised, low=None, high=None
+    db, user, *, conviction, expected, realised, low=None, high=None, direction="buy"
 ) -> DiscoveryPrediction:
     pred = DiscoveryPrediction(
         id=uuid4().hex, user_id=user.id, run_id="r1", symbol="TST",
         predicted_at=now_utc() - timedelta(days=30),
         horizon_days=21, resolve_at=now_utc() - timedelta(days=1),
-        direction="buy", conviction=conviction, expected_return=expected,
+        direction=direction, conviction=conviction, expected_return=expected,
         expected_return_low=low, expected_return_high=high,
         realised_return=realised, outcome_status="resolved",
         price_at_prediction=100.0, features_json={},
@@ -399,3 +399,20 @@ def test_dsr_computed_once_multiple_strategy_variants_exist():
     assert 0.0 <= row.dsr <= 1.0
     # DSR deflates for selection bias, so it must never exceed PSR.
     assert row.dsr <= row.psr + 1e-9
+
+
+def test_a_sell_is_scored_on_the_price_move_its_forecast_describes():
+    """Resolution stores a sell's realised return negated; the MC forecast is of
+    the price move, so magnitude must compare it with the move (prod MZ slope -2.4)."""
+    db = _memory_db()
+    user = _user(db)
+    _advisor_portfolio(db, user)
+    # Price moves exactly as forecast; sells store the bet-direction return.
+    for i, move in enumerate([0.03, -0.02, 0.01, -0.04, 0.02]):
+        direction = "sell" if i % 2 else "buy"
+        stored = -move if direction == "sell" else move
+        _resolved_prediction(db, user, conviction=0.6, expected=move, realised=stored,
+                             low=move - 0.05, high=move + 0.05, direction=direction)
+    row = compute_advisor_scorecard(db, user.id)
+    assert row is not None
+    assert row.mz_slope is not None and abs(row.mz_slope - 1.0) < 1e-6

@@ -28,7 +28,7 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.foundation.models.entities import LlmPortfolioDecision, PaperSnapshot
+from app.foundation.models.entities import LlmPortfolioDecision, PaperPortfolio, PaperSnapshot
 from app.decision.llm_portfolio.assessment import BENCHMARK_TICKER, _fetch_interval_return
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,9 @@ def _portfolio_interval_return_pct(
     """Portfolio return over ``[start, end]`` as a percentage, from snapshots.
 
     Derived from since-inception ``total_return_pct`` on the snapshot nearest each
-    endpoint: ``((1 + r_end/100) / (1 + r_start/100) - 1) * 100``.
+    endpoint. The snapshot stores it as a fraction (``paper_portfolio`` writes
+    ``(value - baseline) / baseline``), so: ``((1 + r_end) / (1 + r_start) - 1) * 100``.
+    Reading it as a percent shrank every measured return 100-fold.
     """
     start_snap = (
         db.query(PaperSnapshot)
@@ -71,7 +73,7 @@ def _portfolio_interval_return_pct(
     r_end = _to_float(end_snap.total_return_pct)
     if r_start is None or r_end is None:
         return None
-    return (((1 + r_end / 100) / (1 + r_start / 100)) - 1.0) * 100
+    return (((1 + r_end) / (1 + r_start)) - 1.0) * 100
 
 
 def _worst_drawdown_pct(
@@ -167,7 +169,14 @@ def score_decision(db: Session, decision: LlmPortfolioDecision, now: datetime) -
     if metric not in _VALID_METRICS:
         return None
 
-    actual = compute_actual_metric(db, decision.portfolio_id, metric, review_date, end)
+    # A decision made before the paper run was reset belongs to a book that no
+    # longer exists; the new run's snapshots would score it on another portfolio.
+    portfolio = db.get(PaperPortfolio, decision.portfolio_id)
+    inception = portfolio.inception_at if portfolio is not None else None
+    if inception is not None and inception.tzinfo is None:
+        inception = inception.replace(tzinfo=UTC)
+    earlier_run = inception is not None and review_date < inception
+    actual = None if earlier_run else compute_actual_metric(db, decision.portfolio_id, metric, review_date, end)
     if actual is None:
         verdict = "unresolvable"
         actual_outcome: dict[str, Any] = {
@@ -175,7 +184,11 @@ def score_decision(db: Session, decision: LlmPortfolioDecision, now: datetime) -
             "actual_pct": None,
             "verdict": verdict,
             "window": [review_date.isoformat(), end.isoformat()],
-            "reason": "Insufficient snapshot / price data",
+            "reason": (
+                f"Made in an earlier paper run (the run restarted {inception.date().isoformat()})"
+                if earlier_run and inception is not None
+                else "Insufficient snapshot / price data"
+            ),
         }
     else:
         actual = round(actual, 2)

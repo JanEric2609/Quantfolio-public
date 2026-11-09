@@ -150,6 +150,19 @@ def _skfolio_weights(kind: str, returns: pd.DataFrame, max_weight: float | None)
 
     prior = EmpiricalPrior(covariance_estimator=LedoitWolf())
     cap = 1.0 if max_weight is None else float(max_weight)
+    n = returns.shape[1]
+    if cap * n <= 1.0 + 1e-9:
+        # A cap of 1/N leaves one feasible portfolio; skfolio rejects it when
+        # the caps sum to 1 - 1e-16 after rounding.
+        return np.full(n, 1.0 / n)
+    if kind == "hrp" and n == 2:
+        # Two assets form a single cluster split, so HRP is inverse variance
+        # (Lopez de Prado 2016, bisection step); skfolio's tree code fails on
+        # it with "argmax of an empty sequence".
+        from sklearn.covariance import LedoitWolf as _LW
+
+        var = np.clip(np.diag(_LW().fit(returns.values).covariance_), 1e-18, None)
+        return _cap_weights((1.0 / var) / np.sum(1.0 / var), cap)
     if kind == "min_variance":
         model = MeanRisk(objective_function=ObjectiveFunction.MINIMIZE_RISK, risk_measure=RiskMeasure.VARIANCE,
                          prior_estimator=prior, min_weights=0.0, max_weights=cap)

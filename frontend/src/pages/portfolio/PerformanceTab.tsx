@@ -1,278 +1,209 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Skeleton } from "../../components/ui/skeleton";
-import { GlossaryTooltip } from "../../components/composed/GlossaryTooltip";
 import { LineChart } from "../../components/charts/LineChart";
-import { formatDate, formatNumber, formatPercent } from "../../lib/format";
-import {
-  useComposites,
-  useLedgerBenchmark,
-  useLedgerEntries,
-  useLedgerSummary,
-  useWriteLedgerSnapshot,
-} from "../quantlab/hooks/usePerformance";
-import { BenchmarkCard } from "./components/BenchmarkCard";
+import { AreaChart } from "../../components/charts/AreaChart";
+import { formatCurrency, formatNumber, formatPercent } from "../../lib/format";
+import { useBookPerformance } from "../quantlab/hooks/useBookPerformance";
+import { drawdownSeries, monthlyReturns, periodReturn, sliceSeries, type Period } from "./performanceMath";
 
-const fmtPct = (v: number | null | undefined) => formatPercent(v, { digits: 2 });
+const PERIODS: { key: Period; label: string }[] = [
+  { key: "all", label: "Since start" },
+  { key: "ytd", label: "This year" },
+  { key: "1y", label: "12 months" },
+];
 
+const pct = (v: number | null | undefined) => formatPercent(v, { digits: 1 });
+const pp = (v: number | null) => (v == null ? "—" : `${v >= 0 ? "+" : ""}${formatNumber(v * 100, { digits: 1 })} pp`);
+const tone = (v: number | null | undefined) => (v == null ? "" : v >= 0 ? "text-success" : "text-danger");
+
+function Stat({ label, value, sub, className = "" }: { label: string; value: string; sub?: string; className?: string }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-text-muted">{label}</dt>
+      <dd className={`font-mono text-base font-semibold tabular-nums ${className}`}>{value}</dd>
+      {sub ? <dd className="text-[11px] text-text-muted">{sub}</dd> : null}
+    </div>
+  );
+}
+
+/**
+ * The real book's return across every broker, in EUR: time-weighted unit
+ * value (what the investments earned), the money-weighted IRR (what your
+ * deposits earned, timing included) and MSCI World over the same days.
+ */
 export function PerformanceTab() {
-  const [selectedComposite, setSelectedComposite] = useState<string | null>(null);
+  const book = useBookPerformance();
+  const [period, setPeriod] = useState<Period>("all");
 
-  const composites = useComposites();
-  const ledgerSummary = useLedgerSummary(selectedComposite);
-  const writeSnapshot = useWriteLedgerSnapshot();
-  const benchmark = useLedgerBenchmark(selectedComposite);
-
-  useEffect(() => {
-    const list = composites.data?.research?.composites;
-    if (!selectedComposite && list && list.length > 0) {
-      setSelectedComposite(list[0].id);
-    }
-  }, [composites.data, selectedComposite]);
-
-  const handleSnapshot = () => {
-    if (!selectedComposite) return;
-    writeSnapshot.mutate({
-      composite_id: selectedComposite,
-      as_of: new Date().toISOString(),
-    });
-  };
-
-  const ledgerEntries = useLedgerEntries(selectedComposite, 120);
-  const entries = ledgerEntries.data?.research?.entries ?? [];
-  // API returns newest-first; the chart needs chronological order.
-  const chronological = [...entries].reverse();
-  const summary = ledgerSummary.data;
-  const research = summary?.research;
-
-  if (composites.isLoading) {
+  if (book.isLoading) {
     return (
       <div className="space-y-4">
-        <Skeleton className="h-40 w-full rounded-md" />
-        <Skeleton className="h-60 w-full rounded-md" />
+        <Skeleton className="h-28 w-full rounded-md" />
+        <Skeleton className="h-64 w-full rounded-md" />
       </div>
     );
   }
-
-  if (composites.isError) {
+  if (book.isError || !book.data) {
     return (
-      <Card className="border border-line bg-panel p-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-sm text-danger">Failed to load performance composites.</div>
-          <Button variant="outline" size="sm" onClick={() => composites.refetch()}>Retry</Button>
-        </div>
+      <Card className="flex items-center justify-between gap-3 p-4">
+        <p className="text-sm text-danger">Performance could not be loaded.</p>
+        <Button variant="outline" size="sm" onClick={() => book.refetch()}>
+          Retry
+        </Button>
+      </Card>
+    );
+  }
+  const perf = book.data;
+  if (!perf.available) {
+    return (
+      <Card className="p-4 text-sm text-text-secondary" data-testid="performance-unavailable">
+        {perf.reason ?? "Not enough position history yet."}
       </Card>
     );
   }
 
-  const compositeList = composites.data?.research?.composites || [];
-  const hasComposites = compositeList.length > 0;
-
-  if (!hasComposites) {
-    return (
-      <Card className="border border-line bg-panel p-4">
-        <div className="text-sm text-text-muted">
-          No composites available. Please check your portfolio setup.
-        </div>
-      </Card>
-    );
-  }
-
-  const selectedName =
-    compositeList.find((c) => c.id === selectedComposite)?.name ?? compositeList[0]?.name;
+  const series = sliceSeries(perf.series, period);
+  const bookReturn = periodReturn(series.map((p) => p.unit_value));
+  const benchReturn = periodReturn(series.map((p) => p.benchmark));
+  const excess = bookReturn != null && benchReturn != null ? bookReturn - benchReturn : null;
+  const dd = drawdownSeries(series);
+  const maxDd = dd.reduce((m, [, v]) => Math.min(m, v), 0);
+  const flows = series.slice(1).reduce((sum, p) => sum + p.net_flow, 0);
+  const months = monthlyReturns(series);
+  const benchName = `${perf.benchmark ?? "MSCI World"} (EUR)`;
+  const whole = period === "all";
 
   return (
     <div className="space-y-4">
-      {/* Action Bar */}
-      <section className="rounded-md border border-line bg-panel p-4">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-semibold text-text-primary">
-              {selectedName || "Performance"}
-            </h3>
-            <p className="text-xs text-text-muted">
-              <GlossaryTooltip k="composite">Composite performance ledger</GlossaryTooltip>
-            </p>
-          </div>
+      <div role="group" aria-label="Period" className="flex w-fit flex-wrap items-center gap-1 rounded-md border border-border p-0.5">
+        {PERIODS.map((p) => (
           <Button
-            onClick={handleSnapshot}
-            disabled={writeSnapshot.isPending}
-            className="shrink-0"
+            key={p.key}
+            type="button"
+            size="sm"
+            variant={period === p.key ? "default" : "ghost"}
+            aria-pressed={period === p.key}
+            onClick={() => setPeriod(p.key)}
           >
-            {writeSnapshot.isPending ? "Saving..." : "Snapshot Ledger"}
+            {p.label}
           </Button>
-        </div>
-        {writeSnapshot.isError && (
-          <p role="alert" className="mt-2 text-xs text-danger">
-            Snapshot failed: {(writeSnapshot.error as Error)?.message ?? "Unknown error"}
-          </p>
-        )}
-        {writeSnapshot.isSuccess && (
-          <p className="mt-2 text-xs text-success">
-            Snapshot written — TWR/MWR recomputed from your portfolio history.
-          </p>
-        )}
+        ))}
+      </div>
+
+      <Card className="p-4">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-5" data-testid="performance-stats">
+          <Stat
+            label="Your investments (time-weighted)"
+            value={pct(whole && perf.twr_annualised != null ? perf.twr_annualised : bookReturn)}
+            sub={whole && perf.twr_annualised != null ? "a year, annualised" : `${series[0]?.date ?? ""} – ${perf.end}`}
+            className={tone(bookReturn)}
+          />
+          <Stat
+            label={benchName}
+            value={pct(whole && perf.benchmark_annualised != null ? perf.benchmark_annualised : benchReturn)}
+            sub="same days"
+          />
+          <Stat
+            label="Difference"
+            value={pp(excess)}
+            sub="before taxes, after fees"
+            className={tone(excess)}
+          />
+          <Stat
+            label="Your deposits earned (IRR)"
+            value={whole ? pct(perf.irr_annualised ?? perf.irr_period) : "—"}
+            sub={whole ? (perf.irr_annualised != null ? "a year, timing included" : "over the period, timing included") : "whole period only"}
+          />
+          <Stat label="Deepest fall" value={pct(maxDd)} sub="from a previous high" className={maxDd < 0 ? "text-danger" : ""} />
+        </dl>
+        <p className="mt-3 text-xs text-text-secondary">
+          Net deposits in the period {formatCurrency(flows, "EUR")} · value now {formatCurrency(perf.value_end_eur ?? 0, "EUR")}.
+        </p>
+      </Card>
+
+      <section className="rounded-md bg-surface p-3">
+        <h2 className="mb-2 text-sm font-semibold text-text-primary">Growth of 1 € invested, against {benchName}</h2>
+        <LineChart
+          ariaLabel="Time-weighted unit value of the book against the benchmark"
+          className="h-64"
+          xType="time"
+          series={[
+            { name: "Your book", data: series.map((p) => [p.date, p.unit_value / (series[0]?.unit_value || 1)] as [string, number]) },
+            ...(series[0]?.benchmark
+              ? [{
+                  name: benchName,
+                  color: "#94a3b8",
+                  data: series
+                    .filter((p) => p.benchmark != null)
+                    .map((p) => [p.date, (p.benchmark as number) / (series[0].benchmark as number)] as [string, number]),
+                }]
+              : []),
+          ]}
+          yFormat={(v) => v.toFixed(2)}
+        />
       </section>
 
-      {/* Performance Metrics */}
-      {research && (
-        <section className="rounded-md border border-line bg-panel p-4">
-          <h3 className="mb-4 text-sm font-semibold">Latest Performance</h3>
+      <section className="rounded-md bg-surface p-3">
+        <h2 className="mb-2 text-sm font-semibold text-text-primary">Fall from the previous high</h2>
+        <AreaChart
+          ariaLabel="Drawdown of the book's unit value"
+          tone="danger"
+          className="h-40"
+          series={[{ name: "Drawdown", data: dd }]}
+          yFormat={(v) => `${Math.round(v * 100)} %`}
+        />
+      </section>
 
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <div>
-              <div className="text-xs text-text-muted">
-                <GlossaryTooltip k="twr">TWR</GlossaryTooltip>
-              </div>
-              <div className="font-mono text-sm font-semibold text-success">
-                {fmtPct(research.twr)}
-              </div>
-            </div>
-
-            <div>
-              <div className="text-xs text-text-muted">
-                <GlossaryTooltip k="mwr">MWR</GlossaryTooltip>
-              </div>
-              <div className="font-mono text-sm font-semibold text-success">
-                {fmtPct(research.mwr)}
-              </div>
-            </div>
-
-            {research.dispersion != null && (
-              <div>
-                <div className="text-xs text-text-muted">
-                  <GlossaryTooltip k="dispersion">Dispersion</GlossaryTooltip>
-                </div>
-                <div className="font-mono text-sm text-text-secondary">
-                  {fmtPct(research.dispersion)}
-                </div>
-              </div>
-            )}
-
-            {research.ex_post_risk?.sharpe != null && (
-              <div>
-                <div className="text-xs text-text-muted">
-                  <GlossaryTooltip k="sharpe">Sharpe</GlossaryTooltip>
-                </div>
-                <div className="font-mono text-sm text-text-secondary">
-                  {formatNumber(research.ex_post_risk.sharpe, { digits: 2 })}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Risk Breakdown */}
-          {research.ex_post_risk && (
-            <div className="mt-4 border-t border-line pt-4">
-              <h4 className="mb-2 text-xs font-semibold text-text-primary">Ex-Post Risk</h4>
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-text-muted">Volatility</span>
-                  <span className="font-mono text-text-primary">
-                    {fmtPct(research.ex_post_risk.volatility)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-text-muted">Max Drawdown</span>
-                  <span className="font-mono text-text-primary">
-                    {fmtPct(research.ex_post_risk.max_drawdown)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-text-muted">CVaR 95%</span>
-                  <span className="font-mono text-text-primary">
-                    {fmtPct(research.ex_post_risk.cvar_95)}
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* vs benchmark: the passive core ETF over the same window */}
-      {benchmark.data?.research ? <BenchmarkCard benchmark={benchmark.data.research} /> : null}
-
-      {/* TWR History Chart */}
-      {chronological.length > 1 && (
-        <section className="rounded-md border border-line bg-panel p-4">
-          <h3 className="mb-3 text-sm font-semibold">
-            <GlossaryTooltip k="twr">TWR History</GlossaryTooltip>
-          </h3>
-          <LineChart
-            ariaLabel="TWR history"
-            className="h-64"
-            series={[
-              {
-                name: "TWR",
-                data: chronological.map((e) => [e.as_of, e.twr]),
-              },
-            ]}
-          />
-        </section>
-      )}
-
-      {/* Ledger Entries */}
-      <section className="rounded-md border border-line bg-panel p-4">
-        <h3 className="mb-3 text-sm font-semibold">Ledger Entries</h3>
-        {ledgerEntries.isLoading ? (
-          <Skeleton className="h-24 w-full rounded-md" />
-        ) : entries.length === 0 ? (
-          <div className="text-sm text-text-muted">
-            <p>No ledger entries yet.</p>
-            <p className="mt-1 text-xs">
-              Click <strong>Snapshot Ledger</strong> to record the first entry. TWR/MWR need at
-              least 2 daily portfolio snapshots — snapshots accumulate automatically once the
-              worker's daily position snapshot job runs (or after DKB syncs on consecutive days).
-            </p>
-          </div>
-        ) : (
+      {months.length > 0 && (
+        <section className="rounded-md bg-surface p-3">
+          <h2 className="mb-2 text-sm font-semibold text-text-primary">Month by month</h2>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm" data-testid="performance-months">
               <thead>
-                <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-text-muted">
-                  <th className="py-2 pr-4">As of</th>
-                  <th className="py-2 pr-4 text-right">TWR</th>
-                  <th className="py-2 pr-4 text-right">MWR</th>
-                  <th className="py-2 pr-4 text-right">Dispersion</th>
-                  <th className="py-2 text-right">Snapshots used</th>
+                <tr className="border-b border-border text-left text-xs text-text-muted">
+                  <th className="py-2 pr-3 font-normal">Month</th>
+                  <th className="py-2 pr-3 text-right font-normal">Your book</th>
+                  <th className="py-2 pr-3 text-right font-normal">{perf.benchmark ?? "Benchmark"}</th>
+                  <th className="py-2 pr-3 text-right font-normal">Difference</th>
+                  <th className="py-2 text-right font-normal">Net deposits</th>
                 </tr>
               </thead>
               <tbody>
-                {entries.map((e) => (
-                  <tr key={e.id} className="border-b border-line last:border-b-0">
-                    <td className="py-2 pr-4 font-mono text-text-secondary">
-                      {formatDate(e.as_of)}
-                    </td>
-                    <td className="py-2 pr-4 text-right font-mono text-text-primary">
-                      {fmtPct(e.twr)}
-                    </td>
-                    <td className="py-2 pr-4 text-right font-mono text-text-primary">
-                      {fmtPct(e.mwr)}
-                    </td>
-                    <td className="py-2 pr-4 text-right font-mono text-text-secondary">
-                      {fmtPct(e.dispersion)}
-                    </td>
-                    <td className="py-2 text-right font-mono text-text-secondary">
-                      {e.snapshot_meta?.snapshots_used ?? "—"}
-                    </td>
-                  </tr>
-                ))}
+                {months.map((m) => {
+                  const diff = m.book != null && m.benchmark != null ? m.book - m.benchmark : null;
+                  return (
+                    <tr key={m.month} className="border-b border-border/50 last:border-0">
+                      <td className="py-1.5 pr-3 font-mono text-text-secondary">
+                        {m.month}
+                        {m.partial ? <span className="ml-1 text-[10px] text-text-muted">part</span> : null}
+                      </td>
+                      <td className={`py-1.5 pr-3 text-right font-mono tabular-nums ${tone(m.book)}`}>{pct(m.book)}</td>
+                      <td className="py-1.5 pr-3 text-right font-mono tabular-nums text-text-secondary">{pct(m.benchmark)}</td>
+                      <td className={`py-1.5 pr-3 text-right font-mono tabular-nums ${tone(diff)}`}>
+                        {pp(diff)}
+                      </td>
+                      <td className="py-1.5 text-right font-mono tabular-nums text-text-secondary">
+                        {formatCurrency(m.netFlow, "EUR")}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
-      {/* Education Note */}
-      <Card className="border border-line bg-panel p-3">
-        <p className="text-xs text-text-secondary">
-          <strong>TWR</strong> (Time-Weighted Return) measures portfolio performance independent of cashflows, suitable for manager evaluation.
-          <br />
-          <strong>MWR</strong> (Money-Weighted Return) accounts for timing and size of cashflows, reflecting investor experience.
-        </p>
-      </Card>
+      <p className="text-[11px] text-text-muted">
+        Securities at every connected broker (DKB, Scalable, Trading 212), in EUR; cash is not included. The
+        time-weighted return removes the effect of deposits and withdrawals, so it compares with {benchName};
+        the IRR is what your own money earned, timing included. Under a year nothing is annualised.
+        {(perf.unpriced?.length ?? 0) > 0 ? ` No price for ${perf.unpriced!.join(", ")}; left out.` : ""}
+        {perf.days_without_full_prices ? ` ${perf.days_without_full_prices} day(s) lacked a full set of prices.` : ""}{" "}
+        Estimate · not financial advice.
+      </p>
     </div>
   );
 }

@@ -72,6 +72,18 @@ DEFAULT_WINDOW_DAYS = 90
 METRICS_CONTEXT = "advisor_scorecard"
 
 
+
+def _price_move(p: Any) -> float:
+    """The stock's own move over the horizon.
+
+    Resolution stores ``realised_return`` in the bet's direction (negated for a
+    sell), while ``expected_return`` and its p5/p95 band are the Monte Carlo
+    forecast of the price move itself. Comparing the two as stored scored every
+    sell with the opposite sign (Mincer-Zarnowitz slope -2.4 on prod, 2026-11-09).
+    """
+    realised = float(p.realised_return)
+    return -realised if p.direction in ("sell", "bear") else realised
+
 def _nav_returns(db: Session, portfolio_id: str, window_start: date, window_end: date) -> list[float]:
     snaps = (
         db.query(PaperSnapshot)
@@ -172,7 +184,7 @@ def compute_advisor_scorecard(
     # to all resolved predictions with an MC band, including neutrals (a
     # "hold" still carries a forward distribution).
     rps_triples = [
-        (float(p.expected_return_low), float(p.expected_return_high), float(p.realised_return))
+        (float(p.expected_return_low), float(p.expected_return_high), _price_move(p))
         for p in resolved
         if p.expected_return_low is not None
         and p.expected_return_high is not None
@@ -182,7 +194,7 @@ def compute_advisor_scorecard(
 
     # Axis 3 — magnitude accuracy (needs a predicted magnitude)
     mz_pairs = [
-        (float(p.expected_return), float(p.realised_return))
+        (float(p.expected_return), _price_move(p))
         for p in resolved
         if p.expected_return is not None and p.realised_return is not None
     ]

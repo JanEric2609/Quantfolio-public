@@ -228,17 +228,18 @@ def test_benchmark_excess_computes_interval(monkeypatch):
         status="completed",
         decision_json="{}",
     ))
-    # Snapshot at/before start: since-inception return 1.0%.
+    # Snapshot at/before start: since-inception return 1.0% (stored as a fraction,
+    # as paper_portfolio writes it).
     db.add(PaperSnapshot(
         portfolio_id=p.id,
         date=(now - timedelta(days=10)).date(),
-        total_return_pct=1.0,
+        total_return_pct=0.01,
     ))
     # Latest snapshot: since-inception return 3.02%.
     db.add(PaperSnapshot(
         portfolio_id=p.id,
         date=now.date(),
-        total_return_pct=3.02,
+        total_return_pct=0.0302,
     ))
     db.commit()
 
@@ -264,8 +265,8 @@ def test_benchmark_excess_none_when_fetch_fails(monkeypatch):
         status="completed",
         decision_json="{}",
     ))
-    db.add(PaperSnapshot(portfolio_id=p.id, date=(now - timedelta(days=10)).date(), total_return_pct=1.0))
-    db.add(PaperSnapshot(portfolio_id=p.id, date=now.date(), total_return_pct=3.0))
+    db.add(PaperSnapshot(portfolio_id=p.id, date=(now - timedelta(days=10)).date(), total_return_pct=0.01))
+    db.add(PaperSnapshot(portfolio_id=p.id, date=now.date(), total_return_pct=0.03))
     db.commit()
     monkeypatch.setattr(assess, "_fetch_interval_return", lambda *a, **k: None)
     assert assess.benchmark_excess_since(db, p.id, now=now) is None

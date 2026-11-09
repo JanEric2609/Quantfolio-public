@@ -1,3 +1,4 @@
+import pytest
 """Tests for the advisor cycle's trailing-window cumulative sell cap and
 core-holding floor (ADR 0013, follow-up to ADR 0012's per-cycle sell cap).
 
@@ -202,6 +203,31 @@ def test_cumulative_cap_fully_exhausted_blocks_further_sells():
         core_holding_floor_pct=DEFAULT_CORE_HOLDING_FLOOR_PCT,
     )
     assert cap == 0.0
+
+
+def test_a_position_bought_inside_the_window_can_still_be_trimmed():
+    """Prod 2026-11-09: TTE.PA bought on 10-15 had a cap of 0 for 28 days."""
+    cap = _effective_sell_cap(
+        "TTE.PA", 1_800.0, 35_600.0,
+        max_sell_pct_of_position=DEFAULT_MAX_SELL_PCT_OF_POSITION,
+        cumulative_totals={"TTE.PA": (0.0, 1_764.0)},
+        max_cumulative_sell_pct=DEFAULT_MAX_CUMULATIVE_SELL_PCT,
+        instrument_types={},
+        core_holding_floor_pct=DEFAULT_CORE_HOLDING_FLOOR_PCT,
+    )
+    assert cap == pytest.approx(1_764.0 / 3)
+
+
+def test_a_fresh_buy_sold_once_is_capped_at_a_third_of_the_buy():
+    cap = _effective_sell_cap(
+        "TTE.PA", 1_200.0, 35_600.0,
+        max_sell_pct_of_position=DEFAULT_MAX_SELL_PCT_OF_POSITION,
+        cumulative_totals={"TTE.PA": (588.0, 1_764.0)},
+        max_cumulative_sell_pct=DEFAULT_MAX_CUMULATIVE_SELL_PCT,
+        instrument_types={},
+        core_holding_floor_pct=DEFAULT_CORE_HOLDING_FLOOR_PCT,
+    )
+    assert cap == pytest.approx(0.0)
 
 
 def test_core_holding_floor_binds_for_etf_below_floor_headroom():

@@ -1,13 +1,15 @@
+import { useState } from "react";
 import { useOutletContext } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { BookOpenText } from "lucide-react";
 import { Card } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
 import { Skeleton } from "../../components/ui/skeleton";
 import { EmptyState } from "../../components/composed/EmptyState";
 import { formatDateTime, formatPercent } from "../../lib/format";
-import { api, type MandateJournalEntry } from "../../lib/api";
-import type { MandatesOutletContext } from "./MandatesHub";
+import { api, type MandateDecision, type MandateJournalEntry } from "../../lib/api";
+import { MANDATES, portfolioOf, type MandateLetter, type MandatesOutletContext } from "./mandateContext";
 
 const STATUS_VARIANT: Record<string, "success" | "warning" | "danger" | "secondary"> = {
   completed: "success",
@@ -29,37 +31,45 @@ const ACTION_VARIANT: Record<string, "success" | "danger" | "secondary"> = {
 
 const THESIS_TRUNCATE = 220;
 
+/** The schema puts confidence inside ``expectation``; older rows had it on top. */
+function confidenceOf(decision: MandateDecision): number | null {
+  if (typeof decision.confidence === "number") return decision.confidence;
+  const c = decision.expectation?.confidence;
+  return typeof c === "number" ? c : null;
+}
+
 function truncate(text: string | null | undefined, max: number): string {
   if (!text) return "—";
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-export function JournalTab() {
-  const { portfolioId, mandate } = useOutletContext<MandatesOutletContext>();
+type Filter = "all" | MandateLetter;
 
-  const journalQuery = useQuery({
-    queryKey: ["llm-portfolio-journal", portfolioId],
-    queryFn: () => api<MandateJournalEntry[]>(`/api/llm-portfolio/${portfolioId}/journal`),
-    enabled: portfolioId != null,
+export function JournalTab() {
+  const { portfolios, portfoliosLoading } = useOutletContext<MandatesOutletContext>();
+  const [filter, setFilter] = useState<Filter>("all");
+  const cols = MANDATES.map((m) => ({ mandate: m, portfolio: portfolioOf(portfolios, m) }));
+  const results = useQueries({
+    queries: cols.map(({ portfolio }) => ({
+      queryKey: ["llm-portfolio-journal", portfolio?.id ?? null],
+      queryFn: () => api<MandateJournalEntry[]>(`/api/llm-portfolio/${portfolio!.id}/journal`),
+      enabled: portfolio != null,
+    })),
   });
 
-  if (portfolioId == null) {
-    return (
-      <EmptyState
-        icon={BookOpenText}
-        title={`No Mandate ${mandate} portfolio yet`}
-        description="Create the mandate on the Overview tab before a journal can exist."
-      />
-    );
-  }
-
-  if (journalQuery.isLoading) {
+  if (portfoliosLoading || results.some((r) => r.isLoading)) {
     return <div className="space-y-2">{[...Array(6)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}</div>;
   }
 
-  const entries = journalQuery.data ?? [];
+  // One timeline, newest first, each row marked with its mandate.
+  const all = results
+    .flatMap((r, i) => (r.data ?? []).map((entry) => ({ entry, mandate: cols[i].mandate })))
+    .sort((a, b) =>
+      String(b.entry.review_date ?? b.entry.created_at).localeCompare(String(a.entry.review_date ?? a.entry.created_at)),
+    );
+  const entries = filter === "all" ? all : all.filter((e) => e.mandate === filter);
 
-  if (entries.length === 0) {
+  if (all.length === 0) {
     return (
       <EmptyState
         icon={BookOpenText}
@@ -70,11 +80,34 @@ export function JournalTab() {
   }
 
   return (
+    <div className="space-y-3">
+      <div role="group" aria-label="Show mandate" className="flex w-fit items-center gap-1 rounded-md border border-border p-0.5">
+        {(["all", ...MANDATES] as Filter[]).map((f) => (
+          <Button
+            key={f}
+            type="button"
+            size="sm"
+            variant={filter === f ? "default" : "ghost"}
+            aria-pressed={filter === f}
+            onClick={() => setFilter(f)}
+          >
+            {f === "all" ? `Both (${all.length})` : `Mandate ${f} (${all.filter((e) => e.mandate === f).length})`}
+          </Button>
+        ))}
+      </div>
+      <JournalTable entries={entries} />
+    </div>
+  );
+}
+
+function JournalTable({ entries }: { entries: { entry: MandateJournalEntry; mandate: MandateLetter }[] }) {
+  return (
     <Card className="p-0 overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-text-muted border-b border-border">
             <th className="py-2 pl-4 pr-3">Date</th>
+            <th className="py-2 pr-3">Mandate</th>
             <th className="py-2 pr-3">Source</th>
             <th className="py-2 pr-3">Action</th>
             <th className="py-2 pr-3">Ticker</th>
@@ -84,12 +117,20 @@ export function JournalTab() {
           </tr>
         </thead>
         <tbody>
-          {entries.map((entry) => {
+          {entries.map(({ entry, mandate }) => {
             const decision = entry.decision_json ?? {};
             const action = (decision.action ?? "—").toLowerCase();
             return (
-              <tr key={`${entry.source}-${entry.id}`} className="border-b border-border/50 align-top">
+              <tr key={`${mandate}-${entry.source}-${entry.id}`} className="border-b border-border/50 align-top">
                 <td className="py-2 pl-4 pr-3 whitespace-nowrap">{formatDateTime(entry.review_date ?? entry.created_at)}</td>
+                <td className="py-2 pr-3 font-semibold">
+                  {mandate}
+                  {entry.earlier_run ? (
+                    <Badge variant="secondary" className="ml-1 text-[10px] font-normal" title="Made before the last paper reset">
+                      earlier run
+                    </Badge>
+                  ) : null}
+                </td>
                 <td className="py-2 pr-3">
                   <Badge variant="secondary" className="text-[10px] capitalize">{entry.source}</Badge>
                 </td>
@@ -100,7 +141,7 @@ export function JournalTab() {
                 </td>
                 <td className="py-2 pr-3 font-mono">{decision.ticker || "—"}</td>
                 <td className="py-2 pr-3 text-right tabular-nums">
-                  {decision.confidence != null ? formatPercent(decision.confidence) : "—"}
+                  {confidenceOf(decision) != null ? formatPercent(confidenceOf(decision)!) : "—"}
                 </td>
                 <td className="py-2 pr-3">
                   <Badge variant={STATUS_VARIANT[entry.status] ?? "secondary"} className="text-[10px]">

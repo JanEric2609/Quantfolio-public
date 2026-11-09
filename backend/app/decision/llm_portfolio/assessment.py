@@ -436,8 +436,8 @@ def benchmark_excess_since(
     if r_start is None or r_end is None:
         return None
 
-    # total_return_pct is stored as a percentage number (e.g. 4.5 == 4.5%).
-    portfolio_interval = ((1 + r_end / 100) / (1 + r_start / 100)) - 1.0
+    # PaperSnapshot.total_return_pct is stored as a fraction (0.045 == 4.5 %).
+    portfolio_interval = ((1 + r_end) / (1 + r_start)) - 1.0
 
     bench = _fetch_interval_return(db, BENCHMARK_TICKER, start, now)
     if bench is None:
@@ -516,7 +516,12 @@ def build_assessment(
     )
     cash_balance = float(latest_snap.cash_balance) if latest_snap and latest_snap.cash_balance is not None else None
     max_drawdown = latest_snap.max_drawdown if latest_snap else None
-    total_return_pct = float(latest_snap.total_return_pct) if latest_snap and latest_snap.total_return_pct is not None else None
+    # The snapshot stores a fraction; the assessment (and the prompt) speak percent.
+    total_return_pct = (
+        float(latest_snap.total_return_pct) * 100
+        if latest_snap and latest_snap.total_return_pct is not None
+        else None
+    )
 
     try:
         benchmark = benchmark_excess_since(db, portfolio.id)

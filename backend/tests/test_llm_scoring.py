@@ -84,7 +84,7 @@ def test_score_decision_abs_return_hit():
     review = d.review_date
     # Snapshot at review start (0%) and at horizon end (+2.02% since inception).
     db.add(PaperSnapshot(portfolio_id=p.id, date=review.date(), total_return_pct=0))
-    db.add(PaperSnapshot(portfolio_id=p.id, date=(review + timedelta(weeks=2)).date(), total_return_pct=2.02))
+    db.add(PaperSnapshot(portfolio_id=p.id, date=(review + timedelta(weeks=2)).date(), total_return_pct=0.0202))
     db.commit()
 
     verdict = scoring.score_decision(db, d, datetime.now(UTC))
@@ -128,7 +128,7 @@ def test_score_decision_benchmark_excess(monkeypatch):
     )
     review = d.review_date
     db.add(PaperSnapshot(portfolio_id=p.id, date=review.date(), total_return_pct=0))
-    db.add(PaperSnapshot(portfolio_id=p.id, date=(review + timedelta(weeks=2)).date(), total_return_pct=2.02))
+    db.add(PaperSnapshot(portfolio_id=p.id, date=(review + timedelta(weeks=2)).date(), total_return_pct=0.0202))
     db.commit()
     # Portfolio +2.0%, benchmark +0.6% → excess +1.4% ≥ 1.0 → hit.
     monkeypatch.setattr(scoring, "_fetch_interval_return", lambda *a, **k: 0.006)
@@ -148,7 +148,7 @@ def test_run_scoring_scores_eligible_only():
         expectation={"metric": "abs_return_pct", "direction": "increase", "magnitude": 1.0},
     )
     db.add(PaperSnapshot(portfolio_id=p.id, date=d1.review_date.date(), total_return_pct=0))
-    db.add(PaperSnapshot(portfolio_id=p.id, date=(d1.review_date + timedelta(weeks=2)).date(), total_return_pct=3.0))
+    db.add(PaperSnapshot(portfolio_id=p.id, date=(d1.review_date + timedelta(weeks=2)).date(), total_return_pct=0.03))
     # Not eligible: horizon not elapsed.
     _decision(
         db, p, weeks_ago=1, horizon=8,
@@ -172,7 +172,7 @@ def test_run_scoring_idempotent():
         expectation={"metric": "abs_return_pct", "direction": "increase", "magnitude": 1.0},
     )
     db.add(PaperSnapshot(portfolio_id=p.id, date=d1.review_date.date(), total_return_pct=0))
-    db.add(PaperSnapshot(portfolio_id=p.id, date=(d1.review_date + timedelta(weeks=2)).date(), total_return_pct=3.0))
+    db.add(PaperSnapshot(portfolio_id=p.id, date=(d1.review_date + timedelta(weeks=2)).date(), total_return_pct=0.03))
     db.commit()
     assert scoring.run_scoring(db) == 1
     # Second run finds no unscored eligible decisions.
@@ -205,3 +205,20 @@ def test_accuracy_endpoint_aggregates_verdicts():
     assert result["hit_rate"] == 0.5
     assert result["pending_scoring"] == 1
     assert result["estimate"] is True
+
+
+def test_decision_from_an_earlier_paper_run_is_unresolvable():
+    """A reset starts a new book; the old decision must not be scored on it (prod 2026-11-09)."""
+    db = _memory_db()
+    p = _portfolio(db, _user(db))
+    d = _decision(
+        db, p, weeks_ago=4, horizon=2,
+        expectation={"metric": "abs_return_pct", "direction": "increase", "magnitude": 1.5},
+    )
+    review = d.review_date
+    p.inception_at = review + timedelta(days=1)
+    db.add(PaperSnapshot(portfolio_id=p.id, date=review.date(), total_return_pct=0))
+    db.add(PaperSnapshot(portfolio_id=p.id, date=(review + timedelta(weeks=2)).date(), total_return_pct=0.05))
+    db.commit()
+    assert scoring.score_decision(db, d, datetime.now(UTC)) == "unresolvable"
+    assert "earlier paper run" in d.reflection_json

@@ -49,9 +49,13 @@ def _memory_db():
 
 EUNL = "IE00B4L5Y983"
 AAPL = "US0378331005"
-TODAY = date.today()
-EARLIER = (datetime.now(UTC) - timedelta(days=20)).strftime("%Y-%m-%dT%H:%M:%SZ")
-NOW = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+# One reading of the clock for the whole module. The ``fake`` fixture pins the
+# service's "today" to it, so a run that crosses midnight UTC (CI did, on
+# 2026-11-09) cannot see the fixtures dated one day and the sync the next.
+_CLOCK = datetime.now(UTC)
+TODAY = _CLOCK.date()
+EARLIER = (_CLOCK - timedelta(days=20)).strftime("%Y-%m-%dT%H:%M:%SZ")
+NOW = _CLOCK.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _ok(command: str, data) -> dict:
@@ -176,6 +180,7 @@ class FakeSc:
 
 @pytest.fixture
 def fake(monkeypatch):
+    monkeypatch.setattr(scalable, "_today", lambda: TODAY)
     runner = FakeSc()
     scalable.set_cli_factory(lambda cfg: ScalableCli(
         ScalableCliConfig(wrapper_path="/fake/quantfolio-sc-ro", cli_user="", timeout_seconds=5, max_attempts=2,
@@ -1509,7 +1514,7 @@ def test_depot_synced_empty_before_the_fix_is_baselined_again(fake):
     fake.responses[("broker", "transactions")]["data"]["result"]["items"].append(
         {"summary_type": "BrokerCashTransactionSummary", "id": "t-dep-today", "type": "CASH_TRANSACTION",
          "status": "SETTLED", "is_cancellation": False,
-         "last_event_datetime": datetime.now(UTC).strftime("%Y-%m-%dT00:00:00Z"),
+         "last_event_datetime": TODAY.strftime("%Y-%m-%dT00:00:00Z"),
          "currency": "EUR", "amount": "35", "cash_transaction_type": "DEPOSIT"},
     )
     scalable.sync(db, user.id)
@@ -1589,7 +1594,7 @@ def test_a_generic_etf_type_keeps_a_money_market_classification(fake):
 
 # --- tax: lots, sales, withheld tax, interest --------------------------------
 
-SELL_TS = (datetime.now(UTC) - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+SELL_TS = (_CLOCK - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _sell(fake, tx_id: str, isin: str, quantity: str, amount: str, *, price: str, fee: str = "0.99",

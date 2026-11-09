@@ -147,19 +147,18 @@ describe("Can I trust it? pages", () => {
     expect(await screen.findByTestId("type-advisor")).toBeInTheDocument();
   });
 
-  it("Mandates: reuses the Mandates accuracy tab under a mandate switch", async () => {
-    const user = userEvent.setup();
+  it("Mandates: reuses the Mandates accuracy tab, both mandates in one table", async () => {
     renderAt("/trust/mandates");
 
     expect(await screen.findByTestId("type-mandates")).toHaveTextContent("No evidence yet");
-    // The reused AccuracyTab got its portfolio from the outlet context.
-    expect(await screen.findByText("Resolved Decisions")).toBeInTheDocument();
+    const table = await screen.findByTestId("mandate-accuracy");
+    expect(table).toHaveTextContent("Mandate A");
+    expect(table).toHaveTextContent("Mandate B");
+    expect(table).toHaveTextContent("Resolved decisions");
+    // Mandate B has no portfolio in this fixture.
+    expect(table).toHaveTextContent("not created");
     expect(apiMock).toHaveBeenCalledWith("/api/llm-portfolio/pA/accuracy");
-
-    await user.click(screen.getByRole("button", { name: "Mandate B" }));
-    expect(screen.getByRole("button", { name: "Mandate B" })).toHaveAttribute("aria-pressed", "true");
-    // Mandate B has no portfolio in this fixture, so the reused tab says so.
-    expect(await screen.findByText("No Mandate B portfolio yet")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mandate B" })).not.toBeInTheDocument();
   });
 
   it("Evidence: reuses the Evidence page", async () => {
