@@ -841,7 +841,15 @@ def run_mandate_review(db: Session, user_id: str, mandate: str) -> dict[str, Any
     ticker = str(final_decision.get("ticker", "")).upper()
     quantity_dec = Decimal(str(final_decision.get("quantity", 0)))
     thesis = str(final_decision.get("thesis", ""))
-    confidence = float(final_decision.get("confidence", 0.0))
+    # The schema asks for confidence inside ``expectation``; reading only the
+    # top level stored 0 for every review (prod, 18 of 18 rows).
+    raw_conf = final_decision.get("confidence")
+    if raw_conf is None and isinstance(final_decision.get("expectation"), dict):
+        raw_conf = final_decision["expectation"].get("confidence")
+    try:
+        confidence = min(max(float(raw_conf), 0.0), 1.0) if raw_conf is not None else 0.0
+    except (TypeError, ValueError):
+        confidence = 0.0
 
     # Run gates for buys
     gate_result: dict[str, Any] | None = None

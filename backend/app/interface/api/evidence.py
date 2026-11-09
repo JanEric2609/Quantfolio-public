@@ -18,7 +18,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.foundation.core.db import get_db
-from app.foundation.models.entities import TrialLedgerEntry, User
+from app.foundation.models.entities import AcTrialLedger, TrialLedgerEntry, User
 from app.foundation.auth import current_user
 from app.foundation.quant_metrics import (
     DEFAULT_N_TRIALS_FLOOR,
@@ -56,6 +56,9 @@ def n_trials_summary(
         .all()
     )
     by_context = {row[0]: row[1] for row in context_rows}
+    # resolve_n_trials also counts these rows: Discover's per-stock factor
+    # scoring, written until 2026-09-28. Shown so the contexts add up to N.
+    ac_count = db.query(func.count(AcTrialLedger.id)).scalar() or 0
     resolved = resolve_n_trials(db)
     effective = effective_n_trials(db)
     grid = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, resolved, effective]
@@ -65,6 +68,7 @@ def n_trials_summary(
         "raw_count": int(raw_count),
         "effective": effective,
         "by_context": by_context,
+        "ac_trial_count": int(ac_count),
         "hurdle_observations": HURDLE_OBSERVATIONS,
         "hurdle_curve": dsr_hurdle_curve(grid, HURDLE_OBSERVATIONS),
     }

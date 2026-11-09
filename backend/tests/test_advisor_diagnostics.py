@@ -28,6 +28,7 @@ from app.foundation.models.entities import (
     User,
 )
 from app.decision.advisor.diagnostics import FAIL, OK, WARN, run_advisor_diagnostics
+from app.decision.advisor import diagnostics
 
 
 def _user(db, name="jan") -> User:
@@ -733,7 +734,7 @@ def test_cycle_history_warns_when_failures_are_the_minority() -> None:
     assert "not valid JSON" in check["detail"]
 
 
-def test_cycle_history_counts_days_not_retry_attempts() -> None:
+def test_cycle_history_counts_days_not_retry_attempts(monkeypatch) -> None:
     """A failed cycle is retried by every trigger that day, so rows over-count.
 
     Production showed "16 of 19 runs failed" across 11 trading days: the 10:00
@@ -746,7 +747,11 @@ def test_cycle_history_counts_days_not_retry_attempts() -> None:
     champ, _ = _strategies(db, user)
     _healthy_jobs(db)
 
-    now = datetime.now(UTC)
+    # Noon, and the same instant for the diagnostics: the retry rows sit
+    # minutes apart, and a run near midnight UTC put one of them on the day
+    # before, or read the window one day later than the fixtures (CI, 2026-11-09).
+    now = datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr(diagnostics, "now_utc", lambda: now)
     bad_days = 0
     for offset in range(0, 15):
         day = now - timedelta(days=offset)

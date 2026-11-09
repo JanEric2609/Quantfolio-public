@@ -101,6 +101,13 @@ CliFactory = Callable[[ScalableCliConfig], ScalableCli]
 _cli_factory: CliFactory = ScalableCli
 
 
+def _today() -> date:
+    """Today in UTC: sc's transaction timestamps are UTC, so the tracking
+    start must be too (the host's local date put a deposit made just after
+    midnight before tracking began)."""
+    return datetime.now(UTC).date()
+
+
 def set_cli_factory(factory: CliFactory | None) -> None:
     """Tests swap in a CLI with a fake runner; ``None`` restores the real one."""
     global _cli_factory
@@ -546,7 +553,7 @@ def _write(db: Session, user_id: str, portfolio_id: str, overview, cash, holding
     ).first() is not None
     first_sync = not raw.get("baseline_at") and not has_rows
     if first_sync:
-        raw["tracking_since"] = date.today().isoformat()
+        raw["tracking_since"] = _today().isoformat()
         raw["baseline_at"] = now.isoformat()
         raw.pop("transactions_watermark", None)
     elif not raw.get("baseline_at"):
@@ -594,7 +601,7 @@ def _write(db: Session, user_id: str, portfolio_id: str, overview, cash, holding
             removed += 1
     db.flush()
 
-    tracking_since = raw.get("tracking_since") or date.today().isoformat()
+    tracking_since = raw.get("tracking_since") or _today().isoformat()
     deferred = deferred or set()
     ledger = _write_ledger(db, user_id, depot, portfolio_id, [t for t in transactions if t.id not in deferred],
                            details, date.fromisoformat(tracking_since),

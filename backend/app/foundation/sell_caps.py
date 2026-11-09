@@ -66,7 +66,12 @@ def effective_sell_cap(
     cap = current_value * max_sell_pct_of_position
 
     sell_v, buy_v = cumulative_totals.get(ticker.upper(), (0.0, 0.0))
-    window_start_value = max(0.0, current_value + sell_v - buy_v)
+    # A position bought inside the window has a reconstructed start value of
+    # ~0, which froze it for the whole window (prod: TTE.PA/ENI.MI from 10-15,
+    # Mandate B's NEM). Measure such a position against what was bought, so a
+    # fresh buy may still be trimmed by the same third (ADR 0013 amendment
+    # 2026-11-09).
+    window_start_value = max(0.0, current_value + sell_v - buy_v, buy_v)
     cumulative_cap = window_start_value * max_cumulative_sell_pct
     cumulative_remaining = max(0.0, cumulative_cap - sell_v)
     cap = min(cap, cumulative_remaining)

@@ -201,6 +201,13 @@ def get_journal(
             return datetime.min.replace(tzinfo=timezone.utc)
 
     entries.sort(key=_sort_key, reverse=True)
+    # Rows from before the last paper reset stay as a record, marked so they
+    # are not read as decisions about the current book.
+    inception = portfolio.inception_at
+    if inception is not None and inception.tzinfo is None:
+        inception = inception.replace(tzinfo=timezone.utc)
+    for e in entries:
+        e["earlier_run"] = bool(inception is not None and e.get("review_date") and _sort_key(e) < inception)
     return entries
 
 

@@ -4,8 +4,8 @@ import { FlaskConical, Download, RefreshCw, AlertTriangle, ShieldCheck } from "l
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { GaugeChart } from "../components/charts/GaugeChart";
 import { LineChart } from "../components/charts/LineChart";
+import { TrialsByContextCard } from "../components/evidence/TrialsByContextCard";
 import { FactorPremiaCard } from "../components/evidence/FactorPremiaCard";
 import { IngredientAttributionCard } from "../components/evidence/IngredientAttributionCard";
 import { EvidenceConsequences } from "../components/evidence/EvidenceConsequences";
@@ -171,27 +171,12 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
         </Card>
       )}
 
-      {Object.keys(summary.by_context).length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Trials by context</CardTitle>
-            <CardDescription>Where search breadth has actually been spent.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-4">
-            {Object.entries(summary.by_context).map(([ctx, count]) => (
-              <div key={ctx} className="flex flex-col items-center gap-1 w-36">
-                <GaugeChart
-                  value={count}
-                  max={Math.max(count, 10)}
-                  label={ctx}
-                  height={120}
-                  ariaLabel={`Trial count for ${ctx}`}
-                />
-                <span className="text-xs text-text-secondary">{ctx}</span>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+      {Object.keys(summary.by_context).length + (summary.ac_trial_count ?? 0) > 0 && (
+        <TrialsByContextCard
+          byContext={summary.by_context}
+          acTrials={summary.ac_trial_count ?? 0}
+          resolved={summary.resolved}
+        />
       )}
 
       <Card>
@@ -235,3 +220,4 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
     </div>
   );
 }
+

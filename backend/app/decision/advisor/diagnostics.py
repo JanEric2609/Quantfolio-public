@@ -71,7 +71,6 @@ _MIN_HISTORY_ROWS = 60  # advisor.decision._price_series floor
 _HISTORY_LOOKBACK_DAYS = 365 * 2  # advisor.decision._HISTORY_DAYS
 _MIN_COMPOSITE_AXES = 3  # advisor.evolution.composite_score
 _MIN_MAGNITUDE_PAIRS = 3  # quant_metrics.compute_mincer_zarnowitz
-_MIN_NAV_RETURNS = 5  # advisor.scorecard axes 1+4
 _MIN_METRIC_SNAPSHOTS = 20  # paper_portfolio.compute_metrics
 _DISCOVER_STALE_DAYS = 7  # advisor.cycle._DISCOVER_STALE_DAYS
 _CYCLE_LOOKBACK_DAYS = 14
@@ -1012,14 +1011,15 @@ def _check_scorecard(
     computable = sum(1 for v in axes.values() if v)
 
     from app.decision.advisor.evolution import composite_score
+    from app.decision.advisor.scorecard import MIN_RETURNS_FOR_RATIOS
 
     composite, detail = composite_score(card)
 
     missing_reasons: list[str] = []
     if not axes["risk_adjusted"] or not axes["downside"]:
         missing_reasons.append(
-            f"NAV axes need ≥{_MIN_NAV_RETURNS} daily returns in the 90-day window "
-            f"(sleeve has {snapshots} snapshot(s) in total)"
+            f"NAV axes need ≥{MIN_RETURNS_FOR_RATIOS} daily returns in the 90-day window "
+            f"(sleeve has {snapshots} snapshot(s), {max(snapshots - 1, 0)} return(s), in total)"
         )
     if not axes["calibration"]:
         missing_reasons.append("calibration needs ≥1 resolved prediction")
