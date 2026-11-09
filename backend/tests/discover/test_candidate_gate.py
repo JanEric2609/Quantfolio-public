@@ -3,7 +3,9 @@
 The gate judges one observation per 30-day block of prediction dates (the
 mean excess of the block's picks) with the anytime-valid sequential t-test
 of Wang & Ramdas (arXiv 2310.03722, Thm 4.11), across all signal-weight
-versions of an instrument type.
+versions of an instrument type. Since ADR 0018's amendment of 2026-11-08 that
+block-mean test decides for funds (the tests below use "etf"); stocks read the
+selection test's stored evidence (the tests at the end).
 """
 import math
 from datetime import UTC, datetime, timedelta
@@ -15,6 +17,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.decision.discover.candidate_gate import (
     EVIDENCE_ALPHA,
+    discover_verdict,
     evaluate_track_record,
     one_sided_t_e_value,
 )
@@ -48,7 +51,7 @@ def _pick(
     day: int,
     excess: float | None,
     hit: bool | None = True,
-    instrument_type: str = "equity",
+    instrument_type: str = "etf",
     config_id: str | None = "cfg-1",
     status: str = "resolved",
     symbol: str = "AAPL",
@@ -111,7 +114,7 @@ def test_many_correlated_picks_on_one_date_are_one_observation():
         _pick(db, user.id, day=0, excess=0.028 if i % 2 else 0.032, symbol=f"S{i}")
     db.commit()
 
-    result = evaluate_track_record(db, "equity", now=NOW)
+    result = evaluate_track_record(db, "etf", now=NOW)
 
     assert result["status"] == "insufficient_data"
     assert result["blocks"] == 1 and result["n"] == 40
@@ -122,7 +125,7 @@ def test_a_steady_edge_over_many_blocks_is_proven():
     user = _user(db)
     _monthly(db, user.id, STEADY)
 
-    result = evaluate_track_record(db, "equity", now=NOW)
+    result = evaluate_track_record(db, "etf", now=NOW)
 
     assert result["status"] == "proven"
     assert result["blocks"] == 12
@@ -136,7 +139,7 @@ def test_no_record_is_proven_in_fewer_than_nine_blocks():
     user = _user(db)
     _monthly(db, user.id, STEADY[:8])
 
-    result = evaluate_track_record(db, "equity", now=NOW)
+    result = evaluate_track_record(db, "etf", now=NOW)
 
     assert result["blocks"] == 8 and result["status"] == "unproven"
     near_certain = [0.01, 0.0101, 0.0099]
@@ -149,7 +152,7 @@ def test_a_mixed_record_is_unproven():
     user = _user(db)
     _monthly(db, user.id, [0.02, -0.03, 0.01, -0.015, 0.025, -0.02])
 
-    result = evaluate_track_record(db, "equity", now=NOW)
+    result = evaluate_track_record(db, "etf", now=NOW)
 
     assert result["status"] == "unproven"
     assert result["e_value"] < 1 / EVIDENCE_ALPHA
@@ -167,7 +170,7 @@ def test_the_cohort_spans_signal_weight_versions():
             _pick(db, user.id, day=block * 30 + j, excess=mean + offset, config_id=config, symbol=f"S{block}{j}")
     db.commit()
 
-    result = evaluate_track_record(db, "equity", now=NOW)
+    result = evaluate_track_record(db, "etf", now=NOW)
 
     assert result["status"] == "proven" and result["blocks"] == 12
 
@@ -178,7 +181,7 @@ def test_instrument_types_are_separate_cohorts():
     _monthly(db, user.id, STEADY)
     _monthly(db, user.id, [-0.01] * 12, instrument_type="money_market", hit=False)
 
-    assert evaluate_track_record(db, "equity", now=NOW)["status"] == "proven"
+    assert evaluate_track_record(db, "etf", now=NOW)["status"] == "proven"
     money_market = evaluate_track_record(db, "money_market", now=NOW)
     assert money_market["status"] == "unproven" and money_market["blocks"] == 12
 
@@ -193,7 +196,7 @@ def test_a_block_still_resolving_ends_the_sequence():
     db.commit()
     now = START + timedelta(days=100)  # block 2's pick resolves at day 91 + 14 days grace
 
-    result = evaluate_track_record(db, "equity", now=now)
+    result = evaluate_track_record(db, "etf", now=now)
 
     assert result["blocks"] == 2 and result["status"] == "insufficient_data"
 
@@ -205,7 +208,7 @@ def test_a_pick_that_never_resolves_does_not_freeze_the_record():
     _pick(db, user.id, day=61, excess=None, status="pending", symbol="DELISTED")
     db.commit()
 
-    result = evaluate_track_record(db, "equity", now=NOW)
+    result = evaluate_track_record(db, "etf", now=NOW)
 
     assert result["blocks"] == 12 and result["status"] == "proven"
 
@@ -216,7 +219,7 @@ def test_the_current_block_is_not_judged_until_it_is_over():
     _monthly(db, user.id, [0.012, 0.009, 0.011, 0.010])
     now = START + timedelta(days=100)  # inside block 3 (days 90..119)
 
-    assert evaluate_track_record(db, "equity", now=now)["blocks"] == 3
+    assert evaluate_track_record(db, "etf", now=now)["blocks"] == 3
 
 
 def test_a_losing_majority_is_not_proven_by_a_few_big_winners():
@@ -224,7 +227,7 @@ def test_a_losing_majority_is_not_proven_by_a_few_big_winners():
     user = _user(db)
     _monthly(db, user.id, STEADY, hit=False)
 
-    result = evaluate_track_record(db, "equity", now=NOW)
+    result = evaluate_track_record(db, "etf", now=NOW)
 
     assert result["e_value"] >= 1 / EVIDENCE_ALPHA
     assert result["hit_rate"] == 0.0 and result["status"] == "unproven"
@@ -232,5 +235,65 @@ def test_a_losing_majority_is_not_proven_by_a_few_big_winners():
 
 def test_no_history_is_insufficient_data():
     db = _memory_db()
-    result = evaluate_track_record(db, "equity", now=NOW)
+    result = evaluate_track_record(db, "etf", now=NOW)
     assert result["status"] == "insufficient_data" and result["blocks"] == 0 and result["n"] == 0
+
+
+# --- Stocks read the selection test since ADR 0018's amendment of 2026-11-08 ---
+
+
+def _db():
+    return _memory_db()
+
+
+def _store(db, user_id, **evidence):
+    from app.decision.verification.daily_tests import BUY_GATE_SETTING_KEY as KEY
+    from app.foundation.settings import upsert_public_settings
+
+    base = {"status": "unproven", "e_skill": 1.0, "evidence_threshold": 100.0, "n_days": 130, "min_days": 126,
+            "start": "2026-11-09", "state": "no_evidence", "guards": {}, "computed_on": "2026-12-01"}
+    upsert_public_settings(db, {KEY: {user_id: {**base, **evidence}}})
+    db.commit()
+
+
+def test_stocks_without_stored_selection_evidence_are_insufficient_data():
+    db = _db()
+    user = _user(db)
+    _monthly(db, user.id, [0.03] * 12, instrument_type="equity")
+    result = evaluate_track_record(db, "equity", user_id=user.id, now=NOW)
+    # The block means alone would say "proven"; for stocks they are only the record now.
+    assert result["legacy"]["status"] == "proven"
+    assert result["status"] == "insufficient_data" and result["method"] == "selection_w_e_process"
+
+
+def test_stocks_are_proven_by_the_stored_selection_evidence():
+    db = _db()
+    user = _user(db)
+    _store(db, user.id, status="proven", e_skill=140.0, state="skill")
+    result = evaluate_track_record(db, "equity", user_id=user.id, now=NOW)
+    assert result["status"] == "proven" and result["e_value"] == 140.0
+    assert discover_verdict(result) == "BUY"
+
+
+def test_a_losing_majority_still_blocks_a_proven_selection_record():
+    db = _db()
+    user = _user(db)
+    _monthly(db, user.id, [-0.002] * 4, instrument_type="equity", hit=False)
+    _store(db, user.id, status="proven", e_skill=140.0, state="skill")
+    result = evaluate_track_record(db, "equity", user_id=user.id, now=NOW)
+    assert result["hit_rate"] == 0.0 and result["status"] == "unproven"
+
+
+def test_funds_keep_the_block_mean_gate():
+    db = _db()
+    user = _user(db)
+    _store(db, user.id, status="proven", e_skill=140.0, state="skill")
+    result = evaluate_track_record(db, "etf", user_id=user.id, now=NOW)
+    assert result["method"] == "block_mean_e_process" and result["status"] == "insufficient_data"
+
+
+def test_the_gate_and_the_job_use_one_setting_key():
+    from app.decision.discover import candidate_gate
+    from app.decision.verification import daily_tests
+
+    assert candidate_gate.BUY_GATE_SETTING_KEY == daily_tests.BUY_GATE_SETTING_KEY

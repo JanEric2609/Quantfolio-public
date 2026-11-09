@@ -27,6 +27,7 @@ from app.foundation.auth import current_user
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import User
 from app.interface.api.params import ROWS_BOUND
+from app.lab.forward_lab import stored_summary as forward_lab_summary
 from app.lab.plan_bands import summary as plan_band_summary
 from app.lab.risk_forecast import summary as risk_summary
 
@@ -207,7 +208,7 @@ class PreRegistrationOut(BaseModel):
 
 class FamilyTestOut(BaseModel):
     family: Literal["F1", "F2", "F3"]
-    series: Literal["ideas", "ranking", "advisor"]
+    series: Literal["ideas", "ranking", "advisor", "ranking_ef"]
     role: Literal["primary", "secondary"]
     alarm_only: bool = Field(
         default=False,
@@ -269,12 +270,26 @@ class NoiseCheckOut(BaseModel):
     looks: list[NoiseLookOut] = Field(default_factory=list)
 
 
+class RobustnessOut(BaseModel):
+    false_alarm: float | None = Field(
+        default=None, description="Share of noise-only resamples of this series whose e-value reached the threshold."
+    )
+    without_best_days: float = Field(description="Skill e-value with the five best days removed.")
+    first_half: float
+    second_half: float
+
+
 class SelectionTestOut(BaseModel):
-    """S (picks against same-run, same-sector non-picks) and U (futility) on one series."""
+    """S (picks against same-run, same-sector non-picks) and U (futility) on one series.
+
+    ``selection`` is the frozen design of 2026-10-14 (secondary since
+    2026-11-08); ``selection_w`` the matched, precision-weighted one of the
+    2026-11-08 amendment (primary).
+    """
 
     family: Literal["S"] = "S"
-    series: Literal["selection"] = "selection"
-    role: Literal["primary"] = "primary"
+    series: Literal["selection", "selection_w"] = "selection"
+    role: Literal["primary", "secondary"] = "primary"
     question: str
     futility_question: str
     start: str
@@ -290,6 +305,9 @@ class SelectionTestOut(BaseModel):
     e_harm: float
     e_futility: float
     threshold: float
+    robustness: RobustnessOut | None = Field(
+        default=None, description="Stress checks of the evidence (plan 2026-11-09, §4); shown, not a guard."
+    )
     futility_threshold: float
     futility_delta_21d: float = Field(description="U's margin per 21 days, gross of costs.")
     n_fallback_days: int = 0
@@ -388,7 +406,17 @@ class DailyTestsOut(BaseModel):
     min_days_for_state: int
     horizon_days: int
     families: list[FamilyTestOut]
-    selection: SelectionTestOut | None = None
+    selection: SelectionTestOut | None = Field(
+        default=None, description="The frozen selection design of 2026-10-14; secondary since 2026-11-08.",
+    )
+    selection_weighted: SelectionTestOut | None = Field(
+        default=None,
+        description="S and U on selection_w, the primary selection test since ADR 0018's amendment of 2026-11-08.",
+    )
+    ranking_efficient: FamilyTestOut | None = Field(
+        default=None,
+        description="F2 on ranking_ef (covariance-efficient weights), primary since the amendment of 2026-11-08.",
+    )
     mandates: list[MandateTestOut] = Field(default_factory=list)
     paired: PairedComparisonOut | None = None
     factor_neutral: FactorNeutralOut | None = Field(
@@ -532,6 +560,34 @@ class RankingMetricsOut(BaseModel):
         default=None, description="Back-filled snapshots: exploratory, never in a verdict."
     )
     verdict_note: str
+
+
+class ForwardLabSignalOut(BaseModel):
+    signal: str
+    label: str
+    source: str
+    days: int
+    first_day: str | None = None
+    last_day: str | None = None
+    mean_daily: float | None = None
+    ci90_daily: tuple[float, float] | None = None
+    annual_ir: float | None = None
+    mean_rank_ic: float | None = None
+    e_skill: float
+    e_harm: float
+    names: int
+    state: Literal["not_started", "collecting", "evidence_of_skill", "evidence_of_harm"]
+    robustness: RobustnessOut | None = None
+
+
+class ForwardLabOut(BaseModel):
+    start: str
+    alpha: float
+    threshold_single: float
+    signals: list[ForwardLabSignalOut]
+    note: str
+    computed_at: str | None = None
+    resamples: int = 0
 
 
 class FanPointOut(BaseModel):
@@ -714,6 +770,15 @@ def get_ranking(
 ) -> dict[str, Any]:
     """How well Discover's score sorted every scored stock (descriptive; the verdict is F2)."""
     return build_ranking_metrics(db, user.id)
+
+
+@router.get("/forward-lab", response_model=ForwardLabOut)
+def get_forward_lab(
+    _user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """The nightly forward-test lab: published signals scored before the outcome (shadow, no effect on picks)."""
+    return forward_lab_summary(db)
 
 
 @router.get("/history", response_model=HistoryOut)

@@ -63,6 +63,7 @@ def test_unclassified_bank_loses_its_revenue_growth():
 
 
 def test_dossier_prompt_uses_the_checked_revenue_growth(monkeypatch):
+    monkeypatch.setenv("DISCOVER_DOSSIER_SLOTS", "0")  # the old prompt's score dump
     db = _memory_db()
     seen: list[str] = []
 
@@ -91,3 +92,36 @@ def test_dossier_prompt_uses_the_checked_revenue_growth(monkeypatch):
     assert '"sector": "Financial Services"' in prompt
     assert "Ticker: write it exactly as HSBA." in prompt
     assert "Portfolio context:" not in prompt
+
+
+def test_slot_prompt_uses_the_checked_revenue_growth(monkeypatch):
+    db = _memory_db()
+    seen: list[str] = []
+
+    def _llm(_db, messages, timeout_s=120.0, **_kw):
+        seen.append(messages[1]["content"])
+        return json.dumps({"thesis": "HSBA trades at {pe}.", "key_risks": []})
+
+    monkeypatch.setattr("app.decision.discover.dossier_writer._local_llm_sync", _llm)
+    monkeypatch.setattr(
+        "app.decision.discover.dossier_writer._fetch_fundamentals",
+        lambda _symbol, _db: {"pe": 13.0, "revenue_growth": 0.254, "sector": None},
+    )
+    monkeypatch.setattr("app.decision.discover.dossier_writer._fetch_sentiment", lambda _symbol, _db: {})
+    scores = {
+        "composite": 0.54,
+        "sentiment_fundamentals": {
+            "revenue_growth": None, "sector": "Financial Services", "concerns": ["revenue_growth_unreliable"],
+        },
+    }
+    candidate = {"symbol": "HSBA.L", "name": "HSBC", "isin": None, "source": "screen",
+                 "scores_json": json.dumps(scores), "tradeable_json": "{}"}
+    out = write_dossier(db, candidate, {"user_id": "u1"})
+
+    prompt = seen[0]
+    # A bank's gross interest income is no revenue growth: no fact, no figure.
+    assert "{revenue_growth}" not in prompt and "25.4" not in prompt
+    assert "Sector: Financial Services" in prompt
+    assert "{pe}: a trailing price-to-earnings ratio of 13.0" in prompt
+    assert "Ticker: write it exactly as HSBA." in prompt
+    assert out["dossier"]["thesis"] == "HSBA trades at a trailing price-to-earnings ratio of 13.0."

@@ -71,13 +71,19 @@ export function SelectionCard({ sel, f1 }: { sel: TrustSelectionTest; f1?: Trust
   const meta = SELECTION_STATE[sel.state];
   const ci = sel.mean_ci_21d;
   const te = f1?.sd_daily != null ? f1.sd_daily * Math.sqrt(252) : null;
+  const weighted = sel.series === "selection_w";
+  const primary = sel.role !== "secondary";
   return (
-    <Card className="space-y-3 p-4" data-testid="family-S">
+    <Card className="space-y-3 p-4" data-testid={weighted ? "family-S-weighted" : "family-S"}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="space-y-0.5">
           <h3 className="text-sm font-semibold text-text-primary">
-            Discover's picks vs the stocks it could have picked{" "}
-            <Badge variant="outline" className="ml-1 align-middle text-[10px]">Primary</Badge>
+            {weighted
+              ? "Discover's picks vs the most similar stocks it could have picked"
+              : "Discover's picks vs the stocks it could have picked"}{" "}
+            <Badge variant={primary ? "outline" : "secondary"} className="ml-1 align-middle text-[10px]">
+              {primary ? "Primary" : "Secondary (earlier design)"}
+            </Badge>
           </h3>
           <p className="text-xs text-text-secondary">{sel.question}</p>
           <p className="text-xs text-text-secondary">{sel.futility_question}</p>
@@ -119,14 +125,27 @@ export function SelectionCard({ sel, f1 }: { sel: TrustSelectionTest; f1?: Trust
           above the limit the daily e-values are not valid.
         </p>
       ) : null}
+      {sel.robustness ? (
+        <p className="text-[11px] text-text-muted" data-testid="selection-robustness">
+          Stress checks (shown, not part of the rule): on resamples of this series with its mean removed, noise alone
+          reached {sel.threshold} in{" "}
+          {sel.robustness.false_alarm == null ? "—" : `${(sel.robustness.false_alarm * 100).toFixed(1)} %`} of cases;
+          without its 5 best days the evidence is {fmtE(sel.robustness.without_best_days)}; first half{" "}
+          {fmtE(sel.robustness.first_half)}, second half {fmtE(sel.robustness.second_half)}.
+        </p>
+      ) : null}
       <p className="text-sm text-text-primary" data-testid="selection-grid">
         Median time to a verdict if the picks' true edge per 21 days is {gridText(sel.time_to_know)}.
       </p>
       <p className="text-[11px] text-text-muted">
         The comparison with MSCI World can only catch a large edge or harm. The question this page can answer in a few
-        years is whether the picks are worth following. Alternatives are the same run's scored stocks in the pick's
-        sector (all of them when the sector has fewer than three
-        {sel.n_fallback_days ? `; ${sel.n_fallback_days} days used that fallback` : ""}).
+        years is whether the picks are worth following.{" "}
+        {weighted
+          ? "Alternatives are the five scored stocks of the same run and sector most like the pick in beta, volatility and momentum over the year before (the five most similar of any sector when the sector has fewer than three), and quieter picks count more. Both are fixed before the pick is made, so the test stays valid and needs far less time (ADR 0018, amendment of 2026-11-08)"
+          : "Alternatives are the same run's scored stocks in the pick's sector (all of them when the sector has fewer than three"}
+        {sel.n_fallback_days ? `; ${sel.n_fallback_days} days used that fallback` : ""}
+        {weighted ? "." : ")."}
+        {!primary ? " Kept for the record: the primary test above asks the same question with less noise." : ""}
         {sel.rho1 != null
           ? ` Day-to-day correlation of the first three months: ${sel.rho1.toFixed(2)}${sel.rho1_flag ? " (above 0.15: noted, the test stays valid)" : ""}.`
           : ""}

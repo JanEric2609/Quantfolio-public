@@ -179,3 +179,49 @@ class BarQuarantine(Base):
     detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     resolution: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class IndexUniverseMember(Base):
+    """One constituent of an equity index, as its tracking fund publishes it.
+
+    Filled weekly from the SPDR MSCI World holdings file
+    (``foundation.index_universe``): the ISIN, name, country, currency and GICS
+    classification come from the file, the Yahoo ``symbol`` from an OpenFIGI
+    mapping of the ISIN to its home listing. ``symbol_ok`` is cleared when
+    Yahoo has no prices for the mapped symbol, and such rows stay out of the
+    Discover universe. The table holds current members only.
+    """
+
+    __tablename__ = "index_universe_members"
+
+    index_key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    isin: Mapped[str] = mapped_column(String(12), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    country: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    sector: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    symbol: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    #: "known" (an existing ticker for the ISIN) or "openfigi".
+    symbol_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    symbol_ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    mapped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class AnalystConsensusCache(Base):
+    """The last price-target consensus fetched for a symbol (provider payload).
+
+    A Discover run reads it when fresh instead of asking Yahoo again; the
+    nightly universe prefetch keeps it fresh for every universe name.
+    """
+
+    __tablename__ = "analyst_consensus_cache"
+
+    symbol: Mapped[str] = mapped_column(String(32), primary_key=True)
+    payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

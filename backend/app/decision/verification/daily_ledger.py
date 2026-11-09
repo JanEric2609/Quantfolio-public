@@ -42,10 +42,12 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+import numpy as np
 import pandas as pd
 from sqlalchemy.orm import Session
 
 from app.decision.verification.benchmark import passive_core_symbol
+from app.foundation import evidence_weights as ew
 from app.decision.verification.ledger_prices import EurSeries, Loader, daily_return, window_days
 from app.foundation.models.entities import (
     DiscoverCandidateSnapshot,
@@ -61,7 +63,16 @@ SERIES_RANKING = "ranking"
 SERIES_SELECTION = "selection"
 SERIES_MANDATE_A = "mandate_a"
 SERIES_MANDATE_B = "mandate_b"
-SERIES = (SERIES_IDEAS, SERIES_ADVISOR, SERIES_RANKING, SERIES_SELECTION, SERIES_MANDATE_A, SERIES_MANDATE_B)
+#: The lower-noise designs of ADR 0018's amendment of 2026-11-08: matched,
+#: precision-weighted selection and covariance-efficient ranking.
+SERIES_SELECTION_W = "selection_w"
+SERIES_RANKING_EF = "ranking_ef"
+SERIES = (
+    SERIES_IDEAS, SERIES_ADVISOR, SERIES_RANKING, SERIES_SELECTION, SERIES_MANDATE_A, SERIES_MANDATE_B,
+    SERIES_SELECTION_W, SERIES_RANKING_EF,
+)
+#: Series whose member weights are fixed from the prices before each issue day.
+WEIGHTED_SERIES = (SERIES_SELECTION_W, SERIES_RANKING_EF)
 #: Series key -> ``PaperPortfolio.mandate`` of the sleeve it judges.
 MANDATE_SERIES = {SERIES_MANDATE_A: "A", SERIES_MANDATE_B: "B"}
 #: A pick's sector needs this many non-picks to be its control; else all non-picks.
@@ -98,6 +109,8 @@ class Member:
     vs_benchmark: bool
     #: A selection pick whose sector had too few controls (all non-picks used).
     fallback: bool = False
+    #: The member's weight in the day's mean (1 except ``selection_w``'s precision weights).
+    weight: float = 1.0
 
 
 def _utc_date(value: datetime) -> date:
@@ -219,6 +232,207 @@ def selection_members(db: Session, user_id: str) -> list[Member]:
     return members
 
 
+def _live_stock_runs(db: Session, user_id: str) -> dict[str, list[DiscoverCandidateSnapshot]]:
+    rows = (
+        db.query(DiscoverCandidateSnapshot)
+        .filter(
+            DiscoverCandidateSnapshot.user_id == user_id,
+            DiscoverCandidateSnapshot.backfilled.is_(False),
+            DiscoverCandidateSnapshot.evaluable.is_(True),
+            DiscoverCandidateSnapshot.instrument_group == "stock",
+        )
+        .all()
+    )
+    by_run: dict[str, list[DiscoverCandidateSnapshot]] = {}
+    for row in rows:
+        by_run.setdefault(row.run_id, []).append(row)
+    return by_run
+
+
+def trailing_returns(
+    prices: EurSeries, symbols: list[str], benchmark: str, calendar: list[date], issue_day: date,
+) -> tuple[list[str], np.ndarray, np.ndarray] | None:
+    """Daily EUR returns over the :data:`ew.LOOKBACK` trading days before *issue_day*.
+
+    The window ends on the last trading day before the issue day, so nothing
+    the issuing run could not have known enters. A symbol is kept when it has
+    a close on or before the window's first day and one in its last
+    :data:`GRACE_TRADING_DAYS` days; closes are carried forward between.
+    Returns (kept symbols, returns days x kept, benchmark returns), or None
+    when the calendar is too short.
+    """
+    end = bisect_right(calendar, issue_day - timedelta(days=1)) - 1
+    start = end - ew.LOOKBACK
+    if start < 0:
+        return None
+    days = calendar[start:end + 1]
+    late = days[-GRACE_TRADING_DAYS]
+
+    def closes(symbol: str) -> list[float] | None:
+        out = []
+        for d in days:
+            got = prices.price_on(symbol, d)
+            if got is None:
+                return None
+            out.append(got[0])
+        last = prices.last_date(symbol)
+        return out if last is not None and last >= late else None
+
+    bench = closes(benchmark)
+    if bench is None:
+        return None
+    kept, cols = [], []
+    for s in symbols:
+        c = closes(s)
+        if c is not None and min(c) > 0:
+            kept.append(s)
+            cols.append(c)
+    if not kept:
+        return None
+    mat = np.asarray(cols, dtype=float).T
+    b = np.asarray(bench, dtype=float)
+    return kept, mat[1:] / mat[:-1] - 1.0, b[1:] / b[:-1] - 1.0
+
+
+def selection_weighted_members(
+    db: Session, user_id: str, prices: EurSeries, benchmark: str, calendar: list[date],
+) -> list[Member]:
+    """``selection_w``: each pick against its nearest same-sector non-picks, weighted by precision.
+
+    The frozen rule of ADR 0018's amendment of 2026-11-08 (§2), all of it
+    fixed from :func:`trailing_returns` before the issue day:
+
+    * features: trailing beta to the passive core, 63-day volatility and 12-1
+      momentum, z-scored over the run's stocks with a full window;
+    * controls: the :data:`ew.KNN` nearest same-sector non-picks; with fewer
+      than :data:`SELECTION_MIN_CONTROLS` of those, the nearest among all
+      non-picks (counted as a fallback). A pick without a full window keeps the
+      2026-10-14 rule's controls;
+    * weight: ``1 / var`` of the pick-minus-controls daily spread over the
+      last :data:`ew.PRECISION_DAYS` days of the window; a pick without one
+      takes the median weight of the run's other picks; every weight is capped
+      at :data:`ew.MAX_WEIGHT_RATIO` times the run's median;
+    * a non-pick correlating above :data:`ew.DUPLICATE_CORR` with another
+      stock of the run over the window (a second share class) is never a
+      control.
+    """
+    members: list[Member] = []
+    for run_id, group in _live_stock_runs(db, user_id).items():
+        picks = [r for r in group if r.picked]
+        if not picks:
+            continue
+        issue_day = min(r.issue_date for r in group)
+        sector = {r.symbol.upper(): (r.sector or "").strip().lower() for r in group}
+        symbols = sorted(sector)
+        picked = {r.symbol.upper() for r in picks}
+        window = trailing_returns(prices, symbols, benchmark, calendar, issue_day)
+        kept, rets, bench = window if window is not None else ([], np.empty((0, 0)), np.empty(0))
+        # A non-pick that is another listing of a pick (or of a kept control) is
+        # never a control: its spread is no comparison (DUPLICATE_CORR).
+        pairs = ew.near_duplicate_pairs(rets) if len(kept) >= 2 else []
+        twins = {kept[i] for pair in pairs for i in pair if kept[i] not in picked}
+        symbols = [s for s in symbols if s not in twins]
+        col = {s: i for i, s in enumerate(kept)}
+        feats = ew.stock_features(rets, bench) if len(kept) >= 2 else None
+        built: list[tuple[str, tuple[str, ...], bool, float | None]] = []
+        for pick in sorted(picked):
+            others = [s for s in symbols if s not in picked]
+            same = [s for s in others if sector[pick] and sector[s] == sector[pick]]
+            if feats is not None and pick in col:
+                pool_same = np.array([col[s] for s in same if s in col], dtype=int)
+                fallback = len(pool_same) < SELECTION_MIN_CONTROLS
+                pool = pool_same if not fallback else np.array([col[s] for s in others if s in col], dtype=int)
+                if len(pool) == 0:
+                    continue
+                ctrl_idx = ew.nearest_controls(feats, col[pick], pool)
+                controls = tuple(kept[i] for i in ctrl_idx)
+                spread = rets[:, col[pick]] - rets[:, ctrl_idx].mean(axis=1)
+                weight = ew.precision_weight(spread)
+            else:
+                fallback = len(same) < SELECTION_MIN_CONTROLS
+                controls = tuple(others if fallback else same)
+                weight = None
+            if controls:
+                built.append((pick, controls, fallback, weight))
+        known = [w for *_, w in built if w is not None]
+        median = float(np.median(known)) if known else 1.0
+        capped = ew.cap_weights([w if w is not None else median for *_, w in built])
+        for (pick, controls, fallback, _), weight in zip(built, capped):
+            c = 1.0 / len(controls)
+            members.append(Member(
+                key=f"{run_id}:{pick}",
+                issue_day=issue_day,
+                horizon=SELECTION_HORIZON_DAYS,
+                positions=(Position(pick, 1.0), *(Position(s, -c) for s in controls)),
+                vs_benchmark=False,
+                fallback=fallback,
+                weight=weight,
+            ))
+    return members
+
+
+def ranking_efficient_members(
+    db: Session, user_id: str, prices: EurSeries, benchmark: str, calendar: list[date],
+) -> list[Member]:
+    """``ranking_ef``: per run, the minimum-variance weights with the rank portfolio's exposure to the score.
+
+    The frozen rule of ADR 0018's amendment of 2026-11-08 (§3): the run's
+    evaluable stocks with a full :func:`trailing_returns` window (at least
+    :data:`MIN_RANKING_STOCKS`), their centred-rank weights ``m`` over that
+    set (of two stocks correlating above :data:`ew.DUPLICATE_CORR`, the
+    later in symbol order dropped), a Ledoit-Wolf covariance ``C`` of the window, and
+    ``argmin w'Cw`` subject to ``1'w = 0`` and ``m'w = m'm`` (Ledoit, Wolf &
+    Zhao 2019).
+    """
+    members: list[Member] = []
+    for run_id, group in _live_stock_runs(db, user_id).items():
+        scored = {r.symbol.upper(): float(r.composite) for r in group if r.composite is not None}
+        if len(scored) < MIN_RANKING_STOCKS:
+            continue
+        issue_day = min(r.issue_date for r in group)
+        window = trailing_returns(prices, sorted(scored), benchmark, calendar, issue_day)
+        if window is None or len(window[0]) < MIN_RANKING_STOCKS:
+            continue
+        kept, rets, _ = window
+        dup = ew.near_duplicates(rets)
+        if dup:
+            keep_idx = [i for i in range(len(kept)) if i not in dup]
+            kept, rets = [kept[i] for i in keep_idx], rets[:, keep_idx]
+        if len(kept) < MIN_RANKING_STOCKS:
+            continue
+        m = ew.centred_rank_weights(np.array([scored[s] for s in kept]))
+        w = ew.efficient_weights(m, ew.ledoit_wolf_cov(rets), float(m @ m))
+        members.append(Member(
+            key=run_id,
+            issue_day=issue_day,
+            horizon=RANKING_HORIZON_DAYS,
+            positions=tuple(Position(s, float(x)) for s, x in zip(kept, w) if x != 0.0),
+            vs_benchmark=False,
+        ))
+    return members
+
+
+#: Calendar days loaded before the first issue: :data:`ew.LOOKBACK` trading days and room.
+_LOOKBACK_CALENDAR_DAYS = 400
+
+
+def _weighted_members(
+    db: Session, user_id: str, series: str, *, today: date, refresh: bool, loader: Loader | None,
+) -> list[Member]:
+    """Members of a :data:`WEIGHTED_SERIES`, built from the year of prices before each issue."""
+    runs = _live_stock_runs(db, user_id)
+    if not runs:
+        return []
+    first_issue = min(r.issue_date for group in runs.values() for r in group)
+    benchmark = passive_core_symbol(db)
+    prices = EurSeries(
+        db, days=(today - first_issue).days + _LOOKBACK_CALENDAR_DAYS, refresh=refresh, loader=loader,
+    )
+    calendar = [d for d in prices.calendar(benchmark) if d <= today]
+    build = selection_weighted_members if series == SERIES_SELECTION_W else ranking_efficient_members
+    return build(db, user_id, prices, benchmark, calendar)
+
+
 def _frozen_days(db: Session, user_id: str, series: str) -> set[date]:
     rows = (
         db.query(TrustDailyActiveReturn.day)
@@ -269,6 +483,8 @@ def freeze_series(
     today = today or datetime.now(UTC).date()
     if series in MANDATE_SERIES:
         return freeze_mandate_series(db, user_id, series, today=today, refresh=refresh, loader=loader)
+    if members is None and series in WEIGHTED_SERIES:
+        members = _weighted_members(db, user_id, series, today=today, refresh=refresh, loader=loader)
     if members is None:
         if series == SERIES_RANKING:
             members = ranking_members(db, user_id)
@@ -324,9 +540,14 @@ def freeze_series(
                 v, s = _member_value(m, prices, benchmark, prev, day)
                 values.append(v)
                 stale.update(s)
-            value = sum(values) / len(values)
+            if series in WEIGHTED_SERIES:
+                # Weights fixed at issue (selection_w's precision; 1 for ranking_ef).
+                weights = [m.weight for m in members_today]
+                value = sum(w * v for w, v in zip(weights, values)) / sum(weights)
+            else:
+                value = sum(values) / len(values)
             detail["n_positions"] = sum(len(m.positions) for m in members_today)
-            if series == SERIES_SELECTION:
+            if series in (SERIES_SELECTION, SERIES_SELECTION_W):
                 detail["n_fallback"] = sum(1 for m in members_today if m.fallback)
             if stale:
                 detail["stale"] = sorted(stale)[:_MAX_STALE_LISTED]
@@ -507,7 +728,10 @@ __all__ = [
     "SERIES",
     "SERIES_MANDATE_A",
     "SERIES_MANDATE_B",
+    "SERIES_RANKING_EF",
     "SERIES_SELECTION",
+    "SERIES_SELECTION_W",
+    "WEIGHTED_SERIES",
     "freeze_mandate_series",
     "mandate_starts",
     "mandate_users",
@@ -515,5 +739,8 @@ __all__ = [
     "freeze_user_series",
     "ledger_users",
     "rank_weights",
+    "ranking_efficient_members",
     "selection_members",
+    "selection_weighted_members",
+    "trailing_returns",
 ]

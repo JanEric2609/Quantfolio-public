@@ -1,7 +1,8 @@
 """Discover universe builder: deterministic screens + news/sentiment candidates.
 
-Combines static index constituents, EU/US mid-cap niche seeds, liquid UCITS
-ETFs, and recent positive-news tickers into a deduplicated candidate list.
+Combines static index constituents, MSCI World's constituents (mapped weekly,
+``foundation.index_universe``), EU/US mid-cap niche seeds, liquid UCITS ETFs,
+and recent positive-news tickers into a deduplicated candidate list.
 Size cap and fundamentals floors are config-driven via the active "universe"
 DiscoveryConfig (defaults: 200 candidates, market cap > 250M EUR,
 volume > 100k/day).
@@ -478,6 +479,18 @@ def _market_cap_eur(
     return mcap * rate if rate is not None else None
 
 
+def _msci_world_symbols(db: Session) -> list[str]:
+    """MSCI World members with a priced Yahoo symbol; [] before the first refresh or on error."""
+    try:
+        from app.foundation.index_universe import universe_symbols
+
+        return [m.symbol for m in universe_symbols(db) if m.symbol]
+    except Exception:  # noqa: BLE001 - the static lists still make a universe
+        logger.warning("build_universe: MSCI World members unavailable", exc_info=True)
+        db.rollback()
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -529,6 +542,10 @@ def build_universe(
     full_pool = (
         _DAX40 + _EUROSTOXX50 + _SP100 + _NASDAQ100 + _EU_MIDCAP + _US_MIDCAP
         + _STOXX600 + _FTSE100 + _CAC40 + _SP500 + _NIKKEI225
+        # MSCI World's ~1,250 constituents, mapped weekly from the SPDR holdings
+        # file (foundation.index_universe; plan 2026-11-08, §6). The static lists
+        # above held 770 unique names; a member Yahoo has no prices for is left out.
+        + _msci_world_symbols(db)
     )
     index_pool: list[str] = full_pool
     if focus:

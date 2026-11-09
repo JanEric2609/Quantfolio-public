@@ -53,11 +53,39 @@ logger = logging.getLogger(__name__)
 #: a 100 % volatility ceiling, stock and fund lanes with one name per industry,
 #: and the recency penalty on Discover's own picks only (#375-#378). Also a
 #: cohort change that keeps the clock (§7).
-COMPOSITE_FORMULA_VERSION = "adr0017.4-2026-11-08"
+#: .5: portfolio fit with the holdings priced in CAD (no USDCAD=X was stored, so the
+#: four Canadian holdings were missing from the book's correlation). Same rule.
+COMPOSITE_FORMULA_VERSION = "adr0017.5-2026-11-08"
 #: 2: ETFs only for a plan line, one fund per index, held indices skipped (D4).
-UNIVERSE_RULE_VERSION = 2
+#: 3: MSCI World's constituents join the stock pool and the cap goes to 1800
+#: (plan 2026-11-08, §6).
+UNIVERSE_RULE_VERSION = 3
 
 _ETF_TYPES = frozenset({"etf", "money_market", "bond"})
+
+#: Signals recorded for every candidate but not ranked on (plan 2026-11-08, WP3):
+#: name -> (stage, key). Their rank IC against the resolved forward return is
+#: measured over the whole cross-section before any of them may enter the composite.
+SHADOW_SIGNAL_KEYS: dict[str, tuple[str, str]] = {
+    "residual_momentum": ("backtest_vs_benchmark", "residual_momentum"),
+    "high_52w_ratio": ("momentum_quality", "high_52w_ratio"),
+    "information_discreteness": ("momentum_quality", "information_discreteness"),
+    "momentum_without_largest_day": ("momentum_quality", "momentum_without_largest_day"),
+    "market_beta_welch": ("quant_signals", "market_beta_welch"),
+    "marginal_vol": ("portfolio_fit", "marginal_vol"),
+    "downside_correlation": ("portfolio_fit", "downside_correlation"),
+}
+
+
+def shadow_signals(scores: dict[str, Any]) -> dict[str, float]:
+    """The shadow signals present in a candidate's scores."""
+    out: dict[str, float] = {}
+    for name, (stage, key) in SHADOW_SIGNAL_KEYS.items():
+        stage_scores = scores.get(stage)
+        value = stage_scores.get(key) if isinstance(stage_scores, dict) else None
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            out[name] = float(value)
+    return out
 
 
 def instrument_group(symbol: str, source: str | None, name: str | None) -> str:
@@ -194,6 +222,9 @@ def capture_snapshot(
             components["composite_inputs"] = r["scores"].get("composite_inputs")
             if r["scores"].get("recency_penalty"):
                 components["recency_penalty"] = r["scores"]["recency_penalty"]
+            signals = shadow_signals(r["scores"])
+            if signals:
+                components["shadow_signals"] = signals
         concerns = result.get("concerns")
         if isinstance(concerns, list) and concerns:
             components["concerns"] = [str(c)[:200] for c in concerns[:20]]

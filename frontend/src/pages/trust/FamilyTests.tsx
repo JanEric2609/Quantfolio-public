@@ -29,7 +29,7 @@ function EPath({ family }: { family: TrustFamilyTest }) {
   const bar = family.path.map((p) => [p.day, family.threshold] as [string, number]);
   return (
     <LineChart
-      ariaLabel={`${TITLES[family.family]}: evidence over time`}
+      ariaLabel={`${title(family)}: evidence over time`}
       height={160}
       yLog
       yFormat={(v) => fmtE(v)}
@@ -42,11 +42,17 @@ function EPath({ family }: { family: TrustFamilyTest }) {
   );
 }
 
+const isRanking = (f: TrustFamilyTest) => f.series === "ranking" || f.series === "ranking_ef";
+
+function title(family: TrustFamilyTest): string {
+  return family.series === "ranking_ef" ? `${TITLES.F2} (least-noise weights)` : TITLES[family.family];
+}
+
 function Posterior({ family }: { family: TrustFamilyTest }) {
   const post = family.posterior;
   if (!post) return null;
   const tau = fmtPct(post.tau_21d, 2).replace(" %", "");
-  const unit = family.series === "ranking" ? "long-short return" : "edge";
+  const unit = isRanking(family) ? "long-short return" : "edge";
   return (
     <div className="space-y-1 rounded-md bg-surface-2 p-3" data-testid={`posterior-${family.family}`}>
       <p className="text-sm text-text-primary">
@@ -94,11 +100,11 @@ export function FamilyCard({ family, start }: { family: TrustFamilyTest; start: 
   const chip = { state: family.state, n: family.n_days, n_needed: null, benchmarked: true, type: "ideas" as const };
   const ci = family.mean_ci_21d;
   return (
-    <Card className="space-y-3 p-4" data-testid={`family-${family.family}`}>
+    <Card className="space-y-3 p-4" data-testid={family.series === "ranking_ef" ? "family-F2-ef" : `family-${family.family}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="space-y-0.5">
           <h3 className="text-sm font-semibold text-text-primary">
-            {TITLES[family.family]}{" "}
+            {title(family)}{" "}
             <Badge variant={family.role === "primary" ? "outline" : "secondary"} className="ml-1 align-middle text-[10px]">
               {family.role === "primary" ? "Primary" : "Secondary"}
             </Badge>
@@ -116,7 +122,7 @@ export function FamilyCard({ family, start }: { family: TrustFamilyTest; start: 
           sub={family.n_days ? `since ${fmtDay(family.first_day ?? start)}` : `starts ${fmtDay(start)}`}
         />
         <Stat
-          label={family.series === "ranking" ? "Long-short return" : "Mean vs your ETF"}
+          label={isRanking(family) ? "Long-short return" : "Mean vs your ETF"}
           value={family.mean_21d != null ? `${fmtPp(family.mean_21d, 2)} / 21 days` : "—"}
           sub={ci ? `90 % interval ${fmtPp(ci[0], 2)} to ${fmtPp(ci[1], 2)}` : null}
         />
@@ -128,7 +134,7 @@ export function FamilyCard({ family, start }: { family: TrustFamilyTest; start: 
         <Stat
           label="Open on an average day"
           value={family.mean_open != null ? family.mean_open.toFixed(1) : "—"}
-          sub={family.series === "ranking" ? "scored runs (cohorts)" : "calls"}
+          sub={isRanking(family) ? "scored runs (cohorts)" : "calls"}
         />
       </dl>
 
@@ -141,7 +147,12 @@ export function FamilyCard({ family, start }: { family: TrustFamilyTest; start: 
           ? `${family.pre_registration.n_days} trading days before ${fmtDay(start)} are shown for context only (before pre-registration); they never enter the e-value. `
           : ""}
         {family.n_stale_days ? `${family.n_stale_days} days used a carried-forward price for at least one name. ` : ""}
-        {family.n_clipped ? `${family.n_clipped} days were beyond the ±5 % clip. ` : ""}
+        {family.n_clipped
+          ? `${family.n_clipped} days were beyond the ±${family.series === "ranking_ef" ? 2 : 5} % clip. `
+          : ""}
+        {family.series === "ranking_ef"
+          ? "The weights hold the score's rank exposure fixed and take the least risky mix of stocks for it, with covariances from the year before each run (Ledoit, Wolf and Zhao, 2019). "
+          : ""}
         {family.rho1 != null
           ? `Day-to-day correlation of the first three months: ${family.rho1.toFixed(2)}${family.rho1_flag ? " (above 0.15: noted, the test stays valid)" : ""}.`
           : ""}
@@ -165,14 +176,20 @@ export function FamilyTests({ tests }: { tests: TrustDailyTests }) {
         </p>
       </div>
       <div className="grid gap-3 xl:grid-cols-2">
+        {tests.selection_weighted ? (
+          <SelectionCard sel={tests.selection_weighted} f1={tests.families.find((f) => f.family === "F1")} />
+        ) : null}
+        {tests.ranking_efficient ? (
+          <FamilyCard family={tests.ranking_efficient} start={tests.ranking_efficient.start} />
+        ) : null}
+        {tests.mandates?.length ? <MandatesCard mandates={tests.mandates} /> : null}
         {tests.selection ? (
           <SelectionCard sel={tests.selection} f1={tests.families.find((f) => f.family === "F1")} />
         ) : null}
-        {tests.mandates?.length ? <MandatesCard mandates={tests.mandates} /> : null}
         {tests.families
           .filter((f) => !f.alarm_only)
           .map((f) => (
-            <FamilyCard key={f.family} family={f} start={tests.start} />
+            <FamilyCard key={f.series} family={f} start={tests.start} />
           ))}
         {tests.paired ? <PairedComparisonCard paired={tests.paired} /> : null}
       </div>
@@ -186,7 +203,7 @@ export function FamilyTests({ tests }: { tests: TrustDailyTests }) {
             {tests.families
               .filter((f) => f.alarm_only)
               .map((f) => (
-                <FamilyCard key={f.family} family={f} start={tests.start} />
+                <FamilyCard key={f.series} family={f} start={tests.start} />
               ))}
           </div>
         </div>

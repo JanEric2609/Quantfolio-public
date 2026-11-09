@@ -58,7 +58,10 @@ DEFAULT_UNIVERSE_CONFIG: dict[str, Any] = {
     # large-cap-only set and lower the market-cap floor so small/mid-cap niche
     # names survive the fundamentals screen. Volume floor stays at 100k/day to
     # preserve tradeability.
-    "universe_max_size": 300,
+    # 1800 since 2026-11-08 (plan 2026-11-08, §6): room for MSCI World's
+    # ~1,250 members next to the static lists; migration 0145 moves the
+    # system row from 300.
+    "universe_max_size": 1800,
     "min_market_cap_eur": 250_000_000,
     "min_avg_volume": 100_000,
 }

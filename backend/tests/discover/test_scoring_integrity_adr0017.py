@@ -7,6 +7,7 @@ the composite contributions breakdown, and the dossier prompt grounding.
 from __future__ import annotations
 
 import json
+import re
 import math
 from datetime import date, timedelta
 from typing import Any
@@ -410,6 +411,7 @@ def test_bbva_dossier_is_grounded_and_estimate_starts_from_market_prior(monkeypa
     from app.decision.discover.dossier_writer import write_dossier
     from app.foundation.settings import upsert_public_settings
 
+    monkeypatch.setenv("DISCOVER_DOSSIER_SLOTS", "0")  # the old prompt's grounding lines
     db = _memory_db()
     upsert_public_settings(db, {"risk_free_rate_pct": 0.0244})
     captured: list[list[dict[str, str]]] = []
@@ -446,6 +448,30 @@ def test_bbva_dossier_is_grounded_and_estimate_starts_from_market_prior(monkeypa
     assert dossier["composite_breakdown"] == _BBVA_SCORES["composite_inputs"]
     assert dossier["signal_breakdown"]["expected_return_anchor_kind"] == "trailing_3y_annualized_return"
     assert dossier["signal_breakdown"]["analyst_consensus"] == pytest.approx(0.3909)
+
+
+def test_bbva_slot_facts_name_each_figure(monkeypatch):
+    """The BBVA.MC mislabels of 2026-09-26, with figures written by code."""
+    from app.decision.discover.dossier_writer import write_dossier
+    from app.foundation.settings import upsert_public_settings
+
+    db = _memory_db()
+    upsert_public_settings(db, {"risk_free_rate_pct": 0.0244})
+    captured: list[list[dict[str, str]]] = []
+    _mock_llm_capturing(monkeypatch, captured)
+    candidate = {
+        "symbol": "BBVA.MC", "isin": None, "name": "BBVA", "source": "screen_index",
+        "scores_json": json.dumps(_BBVA_SCORES), "tradeable_json": "{}",
+    }
+    write_dossier(db, candidate, {"user_id": "user1"})
+    prompt = captured[0][1]["content"]
+    # The 3-year return and the 12-1 month momentum are two keyed facts with their own names.
+    assert re.search(r"\{past_return\}: a past return of \+\d+\.\d % a year \(last", prompt)
+    assert "{momentum}: a 12-1 month price return of +60.9 %" in prompt
+    # One market beta, the weekly one; no factor loadings, no raw score dump.
+    assert "{beta}: a market beta of 1.10 against VGK (weekly, 2 years)" in prompt
+    assert "factor_betas" not in prompt and "Quantitative scores:" not in prompt
+    assert "5.5 % below the current price" in prompt
 
 
 def test_low_return_long_pick_no_longer_below_cash(monkeypatch):

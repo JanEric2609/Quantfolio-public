@@ -17,6 +17,13 @@ two-regime noise, F1-style overlapping membership), `type_i_error`,
 `time_to_verdict`, `minimum_detectable_edge`, and `MODELS` (the noise models
 by name).
 
+`noise_study.py`: the outcome-blind noise of candidate test designs on real
+prices (random picks and scores, and the live runs' weights measured only on
+the year before each issue); `scripts/run_noise_study.py` loads the closes.
+It chose the `selection_w` and `ranking_ef` designs (ADR 0018, amendment of
+2026-11-08) and uses the same weights as the ledger
+(`foundation/evidence_weights.py`).
+
 ## Invariants
 
 - Reads nothing from `decision`: the test constants come in as `TestSpec`s;

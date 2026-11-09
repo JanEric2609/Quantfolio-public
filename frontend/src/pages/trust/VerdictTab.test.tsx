@@ -160,6 +160,7 @@ function routeApi(verdict: TrustVerdict | Error) {
   apiMock.mockImplementation((url: string) => {
     if (url === "/api/trust/ranking") return Promise.resolve(RANKING);
     if (url === "/api/trust/history") return Promise.reject(new Error("no history in this test"));
+    if (url === "/api/trust/forward-lab") return Promise.reject(new Error("no forward lab in this test"));
     return verdict instanceof Error ? Promise.reject(verdict) : Promise.resolve(verdict);
   });
 }
@@ -560,6 +561,36 @@ describe("VerdictTab", () => {
     expect(screen.getByTestId("family-S")).toHaveTextContent("16 % a year apart from MSCI World");
     expect(screen.getByTestId("mandates")).toHaveTextContent("Mandate A: Measuring its noise");
     expect(within(screen.getByTestId("trust-alarms")).getByTestId("family-F1")).toBeInTheDocument();
+  });
+
+  it("leads with the matched, weighted selection test and keeps the earlier design as secondary", async () => {
+    const base = makeTests();
+    const sel = {
+      family: "S" as const, question: "q", futility_question: "fq", n_days: 0, first_day: null, mean_21d: null,
+      mean_ci_21d: null, e_skill: 1, e_harm: 1, e_futility: 1, threshold: 40, futility_threshold: 20,
+      futility_delta_21d: 0.006, state: "too_early" as const, path: [], time_to_know: { sd_daily: 0.004, grid: [] },
+    };
+    const f2 = base.families.find((f) => f.family === "F2")!;
+    renderTab(
+      makeVerdict({
+        daily_tests: {
+          ...base,
+          families: base.families.map((f) => (f.family === "F2" ? { ...f, role: "secondary" as const } : f)),
+          selection: { ...sel, series: "selection", role: "secondary", start: "2026-10-15", clip: 0.0225, sigma_ref: 0.005 },
+          selection_weighted: { ...sel, series: "selection_w", role: "primary", start: "2026-11-09", clip: 0.02, sigma_ref: 0.0044 },
+          ranking_efficient: { ...f2, series: "ranking_ef", role: "primary", start: "2026-11-09" },
+        },
+      }),
+    );
+    const weighted = await screen.findByTestId("family-S-weighted");
+    expect(weighted).toHaveTextContent("most similar stocks it could have picked");
+    expect(weighted).toHaveTextContent("Primary");
+    expect(weighted).toHaveTextContent("quieter picks count more");
+    expect(screen.getByTestId("family-S")).toHaveTextContent("Secondary (earlier design)");
+    const ef = screen.getByTestId("family-F2-ef");
+    expect(ef).toHaveTextContent("least-noise weights");
+    expect(ef).toHaveTextContent("Primary");
+    expect(screen.getByTestId("family-F2")).toHaveTextContent("Secondary");
   });
 
   it("marks a selection series that failed its noise check as not valid", async () => {

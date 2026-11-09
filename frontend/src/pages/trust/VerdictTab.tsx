@@ -8,6 +8,7 @@ import { EvidenceChip } from "./EvidenceChip";
 import { FamilyTests } from "./FamilyTests";
 import { FundsPanel } from "./FundsPanel";
 import { HistoryPanel } from "./HistoryPanel";
+import { ForwardLabPanel } from "./ForwardLabPanel";
 import { PlanBandsPanel } from "./PlanBandsPanel";
 import { RiskBandsPanel } from "./RiskBandsPanel";
 import { RankingPanel } from "./RankingPanel";
@@ -194,6 +195,7 @@ export function VerdictTab() {
 
       <RiskBandsPanel />
       <PlanBandsPanel />
+      <ForwardLabPanel />
 
       <HistoryPanel />
 

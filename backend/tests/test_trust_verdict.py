@@ -18,7 +18,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.decision.verification.daily_tests import PRIMARY_TEST_START
+from app.decision.verification.daily_tests import PRIMARY_TEST_START, V2_TEST_START
 from app.decision.verification.trust import build_verdict, list_calls
 from app.foundation.auth import current_user
 from app.foundation.core.db import Base, get_db
@@ -167,8 +167,9 @@ def test_empty_ledgers_are_too_early_everywhere_with_a_plain_headline():
     verdict = build_verdict(db, user.id, now=NOW)
 
     assert verdict["state"] == "too_early"
+    # The headline reads selection_w, the primary selection test since 2026-11-08.
     assert verdict["headline"] == (
-        "Too early to tell: the pre-registered test starts on 2026-10-15; no trading day with open picks recorded yet."
+        "Too early to tell: the pre-registered test starts on 2026-11-09; no trading day with open picks recorded yet."
     )
     assert verdict["resolved_calls"] == 0
     assert verdict["skill"] is None
@@ -193,8 +194,13 @@ def test_empty_ledgers_are_too_early_everywhere_with_a_plain_headline():
     tests = verdict["daily_tests"]
     assert tests["start"] == "2026-10-15" and tests["threshold"] == pytest.approx(40.0)
     assert [(f["family"], f["series"], f["role"]) for f in tests["families"]] == [
-        ("F1", "ideas", "primary"), ("F2", "ranking", "primary"), ("F3", "advisor", "secondary"),
+        ("F1", "ideas", "primary"), ("F2", "ranking", "secondary"), ("F3", "advisor", "secondary"),
     ]
+    eff = tests["ranking_efficient"]
+    assert (eff["family"], eff["series"], eff["role"], eff["start"]) == ("F2", "ranking_ef", "primary", "2026-11-09")
+    sel_w = tests["selection_weighted"]
+    assert (sel_w["series"], sel_w["role"], sel_w["start"], sel_w["clip"]) == ("selection_w", "primary", "2026-11-09", 0.02)
+    assert tests["selection"]["role"] == "secondary"
     for f in tests["families"]:
         assert f["n_days"] == 0 and f["state"] == "too_early" and f["posterior"] is None
         assert f["e_skill"] == 1.0 and f["e_harm"] == 1.0 and f["path"] == []
@@ -213,7 +219,7 @@ def test_headline_counts_trading_days_and_states_the_time_to_know_range():
     db = _memory_db()
     user = _user(db)
     _seed_daily(db, user, "ideas", _daily(0.0, 12))
-    _seed_daily(db, user, "selection", _daily(0.0, 12))
+    _seed_daily(db, user, "selection_w", _daily(0.0, 12), first=V2_TEST_START)
 
     verdict = build_verdict(db, user.id, now=NOW)
     f1 = _family(verdict, "F1")
@@ -283,12 +289,12 @@ def test_a_flat_daily_record_after_three_months_is_no_evidence():
     _seed_daily(db, user, "ideas", _daily(0.0, 80, sd=0.01))
     # Seed 7's first 63 draws have VR(21) 3.7, one of the 2 % of clean series the noise
     # check fails at day 63 (ADR 0018 §11); this test is about the state, not that check.
-    _seed_daily(db, user, "selection", _daily(0.0, 80, sd=0.005, seed=8))
+    _seed_daily(db, user, "selection_w", _daily(0.0, 80, sd=0.005, seed=8), first=V2_TEST_START)
 
     verdict = build_verdict(db, user.id, now=NOW)
 
     assert _family(verdict, "F1")["state"] == "no_evidence"
-    assert verdict["daily_tests"]["selection"]["state"] == "no_evidence"
+    assert verdict["daily_tests"]["selection_weighted"]["state"] == "no_evidence"
     assert verdict["headline"].startswith("No evidence yet either way: 80 trading days so far.")
 
 
@@ -296,11 +302,12 @@ def test_a_futile_selection_edge_sets_the_headline():
     db = _memory_db()
     user = _user(db)
     # No edge at all, with little noise: below the 0.6 % margin, but no harm.
-    _seed_daily(db, user, "selection", _daily(0.0, 1500, sd=0.002, seed=8))  # seed 7 fails the noise check
+    # seed 7 fails the noise check
+    _seed_daily(db, user, "selection_w", _daily(0.0, 1500, sd=0.002, seed=8), first=V2_TEST_START)
 
     verdict = build_verdict(db, user.id, now=NOW)
 
-    assert verdict["daily_tests"]["selection"]["state"] == "not_worth_following"
+    assert verdict["daily_tests"]["selection_weighted"]["state"] == "not_worth_following"
     assert verdict["headline"].startswith("Not worth following:")
 
 
@@ -853,9 +860,9 @@ def test_a_failed_noise_check_voids_the_selection_headline():
     for _ in range(300):  # AR(1) 0.9: the daily values persist
         prev = 0.9 * prev + rng.normal(0.0, 0.002)
         x.append(prev - 0.001)
-    _seed_daily(db, user, "selection", x)
+    _seed_daily(db, user, "selection_w", x, first=V2_TEST_START)
 
     verdict = build_verdict(db, user.id, now=NOW)
 
-    assert verdict["daily_tests"]["selection"]["state"] == "not_valid"
+    assert verdict["daily_tests"]["selection_weighted"]["state"] == "not_valid"
     assert verdict["headline"].startswith("No valid verdict: the selection series' daily values persist")

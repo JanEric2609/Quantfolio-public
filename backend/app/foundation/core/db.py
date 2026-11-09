@@ -45,13 +45,21 @@ def _engine_args(database_url: str) -> dict:
         return {
             "pool_pre_ping": True,
             # SQLAlchemy's default (5 + 10 overflow) is smaller than what the
-            # worker's 17 job threads can hold (a tracked job keeps two
+            # worker's 18 job threads can hold (a tracked job keeps two
             # connections on PostgreSQL); tunable per process via env.
             "pool_size": int(os.getenv("DB_POOL_SIZE", "10")),
-            "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "24")),
+            "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "26")),
             "connect_args": {"client_encoding": "utf8"},
         }
     return {"pool_pre_ping": True}
+
+
+def pool_capacity(database_url: str) -> int | None:
+    """Connections the pool can hand out at once (pool + overflow); None when unbounded (SQLite)."""
+    args = _engine_args(database_url)
+    if "pool_size" not in args:
+        return None
+    return int(args["pool_size"]) + int(args["max_overflow"])
 
 
 settings = get_settings()

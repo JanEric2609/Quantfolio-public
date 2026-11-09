@@ -81,3 +81,13 @@ def test_a_second_holding_with_the_same_isin_is_refused_not_a_crash(client, db):
     assert moved.status_code == 409
     # Saving a holding under its own ISIN is fine.
     assert tc.put(f"/api/portfolio/holdings/{first.json()['id']}", json={**body, "quantity": 4.0}).status_code == 200
+
+
+def test_a_repeated_asset_class_in_target_allocation_is_refused_not_a_crash(client):
+    """Found by the API fuzzer: two "cash" rows hit the unique key and returned 500."""
+    tc, _user = client
+    body = [{"asset_type": "cash", "target_pct": 0.0}, {"asset_type": "cash", "target_pct": 100.0}]
+    resp = tc.put("/api/portfolio/target-allocation", json=body)
+    assert resp.status_code == 400
+    ok = tc.put("/api/portfolio/target-allocation", json=[{"asset_type": "cash", "target_pct": 100.0}])
+    assert ok.status_code == 200

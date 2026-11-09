@@ -71,6 +71,11 @@ from .dkb import (
     PositionSnapshot as PositionSnapshot,
 )
 from .embedding import Embedding as Embedding, FinAgentRun as FinAgentRun
+from .forward_lab import (
+    ForwardLabDaily as ForwardLabDaily,
+    ForwardLabSnapshot as ForwardLabSnapshot,
+    NewsToneScore as NewsToneScore,
+)
 from .goal import Goal as Goal
 from .jobs import AppError as AppError, JobRun as JobRun
 from .market import (
@@ -81,6 +86,8 @@ from .market import (
     Fundamental as Fundamental,
     ListingCurrency as ListingCurrency,
     IndexCurrencyWeights as IndexCurrencyWeights,
+    IndexUniverseMember as IndexUniverseMember,
+    AnalystConsensusCache as AnalystConsensusCache,
     MacroIndicator as MacroIndicator,
     PriceCache as PriceCache,
 )

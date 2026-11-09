@@ -29,6 +29,7 @@ from app.lab.alphacrafter.jobs import (
     register_alphacrafter_daily_job,
     register_alphacrafter_tuning_job,
 )
+from app.lab.forward_lab.jobs import register_forward_lab_job, register_news_tone_job
 from app.decision.crash_guard import register_crash_guard_job
 from app.decision.monthly_plan_store import register_monthly_plan_snapshot_job
 from app.decision.trade_check import register_trade_check_job
@@ -36,6 +37,7 @@ from app.decision.discover.jobs import (
     register_analyst_estimates_snapshot_job,
     register_discover_ml_training_job,
     register_discover_refresh_job,
+    register_discover_universe_prefetch_job,
     register_discovery_resolution_job,
     register_discovery_review_job,
 )
@@ -137,6 +139,9 @@ EXPECTED_REGISTRATIONS = {
     "index_currency_weights": {"trigger": "cron", "day": "3", "hour": 5, "minute": 15},
     "insider_trading_refresh": {"trigger": "cron", "hour": 4, "minute": 15},
     "analyst_estimates_snapshot": {"trigger": "cron", "hour": 4, "minute": 45},
+    "discover_universe_prefetch": {"trigger": "cron", "hour": 1, "minute": 15},
+    "forward_lab_nightly": {"trigger": "cron", "hour": 4, "minute": 30},
+    "news_tone_nightly": {"trigger": "cron", "hour": 5, "minute": 0},
     "telegram_daily_reminder": {"trigger": "cron", "hour": 20, "minute": 0},
     "telegram_polling": {"trigger": "interval", "minutes": 1},
     "regime_refit": {"trigger": "cron", "day_of_week": "sun", "hour": 6, "minute": 0},
@@ -247,6 +252,9 @@ def _drive_all_registrations(sched):
     returns["discovery_config_review"] = register_discovery_review_job(sched)
     returns["discover_ml_training"] = register_discover_ml_training_job(sched)
     returns["analyst_estimates_snapshot"] = register_analyst_estimates_snapshot_job(sched)
+    returns["discover_universe_prefetch"] = register_discover_universe_prefetch_job(sched)
+    returns["forward_lab_nightly"] = register_forward_lab_job(sched)
+    returns["news_tone_nightly"] = register_news_tone_job(sched)
     returns["advisor_rl_training"] = register_advisor_rl_training_job(sched)
     returns["listing_currency_audit"] = register_listing_currency_audit_job(sched)
     returns["index_currency_weights"] = register_index_currency_weights_job(sched)
@@ -357,7 +365,7 @@ EXPECTED_SCHEDULER_DEFAULTS = {"misfire_grace_time": 300, "coalesce": True, "max
 
 def test_scheduler_defaults_snapshot():
     assert jobs.SCHEDULER_JOB_DEFAULTS == EXPECTED_SCHEDULER_DEFAULTS
-    assert jobs.WORKER_THREAD_POOL_SIZE == 17
+    assert jobs.WORKER_THREAD_POOL_SIZE == 18
     # A caller mutating the returned dict must not change the shared defaults.
     jobs.scheduler_job_defaults()["misfire_grace_time"] = 1
     assert jobs.SCHEDULER_JOB_DEFAULTS == EXPECTED_SCHEDULER_DEFAULTS

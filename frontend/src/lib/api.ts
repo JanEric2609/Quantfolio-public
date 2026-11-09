@@ -1645,7 +1645,8 @@ export interface TrustTimeToKnow {
 
 export interface TrustFamilyTest {
   family: TrustFamilyKey;
-  series: "ideas" | "ranking" | "advisor";
+  /** ranking_ef: covariance-efficient ranking weights (ADR 0018 amendment of 2026-11-08). */
+  series: "ideas" | "ranking" | "advisor" | "ranking_ef";
   role: "primary" | "secondary";
   /** F1 since ADR 0018's amendment of 2026-10-14: shown as an alarm (harm or a large edge). */
   alarm_only?: boolean;
@@ -1687,7 +1688,12 @@ export interface TrustDailyTests {
   min_days_for_state: number;
   horizon_days: number;
   families: TrustFamilyTest[];
+  /** The frozen 2026-10-14 selection design; secondary since 2026-11-08. */
   selection?: TrustSelectionTest | null;
+  /** selection_w: matched, precision-weighted picks; the primary selection test since 2026-11-08. */
+  selection_weighted?: TrustSelectionTest | null;
+  /** F2 on ranking_ef; the primary ranking test since 2026-11-08. */
+  ranking_efficient?: TrustFamilyTest | null;
   mandates?: TrustMandateTest[];
   paired?: TrustPairedComparison | null;
   factor_neutral?: TrustFactorNeutral | null;
@@ -1708,10 +1714,44 @@ export interface TrustNoiseCheck {
 }
 
 /** S (picks vs same-run, same-sector non-picks) and U (futility) on one series. */
+/** Stress checks of a series' evidence (plan 2026-11-09, §4); shown, never a guard. */
+export interface TrustRobustness {
+  false_alarm?: number | null;
+  without_best_days: number;
+  first_half: number;
+  second_half: number;
+}
+
+export interface TrustForwardLabSignal {
+  signal: string;
+  label: string;
+  source: string;
+  days: number;
+  first_day?: string | null;
+  last_day?: string | null;
+  mean_daily?: number | null;
+  ci90_daily?: [number, number] | null;
+  annual_ir?: number | null;
+  mean_rank_ic?: number | null;
+  e_skill: number;
+  e_harm: number;
+  names: number;
+  state: "not_started" | "collecting" | "evidence_of_skill" | "evidence_of_harm";
+  robustness?: TrustRobustness | null;
+}
+
+export interface TrustForwardLab {
+  start: string;
+  alpha: number;
+  threshold_single: number;
+  signals: TrustForwardLabSignal[];
+  note: string;
+}
+
 export interface TrustSelectionTest {
   family: "S";
-  series: "selection";
-  role: "primary";
+  series: "selection" | "selection_w";
+  role: "primary" | "secondary";
   question: string;
   futility_question: string;
   start: string;
@@ -1727,6 +1767,7 @@ export interface TrustSelectionTest {
   e_harm: number;
   e_futility: number;
   threshold: number;
+  robustness?: TrustRobustness | null;
   futility_threshold: number;
   futility_delta_21d: number;
   n_fallback_days?: number;
