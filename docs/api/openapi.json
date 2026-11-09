@@ -4302,6 +4302,198 @@
         "title": "ForecastGridOut",
         "type": "object"
       },
+      "ForwardLabOut": {
+        "properties": {
+          "alpha": {
+            "title": "Alpha",
+            "type": "number"
+          },
+          "computed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed At"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "resamples": {
+            "default": 0,
+            "title": "Resamples",
+            "type": "integer"
+          },
+          "signals": {
+            "items": {
+              "$ref": "#/components/schemas/ForwardLabSignalOut"
+            },
+            "title": "Signals",
+            "type": "array"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "threshold_single": {
+            "title": "Threshold Single",
+            "type": "number"
+          }
+        },
+        "required": [
+          "start",
+          "alpha",
+          "threshold_single",
+          "signals",
+          "note"
+        ],
+        "title": "ForwardLabOut",
+        "type": "object"
+      },
+      "ForwardLabSignalOut": {
+        "properties": {
+          "annual_ir": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annual Ir"
+          },
+          "ci90_daily": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci90 Daily"
+          },
+          "days": {
+            "title": "Days",
+            "type": "integer"
+          },
+          "e_harm": {
+            "title": "E Harm",
+            "type": "number"
+          },
+          "e_skill": {
+            "title": "E Skill",
+            "type": "number"
+          },
+          "first_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Day"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_day": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Day"
+          },
+          "mean_daily": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Daily"
+          },
+          "mean_rank_ic": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Rank Ic"
+          },
+          "names": {
+            "title": "Names",
+            "type": "integer"
+          },
+          "robustness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RobustnessOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "signal": {
+            "title": "Signal",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "not_started",
+              "collecting",
+              "evidence_of_skill",
+              "evidence_of_harm"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "signal",
+          "label",
+          "source",
+          "days",
+          "e_skill",
+          "e_harm",
+          "names",
+          "state"
+        ],
+        "title": "ForwardLabSignalOut",
+        "type": "object"
+      },
       "FundPeerOut": {
         "properties": {
           "isin": {
@@ -10791,6 +10983,42 @@
         "title": "RiskProfileOut",
         "type": "object"
       },
+      "RobustnessOut": {
+        "properties": {
+          "false_alarm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Share of noise-only resamples of this series whose e-value reached the threshold.",
+            "title": "False Alarm"
+          },
+          "first_half": {
+            "title": "First Half",
+            "type": "number"
+          },
+          "second_half": {
+            "title": "Second Half",
+            "type": "number"
+          },
+          "without_best_days": {
+            "description": "Skill e-value with the five best days removed.",
+            "title": "Without Best Days",
+            "type": "number"
+          }
+        },
+        "required": [
+          "without_best_days",
+          "first_half",
+          "second_half"
+        ],
+        "title": "RobustnessOut",
+        "type": "object"
+      },
       "RunDetailResponse": {
         "properties": {
           "candidates": {
@@ -12304,6 +12532,17 @@
             "default": false,
             "title": "Rho1 Flag",
             "type": "boolean"
+          },
+          "robustness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RobustnessOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stress checks of the evidence (plan 2026-11-09, \u00a74); shown, not a guard."
           },
           "role": {
             "default": "primary",
@@ -34080,6 +34319,28 @@
           }
         },
         "summary": "Get Calls",
+        "tags": [
+          "trust"
+        ]
+      }
+    },
+    "/api/trust/forward-lab": {
+      "get": {
+        "description": "The nightly forward-test lab: published signals scored before the outcome (shadow, no effect on picks).",
+        "operationId": "get_forward_lab_api_trust_forward_lab_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForwardLabOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Forward Lab",
         "tags": [
           "trust"
         ]

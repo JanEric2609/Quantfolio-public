@@ -37,7 +37,10 @@ owns the append-only evidence ledgers of ADR 0018:
    and the year of prices before each issue; they are the primary S/U and F2
    tests from 2026-11-09, the older designs secondary). The weekly job also
    stores `daily_tests.buy_gate_evidence` per user under `trust_buy_gate_json`
-   for the Discover BUY gate;
+   for the Discover BUY gate. From 63 observed days `selection_w` also carries
+   `lab.forward_lab`'s robustness checks (noise-only false-alarm rate, the
+   evidence without the five best days, by halves); shown, never a guard
+   (plan 2026-11-09, §4);
    `candidate_outcomes.py` resolves every shadow-ledger snapshot at 5/10/21/63
    trading days (`candidate_outcome`); `ledger_prices.py` is their EUR close
    loader and calendar; `jobs.py` registers `trust_daily_ledger` (nightly

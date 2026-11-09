@@ -49,6 +49,7 @@ from app.decision.verification.daily_ledger import (
     mandate_starts,
 )
 from app.foundation import forecast_verification as fv
+from app.lab.forward_lab import robustness_checks
 from app.foundation.models.entities import TrustDailyActiveReturn
 
 #: First day an observation may enter an e-value (ADR 0018, amendment of
@@ -405,11 +406,19 @@ def selection_result(
 
 
 def selection_weighted_result(rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
-    """S and U on ``selection_w``, the primary selection design since 2026-11-08."""
-    return selection_result(
+    """S and U on ``selection_w``, the primary selection design since 2026-11-08, with its robustness checks."""
+    result = selection_result(
         rows, series=SERIES_SELECTION_W, start=V2_TEST_START, sigma_ref=SELECTION_W_SIGMA_REF,
         clip=V2_CLIP, question=SELECTION_W_QUESTION,
     )
+    _days, values, _before = _observed(rows, V2_TEST_START)
+    result["robustness"] = None
+    if len(values) > BUY_ROBUSTNESS_MIN_DAYS:
+        # Shown beside the verdict, not a guard: the BUY rule stays as pre-registered.
+        result["robustness"] = robustness_checks(
+            values, 1.0 / BUY_EVIDENCE_ALPHA, clip=V2_CLIP, seed=len(values),
+        ).as_dict()
+    return result
 
 
 def mandate_results(
@@ -630,6 +639,9 @@ BUY_EVIDENCE_ALPHA = 0.01
 #: come from day 63, 3.7 % from day 126; 1.9 % / 1.8 % under AR(1) 0.15 and
 #: 0.3 % on iid noise either way.
 BUY_MIN_DAYS = NOISE_CHECK_LOOKS[1][0]
+#: Observed days before the robustness checks run (plan 2026-11-09, §4): a
+#: block bootstrap of fewer days says little.
+BUY_ROBUSTNESS_MIN_DAYS = 63
 
 
 def buy_gate_evidence(db: Session, user_id: str | None) -> dict[str, Any]:
@@ -676,6 +688,7 @@ def buy_gate_evidence(db: Session, user_id: str | None) -> dict[str, Any]:
         "state": sel["state"],
         "guards": guards,
         "time_to_know": sel["time_to_know"],
+        "robustness": sel["robustness"],
     }
 
 

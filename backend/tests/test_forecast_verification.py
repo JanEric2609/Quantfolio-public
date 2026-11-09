@@ -471,7 +471,8 @@ def test_issue_days_needed_reference_values_and_speed():
     fv.issue_days_needed.cache_clear()
     start = time.perf_counter()
     default = fv.issue_days_needed(0.55, 0.5, 4, 0.05, 21)
-    assert time.perf_counter() - start < 0.2
+    # About 0.08 s locally; GitHub's shared runners took 0.22-0.23 s (2026-11-09), so 0.2 s was flaky.
+    assert time.perf_counter() - start < 0.5
     assert default == 9783  # seeded: median issue days to e >= K/alpha = 80
     assert fv.issue_days_needed(0.55, 0.5, 4, 0.05, 21) == default  # cached, deterministic
     assert fv.issue_days_needed(0.60, 0.5, 4, 0.05, 21) == 2105

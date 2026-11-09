@@ -1714,6 +1714,40 @@ export interface TrustNoiseCheck {
 }
 
 /** S (picks vs same-run, same-sector non-picks) and U (futility) on one series. */
+/** Stress checks of a series' evidence (plan 2026-11-09, §4); shown, never a guard. */
+export interface TrustRobustness {
+  false_alarm?: number | null;
+  without_best_days: number;
+  first_half: number;
+  second_half: number;
+}
+
+export interface TrustForwardLabSignal {
+  signal: string;
+  label: string;
+  source: string;
+  days: number;
+  first_day?: string | null;
+  last_day?: string | null;
+  mean_daily?: number | null;
+  ci90_daily?: [number, number] | null;
+  annual_ir?: number | null;
+  mean_rank_ic?: number | null;
+  e_skill: number;
+  e_harm: number;
+  names: number;
+  state: "not_started" | "collecting" | "evidence_of_skill" | "evidence_of_harm";
+  robustness?: TrustRobustness | null;
+}
+
+export interface TrustForwardLab {
+  start: string;
+  alpha: number;
+  threshold_single: number;
+  signals: TrustForwardLabSignal[];
+  note: string;
+}
+
 export interface TrustSelectionTest {
   family: "S";
   series: "selection" | "selection_w";
@@ -1733,6 +1767,7 @@ export interface TrustSelectionTest {
   e_harm: number;
   e_futility: number;
   threshold: number;
+  robustness?: TrustRobustness | null;
   futility_threshold: number;
   futility_delta_21d: number;
   n_fallback_days?: number;

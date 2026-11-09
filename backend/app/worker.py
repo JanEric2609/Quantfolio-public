@@ -16,6 +16,7 @@ from app.lab.alphacrafter.jobs import (
     register_alphacrafter_tuning_job,
 )
 from app.lab.alphacrafter.orchestrator import reap_stale_job_runs
+from app.lab.forward_lab.jobs import register_forward_lab_job, register_news_tone_job
 from app.decision.discover.jobs import (
     register_analyst_estimates_snapshot_job,
     register_discover_ml_training_job,
@@ -1098,6 +1099,8 @@ def build_scheduler() -> Any:
     register_discover_ml_training_job(scheduler)
     register_analyst_estimates_snapshot_job(scheduler)
     register_discover_universe_prefetch_job(scheduler)
+    register_forward_lab_job(scheduler)
+    register_news_tone_job(scheduler)
     register_monthly_envelope_rollover_job(scheduler)
     register_telegram_daily_reminder_job(scheduler)
     register_telegram_polling_job(scheduler)

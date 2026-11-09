@@ -27,6 +27,7 @@ from app.foundation.auth import current_user
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import User
 from app.interface.api.params import ROWS_BOUND
+from app.lab.forward_lab import stored_summary as forward_lab_summary
 from app.lab.plan_bands import summary as plan_band_summary
 from app.lab.risk_forecast import summary as risk_summary
 
@@ -269,6 +270,15 @@ class NoiseCheckOut(BaseModel):
     looks: list[NoiseLookOut] = Field(default_factory=list)
 
 
+class RobustnessOut(BaseModel):
+    false_alarm: float | None = Field(
+        default=None, description="Share of noise-only resamples of this series whose e-value reached the threshold."
+    )
+    without_best_days: float = Field(description="Skill e-value with the five best days removed.")
+    first_half: float
+    second_half: float
+
+
 class SelectionTestOut(BaseModel):
     """S (picks against same-run, same-sector non-picks) and U (futility) on one series.
 
@@ -295,6 +305,9 @@ class SelectionTestOut(BaseModel):
     e_harm: float
     e_futility: float
     threshold: float
+    robustness: RobustnessOut | None = Field(
+        default=None, description="Stress checks of the evidence (plan 2026-11-09, §4); shown, not a guard."
+    )
     futility_threshold: float
     futility_delta_21d: float = Field(description="U's margin per 21 days, gross of costs.")
     n_fallback_days: int = 0
@@ -549,6 +562,34 @@ class RankingMetricsOut(BaseModel):
     verdict_note: str
 
 
+class ForwardLabSignalOut(BaseModel):
+    signal: str
+    label: str
+    source: str
+    days: int
+    first_day: str | None = None
+    last_day: str | None = None
+    mean_daily: float | None = None
+    ci90_daily: tuple[float, float] | None = None
+    annual_ir: float | None = None
+    mean_rank_ic: float | None = None
+    e_skill: float
+    e_harm: float
+    names: int
+    state: Literal["not_started", "collecting", "evidence_of_skill", "evidence_of_harm"]
+    robustness: RobustnessOut | None = None
+
+
+class ForwardLabOut(BaseModel):
+    start: str
+    alpha: float
+    threshold_single: float
+    signals: list[ForwardLabSignalOut]
+    note: str
+    computed_at: str | None = None
+    resamples: int = 0
+
+
 class FanPointOut(BaseModel):
     p: int
     cumulative_excess: float
@@ -729,6 +770,15 @@ def get_ranking(
 ) -> dict[str, Any]:
     """How well Discover's score sorted every scored stock (descriptive; the verdict is F2)."""
     return build_ranking_metrics(db, user.id)
+
+
+@router.get("/forward-lab", response_model=ForwardLabOut)
+def get_forward_lab(
+    _user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """The nightly forward-test lab: published signals scored before the outcome (shadow, no effect on picks)."""
+    return forward_lab_summary(db)
 
 
 @router.get("/history", response_model=HistoryOut)

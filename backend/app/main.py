@@ -13,7 +13,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.interface.api import routers
 from app.interface.middleware import CrossSiteRequestGuard
 from app.foundation.core.config import _DEFAULT_JWT_SECRET, get_settings
-from app.foundation.core.db import create_all, SessionLocal
+from app.foundation.core.db import create_all, pool_capacity, SessionLocal
 from app.foundation.core.logging_setup import configure_logging
 from app.foundation.llm.base import LlmUnavailableError
 from app.foundation.core.security import limiter
@@ -161,6 +161,28 @@ def _current_frontend_origins() -> list[str]:
         return env_fallback_origins()
 
 
+#: Connections kept free for async endpoints and startup work.
+_POOL_HEADROOM = 4
+
+
+def _fit_threads_to_db_pool(database_url: str) -> None:
+    """Run at most as many sync endpoints at once as the DB pool can serve.
+
+    Starlette runs each sync endpoint in AnyIO's thread pool (40 threads by
+    default), and each holds a pooled connection for its whole run. With a
+    pool of 34 a page that asks for many price histories while the providers
+    are slow ran it dry: 74 "QueuePool limit reached" 500s from
+    ``GET /api/market/history`` between 2026-10-29 and 11-05. With fewer
+    threads than connections the extra requests wait for a thread instead.
+    """
+    from anyio import to_thread
+
+    capacity = pool_capacity(database_url)
+    if capacity is None:
+        return
+    to_thread.current_default_thread_limiter().total_tokens = max(4, capacity - _POOL_HEADROOM)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     settings = get_settings()
@@ -168,6 +190,7 @@ async def lifespan(_app: FastAPI):
     _startup_security_checks(settings)
     if settings.app_env == "local" or settings.database_url.startswith("sqlite"):
         create_all()
+    _fit_threads_to_db_pool(settings.database_url)
 
     try:
         _announce_first_run_setup()

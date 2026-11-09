@@ -125,6 +125,15 @@ export function SelectionCard({ sel, f1 }: { sel: TrustSelectionTest; f1?: Trust
           above the limit the daily e-values are not valid.
         </p>
       ) : null}
+      {sel.robustness ? (
+        <p className="text-[11px] text-text-muted" data-testid="selection-robustness">
+          Stress checks (shown, not part of the rule): on resamples of this series with its mean removed, noise alone
+          reached {sel.threshold} in{" "}
+          {sel.robustness.false_alarm == null ? "—" : `${(sel.robustness.false_alarm * 100).toFixed(1)} %`} of cases;
+          without its 5 best days the evidence is {fmtE(sel.robustness.without_best_days)}; first half{" "}
+          {fmtE(sel.robustness.first_half)}, second half {fmtE(sel.robustness.second_half)}.
+        </p>
+      ) : null}
       <p className="text-sm text-text-primary" data-testid="selection-grid">
         Median time to a verdict if the picks' true edge per 21 days is {gridText(sel.time_to_know)}.
       </p>

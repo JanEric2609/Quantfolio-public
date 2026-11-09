@@ -45,6 +45,7 @@ from app.foundation.data_backbone.listing_currency import resolve_currency
 from app.decision.discover.regime_gate import MacroRegimeGate
 from app.foundation.etf_overlap import pairwise_overlap
 from app.foundation.instrument_taxonomy import classify_instrument
+from app.foundation import price_signals
 from app.foundation.market import history as market_history, refresh_stale_bars
 from app.foundation.portfolio.bridge import build_real_price_matrix
 from app.foundation.providers.registry import build_provider_registry
@@ -1516,62 +1517,11 @@ def stage_momentum_quality(
 # snapshot of all ~240 candidates a run and are measured there first
 # (shadow_ledger.SHADOW_SIGNAL_KEYS). The composite does not read them.
 
-#: Months of returns behind the residual-momentum regression (Blitz, Huij & Martens 2011: 36).
-RESIDUAL_MOMENTUM_MIN_MONTHS = 24
-
-
-def _residual_momentum(dates: Any, cand_closes: Any, bench_closes: Any) -> float | None:
-    """Residual momentum (Blitz, Huij & Martens 2011), against the candidate's benchmark.
-
-    Month-end returns of both legs; the candidate's regressed on the
-    benchmark's over every month but the latest; the residuals of the eleven
-    months t-12..t-2 summed and divided by their standard deviation. Ranking on
-    what the market does not explain reduced momentum's crashes and about doubled
-    its risk-adjusted return in their 1926-2009 sample. CAPM residuals here: the
-    paper uses Fama-French factors, which are not stored in EUR.
-    """
-    frame = pd.DataFrame(
-        {"c": list(cand_closes), "b": list(bench_closes)}, index=pd.to_datetime(pd.Series(list(dates)))
-    ).astype(float)
-    monthly = frame.resample("ME").last().pct_change().dropna()
-    # The latest month is skipped, as in 12-1 momentum.
-    estimation = monthly.iloc[:-1]
-    if len(estimation) < RESIDUAL_MOMENTUM_MIN_MONTHS:
-        return None
-    x = estimation["b"].to_numpy()
-    y = estimation["c"].to_numpy()
-    x_dev = x - x.mean()
-    denom = float((x_dev**2).sum())
-    if denom <= 0:
-        return None
-    slope = float((x_dev * (y - y.mean())).sum()) / denom
-    residuals = y - (y.mean() + slope * x_dev)
-    formation = residuals[-11:]
-    spread = float(formation.std(ddof=1))
-    if not math.isfinite(spread) or spread <= 0:
-        return None
-    return float(formation.sum()) / spread
-
-
-def _welch_beta(cand_returns: list[float], bench_returns: list[float]) -> float | None:
-    """Slope-winsorized market beta (Welch 2022, "Simply Better Market Betas").
-
-    Each day's stock return is clipped to the band between -2 and +4 times that
-    day's market return, then an ordinary least-squares slope is fitted. It
-    forecast next year's beta better than OLS, Vasicek shrinkage and the
-    Blume adjustment in his tests, because one-day jumps no longer pull the slope.
-    """
-    if len(cand_returns) != len(bench_returns) or len(cand_returns) < 60:
-        return None
-    rc = pd.Series(cand_returns, dtype=float)
-    rm = pd.Series(bench_returns, dtype=float)
-    lo = pd.concat([-2.0 * rm, 4.0 * rm], axis=1).min(axis=1)
-    hi = pd.concat([-2.0 * rm, 4.0 * rm], axis=1).max(axis=1)
-    clipped = rc.clip(lower=lo, upper=hi)
-    var = float(rm.var(ddof=1))
-    if not math.isfinite(var) or var <= 0:
-        return None
-    return float(clipped.cov(rm)) / var
+# The two kernels live in foundation/price_signals.py, shared with the nightly
+# forward-test lab; the old names stay for the stages and tests that use them.
+RESIDUAL_MOMENTUM_MIN_MONTHS = price_signals.RESIDUAL_MOMENTUM_MIN_MONTHS
+_residual_momentum = price_signals.residual_momentum
+_welch_beta = price_signals.welch_beta
 
 
 def _largest_day_in_formation(closes: Any, dates: Any, momentum: float) -> dict[str, Any]:

@@ -160,6 +160,7 @@ function routeApi(verdict: TrustVerdict | Error) {
   apiMock.mockImplementation((url: string) => {
     if (url === "/api/trust/ranking") return Promise.resolve(RANKING);
     if (url === "/api/trust/history") return Promise.reject(new Error("no history in this test"));
+    if (url === "/api/trust/forward-lab") return Promise.reject(new Error("no forward lab in this test"));
     return verdict instanceof Error ? Promise.reject(verdict) : Promise.resolve(verdict);
   });
 }
