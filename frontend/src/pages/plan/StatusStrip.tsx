@@ -28,6 +28,9 @@ export function StatusStrip({ plan }: { plan: MonthlyPlan }) {
         value={ladder ? `stage ${ladder.stage}, ${ladder.stage_name}` : "Paper stage"}
         to="/graduation"
       />
+      {plan.cash?.savings_pot_eur ? (
+        <Chip label="Savings pot" value={formatCurrency(plan.cash.savings_pot_eur, "EUR")} hash="#month-more" />
+      ) : null}
       {plan.cash && (
         <Chip label="Investable cash" value={formatCurrency(plan.cash.investable_eur, "EUR")} hash="#month-more" />
       )}

@@ -25,6 +25,10 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 #: Stages that depend on a symbol's stored bars (and the benchmark's) only.
+#: Bump whenever a cached stage function changes: it is part of every key, so rows
+#: written by the old code are no longer read (and are pruned after a week).
+STAGE_CACHE_VERSION = 1
+
 CACHEABLE_STAGES = frozenset({"momentum_quality", "backtest_vs_benchmark", "verification_gate", "quant_signals"})
 
 
@@ -64,7 +68,7 @@ def cached_stage(
     bar_date = latest_bar_date(db, symbol)
     if bar_date is None:
         return fn(*args, **kwargs)
-    key = f"{stage}:{variant}" if variant else stage
+    key = f"v{STAGE_CACHE_VERSION}:{stage}:{variant}" if variant else f"v{STAGE_CACHE_VERSION}:{stage}"
     row = db.get(DiscoverStageCache, (symbol, key, bar_date))
     if row is not None:
         try:

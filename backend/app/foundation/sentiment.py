@@ -277,7 +277,7 @@ def aggregate_sentiment(db: Any, ticker: str, days: int = 21) -> dict[str, Any]:
         "finbert_score": None,
         "news_count": 0,
         "headlines": [],
-        "overall": "neutral",
+        "overall": "unscored",
         "articles": [],
     }
     if not rows:

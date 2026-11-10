@@ -381,6 +381,10 @@ EXPECTED_SCHEDULER_DEFAULTS = {"misfire_grace_time": 300, "coalesce": True, "max
 def test_scheduler_defaults_snapshot():
     assert jobs.SCHEDULER_JOB_DEFAULTS == EXPECTED_SCHEDULER_DEFAULTS
     assert jobs.WORKER_THREAD_POOL_SIZE == 20
+    # A tracked job holds two connections (session + advisory lock).
+    from app.foundation.core.db import pool_capacity
+
+    assert (pool_capacity("postgresql://u@h/d") or 0) >= 2 * jobs.WORKER_THREAD_POOL_SIZE
     # A caller mutating the returned dict must not change the shared defaults.
     jobs.scheduler_job_defaults()["misfire_grace_time"] = 1
     assert jobs.SCHEDULER_JOB_DEFAULTS == EXPECTED_SCHEDULER_DEFAULTS

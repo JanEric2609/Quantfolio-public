@@ -3321,6 +3321,7 @@ export interface PlanCash {
   emergency_reserve_eur: number;
   reserve_set: boolean;
   investable_eur: number;
+  savings_pot_eur?: number | null;
 }
 
 export interface MonthlyPlan {

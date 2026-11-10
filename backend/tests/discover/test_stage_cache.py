@@ -85,3 +85,17 @@ def test_prune_drops_old_dates_only():
     db.commit()
     assert stage_cache.prune(db) == 1
     assert db.execute(text("SELECT count(*) FROM discover_stage_cache")).scalar() == 1
+
+
+def test_a_new_code_version_does_not_read_old_rows(monkeypatch):
+    db = _db()
+    calls: list[int] = []
+
+    def stage(_db, symbol, **_kw):
+        calls.append(1)
+        return {"x": len(calls)}, None
+
+    stage_cache.cached_stage(db, "AAA", "momentum_quality", stage, db, "AAA")
+    monkeypatch.setattr(stage_cache, "STAGE_CACHE_VERSION", stage_cache.STAGE_CACHE_VERSION + 1)
+    out = stage_cache.cached_stage(db, "AAA", "momentum_quality", stage, db, "AAA")
+    assert len(calls) == 2 and out[0] == {"x": 2}

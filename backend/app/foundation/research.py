@@ -589,10 +589,16 @@ def replace_section(report: str, title_words: str, body: str) -> str:
 
 def summary_of(report_body: str) -> str:
     """The first prose paragraph of the report (headings skipped)."""
-    for para in re.split(r"\n\s*\n", report_body.strip()):
-        text = para.strip()
-        if text and not all(_HEADING.match(line.strip()) for line in text.splitlines() if line.strip()):
-            return "\n".join(line for line in text.splitlines() if not _HEADING.match(line.strip())).strip()
+    paragraphs: list[list[str]] = [[]]
+    for raw in report_body.splitlines():  # a blank line ends a paragraph (linear, no regex backtracking)
+        line = raw.strip()
+        if line:
+            paragraphs[-1].append(line)
+        elif paragraphs[-1]:
+            paragraphs.append([])
+    for lines in paragraphs:
+        if lines and not all(_HEADING.match(line) for line in lines):
+            return "\n".join(line for line in lines if not _HEADING.match(line)).strip()
     return ""
 
 
@@ -682,7 +688,8 @@ async def generate_report(db: Session, ticker: str, user_id: str, *,
     elif model_text:
         report_text = assemble_report(model_text, context)
     else:
-        report_text = ""
+        # No model text after the retry: the figures still make a report.
+        report_text = fallback_report(context)
 
     summary = summary_of(report_text.split("\n", 1)[1] if report_text else "")
     try:
