@@ -88,6 +88,14 @@ class ProviderRegistry:
             if cap_dead and provider_name in cap_dead:
                 cap_dead.pop(provider_name, None)
 
+    # Providers whose plans (as configured here) only know US listings, and
+    # the capabilities whose first argument is a ticker.
+    _US_ONLY_PROVIDERS = frozenset({"massive", "tiingo", "twelvedata", "databento", "alpaca", "finnhub"})
+    _SYMBOL_CAPABILITIES = frozenset({
+        "get_quote", "get_history", "get_fundamentals", "get_news",
+        "get_analyst_estimates", "get_earnings_calendar", "get_dividends",
+    })
+
     def first_success(
         self,
         capability: str,
@@ -112,6 +120,16 @@ class ProviderRegistry:
             # Capability filtering: skip if provider doesn't support this capability
             if capability not in provider.capabilities:
                 attempted.append(f"{provider.name} does not support {capability}")
+                continue
+            # Market skipping: a US-only provider asked about a European
+            # listing would spend a call and a rate-limit slot to say "no"
+            # (Massive answered IWDA.AS with errors every probe).
+            if (
+                provider.name in self._US_ONLY_PROVIDERS
+                and capability in self._SYMBOL_CAPABILITIES
+                and args and isinstance(args[0], str) and not _is_us_symbol(args[0])
+            ):
+                attempted.append(f"{provider.name}: covers US listings only")
                 continue
             # Adaptive skipping: skip if provider is marked dead for this capability
             if self._is_dead(capability, provider.name):
@@ -188,10 +206,11 @@ class ProviderRegistry:
     _PRICE_HISTORY_PROVIDER_ORDER = ["yfinance", "tiingo", "alpaca"]
     ADJUSTED_HISTORY_PROVIDERS = frozenset({"tiingo", "yfinance", "alpaca"})
     # Twelve Data documents `adjust=all` on /time_series and the provider now
-    # sends it, but whether the owner's plan honours it is unverified. Flip
-    # this only after the acceptance test: SPY 2023-12-29 must come back near
-    # the adjusted close (≈ 465-470 today), not the raw 475.31.
-    TWELVEDATA_ADJUSTED_VERIFIED = False
+    # sends it, but whether the owner's plan honours it must be measured: the
+    # nightly cross-check runs the acceptance test once (SPY 2023-12-29 must
+    # come back near the adjusted close, ≈ 465-470, not the raw 475.31) and
+    # build_provider_registry sets this from its stored verdict.
+    TWELVEDATA_ADJUSTED_VERIFIED: bool = False
     # Providers that only know US listings: asking them for a European symbol
     # wastes a call (and a rate-limit slot) per symbol.
     _US_ONLY_HISTORY_PROVIDERS = frozenset({"tiingo", "databento", "alpaca", "finnhub", "alphavantage", "twelvedata"})
@@ -416,9 +435,29 @@ def build_provider_registry(db: Session) -> ProviderRegistry:
         if prov is not None:
             providers.append(prov)
 
+    # The acceptance test of Twelve Data's adjusted closes runs once, from the
+    # nightly cross-check (``cross_check.probe_twelvedata``); its stored
+    # verdict decides, process-wide, whether Twelve Data joins the adjusted
+    # chain. Without a passing probe it stays out, as before.
+    ProviderRegistry.TWELVEDATA_ADJUSTED_VERIFIED = _twelvedata_probe_passed(db)
+
     registry = ProviderRegistry(providers)
     _registry_cache = (time.monotonic(), registry)
     return registry
+
+
+TWELVEDATA_PROBE_KEY = "twelvedata_adjusted_probe_json"
+
+
+def _twelvedata_probe_passed(db: Session) -> bool:
+    from app.foundation.models.entities import AppSetting
+
+    try:
+        row = db.query(AppSetting).filter(AppSetting.key == TWELVEDATA_PROBE_KEY).one_or_none()
+        probe = json.loads(row.value_json) if row is not None else None
+    except Exception:  # noqa: BLE001 - an unreadable probe is a failed probe
+        return False
+    return isinstance(probe, dict) and probe.get("verified") is True
 
 
 def invalidate_registry_cache() -> None:

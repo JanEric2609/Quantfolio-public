@@ -402,21 +402,9 @@ def _run_review_tool(db: Session, tool_name: str, args: dict[str, Any]) -> dict[
         ticker = args.get("ticker", "")
         return fundamentals(db, ticker)
     if tool_name == "get_discover_shortlist":
-        from app.foundation.models.entities import DiscoverCandidate
+        from app.decision.llm_portfolio.shortlist import shortlist_dicts
 
-        rows = (
-            db.query(DiscoverCandidate)
-            .filter(DiscoverCandidate.status == "shortlisted")
-            .order_by(DiscoverCandidate.id.desc())
-            .limit(args.get("limit", 10))
-            .all()
-        )
-        return {
-            "candidates": [
-                {"symbol": r.symbol, "name": r.name, "isin": r.isin, "scores_json": r.scores_json}
-                for r in rows
-            ]
-        }
+        return {"candidates": shortlist_dicts(db, limit=int(args.get("limit", 10) or 10))}
     return {"error": f"Unknown tool: {tool_name}"}
 
 
@@ -599,6 +587,13 @@ def run_mandate_review(db: Session, user_id: str, mandate: str) -> dict[str, Any
     if portfolio.managed_by == "retired":
         # ADR 0018 amendment of 2026-10-14, §5: its futility test rejected.
         return {"status": "retired", "mandate": mandate, "portfolio_id": portfolio_id, "decisions": [], "trades": []}
+    if mandate == "B":
+        # B is the rules control (2026-11-09): same candidates and limits as A,
+        # no model. See ``rules.py``.
+        from app.decision import paper_portfolio
+        from app.decision.llm_portfolio.rules import run_rules_review
+
+        return run_rules_review(db, user_id, portfolio, mandate, paper=paper_portfolio)
 
     # Build context
     context = assemble_review_context(db, portfolio_id, mandate)

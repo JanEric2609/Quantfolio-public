@@ -729,6 +729,17 @@ def _earnings_is_near(sf: dict[str, Any]) -> bool:
     return isinstance(days, int) and 0 <= days <= EARNINGS_RISK_DAYS
 
 
+def _filings_text(db: Session, symbol: str) -> str | None:
+    """Material 8-Ks of the last 30 days in plain words (US listings only), or None."""
+    try:
+        from app.foundation.data_engineering.sec_8k import recent_material_text
+
+        return recent_material_text(db, symbol)
+    except Exception:  # noqa: BLE001 - a missing table or bad row must not stop a dossier
+        logger.debug("dossier: 8-K lookup failed for %s", symbol, exc_info=True)
+        return None
+
+
 def _earnings_text(sf: dict[str, Any]) -> str | None:
     """The next-earnings sentence built from attach_earnings_calendar's fields, or None."""
     report_day = sf.get("next_earnings_date")
@@ -1035,6 +1046,12 @@ def write_dossier(
         "\nGenerate a research hypothesis as structured JSON matching the schema."
     )
 
+    filings_text = None if instrument_type in ("etf", "fund") else _filings_text(db, symbol)
+    if filings_text:
+        context = context.replace(
+            "Macro facts: ", f"Company filings: {filings_text}\nMacro facts: ", 1,
+        )
+
     slot_facts: list[Fact] | None = None
     digit_terms: list[str] = []
     if slots_enabled():
@@ -1050,6 +1067,7 @@ def write_dossier(
             earnings_near=_earnings_is_near(sf_scores),
             is_fund=instrument_type in ("etf", "fund"),
             recent_fall_limit=RECENT_FALL_LIMIT,
+            filings_text=filings_text,
         )
         candidate_name = candidate.get("name") if isinstance(candidate, dict) else getattr(candidate, "name", None)
         digit_terms = allowed_digit_terms(

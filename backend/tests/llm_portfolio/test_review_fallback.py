@@ -94,7 +94,7 @@ def test_tool_loop_exhaustion_persists_fallback_hold(monkeypatch):
     tool_call = json.dumps({"tool": "get_quote", "args": {"ticker": "SPY"}})
     monkeypatch.setattr(review_mod, "_local_llm_sync", lambda *a, **k: tool_call)
 
-    result = review_mod.run_mandate_review(db, user.id, "B")
+    result = review_mod.run_mandate_review(db, user.id, "A")
 
     assert result["status"] == "fallback_hold"
     assert result["decision"]["action"] == "hold"
@@ -120,7 +120,7 @@ def test_persistent_unparseable_json_persists_review_failed(monkeypatch):
 
     monkeypatch.setattr(review_mod, "_local_llm_sync", lambda *a, **k: "not json at all")
 
-    result = review_mod.run_mandate_review(db, user.id, "B")
+    result = review_mod.run_mandate_review(db, user.id, "A")
 
     assert result["status"] == "review_failed"
     assert result["decision"]["action"] == "hold"

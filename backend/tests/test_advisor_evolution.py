@@ -214,17 +214,29 @@ def test_composite_falls_back_to_sigmoid_sharpe_without_psr():
 
 
 def test_composite_uses_rps_directly_when_present():
-    """F11: calibration uses 1 - scorecard.rps_avg rather than the sign-only
-    Brier formula when rps_avg is available."""
+    """F11: calibration uses 1 - scorecard.rps_avg when it is the only
+    calibration input."""
     scorecard = AdvisorScorecard(
         sharpe=1.0, psr=0.6,
-        brier_avg=0.0,   # would give calibration=1.0 under the old formula
-        rps_avg=0.3,      # deliberately different: 1 - 0.3 = 0.7
+        brier_avg=None,
+        rps_avg=0.3,      # 1 - 0.3 = 0.7
         max_drawdown=0.05, mz_slope=0.9, mz_r2=0.6,
     )
     score, detail = composite_score(scorecard)
     assert score is not None
     assert detail["components"]["calibration"] == pytest.approx(0.7)
+
+
+def test_composite_calibration_counts_the_stated_confidence_too():
+    """2026-11-09: a calibrated MC band hid a worse-than-coin-flip confidence."""
+    scorecard = AdvisorScorecard(
+        sharpe=1.0, psr=0.6,
+        brier_avg=0.327,  # worse than a coin flip -> confidence part 0.0
+        rps_avg=0.3,      # band part 0.7
+        max_drawdown=0.05, mz_slope=0.9, mz_r2=0.6,
+    )
+    _score, detail = composite_score(scorecard)
+    assert detail["components"]["calibration"] == pytest.approx(0.35)
 
 
 def test_composite_falls_back_to_brier_without_rps():

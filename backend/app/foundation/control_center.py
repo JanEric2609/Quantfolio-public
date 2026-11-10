@@ -127,6 +127,7 @@ def attention_items(db: Session, *, today: date | None = None) -> list[dict[str,
     _setting_items(settings, clock, items)
     _backup_items(db, now, items)
     _price_items(db, now, items)
+    _cross_check_items(db, now, items)
     _evidence_gate_items(db, now, items)
     _stuck_job_items(db, heartbeat, now, items)
     _disk_items(items)
@@ -584,6 +585,39 @@ def _price_items(db: Session, now: datetime, items: list[AttentionItem]) -> None
             f"{len(stale)} price series {'are' if len(stale) > 1 else 'is'} out of date",
             ", ".join(stale[:12]) + (" …" if len(stale) > 12 else "")
             + ". Values, the plan and the benchmark comparison use these closes.",
+            "/settings/status#coverage", "View coverage",
+        ))
+
+
+def _cross_check_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
+    """Stored series a second provider disagrees with (last 3 nights, newest verdict per symbol)."""
+    from app.foundation.models.entities import PriceCrossCheck
+
+    since = now.date() - timedelta(days=3)
+    latest: dict[str, PriceCrossCheck] = {}
+    for row in (
+        db.query(PriceCrossCheck)
+        .filter(PriceCrossCheck.checked_on >= since)
+        .order_by(PriceCrossCheck.checked_on)
+        .all()
+    ):
+        latest[row.symbol] = row
+    errors = [r for r in latest.values() if r.verdict == "error" and r.action != "repulled"]
+    warns = [r for r in latest.values() if r.verdict == "warn" and r.pattern != "spike"]
+    if errors:
+        items.append(AttentionItem(
+            "prices-cross-check-error", "warning",
+            f"{len(errors)} stored price series disagree with a second provider",
+            ", ".join(f"{r.symbol} ({r.pattern}, {r.action})" for r in errors[:10])
+            + ". A split or ×100 break no second check confirmed; returns computed from these series are suspect.",
+            "/settings/status#coverage", "View coverage",
+        ))
+    if len(warns) >= 5:
+        items.append(AttentionItem(
+            "prices-cross-check-warn", "info",
+            f"{len(warns)} stored price series drift from a second provider",
+            ", ".join(f"{r.symbol} ({r.pattern})" for r in warns[:10])
+            + ". Usually a dividend the next weekly re-pull restates, or bars that stopped updating.",
             "/settings/status#coverage", "View coverage",
         ))
 

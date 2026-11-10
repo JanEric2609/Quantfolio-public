@@ -1207,13 +1207,21 @@ def _check_learning(
             remedy="Restore trade flow so predictions resolve; reflection and evolution follow from that.",
         )
     if not active:
+        from app.decision.advisor.reflection import MIN_LESSON_N
+
         return Check(
             key="learning",
             label="Learning loop",
-            status=WARN,
-            detail=f"{len(lessons)} lesson(s) exist but all have decayed below the activation rank.",
+            status=OK,
+            detail=(
+                f"No active lesson ({len(lessons)} written so far, retired, superseded or decayed). "
+                f"A lesson is kept only when it rests on at least {MIN_LESSON_N} resolved trades "
+                "since the sleeve's last reset with a hit rate clearly away from 50 %, and matches "
+                "the computed numbers. Until then the model still sees its computed track record "
+                "and calibration every cycle."
+            ),
             data=data,
-            remedy="Lessons decay by 0.85 per reflection; without fresh ones the memory empties.",
+            remedy="Nothing to fix: lessons appear once the record supports one.",
         )
     return Check(
         key="learning",

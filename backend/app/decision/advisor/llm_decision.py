@@ -309,7 +309,7 @@ def sell_only_symbols(
 def _build_user_prompt(
     proposal: TradeProposal,
     gate_result: RiskGateResult,
-    lessons: list[str],
+    track_record: dict[str, Any] | None = None,
     *,
     cash_eur: float | None = None,
     total_value_eur: float | None = None,
@@ -425,8 +425,13 @@ def _build_user_prompt(
         "risk_envelope": gate_result.envelope,
         "risk_ceilings": gate_result.ceilings,
         "blocked_by_risk_gate": gate_result.blocked,
-        "lessons": lessons,  # reflection memory — the LLM reads its own track record
     }
+    if track_record:
+        # Computed, not remembered: how this sleeve's calls since its last
+        # reset actually did against EUNL.DE, and how often each stated
+        # confidence level was right (2026-11-09: hit rate fell as confidence
+        # rose, Brier 0.33 against a coin flip's 0.25).
+        payload["your_track_record"] = track_record
     if rl_signal:
         payload["rl_signal_note"] = (
             "Some candidates carry rl_suggested_weight: a portfolio-allocation "
@@ -632,12 +637,33 @@ def _record_attempt(
     })
 
 
+_CALIBRATION_NOTE = (
+    "\nYour `confidence` is scored with the Brier score against whether the "
+    "trade beats EUNL.DE over 21 trading days. `your_track_record` (when "
+    "present) shows how your past calls since the sleeve's last reset actually "
+    "did: `calibration.bins` gives, per stated-confidence band, how often those "
+    "calls won. If a band won less often than you stated, state lower "
+    "confidence for similar calls now; 0.5 means no edge."
+)
+
+
+def _lessons_section(lessons: list[str]) -> str:
+    lines = "\n".join(f"- {lesson}" for lesson in lessons)
+    return (
+        "\n\nLessons from your own scored trades (each checked against the "
+        "numbers; [group, n = trades it rests on, verdict]). Apply them where a "
+        "candidate falls in that group; they do not override the risk envelope:\n"
+        f"{lines}"
+    )
+
+
 def decide_trades(
     db: Session,
     proposal: TradeProposal,
     gate_result: RiskGateResult,
     *,
     lessons: list[str] | None = None,
+    track_record: dict[str, Any] | None = None,
     llm_call: Callable[[Session, list[dict[str, str]]], str] | None = None,
     system_suffix: str | None = None,
     cash_eur: float | None = None,
@@ -658,7 +684,11 @@ def decide_trades(
         db: Active session (used to resolve the LLM endpoint).
         proposal: Deterministic proposal (C1).
         gate_result: Risk-gate result (C2) — the LLM only sees passing names.
-        lessons: Reflection-memory lessons injected into the prompt (PR2 A3).
+        lessons: Reflection-memory lessons (PR2 A3), each already checked
+            against the computed record; rendered as their own section of the
+            system prompt rather than one more field in the data payload.
+        track_record: ``reflection.track_record_stats`` for the sleeve, shown
+            to the model as ``your_track_record``.
         llm_call: Injectable LLM callable for tests (``(db, messages) -> str``).
         system_suffix: Optional strategy prompt framing appended to the system
             prompt (champion/challenger variants, PR2 C2).
@@ -735,6 +765,9 @@ def decide_trades(
 
     call: Callable[[Session, list[dict[str, str]]], str] = llm_call or _instrumented_call
     system_prompt = _SYSTEM_PROMPT if not system_suffix else f"{_SYSTEM_PROMPT}\n{system_suffix}"
+    system_prompt += _CALIBRATION_NOTE
+    if lessons:
+        system_prompt += _lessons_section(lessons)
     base_messages = [
         {"role": "system", "content": system_prompt},
         {
@@ -742,7 +775,7 @@ def decide_trades(
             "content": _build_user_prompt(
                 proposal,
                 gate_result,
-                lessons or [],
+                track_record,
                 cash_eur=cash_eur,
                 total_value_eur=total_value_eur,
                 fee_schedule=fee_schedule,

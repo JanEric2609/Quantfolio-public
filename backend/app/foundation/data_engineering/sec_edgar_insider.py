@@ -204,8 +204,8 @@ class IndexEntry:
     path: str
 
 
-def parse_form_index(text: str) -> list[IndexEntry]:
-    """Form 4 and 4/A rows of an EDGAR daily ``form.YYYYMMDD.idx``, one per filing.
+def parse_form_index(text: str, forms: tuple[str, ...] = _FORM_TYPES) -> list[IndexEntry]:
+    """Rows of *forms* (Form 4 and 4/A by default) in an EDGAR daily ``form.YYYYMMDD.idx``, one per filing.
 
     A filing is listed once per filer (issuer and each reporting owner);
     rows are collapsed on the archive path.
@@ -213,7 +213,7 @@ def parse_form_index(text: str) -> list[IndexEntry]:
     entries: dict[str, IndexEntry] = {}
     for line in text.splitlines():
         parts = line.split()
-        if len(parts) < 5 or parts[0] not in _FORM_TYPES or not parts[-1].startswith("edgar/data/"):
+        if len(parts) < 5 or parts[0] not in forms or not parts[-1].startswith("edgar/data/"):
             continue
         path, filed_raw, cik = parts[-1], parts[-2], parts[-3]
         if not (filed_raw.isdigit() and cik.isdigit()):

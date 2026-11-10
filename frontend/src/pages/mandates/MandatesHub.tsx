@@ -29,7 +29,7 @@ export function MandatesHub() {
       <PageHeader
         title="Mandates"
         icon={<Scale className="h-8 w-8 text-accent" />}
-        subtitle="Two LLM paper portfolios, reviewed every week and compared side by side: decision journal, outcome accuracy, and paper-vs-real divergence."
+        subtitle="LLM picks (A) against a fixed rule on the same candidates (B), reviewed every week: decision journal, outcome accuracy, and paper-vs-real divergence."
       />
       <TabNav tabs={TABS} ariaLabel="Mandate sections" />
       <Outlet context={context} />

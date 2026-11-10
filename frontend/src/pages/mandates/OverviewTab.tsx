@@ -18,6 +18,11 @@ import {
 } from "../../lib/api";
 
 const MANDATES = ["A", "B"] as const;
+
+const ROLE: Record<"A" | "B", string> = {
+  A: "LLM picks",
+  B: "Rules control (no LLM)",
+};
 const POLL_INTERVAL_MS = 2500;
 
 function MandateCard({ portfolio, mandate }: { portfolio: MandateListItem | null; mandate: "A" | "B" }) {
@@ -72,11 +77,11 @@ function MandateCard({ portfolio, mandate }: { portfolio: MandateListItem | null
     return (
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Mandate {mandate}</CardTitle>
+          <CardTitle className="text-base">Mandate {mandate} · {ROLE[mandate]}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-text-muted">
-            No paper portfolio for this mandate yet. Create one to start running weekly LLM reviews.
+            No paper portfolio for this mandate yet. Create one to start its weekly reviews.
           </p>
           <Button size="sm" variant="outline" onClick={() => createMandate.mutate()} disabled={createMandate.isPending}>
             <PlusCircle className="h-4 w-4 mr-2" />
@@ -91,7 +96,7 @@ function MandateCard({ portfolio, mandate }: { portfolio: MandateListItem | null
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
         <CardTitle className="text-base flex items-center gap-2">
-          Mandate {mandate}
+          Mandate {mandate} · {ROLE[mandate]}
           <Badge variant="secondary" className="text-[10px]">{portfolio.managed_by}</Badge>
         </CardTitle>
         <Button
@@ -153,9 +158,12 @@ export function OverviewTab() {
   return (
     <div className="space-y-4">
       <p className="text-sm text-text-secondary max-w-2xl">
-        Two LLM paper portfolios, side by side. Each started from your real holdings and is reviewed
-        once a week: a bounded LLM tool loop ends in a buy, sell or hold, gated by risk and portfolio
-        checks. Paper only — nothing here is ever executed at a broker.
+        An experiment in two paper portfolios. Both see the same Discover shortlist and keep the same
+        limits (at most 15 % in one stock, at least 40 % in ETFs). Mandate A lets an LLM choose: a
+        bounded tool loop ends in one buy, sell or hold a week. Mandate B uses fixed rules instead:
+        it holds the shortlisted names with the best 12-1 month momentum, skipping the most volatile,
+        at inverse-volatility weights. A minus B is what the LLM adds over a simple rule. Paper only;
+        nothing here is ever executed at a broker.
       </p>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {MANDATES.map((m) => (

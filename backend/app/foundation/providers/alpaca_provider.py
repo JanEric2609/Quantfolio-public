@@ -137,6 +137,47 @@ class AlpacaProvider(MarketDataProvider):
             logger.warning("Alpaca get_history failed for %s: %s", symbol, exc)
             return self.unavailable("history", str(exc))
 
+    def get_closes_multi(
+        self, symbols: list[str], start: str, end: str | None = None, *, feed: str = "sip",
+    ) -> dict[str, dict[str, float]]:
+        """``{symbol: {YYYY-MM-DD: adjusted close}}`` for many US symbols in few calls.
+
+        One request covers up to ``_MULTI_BATCH`` symbols and pages through
+        ``next_page_token``; the free plan allows 200 calls a minute, so the
+        whole US universe over a couple of weeks is a handful of calls. Keys
+        are the symbols as passed. Raises ``ValueError`` on an HTTP error, so
+        a caller can retry with ``feed="iex"`` when SIP history is refused.
+        """
+        if not self.enabled:
+            raise ValueError("Alpaca API key/secret is not configured.")
+        by_plain = {strip_exchange_suffix(s): s for s in symbols if is_us_listing(s)}
+        out: dict[str, dict[str, float]] = {}
+        plain = sorted(by_plain)
+        for i in range(0, len(plain), self._MULTI_BATCH):
+            batch = plain[i : i + self._MULTI_BATCH]
+            params: dict[str, Any] = {
+                "symbols": ",".join(batch), "timeframe": "1Day", "adjustment": "all",
+                "feed": feed, "start": start, "limit": 10000,
+            }
+            if end:
+                params["end"] = end
+            for _page in range(50):
+                data = self._get("/stocks/bars", params=params)
+                for sym, bars in (data.get("bars") or {}).items():
+                    target = out.setdefault(str(by_plain.get(str(sym)) or sym), {})
+                    for bar in bars or []:
+                        as_of = _parse_iso(bar.get("t"))
+                        close = _float(bar.get("c"))
+                        if as_of is not None and close is not None and close > 0:
+                            target[as_of.date().isoformat()] = close
+                token = data.get("next_page_token")
+                if not token:
+                    break
+                params["page_token"] = token
+        return out
+
+    _MULTI_BATCH = 100
+
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         # `self.enabled` is only true when both api_key and api_secret are set,
         # so headers will always carry non-empty strings here.

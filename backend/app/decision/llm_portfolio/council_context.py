@@ -14,7 +14,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.foundation.models.entities import DiscoverCandidate, PaperHolding, PaperPortfolio, PaperSnapshot
+from app.foundation.models.entities import PaperHolding, PaperPortfolio, PaperSnapshot
 from app.decision.llm_portfolio.context import _build_regime_block
 from app.foundation.quant import correlation_matrix_from_price_matrix
 from app.foundation.quant_proposal import TradeProposal, build_trade_proposal, concentration_from_weights
@@ -30,13 +30,9 @@ def _default_candidates(db: Session, limit: int = 10) -> list[dict[str, Any]]:
     mandate review loop, which never built one before this wiring existed).
     """
     try:
-        rows = (
-            db.query(DiscoverCandidate)
-            .filter(DiscoverCandidate.status == "shortlisted")
-            .order_by(DiscoverCandidate.id.desc())
-            .limit(limit)
-            .all()
-        )
+        from app.decision.llm_portfolio.shortlist import latest_shortlist
+
+        rows = latest_shortlist(db, limit=limit)
         return [{"symbol": r.symbol, "name": r.name, "source": "discover"} for r in rows]
     except Exception as exc:
         logger.warning("council_context: discover shortlist unavailable: %s", exc)

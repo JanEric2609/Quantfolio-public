@@ -388,3 +388,17 @@ def test_china_listings_still_flow_on_tiingo(monkeypatch):
     assert result["ok"] is True
     assert len(calls) == 1
     assert "/tiingo/daily/600519.SS/prices" in calls[0]["url"]
+
+
+def test_first_success_skips_us_only_providers_for_european_symbols():
+    massive = _FakeProvider("massive", {"get_quote"}, succeed=True)
+    other = _FakeProvider("p2", {"get_quote"}, succeed=True)
+    registry = ProviderRegistry([massive, other])
+
+    result = registry.get_quote("IWDA.AS")
+    assert result["provider"] == "p2"
+    assert massive._call_count == 0
+
+    result = registry.get_quote("AAPL")
+    assert result["provider"] == "massive"
+    assert massive._call_count == 1

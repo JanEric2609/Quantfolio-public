@@ -88,6 +88,7 @@ def build_facts(
     earnings_near: bool = False,
     is_fund: bool = False,
     recent_fall_limit: float = 0.20,
+    filings_text: str | None = None,
 ) -> list[Fact]:
     """The candidate's figures as keyed phrases, in the order a reader needs them.
 
@@ -186,6 +187,10 @@ def build_facts(
         )
     if (flow := _num(insider.get("net_insider_flow_usd"))) is not None and flow != 0:
         add("insider_flow", f"net insider {'selling' if flow < 0 else 'buying'} of {_usd(flow)}")
+
+    # The company's own 8-K filings of the last 30 days (restatement, auditor
+    # change, delisting notice, impairment, departures): sec_8k.py.
+    add("filings", filings_text)
 
     if earnings_text:
         add("earnings", earnings_text.rstrip(".") + ("" if earnings_near else " (too far off to be a key risk)"))

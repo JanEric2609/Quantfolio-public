@@ -70,4 +70,6 @@ class NewsToneScore(Base):
     #: ``{event_type: count}`` (earnings, guidance, deal, legal, management, product, macro, other).
     events_json: Mapped[dict] = mapped_column(JSON, default=dict)
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    #: Where the headlines came from: ``finnhub`` (US) or ``gdelt`` (the rest).
+    source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

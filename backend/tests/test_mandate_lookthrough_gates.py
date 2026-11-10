@@ -119,8 +119,8 @@ def test_hold_with_94_percent_cash_buys_the_core_up_to_the_floor(monkeypatch):
     user = User(username="u", password_hash="x")
     db.add(user)
     db.commit()
-    p = PaperPortfolio(user_id=user.id, name="B", initial_cash=Decimal("10000"), managed_by="llm",
-                       mandate="B", mandate_config_json=json.dumps({"min_etf_pct": 0.30}))
+    p = PaperPortfolio(user_id=user.id, name="A", initial_cash=Decimal("10000"), managed_by="llm",
+                       mandate="A", mandate_config_json=json.dumps({"min_etf_pct": 0.30}))
     db.add(p)
     db.add(ListingCurrency(symbol="EUNL.DE", currency="EUR", source="test"))
     db.commit()
@@ -136,7 +136,7 @@ def test_hold_with_94_percent_cash_buys_the_core_up_to_the_floor(monkeypatch):
     passing = {"passed": True, "checks": [], "reason": "All gates passed"}
     with patch("app.decision.paper_portfolio.paper_quote_eur", return_value={"price": 100.0}), \
             patch("app.decision.llm_portfolio.gates.check_buy_gates", return_value=passing):
-        res = review_mod.run_mandate_review(db, user.id, "B")
+        res = review_mod.run_mandate_review(db, user.id, "A")
 
     assert res["trade_created"] is True
     assert res["decision"]["action"] == "hold"
