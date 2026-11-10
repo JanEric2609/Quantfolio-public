@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.decision.discover.thesis_checks import DIVERSIFIER_MAX_CORRELATION, STRONG_MOMENTUM_RANK
+from app.foundation.fundamentals_context import growth_basis_text
 
 #: A cited fact: ``{momentum}``.
 SLOT = re.compile(r"\{([a-z0-9_]+)\}")
@@ -89,6 +90,7 @@ def build_facts(
     is_fund: bool = False,
     recent_fall_limit: float = 0.20,
     filings_text: str | None = None,
+    corporate_action_text: str | None = None,
 ) -> list[Fact]:
     """The candidate's figures as keyed phrases, in the order a reader needs them.
 
@@ -166,6 +168,9 @@ def build_facts(
         )
         add("correlation", f"a weekly correlation of {corr:.2f} with the portfolio ({verdict})")
 
+    # A split or spin-off after the last report: the ratios below are blanked by
+    # the caller, and the reader is told why they are missing (corporate_action.py).
+    add("corporate_action", corporate_action_text)
     if not is_fund:
         if (pe := _num(fundamentals.get("pe"))) is not None and pe > 0:
             add("pe", f"a trailing price-to-earnings ratio of {pe:.1f}")
@@ -176,7 +181,9 @@ def build_facts(
             level = "less debt than equity" if de < 100 else "more debt than equity"
             add("debt_equity", f"debt at {de:.0f} % of equity ({level})")
         if (rg := _num(fundamentals.get("revenue_growth"))) is not None:
-            add("revenue_growth", f"revenue growth of {_pct(rg * 100)} on the year")
+            # "On the year" read as annual growth; yfinance's figure is one quarter.
+            basis = growth_basis_text(fundamentals.get("growth_basis"))
+            add("revenue_growth", f"revenue growth of {_pct(rg * 100)} {basis}")
 
     buyers = _num(insider.get("cluster_buy_score"))
     if buyers is not None and buyers >= 1:
@@ -193,7 +200,10 @@ def build_facts(
     add("filings", filings_text)
 
     if earnings_text:
-        add("earnings", earnings_text.rstrip(".") + ("" if earnings_near else " (too far off to be a key risk)"))
+        text = earnings_text.rstrip(".")
+        if not earnings_near:
+            text = text[:-1] + "; too far off to be a key risk)" if text.endswith(")") else text + " (too far off to be a key risk)"
+        add("earnings", text)
 
     if sf.get("analyst_target") is not None and (upside := _num(sf.get("analyst_upside"))) is not None:
         count = sf.get("analyst_count")

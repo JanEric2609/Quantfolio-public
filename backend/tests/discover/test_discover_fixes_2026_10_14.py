@@ -34,12 +34,15 @@ _EARNINGS = {"sentiment_fundamentals": {"next_earnings_date": "2026-10-19", "day
 
 
 def test_the_earnings_risk_survives_an_llm_list_that_leaves_it_out():
-    earnings, rest = deterministic_risks(_EARNINGS, {"insider_cluster_buy_score": 3})
+    scores = {**_EARNINGS, "portfolio_fit": {"correlation": 0.8}}
+    earnings, rest = deterministic_risks(scores, {"insider_cluster_buy_score": 3})
     assert earnings and earnings[0].startswith("Earnings event:")
-    # The LLM repeats the prompt's insider line and drops the earnings one.
+    # Insider buying is no risk (run 57c8f8b8): no line for it.
+    assert not any(r.lower().startswith("insider activity") for r in rest)
+    # The LLM repeats the overlap line and drops the earnings one.
     merged = merge_risks([*earnings, *rest], ["Valuation risk: the multiple is high.", rest[0]])
     assert merged[0].startswith("Earnings event:")
-    assert sum(r.lower().startswith("insider activity") for r in merged) == 1
+    assert sum(r.lower().startswith("overlap") for r in merged) == 1
     assert "Valuation risk: the multiple is high." in merged
 
 

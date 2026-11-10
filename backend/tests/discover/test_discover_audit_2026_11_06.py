@@ -259,7 +259,7 @@ def test_the_mislabel_reason_is_reported():
 # --- risks and rounding -----------------------------------------------------
 
 def test_one_earnings_event_is_one_risk():
-    required = ["Earnings event: Next earnings report: 2026-11-19, 14 days from now."]
+    required = ["Earnings event: The next earnings report on 2026-11-19 (in 14 days)."]
     out = merge_risks(required, ["Upcoming earnings on 2026-11-19 may move the price.", "Margins may fall."])
     assert out == [required[0], "Margins may fall."]
     # Falling earnings are a different risk from the report date.
@@ -278,7 +278,8 @@ def test_skill_horizon_has_no_false_precision():
 
 def test_earnings_on_the_run_day_says_what_it_means():
     text = _earnings_text({"next_earnings_date": "2026-11-05", "days_to_earnings": 0})
-    assert "may predate the results" in text
+    assert "may predate it" in text
+    assert text.startswith("the next earnings report on 2026-11-05 (today;")
     assert "predate" not in _earnings_text({"next_earnings_date": "2026-11-19", "days_to_earnings": 14})
 
 

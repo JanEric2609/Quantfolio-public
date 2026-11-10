@@ -2718,16 +2718,23 @@ export type VerdictsResponse = {
 export type PiotroskiSignal = {
   name: string;
   value: number | null;
-  pass: boolean;
+  /** null: not meaningful for this company (left out of score and max). */
+  pass: boolean | null;
+  /** How to show value: a fraction shown as %, a multiple, or percentage points (590 = 590 %). */
+  unit?: "pct" | "times" | "pct_points";
+  note?: string;
 };
 
 export type PiotroskiResponse = {
   ticker: string;
   score: number | null;
   max: number;
+  /** The score restated on 0-9 when a criterion was left out. */
+  score_9?: number | null;
   signals: PiotroskiSignal[];
   source: string;
   message?: string;
+  book_equity_unreliable?: boolean;
 };
 
 // --- Phase 7: Sentiment types ---

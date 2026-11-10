@@ -121,6 +121,120 @@ _SCORE_AS_RISK = re.compile(r"\b(?:fundamentals?|composite|portfolio fit|fit|mom
 _HOLDINGS_CLAIM = re.compile(r"\bholdings?\b[^.]*", re.I)
 _NOT_A_HOLDING = frozenset({"ETF", "ETC", "MSCI", "UCITS", "USD", "EUR", "GBP", "FTSE", "ESG"})
 
+# Run 57c8f8b8 (2026-11-10), checked against the web: wording the figures
+# could not catch. Each such sentence or risk line is dropped, not the dossier.
+#: A company named as an example ("holdings like Moderna"): IUSN has no holdings data.
+_NAMED_EXAMPLE = re.compile(r"\b(?:like|such as|including|e\.g\.)\s+([A-Z][\w&'-]+(?:\s+[A-Z][\w&'-]+)*)")
+#: The owner's portfolio described by a style nothing measured ("a growth style portfolio",
+#: "a technology-heavy portfolio").
+_PORTFOLIO_STYLE = re.compile(
+    r"\b[\w-]+[- ](?:heavy|style|tilted|oriented|focused|dominated|driven|centric|weighted)\s+portfolio\b|"
+    r"\b(?:growth|value|tech|technology|defensive|cyclical|income)\s+portfolio\b",
+    re.I,
+)
+_PORTFOLIO_STYLE_CLAUSE = re.compile(
+    r"\s*\b(?:within|in|for|across|to)\s+(?:an?|the|your)\s+(?:" + _PORTFOLIO_STYLE.pattern + r")", re.I,
+)
+#: The cash return without the system's estimate it is compared with ("an annualized return
+#: exceeding 1.22 % from cash", "trades above cash yields of ... from cash").
+_CASH_PHRASE = re.compile(r"\bfrom cash over the same months\b", re.I)
+_ESTIMATE_PHRASE = re.compile(r"\(the system's estimate\)", re.I)
+#: The stance justified by the broad-market regime ("aligns with the sideways regime model").
+_REGIME_JUSTIFICATION = re.compile(
+    r"\b(?:align\w*|consistent|fits?|suits?|match\w*|support\w*|in line)\b[^.]{0,40}\bregime\b|"
+    r"\bregime\b[^.]{0,40}\b(?:supports?|favou?rs?|suits?)\b",
+    re.I,
+)
+_CORRELATION_WORD = re.compile(r"\bcorrelat", re.I)
+_OTHER_RISK_FIGURE = re.compile(r"\bbeta\b|\blargest fall\b|\bdrawdown\b|\bvolatility\b", re.I)
+#: Insider buying is not a risk to a long position (ADM listed one buyer as its first risk).
+_INSIDER_BUY_RISK = re.compile(r"\binsiders?\b[^.]*\b(?:bought|buys?|buying|purchas\w*)\b", re.I)
+_INSIDER_SELL = re.compile(r"\b(?:sold|sells?|selling|sales?)\b", re.I)
+#: A beta below this is not "market sensitivity" (ENX's 0.29 was listed as a risk).
+LOW_BETA_RISK_MAX = 0.8
+_BETA_VALUE = re.compile(r"\bbeta of (-?\d+(?:\.\d+)?)", re.I)
+#: Two figure phrases run together without a conjunction ("a ratio of 15.3 a return on equity").
+_RUN_TOGETHER = re.compile(r"(\d(?:[\d.,]*\d)?(?:\s?%)?)\s+(an?\s+(?:return|trailing|market|weekly|debt|revenue|annual|largest|past|12-1))")
+
+
+def _named_example_unknown(text: str, facts_text: str) -> bool:
+    for m in _NAMED_EXAMPLE.finditer(text):
+        name = m.group(1).split()[0]
+        singular = name[:-1] if name.endswith("s") else name  # "such as ETFs"
+        if name not in _NOT_A_HOLDING and singular not in _NOT_A_HOLDING and not re.search(rf"\b{re.escape(name)}\b", facts_text):
+            return True
+    return False
+
+
+def sloppy_sentence(sentence: str, facts_text: str = "") -> str | None:
+    """Why a thesis sentence says something the data does not, or None."""
+    if _named_example_unknown(sentence, facts_text):
+        return "names a company that is not in the data"
+    style = _PORTFOLIO_STYLE.search(sentence)
+    if style and style.group(0).lower() not in facts_text.lower():
+        return "describes the portfolio's style, which nothing measured"
+    if _CASH_PHRASE.search(sentence) and not _ESTIMATE_PHRASE.search(sentence):
+        return "quotes the cash return without the estimate it is compared with"
+    if _REGIME_JUSTIFICATION.search(sentence):
+        return "justifies the stance by the broad-market regime"
+    if (
+        _DIVERSIFIER_CLAIM.search(sentence)
+        and _OTHER_RISK_FIGURE.search(sentence)
+        and not _CORRELATION_WORD.search(sentence)
+    ):
+        # ADM: "diversification benefits given its modest market beta ... and a largest fall of 19 %".
+        return "argues diversification from beta or a fall, not the correlation"
+    return None
+
+
+def sloppy_risk(risk: str, facts_text: str = "") -> str | None:
+    """Why a risk line is not a risk the data shows, or None."""
+    if _INSIDER_BUY_RISK.search(risk) and not _INSIDER_SELL.search(risk):
+        return "insider buying is not a risk"
+    m = _BETA_VALUE.search(risk)
+    if m and abs(float(m.group(1))) < LOW_BETA_RISK_MAX and not re.search(r"\b(?:volatil|drawdown|fall)\w*", risk, re.I):
+        return "a low market beta is not a risk"
+    return sloppy_sentence(risk, facts_text)
+
+
+def tidy_sentence(sentence: str) -> str:
+    """Mend two slips the model makes around the figure phrases.
+
+    A verdict said twice: "adds little diversification given a weekly correlation of
+    0.96 with the portfolio (it adds little diversification)" (SPYY). Two phrases with
+    no "and" between them: "a price-to-earnings ratio of 15.3 a return on equity of 9.1 %" (ABN).
+    """
+    # From the end backwards: cutting a later match leaves the earlier offsets valid.
+    for m in reversed(list(re.finditer(r"\s*\((?:it )?([^()]{6,60})\)", sentence))):
+        inner = m.group(1).strip().lower()
+        before = sentence[: m.start()].lower()
+        if inner in before:
+            sentence = sentence[: m.start()] + sentence[m.end():]
+    # "within a technology-heavy portfolio": the clause goes, the figures stay.
+    sentence = _PORTFOLIO_STYLE_CLAUSE.sub("", sentence)
+    # "(it adds little diversification) to existing positions" (XDEM): the phrase already names the portfolio.
+    sentence = re.sub(r"\)\s+to (?:the |its |your )?existing (?:positions|holdings)\b", ")", sentence)
+    return _RUN_TOGETHER.sub(r"\1 and \2", sentence)
+
+
+def distinct_risks(risks: list[str]) -> list[str]:
+    """Risk lines less repeats: the same text, or the same figures said again (XDEM listed its
+    correlation of 0.82 twice)."""
+    seen_text: set[str] = set()
+    seen_figures: set[frozenset[str]] = set()
+    out: list[str] = []
+    for risk in risks:
+        key = re.sub(r"\W+", " ", risk.lower()).strip()
+        figures = frozenset(re.findall(r"\d+(?:\.\d+)?", risk))
+        if key in seen_text or (figures and figures in seen_figures):
+            continue
+        seen_text.add(key)
+        if figures:
+            seen_figures.add(figures)
+        out.append(risk)
+    return out
+
+
 #: "Strong momentum" needs at least this rank; below it, the figure speaks for itself.
 STRONG_MOMENTUM_RANK = 0.8
 #: A weekly correlation with the book from here on is no diversifier.
@@ -340,7 +454,7 @@ def _unsupported_claim(text: str, correlation: float | None) -> bool:
     )
 
 
-def without_unsupported_sentences(thesis: str, correlation: float | None = None) -> str:
+def without_unsupported_sentences(thesis: str, correlation: float | None = None, facts_text: str | None = None) -> str:
     """``thesis`` less the sentences with an unsupported claim; unchanged if too little is left.
 
     In run dd3fe7b9 (2026-11-07) the model wrote a diversification claim on both
@@ -348,7 +462,14 @@ def without_unsupported_sentences(thesis: str, correlation: float | None = None)
     A thesis of nothing but such claims stays as it is and is rejected by the checks.
     """
     sentences = re.split(r"(?<=[.!?])\s+", thesis.strip())
-    kept = " ".join(s for s in sentences if not _unsupported_claim(s, correlation))
+    # Tidied first: a style clause ("within a growth style portfolio") is cut, not
+    # the sentence with its figures.
+    tidied = [tidy_sentence(s) for s in sentences]
+    kept = " ".join(
+        s for s in tidied
+        if not _unsupported_claim(s, correlation)
+        and (facts_text is None or sloppy_sentence(s, facts_text) is None)
+    )
     return kept if len(kept) >= MIN_KEPT_THESIS_CHARS else thesis
 
 
@@ -376,14 +497,20 @@ def check_thesis(
     """Clean and check a thesis and its risks; the first failing rule names the reason."""
     trimmed = trim_to_sentence(plain_field_names(thesis or ""))
     named = [plain_field_names(r.strip()) for r in key_risks if isinstance(r, str) and r.strip()]
-    risks = [
-        r for r in named
+    risks = distinct_risks([
+        r for r in (tidy_sentence(x) for x in named)
         if not is_data_gap_risk(r) and not is_false_risk(r, de_ratio) and not _unsupported_claim(r, correlation)
-    ]
+        and sloppy_risk(r, facts_text) is None
+    ])
     if trimmed is None:
         return ThesisCheck(thesis, risks, "truncated", ["the thesis has no complete sentence"])
-    trimmed = without_unsupported_sentences(trimmed, correlation)
+    trimmed = without_unsupported_sentences(trimmed, correlation, facts_text)
     result = ThesisCheck(trimmed, risks)
+    # Left in only because too little would remain without it (ADM: both sentences).
+    sloppy = [w for w in (sloppy_sentence(x, facts_text) for x in re.split(r"(?<=[.!?])\s+", trimmed)) if w]
+    if sloppy:
+        result.reason, result.problems = "mislabel", [f"the thesis {w}" for w in sloppy]
+        return result
     texts = [trimmed, *risks]
     if any(has_foreign_script(t) for t in texts):
         result.reason, result.problems = "script", ["non-Latin characters (CJK, Hangul or Cyrillic)"]

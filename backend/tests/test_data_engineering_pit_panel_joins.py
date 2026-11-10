@@ -375,6 +375,34 @@ def test_pit_insider_signal_excludes_10b5_1_plan_trades(tmp_path, monkeypatch):
     assert joined.iloc[0]["net_insider_flow_usd"] == pytest.approx(10000.0 - 3000.0)  # Carol's plan sale is out
 
 
+def test_pit_insider_signal_drops_trades_first_filed_long_after_they_were_made(tmp_path, monkeypatch):
+    """Run 57c8f8b8 (2026-11-10): ADM's director filed on 2026-11-09 a purchase
+    from February next to one from 2026-11-05. Anchored on the filing date, the
+    February trade entered the 90-day flow as recent buying (683,506 USD where
+    the trades made in the window came to 196,756 USD)."""
+    monkeypatch.setenv("QUANTFOLIO_PARQUET_PANEL_DIR", str(tmp_path))
+    db = _memory_db()
+    base = {"issuer_cik": "500", "ticker": "TESTCO", "cik": "1", "insider_name": "Dan Director", "code": "P"}
+    rows = [
+        {**base, "accession": "0001", "filing_date": "09-NOV-2026", "transaction_date": "05-NOV-2026",
+         "shares": "2800", "price": "70.27"},
+        {**base, "accession": "0002", "filing_date": "09-NOV-2026", "transaction_date": "05-FEB-2026",
+         "shares": "7500", "price": "64.90"},
+        # Filed 30 days after the trade: late, but still inside the tolerance.
+        {**base, "accession": "0003", "filing_date": "09-NOV-2026", "transaction_date": "10-OCT-2026",
+         "cik": "2", "insider_name": "Erin Officer", "shares": "100", "price": "70.00"},
+    ]
+    _write_insider_tsvs(tmp_path / "sec_extract", rows)
+    result = load_insider_trading_extract(tmp_path / "sec_extract", dry_run=False)
+    assert result.ok is True, result.error
+
+    joined = pit_insider_signal_for_symbol(db, "TESTCO", pd.DatetimeIndex(["2026-11-10"]))
+
+    assert joined is not None
+    assert joined.iloc[0]["cluster_buy_score"] == 2
+    assert joined.iloc[0]["net_insider_flow_usd"] == pytest.approx(2800 * 70.27 + 100 * 70.0)
+
+
 def test_pit_insider_signal_reads_partitions_without_the_plan_column(tmp_path, monkeypatch):
     """Partitions written before the column existed read as "unknown", which
     is not a plan: their trades stay in the signal."""

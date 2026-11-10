@@ -87,7 +87,7 @@ async def get_piotroski_score(
 ) -> dict[str, Any]:
     """Piotroski-inspired fundamental strength score (0–9) for *ticker*."""
     from app.foundation.piotroski import compute_piotroski
-    return compute_piotroski(db, ticker.upper())
+    return compute_piotroski(db, ticker.upper(), refresh=True)
 
 
 @router.get("/stock/{ticker}/sentiment")

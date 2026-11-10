@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -18,11 +18,17 @@ from app.foundation.portfolio.name_resolver import resolve_position_name
 from app.foundation.models.entities import (
     MultiHorizonVerdict,
     NewsItem,
-    PriceCache,
     StockResearchReport,
     User,
 )
-from app.foundation.market import fundamentals, quote
+from app.foundation.fundamentals_context import (
+    NET_DEBT_EBITDA_OK,
+    book_ratios_unreliable_in,
+    growth_basis,
+    growth_basis_text,
+    net_debt_to_ebitda,
+)
+from app.foundation.market import fundamentals, history, quote
 from app.foundation.text_safety import ascii_safe
 
 logger = logging.getLogger(__name__)
@@ -38,19 +44,116 @@ REPORT_TTL_HOURS = 24
 # ---------------------------------------------------------------------------
 
 def _price_history(db: Session, ticker: str, days: int = 365) -> list[dict[str, Any]]:
-    """Pull OHLCV rows from PriceCache."""
-    cutoff = datetime.now(UTC) - timedelta(days=days)
-    rows = (
-        db.query(PriceCache)
-        .filter(PriceCache.ticker == ticker, PriceCache.date >= cutoff)
-        .order_by(PriceCache.date)
-        .all()
-    )
-    return [{"date": str(r.date), "open": float(r.open) if r.open is not None else 0,
-             "high": float(r.high) if r.high is not None else 0,
-             "low": float(r.low) if r.low is not None else 0,
-             "close": float(r.close) if r.close is not None else 0,
-             "volume": int(r.volume or 0)} for r in rows]
+    """Daily OHLCV for the chart and the report, oldest first.
+
+    Read through :func:`market.history`: stored daily bars first, then the
+    price cache, then a live fetch. The price cache alone holds whatever
+    quotes touched it: for WKL.AS on 2026-11-10 that was today's partial
+    session (one row) beside 1,865 stored bars, so the chart showed one
+    candle and the report called a stock up 30 % in six weeks "flat".
+    """
+    try:
+        rows = history(db, ticker, days=days)
+    except Exception:
+        logger.warning("research: price history failed for %s", ticker, exc_info=True)
+        return []
+    out = []
+    for r in rows:
+        close = r.get("close")
+        if close is None:
+            continue
+        day = r.get("date")
+        out.append({
+            "date": day.isoformat()[:10] if isinstance(day, (date, datetime)) else str(day)[:10],
+            "open": float(r["open"]) if r.get("open") is not None else float(close),
+            "high": float(r["high"]) if r.get("high") is not None else float(close),
+            "low": float(r["low"]) if r.get("low") is not None else float(close),
+            "close": float(close),
+            "volume": int(r.get("volume") or 0),
+        })
+    return out
+
+
+def _rsi(closes: list[float], period: int = 14) -> float | None:
+    """Wilder's RSI over *closes*; None with too few prices."""
+    if len(closes) <= period:
+        return None
+    gains = [max(b - a, 0.0) for a, b in zip(closes, closes[1:], strict=False)]
+    losses = [max(a - b, 0.0) for a, b in zip(closes, closes[1:], strict=False)]
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for g, l_ in zip(gains[period:], losses[period:], strict=True):
+        avg_gain = (avg_gain * (period - 1) + g) / period
+        avg_loss = (avg_loss * (period - 1) + l_) / period
+    if avg_loss == 0:
+        return 100.0
+    return round(100 - 100 / (1 + avg_gain / avg_loss), 1)
+
+
+def price_technicals(history_rows: list[dict[str, Any]], today: date | None = None) -> dict[str, Any] | None:
+    """The price and volume figures the report may quote, computed here.
+
+    The model got a price range and nothing else, and filled the gap with
+    guesses. Volume averages use completed sessions only: a bar dated today
+    may be a session in progress (WKL.AS: 143,542 shares at midday read as
+    "11 % of typical activity").
+    """
+    if not history_rows:
+        return None
+    today = today or datetime.now(UTC).date()
+    closes = [float(r["close"]) for r in history_rows]
+    last = history_rows[-1]
+    last_close = closes[-1]
+
+    def _ret(sessions: int) -> float | None:
+        if len(closes) <= sessions or closes[-1 - sessions] <= 0:
+            return None
+        return round((last_close / closes[-1 - sessions] - 1) * 100, 1)
+
+    def _sma(n: int) -> float | None:
+        return round(sum(closes[-n:]) / n, 2) if len(closes) >= n else None
+
+    completed = [r for r in history_rows if str(r["date"])[:10] < today.isoformat()]
+    vols = [int(r.get("volume") or 0) for r in completed[-20:] if r.get("volume")]
+    year = closes[-252:]
+    daily = [b / a - 1 for a, b in zip(closes[-64:], closes[-63:], strict=False) if a > 0]
+    vol_3m = None
+    if len(daily) >= 20:
+        mean = sum(daily) / len(daily)
+        vol_3m = round((sum((x - mean) ** 2 for x in daily) / (len(daily) - 1)) ** 0.5 * (252 ** 0.5) * 100, 1)
+    year_rows = history_rows[-252:]
+    peak, max_dd = year[0], 0.0
+    for c in year:
+        peak = max(peak, c)
+        max_dd = min(max_dd, c / peak - 1)
+    hi_i = max(range(len(year)), key=year.__getitem__)
+    lo_i = min(range(len(year)), key=year.__getitem__)
+    sma50, sma200 = _sma(50), _sma(200)
+    return {
+        "sessions": len(closes),
+        "last_close": round(last_close, 4),
+        "last_close_date": str(last["date"])[:10],
+        "last_session_in_progress": str(last["date"])[:10] >= today.isoformat(),
+        "return_1w_pct": _ret(5),
+        "return_1m_pct": _ret(21),
+        "return_3m_pct": _ret(63),
+        "return_6m_pct": _ret(126),
+        "return_12m_pct": _ret(252),
+        "high_52w": round(max(year), 4),
+        "high_52w_date": str(year_rows[hi_i]["date"])[:10],
+        "low_52w": round(min(year), 4),
+        "low_52w_date": str(year_rows[lo_i]["date"])[:10],
+        "pct_below_52w_high": round((1 - last_close / max(year)) * 100, 1) if max(year) > 0 else None,
+        "sma_50": sma50,
+        "sma_200": sma200,
+        "above_sma_50": None if sma50 is None else last_close > sma50,
+        "above_sma_200": None if sma200 is None else last_close > sma200,
+        "rsi_14": _rsi(closes[-120:]),
+        "volatility_3m_annual_pct": vol_3m,
+        "max_drawdown_12m_pct": round(max_dd * 100, 1),
+        "avg_volume_20d_completed": round(sum(vols) / len(vols)) if vols else None,
+        "last_completed_volume": int(completed[-1].get("volume") or 0) if completed else None,
+    }
 
 
 def _latest_fundamentals(db: Session, ticker: str) -> dict[str, Any] | None:
@@ -68,7 +171,18 @@ def _latest_fundamentals(db: Session, ticker: str) -> dict[str, Any] | None:
         logger.warning("research: fundamentals lookup failed for %s", ticker, exc_info=True)
         return None
     data = result.get("data")
-    return data if isinstance(data, dict) and data else None
+    if not isinstance(data, dict) or not data:
+        return None
+    out = dict(data)
+    # Leverage that does not divide by book equity, for the page and the prompt.
+    nd = net_debt_to_ebitda(data)
+    if nd is not None:
+        out["net_debt_ebitda"] = nd
+    # What the growth figures compare: one quarter (yfinance) or twelve months (Finnhub).
+    basis = growth_basis(data, result.get("source"))
+    if basis:
+        out["growth_basis"] = basis
+    return out
 
 
 def _recent_news(db: Session, ticker: str, limit: int = 10) -> list[dict[str, Any]]:
@@ -144,10 +258,12 @@ def _user_risk_profile(db: Session, user_id: str) -> str:
 def build_context(db: Session, ticker: str, user_id: str) -> dict[str, Any]:
     """Gather all data dimensions into one dict for the LLM prompt."""
     q = quote(db, ticker)
+    price_history = _price_history(db, ticker)
     return {
         "ticker": ticker,
         "quote": q,
-        "price_history": _price_history(db, ticker),
+        "price_history": price_history,
+        "technicals": price_technicals(price_history),
         "fundamentals": _latest_fundamentals(db, ticker),
         "recent_news": _recent_news(db, ticker),
         "recommendations": _existing_recommendations(db, ticker),
@@ -214,44 +330,140 @@ a concise but thorough stock research report.  The report must include:
 6. **Risk Factors** — key risks specific to this stock.
 7. **Conclusion & Recommendation** — actionable verdict (BUY / HOLD / SELL) with confidence (0-1).
 
+Rules:
+- Quote only figures given below, with the period they cover. Do not compute
+  or estimate indicators yourself: the price figures were computed from the
+  daily closes. If a figure is missing, say it is not available.
+- Describe the trend from the stated returns and moving averages; never from
+  one session. Judge volume only against completed sessions.
+- The market regime describes the broad market, not this stock.
+- Leverage: when the data says book equity is too small for debt/equity and
+  ROE to mean anything, do not use them; judge debt by net debt / EBITDA.
+- Growth figures cover the period their label states, in reported currency:
+  one quarter can swing with prices, currency moves and disposals. Quote the
+  period; do not call one quarter a trend or "stagnation", and do not name a
+  cause the data does not give.
+- Say "not given" rather than supply a date, a cause, a size or a history
+  that is not in the data.
+- With no news given, say sentiment cannot be judged from the data. Do not
+  infer what investors think from volume or price.
+
 Adapt tone to the user's risk profile (conservative → cautious, aggressive → opportunity-focused).
 Include brief explanations for technical terms.
 Output in Markdown.
 """
 
 
+def _pct(value: Any, digits: int = 1) -> str | None:
+    try:
+        return f"{float(value) * 100:.{digits}f} %"
+    except (TypeError, ValueError):
+        return None
+
+
+def _fmt(value: Any, digits: int = 2) -> str | None:
+    try:
+        return f"{float(value):,.{digits}f}"
+    except (TypeError, ValueError):
+        return None
+
+
+def _market_cap(value: Any, currency: Any) -> str | None:
+    """Market cap in billions with its size class (the model called a 19.6 bn company small-cap)."""
+    try:
+        cap = float(value)
+    except (TypeError, ValueError):
+        return None
+    size = "large cap" if cap >= 10e9 else "mid cap" if cap >= 2e9 else "small cap"
+    return f"{cap / 1e9:.1f} bn {currency or ''} ({size})".replace("  ", " ")
+
+
+def _technicals_lines(t: dict[str, Any] | None) -> list[str]:
+    if not t:
+        return ["\n**Price history:** not available."]
+    lines = [f"\n**Price figures** (from {t['sessions']} daily closes up to {t['last_close_date']}"
+             + (", the last session still in progress" if t.get("last_session_in_progress") else "") + "):"]
+    labels = [
+        ("last_close", "Last close"), ("return_1w_pct", "Return 1 week %"), ("return_1m_pct", "Return 1 month %"),
+        ("return_3m_pct", "Return 3 months %"), ("return_6m_pct", "Return 6 months %"),
+        ("return_12m_pct", "Return 12 months %"), ("high_52w", "52-week high"), ("high_52w_date", "Date of the 52-week high"),
+        ("low_52w", "52-week low"), ("low_52w_date", "Date of the 52-week low"),
+        ("pct_below_52w_high", "Below 52-week high %"), ("sma_50", "50-day average"), ("sma_200", "200-day average"),
+        ("above_sma_50", "Above 50-day average"), ("above_sma_200", "Above 200-day average"),
+        ("rsi_14", "RSI 14 days"), ("volatility_3m_annual_pct", "Volatility, last 3 months, annualised %"),
+        ("max_drawdown_12m_pct", "Largest fall from a peak, 12 months %"),
+        ("avg_volume_20d_completed", "Average daily volume, last 20 completed sessions"),
+        ("last_completed_volume", "Volume of the last completed session"),
+    ]
+    for key, label in labels:
+        if t.get(key) is not None:
+            lines.append(f"- {label}: {t[key]}")
+    return lines
+
+
+def _fundamentals_lines(fund: dict[str, Any] | None) -> list[str]:
+    """Fundamentals as labelled lines; the provider's field names hid what each covers."""
+    if not fund:
+        return ["\n**Fundamentals:** not available."]
+    unreliable = book_ratios_unreliable_in(fund)
+    basis_text = growth_basis_text(growth_basis(fund))
+    nd = net_debt_to_ebitda(fund)
+    rows: list[tuple[str, str | None]] = [
+        ("Sector / industry", " / ".join(str(x) for x in (fund.get("sector"), fund.get("industry")) if x) or None),
+        ("Market cap", _market_cap(fund.get("market_cap"), fund.get("currency"))),
+        ("Trailing P/E", _fmt(fund.get("pe_ratio"))),
+        ("Forward P/E", _fmt(fund.get("forward_pe"))),
+        ("EV / EBITDA", _fmt(fund.get("ev_ebitda"))),
+        ("Price / book", _fmt(fund.get("pb_ratio"))),
+        ("Free-cash-flow yield", _pct(fund.get("fcf_yield"))),
+        ("Dividend yield", _pct(fund.get("dividend_yield"))),
+        ("Gross margin", _pct(fund.get("gross_margin"))),
+        ("Profit margin", _pct(fund.get("profit_margin"))),
+        ("Return on equity", None if unreliable else _pct(fund.get("roe"))),
+        ("Debt / equity", None if unreliable else (
+            f"{float(fund['debt_equity']):.0f} %" if _fmt(fund.get("debt_equity")) else None)),
+        ("Net debt / EBITDA", None if nd is None else f"{nd:.1f}x"
+         + (" (manageable)" if nd <= NET_DEBT_EBITDA_OK else " (high)")),
+        (f"Revenue growth {basis_text}, reported currency", _pct(fund.get("revenue_growth"))),
+        (f"Earnings growth {basis_text}", _pct(fund.get("earnings_growth"))),
+        ("Beta (provider, against its home index)", _fmt(fund.get("beta"))),
+    ]
+    lines = ["\n**Fundamentals** (provider data):"]
+    lines += [f"- {label}: {value}" for label, value in rows if value]
+    if unreliable:
+        lines.append(
+            "- Book equity is too small for debt/equity and return on equity to mean anything "
+            f"(price/book {_fmt(fund.get('pb_ratio'))}; typically after years of buybacks); they are left out."
+        )
+    return lines
+
+
 def _build_user_message(context: dict[str, Any]) -> str:
     parts = [f"## {context['ticker']} Research Context\n"]
     q = context.get("quote", {})
     if q:
-        parts.append(f"**Current Price:** {q.get('price', 'N/A')} | Source: {q.get('source', 'N/A')}")
+        parts.append(f"**Current Price:** {q.get('price', 'N/A')} {q.get('currency') or ''} | Source: {q.get('source', 'N/A')}")
     parts.append(f"\n**Risk Profile:** {context.get('risk_profile', 'moderate')}")
-    parts.append(f"**Market Regime:** {context.get('regime', 'unknown')}")
+    parts.append(f"**Broad-market regime (not about this stock):** {context.get('regime', 'unknown')}")
 
-    # Price history summary
-    history = context.get("price_history", [])
-    if history:
-        closes = [h["close"] for h in history]
-        parts.append(f"\n**Price Range ({len(history)} days):** {min(closes):.2f} – {max(closes):.2f}")
-
-    # Fundamentals
-    fund = context.get("fundamentals")
-    if fund:
-        parts.append(f"\n**Fundamentals:** {json.dumps(fund, default=str)[:2000]}")
+    parts += _technicals_lines(context.get("technicals"))
+    parts += _fundamentals_lines(context.get("fundamentals"))
 
     # News
     news = context.get("recent_news", [])
     if news:
         parts.append("\n**Recent News:**")
         for n in news[:5]:
-            parts.append(f"- [{n.get('sentiment_label', 'neutral')}] {n['title']} ({n['source']})")
+            parts.append(f"- [{n.get('sentiment_label', 'neutral')}] {n['title']} ({n['source']}, {n['published_at'][:10]})")
+    else:
+        parts.append("\n**Recent News:** none stored for this stock.")
 
     # Existing recommendations
     recs = context.get("recommendations", [])
     if recs:
         parts.append("\n**Prior Recommendations:**")
         for r in recs:
-            parts.append(f"- {r['verdict']} ({r['confidence']:.0%}) — {r['horizon']}")
+            parts.append(f"- {r['verdict']} (confidence {r['confidence']}, {r.get('mode')}) — {r['horizon']}")
 
     # Portfolio context
     pc = context.get("portfolio_context", {})

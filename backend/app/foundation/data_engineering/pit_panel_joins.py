@@ -85,6 +85,12 @@ _IBES_MEASURE = "EPS"
 # ``pit_insider_signal_for_symbol`` to exclude noise before scoring.
 _ROUTINE_MIN_CONSECUTIVE_YEARS = 3
 _CLUSTER_WINDOW_DAYS = 30
+# A Form 4 is due two business days after the trade. A trade first reported
+# more than a month later is old news when it surfaces: ADM's director filed a
+# February purchase on 2026-11-09, and anchored on its filing date it entered
+# the 90-day flow as recent buying (683,506 USD against 196,756 USD of trades
+# made inside the window; run 57c8f8b8). Such rows are dropped.
+_LATE_FILING_MAX_DAYS = 30
 
 # JKP characteristics are monthly and ``eom`` is already the availability
 # date (see ``read_wrds_factor_characteristics``), so a fresh row is at most
@@ -445,6 +451,13 @@ _SAME_TRADE_COLUMNS = (
 )
 
 
+def _late_reported(rows: pd.DataFrame) -> pd.Series:
+    """True where the trade was first filed more than :data:`_LATE_FILING_MAX_DAYS` after it was made."""
+    filed = pd.to_datetime(rows["filing_date"], errors="coerce")
+    traded = pd.to_datetime(rows["transaction_date"], errors="coerce")
+    return cast(pd.Series, (filed - traded) > pd.Timedelta(days=_LATE_FILING_MAX_DAYS))
+
+
 def _one_row_per_trade(rows: pd.DataFrame) -> pd.DataFrame:
     """One row for each trade reported by several joint filers.
 
@@ -467,8 +480,9 @@ def pit_insider_signal_for_symbol(
     own look-ahead warning). Restricted to open-market P/S transactions
     (:data:`OPEN_MARKET_TRANSACTION_CODES`), with routine traders
     (:func:`_classify_routine_insiders`) and trades from filings that ticked
-    the Rule 10b5-1 plan box (:func:`_planned_trades`) excluded, and each
-    trade counted once (:func:`_one_row_per_trade`).
+    the Rule 10b5-1 plan box (:func:`_planned_trades`) and trades first
+    filed more than a month after they were made (:func:`_late_reported`)
+    excluded, and each trade counted once (:func:`_one_row_per_trade`).
 
     Per requested date, over the trailing windows below (as of that date):
 
@@ -491,7 +505,10 @@ def pit_insider_signal_for_symbol(
 
     ticker_match = ticker_match.dropna(subset=["filing_date", "transaction_date"]).copy()
     routine = _classify_routine_insiders(ticker_match).reindex(ticker_match.index, fill_value=False)
-    opportunistic = _one_row_per_trade(cast(pd.DataFrame, ticker_match[~(routine | _planned_trades(ticker_match))]))
+    late = _late_reported(ticker_match).reindex(ticker_match.index, fill_value=False)
+    opportunistic = _one_row_per_trade(
+        cast(pd.DataFrame, ticker_match[~(routine | _planned_trades(ticker_match) | late)])
+    )
 
     original_index = pd.DatetimeIndex(dates)
     naive_dates = (

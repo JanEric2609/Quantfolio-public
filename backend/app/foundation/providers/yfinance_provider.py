@@ -161,7 +161,16 @@ class YFinanceProvider(MarketDataProvider):
                 "profit_margin": info.get("profitMargins"),
                 "gross_margin": info.get("grossMargins"),
                 "debt_equity": info.get("debtToEquity"),
+                # Leverage that does not divide by book equity (buybacks can
+                # shrink it: Wolters Kluwer's D/E read 590 % at a net debt /
+                # EBITDA of 2.0x). fundamentals_context.net_debt_to_ebitda.
+                "total_debt": info.get("totalDebt"),
+                "total_cash": info.get("totalCash"),
+                "ebitda": info.get("ebitda"),
+                # Yahoo's revenueGrowth: the latest quarter against the same
+                # quarter a year earlier, in reported currency.
                 "revenue_growth": info.get("revenueGrowth"),
+                "growth_basis": "quarter_yoy",
                 "earnings_growth": info.get("earningsGrowth"),
                 "eps": info.get("trailingEps"),
                 "market_cap": info.get("marketCap"),

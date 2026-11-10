@@ -311,7 +311,8 @@ def _build_ticker_fundamentals(
         for ticker in tickers:
             try:
                 result = compute_piotroski(db, ticker)
-                score = result.get("score") if result else None
+                # On 0-9 even when a criterion was not meaningful (piotroski.py).
+                score = (result.get("score_9", result.get("score")) if result else None)
                 if score is not None:
                     # Extract individual Piotroski components if available
                     details = result.get("details", {})
