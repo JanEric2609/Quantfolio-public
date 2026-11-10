@@ -17,6 +17,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.foundation import quant_metrics as qm
 from app.foundation.models.entities import RecommendationDossier
 from app.lab.alphacrafter.shared_memory import SharedMemoryH
 
@@ -62,6 +63,24 @@ def compute_verdict(conviction: float) -> str:
     if conviction >= VERDICT_REVIEW_THRESHOLD:
         return "hold"
     return "review"
+
+
+def deflated_backtest_sharpe(
+    sharpe: float, n_trials: int | None, n_obs: int | None, periods_per_year: int = 252
+) -> float:
+    """The winning config's Sharpe less the best-of-N luck hurdle (ADR 0025).
+
+    The Trader ranks its grid by Sharpe and hands the top one on; the best of
+    N skill-less configs has an expected Sharpe above zero
+    (:func:`quant_metrics.dsr_hurdle_curve`). N is the ``alphacrafter_trader``
+    family, the configs the winner was selected among. Unchanged when N or the
+    sample length is unknown.
+    """
+    if not n_trials or n_trials <= 1 or not n_obs or n_obs < 2:
+        return sharpe
+    curve = qm.dsr_hurdle_curve([int(n_trials)], int(n_obs), periods_per_year)
+    hurdle = float(curve[0]["sharpe_hurdle"]) if curve else 0.0
+    return sharpe - hurdle
 
 
 def compute_conviction(
@@ -147,9 +166,12 @@ async def build_dossier(
     sharpe = float(trader_config.get("sharpe_ratio", trader_config.get("sharpe", 0.0)) or 0.0)
     max_dd = float(trader_config.get("max_drawdown", trader_config.get("max_dd", 0.0)) or 0.0)
 
+    deflated_sharpe = deflated_backtest_sharpe(
+        sharpe, trader_config.get("n_trials"), trader_config.get("n_obs")
+    )
     if conviction is None:
         conviction = compute_conviction(
-            sharpe=sharpe, mean_ic=mean_ic, regime_score=regime_score, crisis=crisis
+            sharpe=deflated_sharpe, mean_ic=mean_ic, regime_score=regime_score, crisis=crisis
         )
     if size_pct is None:
         # Scale size with conviction, capped at 10% of the portfolio.
@@ -166,6 +188,11 @@ async def build_dossier(
         f"Backtest Sharpe {sharpe:.2f}, max drawdown {max_dd:.2%}, "
         f"rebalance {trader_config.get('rebalance_freq', 'D')}."
     )
+    if deflated_sharpe != sharpe:
+        risk_notes += (
+            f" Conviction uses Sharpe {deflated_sharpe:.2f} after the best-of-"
+            f"{trader_config.get('n_trials')} configs luck hurdle."
+        )
     if crisis:
         risk_notes += " Crisis gate active — conviction haircut applied."
     if mc_run_id:
@@ -239,7 +266,11 @@ class DossierBuilder:
             return h
 
         best_config = max(configs, key=lambda c: c.get("sharpe_ratio", 0))
-        sharpe = best_config.get("sharpe_ratio", 0.0)
+        sharpe = deflated_backtest_sharpe(
+            float(best_config.get("sharpe_ratio", 0.0) or 0.0),
+            qm.resolve_n_trials(db, (qm.ALPHACRAFTER_TRADER_FAMILY,)),
+            best_config.get("n_obs"),
+        )
 
         regime_score = screener_outputs.get("regime_score")
         regime_label = screener_outputs.get("regime_label") or h.market_state.regime_label

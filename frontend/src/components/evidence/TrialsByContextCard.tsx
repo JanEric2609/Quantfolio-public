@@ -9,7 +9,11 @@ export function TrialsByContextCard({
   acTrials: number;
   resolved: number;
 }) {
-  const rows = Object.entries(byContext).map(([ctx, n]) => ({ key: ctx, label: ctx, n }));
+  const rows = Object.entries(byContext).map(([ctx, n]) => ({
+    key: ctx,
+    label: ctx === "discover_legacy" ? "Discover factor scoring (until 28 Sep 2026)" : ctx,
+    n,
+  }));
   if (acTrials > 0) {
     rows.push({ key: "ac_trial_ledger", label: "Discover factor scoring (until 28 Sep 2026)", n: acTrials });
   }
@@ -19,10 +23,10 @@ export function TrialsByContextCard({
   return (
     <Card data-testid="trials-by-context">
       <CardHeader>
-        <CardTitle className="text-base">Trials by context</CardTitle>
+        <CardTitle className="text-base">Trials by family</CardTitle>
         <CardDescription>
-          Where search breadth has been spent. The rows add up to N = {resolved.toLocaleString("en-US")}, the count
-          every Deflated Sharpe gate deflates by.
+          Where search breadth has been spent. The rows add up to N = {resolved.toLocaleString("en-US")}, the total
+          over every family; each gate deflates only by the families it draws from.
         </CardDescription>
       </CardHeader>
       <CardContent>

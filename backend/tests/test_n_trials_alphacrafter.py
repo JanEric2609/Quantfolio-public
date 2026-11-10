@@ -20,7 +20,8 @@ def _seed(db):
 def test_rows_in_both_ledgers_are_summed():
     db = _memory_db()
     _seed(db)
-    assert resolve_n_trials(db) == 3 + 8
+    # ADR 0025: ac_trial_ledger counts as distinct config_hash ("h"), not rows.
+    assert resolve_n_trials(db) == 3 + 1
 
 
 def test_each_alphacrafter_run_is_one_family():

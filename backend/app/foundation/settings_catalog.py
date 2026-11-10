@@ -286,8 +286,21 @@ _reg(CatalogEntry("plan_tilt_max_pct", "profile", "Factor tilt cap",
     input_type="number", unit="pct", min=0, max=100, section="Monthly plan",
     extended_help="15 % keeps tracking error tight (about 1 pp a year worst-case lag); 35 % is moderate."))
 _reg(CatalogEntry("plan_satellite_max_pct", "profile", "Stock-pick cap",
-    "Largest share of the book single stocks may reach once a strategy passes the evidence gate.",
+    "Hard ceiling on single stocks. The capital ladder sets the actual share and never goes above this.",
     input_type="number", unit="pct", min=0, max=100, section="Monthly plan"))
+_reg(CatalogEntry("ladder_tuition_budget_pct", "profile", "Ladder: tuition budget",
+    "The yearly loss, as a share of the book, you accept to try an unproven stock picker at the Tuition stage.",
+    input_type="number", unit="pct", min=0, max=5, section="Monthly plan", advanced=True,
+    extended_help="Sizes the Tuition weight: budget / (|bad alpha| + 1.645 x tracking error), at most 5 %."))
+_reg(CatalogEntry("ladder_bad_alpha_pct", "profile", "Ladder: bad-case alpha",
+    "The yearly underperformance of a picker with no skill, after costs, that the Tuition weight is sized against.",
+    input_type="number", unit="pct", min=-20, max=0, section="Monthly plan", advanced=True))
+_reg(CatalogEntry("ladder_proven_weight_pct", "profile", "Ladder: Proven weight",
+    "Share of the book stock picks get at the Proven stage (at most 20 %).",
+    input_type="number", unit="pct", min=0, max=20, section="Monthly plan", advanced=True))
+_reg(CatalogEntry("ladder_owner_veto", "profile", "Ladder: owner veto",
+    "Keep every candidate at the Paper stage (0 % stock picks), whatever the evidence says.",
+    input_type="boolean", section="Monthly plan"))
 _reg(CatalogEntry("plan_drift_band_pp", "profile", "Drift band",
     "A sleeve is only sold down once it sits this far above target and a year of contributions can't fix it.",
     input_type="number", unit="pp", min=0, section="Monthly plan",

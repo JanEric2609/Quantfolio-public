@@ -28,6 +28,17 @@ router = APIRouter(prefix="/api/advisor", tags=["advisor"])
 
 
 def _advisor_portfolio(db: Session, user_id: str) -> PaperPortfolio | None:
+    """The current champion's sleeve; the ``advisor`` sleeve before any strategy exists.
+
+    After a promotion the champion drives its own ``adv-<id>`` sleeve (ADR 0025).
+    """
+    from app.decision.advisor import get_champion
+
+    champion = get_champion(db, user_id)
+    if champion is not None and champion.portfolio_id:
+        portfolio = db.get(PaperPortfolio, champion.portfolio_id)
+        if portfolio is not None:
+            return portfolio
     return (
         db.query(PaperPortfolio)
         .filter(PaperPortfolio.user_id == user_id, PaperPortfolio.mandate == ADVISOR_MANDATE)
@@ -86,7 +97,7 @@ def latest_cycle(
         db.query(LlmPortfolioDecision)
         .filter(
             LlmPortfolioDecision.portfolio_id == portfolio.id,
-            LlmPortfolioDecision.mandate == ADVISOR_MANDATE,
+            LlmPortfolioDecision.mandate == (portfolio.mandate or ADVISOR_MANDATE),
         )
         .order_by(LlmPortfolioDecision.review_date.desc())
         .first()
@@ -267,6 +278,7 @@ def evolution_status(
     return {
         "champion": _strategy_payload(db, champion),
         "challenger": _strategy_payload(db, challenger),
+        "paired_test": _paired_test_payload(db, champion, challenger),
         "rounds": rounds,
         "promotion_history": [
             {
@@ -290,6 +302,45 @@ def evolution_status(
             }
             for lesson in lessons
         ],
+    }
+
+
+def _paired_test_payload(db: Session, champion: Any, challenger: Any) -> dict[str, Any]:
+    """The pre-registered promotion rule (ADR 0025) and its latest result for the pair."""
+    from app.foundation.models.entities import CompetitionRun
+    from app.decision.advisor import promotion as rule
+
+    last: dict[str, Any] | None = None
+    if champion is not None and challenger is not None:
+        run = (
+            db.query(CompetitionRun)
+            .filter(
+                CompetitionRun.portfolio_a_id == champion.portfolio_id,
+                CompetitionRun.portfolio_b_id == challenger.portfolio_id,
+            )
+            .order_by(CompetitionRun.created_at.desc())
+            .first()
+        )
+        if run is not None:
+            try:
+                last = json.loads(run.state_json or "{}").get("last_result")
+            except json.JSONDecodeError:
+                last = None
+    return {
+        "rule": {
+            "endpoint": "Brier(champion) - Brier(challenger) on matched shadow forecasts, mean per date",
+            "test": "one-sided Diebold-Mariano, Newey-West lag 20, Harvey-Leybourne-Newbold correction",
+            "overall_alpha": rule.OVERALL_ALPHA,
+            "nominal_alpha_per_look": rule.POCOCK_NOMINAL_ALPHA,
+            "max_looks": rule.MAX_LOOKS,
+            "look_spacing_trading_days": rule.LOOK_SPACING_TRADING_DAYS,
+            "min_trading_days": rule.MIN_TRADING_DAYS,
+            "min_horizons": rule.MIN_HORIZONS,
+            "min_pairs": rule.MIN_PAIRS,
+            "return_floor_annual": rule.GUARD_RETURN_FLOOR_ANNUAL,
+            "mdd_slack": rule.GUARD_MDD_SLACK,
+        },
+        "last": last,
     }
 
 

@@ -14,14 +14,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Progress } from "../components/ui/progress";
+import { LadderCards } from "../components/graduation/LadderCards";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import {
   api,
   getGraduationStatus,
   generateGraduatedRecommendations,
+  getLadderState,
   type GraduationStatus,
   type GraduationTransition,
+  type LadderState,
   type GraduatedRecommendation,
 } from "../lib/api";
 
@@ -66,6 +69,7 @@ export function GraduationPage() {
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [recs, setRecs] = useState<GraduatedRecommendation[] | null>(null);
+  const [ladder, setLadder] = useState<LadderState | null>(null);
 
   function load() {
     setLoading(true);
@@ -74,6 +78,9 @@ export function GraduationPage() {
       .then(setStatus)
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load graduation status"))
       .finally(() => setLoading(false));
+    getLadderState()
+      .then(setLadder)
+      .catch(() => setLadder(null));
     api<GraduationTransition[]>("/api/graduation/transitions")
       .then(setTransitions)
       .catch(() => setTransitions([]));
@@ -118,22 +125,26 @@ export function GraduationPage() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold flex items-center gap-2">
-            <GraduationCap className="h-5 w-5" /> LLM Graduation
+            <GraduationCap className="h-5 w-5" /> Capital ladder
           </h1>
           <p className="text-sm text-text-secondary mt-1 max-w-2xl">
-            The <strong>champion strategy</strong> only advises your{" "}
-            <strong>real</strong> portfolio once it has statistically proven itself on
-            the paper book — a Deflated Sharpe Ratio (deflated for every competing
-            strategy), out-of-sample consistency, a drawdown ceiling, learning
-            maturity, and a sustained 4-axis bar across rolling scorecards. If it
-            later dips below the bar it <strong>de-graduates</strong> and
-            recommendations pause. Advisory only, never auto-traded.
+            Two candidates, the LLM advisor and the rules control (Mandate B), climb a{" "}
+            <strong>capital ladder</strong>: paper, then a small tuition weight, then 10 %, then 15 % of your
+            book for stock picks, as their paper record against MSCI World builds evidence. Evidence that
+            the candidate does harm, or a drawdown beyond its band, sends it back to paper. The monthly plan
+            sets the satellite from it. Advisory only, never auto-traded.
           </p>
         </div>
         <Badge variant={status.graduated ? "default" : "secondary"} className="shrink-0">
-          {status.graduated ? "Graduated" : "In training"}
+          {status.graduated ? "Earned or above" : "Below Earned"}
         </Badge>
       </div>
+
+      {ladder ? (
+        <LadderCards state={ladder} />
+      ) : (
+        <Card className="p-5 text-sm text-text-muted">Capital ladder unavailable.</Card>
+      )}
 
       {/* Passive core (ADR 0015 silent-period default) */}
       {!status.graduated && status.passive_core && (
@@ -192,7 +203,7 @@ export function GraduationPage() {
                           variant={t.to_graduated ? "default" : "secondary"}
                           className="text-[10px] shrink-0"
                         >
-                          {t.to_graduated ? "graduated" : "de-graduated"}
+                          {t.criteria?.ladder ? "ladder" : t.to_graduated ? "graduated" : "de-graduated"}
                         </Badge>
                         <span className="text-text-secondary">
                           {formatDateTime(t.created_at)} — {t.reason}
@@ -207,23 +218,18 @@ export function GraduationPage() {
         </Card>
       )}
 
-      {/* Overall progress */}
+      {/* Legacy criteria (ADR 0025: display only) */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Overall progress</CardTitle>
-          <CardDescription>{pct}% of graduation criteria met</CardDescription>
+          <CardTitle className="text-base">Old graduation criteria (legacy)</CardTitle>
+          <CardDescription>
+            Display only since the capital ladder replaced them; nothing reads them. {pct}% met. The Deflated
+            Sharpe and overfitting checks now screen backtest-selected strategies in the lab.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <Progress value={pct} />
         </CardContent>
-      </Card>
-
-      {/* Criteria */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Graduation criteria</CardTitle>
-          <CardDescription>Every blocking criterion must pass.</CardDescription>
-        </CardHeader>
         <CardContent className="space-y-4">
           {status.criteria.map((c) => (
             <div key={c.key} className="space-y-1">
@@ -271,7 +277,7 @@ export function GraduationPage() {
           <CardDescription>
             {status.recommendations_unlocked
               ? "Unlocked. Recommendations appear on the Dossiers page for manual action."
-              : "Locked until the LLM graduates."}
+              : "Locked until a candidate reaches Earned on the capital ladder."}
           </CardDescription>
         </CardHeader>
         <CardContent>

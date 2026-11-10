@@ -280,7 +280,12 @@ def test_strong_consistent_record_graduates():
     result = evaluate_graduation(db, user.id)
     failed = [c.key for c in result.criteria if not c.passed]
     assert result.graduated is True, f"unexpected failing criteria: {failed}"
-    assert result.metrics["dsr"] >= 0.95
+    # ADR 0025: the Deflated Sharpe moved to the lab; the criterion stays as a
+    # legacy, non-blocking display.
+    skill = next(c for c in result.criteria if c.key == "statistical_skill")
+    assert skill.blocking is False and skill.legacy is True and skill.value is None
+    assert result.metrics["dsr"] is None
+    assert all(c.legacy for c in result.criteria)
     assert result.overall_progress >= 0.99
 
 
@@ -437,9 +442,15 @@ def test_graduated_user_can_post_recommendations():
     db.commit()
     _seed_passing_scorecards(db, user.id, p.id)
 
-    result = evaluate_graduation(db, user.id)
-    failed = [c.key for c in result.criteria if not c.passed]
-    assert result.graduated is True, f"unexpected failing criteria: {failed}"
+    # ADR 0025: the capital ladder unlocks recommendations, not the legacy
+    # criteria. A candidate at Earned (stage 2).
+    from app.foundation.models.entities import LadderCandidate
+
+    db.add(LadderCandidate(
+        user_id=user.id, slot="rules", kind="mandate", ref_id=p.id, portfolio_id=p.id,
+        config_hash="x", epoch=1, pi=0.5, born_at=datetime(2026, 1, 5, tzinfo=timezone.utc), stage=2,
+    ))
+    db.commit()
 
     client = _api_client(db, user)
     try:
@@ -455,7 +466,6 @@ def test_graduated_user_can_post_recommendations():
             resp = client.post("/api/graduation/recommendations")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["graduation"]["graduated"] is True
         assert body["recommendations"][0]["ticker"] == "EUNL.DE"
         assert body["estimate"] is True
         assert body["not_tax_advice"] is True
@@ -727,8 +737,9 @@ def test_metrics_contains_expected_keys():
         assert key in result.metrics, f"Missing metrics key: {key}"
 
 
-def test_multiple_ai_portfolios_champion_is_higher_dsr():
-    """With two AI portfolios the evaluator selects the better-performing one."""
+def test_multiple_ai_portfolios_champion_is_the_longer_record():
+    """With two AI portfolios and no champion strategy, the longer record is shown
+    (selecting by Deflated Sharpe moved to the lab with the DSR, ADR 0025)."""
     db = _memory_db()
     user = _user(db)
 
@@ -756,7 +767,7 @@ def test_multiple_ai_portfolios_champion_is_higher_dsr():
     _seed_track_record(db, pb.id, days=10, daily_return=0.0001, final_return_pct=0.005)
 
     result = evaluate_graduation(db, user.id)
-    # Champion should be portfolio A (higher DSR).
+    # Champion should be portfolio A (the longer record).
     assert result.metrics["champion_portfolio_id"] == pa.id
     assert result.metrics["n_ai_portfolios"] == 2
     # n_trials is deflated by search breadth (#107), so it floors at the
@@ -946,3 +957,24 @@ def test_outperformance_real_return_is_read_as_fraction_not_percent():
         "If this is 0.0007 the /100 bug is present."
     )
 
+
+
+def test_legacy_criteria_alone_do_not_unlock_recommendations():
+    """ADR 0025: with every candidate on paper the endpoint stays locked."""
+    db = _memory_db()
+    user = _user(db)
+    _ai_portfolio(db, user.id)
+    client = _api_client(db, user)
+    try:
+        resp = client.post("/api/graduation/recommendations")
+        assert resp.status_code == 409
+        assert "not_graduated" in resp.text
+        status = client.get("/api/graduation/status").json()
+        assert status["graduated"] is False and status["recommendations_unlocked"] is False
+        assert status["ladder"]["not_financial_advice"] is True
+        assert all(c["legacy"] for c in status["criteria"])
+        ladder = client.get("/api/graduation/ladder").json()
+        assert ladder["estimate"] and ladder["not_tax_advice"] and ladder["not_financial_advice"]
+        assert ladder["satellite_weight_pct"] == 0.0
+    finally:
+        app_overrides_clear()

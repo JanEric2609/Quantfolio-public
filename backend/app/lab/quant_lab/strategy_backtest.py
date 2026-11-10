@@ -306,8 +306,11 @@ def run_strategy_backtest(
         }, sort_keys=True)
         qm.record_trial(db, TRIAL_CONTEXT, key, {"family": f"{symbol}:{strategy_key}", "source": "quant_lab_backtest"})
         db.commit()
-    n_trials = qm.resolve_n_trials(db)
-    n_eff = qm.effective_n_trials(db)
+    # ADR 0025: this backtest is selected among the quant-lab backtests only.
+    n_trials = qm.resolve_n_trials(db, (TRIAL_CONTEXT,))
+    # Lower bound for display: parameter variants of one symbol x strategy
+    # are one search.
+    n_eff = qm.n_search_families(db, (TRIAL_CONTEXT,))
 
     timing = strategy_key != "buy_hold"
     pbo = None

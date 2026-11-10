@@ -16,7 +16,7 @@ export function PaperPortfoliosHub() {
       <PageHeader
         title="Advisor"
         icon={<BrainCircuit className="h-8 w-8 text-accent" />}
-        subtitle="The advisor loop: daily paper trades → champion/challenger evolution → graduation check. Paper only: it never sets weights for your real book; only This month does."
+        subtitle="The advisor loop: daily paper trades → champion/challenger evolution → capital ladder. Paper only: it never trades your real book; the ladder only sets how much This month puts into stock picks."
       />
       <TabNav tabs={TABS} ariaLabel="Advisor sections" />
       <Outlet />

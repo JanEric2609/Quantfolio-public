@@ -991,12 +991,45 @@ def deflated_ic_sharpe(
 #: the hurdle moves with N instead.
 DEFAULT_N_TRIALS_FLOOR = 1
 
+# Trial families (ADR 0025, amending ADR 0015 ruling #9). ``trial_ledger.context``
+# is the family. A gate's N counts only the families the candidate under test
+# was selected from; the global total stays on the Evidence page as a
+# conservative researcher-level number.
+#: Discover's old per-stock IC rows (``ac_trial_ledger``): one trial per
+#: distinct ``config_hash``. Read by no gate.
+DISCOVER_LEGACY_FAMILY = "discover_legacy"
+ALPHACRAFTER_MINER_FAMILY = "alphacrafter_miner"
+ALPHACRAFTER_TRADER_FAMILY = "alphacrafter_trader"
+ALPHACRAFTER_TUNING_FAMILY = "alphacrafter_tuning"
+ADVISOR_CHAMPION_FAMILY = "advisor_champion"
+ADVISOR_CHALLENGER_FAMILY = "advisor_challenger"
+ADVISOR_FAMILIES = (ADVISOR_CHAMPION_FAMILY, ADVISOR_CHALLENGER_FAMILY)
+#: Lab studies the evidence gate grades; its N is the sum over these. The
+#: plan names them by study (pooled_model, satellite, factor_premia, tier_b,
+#: ranking_replay, quant_lab_backtest); the ledger contexts they write are
+#: these strings (``discover_replay`` is the ranking replay, ``backtest`` the
+#: quant-lab backtest, ``discover_pooled_ml`` the pooled ML study, and
+#: ``plan_rules`` ADR 0022's savings-plan rule study).
+LAB_FAMILIES = (
+    "pooled_model",
+    "discover_pooled_ml",
+    "satellite",
+    "factor_premia",
+    "tier_b",
+    "discover_replay",
+    "backtest",
+    "plan_rules",
+)
+
 
 def record_trial(
     db: Session,
     context: str,
     trial_key: str,
     metadata: dict | None = None,
+    *,
+    config_hash: str | None = None,
+    selection_set_id: str | None = None,
 ) -> TrialLedgerEntry:
     """Idempotently append one row to the global trial ledger.
 
@@ -1007,6 +1040,9 @@ def record_trial(
     over configurations/hypotheses — AlphaCrafter's grid, an advisor
     challenger spawn, a discover candidate cohort, a graduation portfolio
     variant — calls this once per trial it evaluates.
+
+    ``config_hash`` names the configuration tested: rows of one family with the
+    same hash count once (ADR 0025). ``selection_set_id`` names the search run.
     """
     existing = db.execute(
         select(TrialLedgerEntry).where(
@@ -1016,25 +1052,86 @@ def record_trial(
     ).scalars().first()
     if existing is not None:
         return existing
-    entry = TrialLedgerEntry(context=context, trial_key=trial_key, metadata_json=metadata or {})
+    entry = TrialLedgerEntry(
+        context=context,
+        trial_key=trial_key,
+        metadata_json=metadata or {},
+        config_hash=config_hash,
+        selection_set_id=selection_set_id,
+    )
     db.add(entry)
     db.flush()
     return entry
 
 
-def resolve_n_trials(db: Session, floor: int = DEFAULT_N_TRIALS_FLOOR) -> int:
-    """Global experiment count for Deflated Sharpe deflation (ADR 0015).
+def config_digest(config: object) -> str:
+    """SHA-256 of a configuration's canonical JSON (the ``config_hash``)."""
+    import hashlib
+    import json
 
-    Counts every row ever written to the trial ledger, across every
-    context, plus every AlphaCrafter factor evaluation in
-    ``ac_trial_ledger`` (6,219 rows on 2026-10-12, against 30 in the trial
-    ledger; plan 2026-10-12, D10): search breadth spent in one context still
-    raises the bar everywhere else, so the gate cannot be gamed by moving the
-    search into an uncounted corner. ``floor`` only keeps the count at least 1.
+    payload = json.dumps(config, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _family_count(db: Session, context: str) -> int:
+    """Trials of one ledger family: distinct ``config_hash`` where set, else rows."""
+    hashed = db.execute(
+        select(func.count(func.distinct(TrialLedgerEntry.config_hash))).where(
+            TrialLedgerEntry.context == context, TrialLedgerEntry.config_hash.isnot(None)
+        )
+    ).scalar_one()
+    unhashed = db.execute(
+        select(func.count()).select_from(TrialLedgerEntry).where(
+            TrialLedgerEntry.context == context, TrialLedgerEntry.config_hash.is_(None)
+        )
+    ).scalar_one()
+    return int(hashed) + int(unhashed)
+
+
+def _discover_legacy_count(db: Session) -> int:
+    """Distinct configurations in ``ac_trial_ledger`` (3 on prod, 6,217 rows)."""
+    return int(
+        db.execute(select(func.count(func.distinct(AcTrialLedger.config_hash)))).scalar_one()
+    )
+
+
+def n_trials_by_family(db: Session) -> dict[str, int]:
+    """Trial count per family, ``discover_legacy`` included (Evidence page)."""
+    contexts = [c for (c,) in db.execute(select(TrialLedgerEntry.context).distinct()).all()]
+    out = {context: _family_count(db, context) for context in sorted(contexts)}
+    legacy = _discover_legacy_count(db)
+    if legacy:
+        out[DISCOVER_LEGACY_FAMILY] = legacy
+    return out
+
+
+def resolve_n_trials(
+    db: Session,
+    families: Sequence[str] | None = None,
+    floor: int = DEFAULT_N_TRIALS_FLOOR,
+) -> int:
+    """Number of trials for Deflated Sharpe deflation (ADR 0015, ADR 0025).
+
+    With *families*: the trials of those families only, the ones the candidate
+    under test was selected from. Each family counts distinct ``config_hash``
+    where one is set, otherwise rows; ``discover_legacy`` reads
+    ``ac_trial_ledger`` as distinct hashes.
+
+    Without *families*: every family summed, ``ac_trial_ledger`` as distinct
+    ``config_hash`` (not its 6,217 per-stock rows). A conservative
+    researcher-level number for display; no gate reads it.
+    ``floor`` only keeps the count at least 1.
     """
-    count = db.execute(select(func.count()).select_from(TrialLedgerEntry)).scalar_one()
-    ac_count = db.execute(select(func.count()).select_from(AcTrialLedger)).scalar_one()
-    return max(int(count) + int(ac_count), floor)
+    if families is None:
+        total = sum(n_trials_by_family(db).values())
+        return max(int(total), floor)
+    total = 0
+    for family in dict.fromkeys(families):
+        if family == DISCOVER_LEGACY_FAMILY:
+            total += _discover_legacy_count(db)
+        else:
+            total += _family_count(db, family)
+    return max(int(total), floor)
 
 
 def trial_family(context: str, trial_key: str, metadata: dict | None) -> str:
@@ -1048,21 +1145,130 @@ def trial_family(context: str, trial_key: str, metadata: dict | None) -> str:
     return f"{context}:{family}"
 
 
-def effective_n_trials(db: Session) -> int:
-    """Lower bound on the number of independent trials: distinct search families.
+def li_ji_effective_number(series_matrix: np.ndarray) -> float:
+    """Li and Ji (2005) effective number of tests from a (T x M) series matrix.
 
-    Lopez de Prado (2019) estimates N_eff by clustering the trials' return
-    correlations; the ledger stores no return series, so each family (see
-    :func:`trial_family`) counts once. The truth lies between this and
-    :func:`resolve_n_trials`; the gate uses the conservative upper end.
+    M_eff = sum over the eigenvalues of the correlation matrix of
+    ``I(|l| >= 1) + (|l| - floor(|l|))``. Perfectly correlated trials count
+    once, independent ones M times.
     """
+    x = np.asarray(series_matrix, dtype=float)
+    if x.ndim != 2 or x.shape[1] == 0:
+        return 0.0
+    if x.shape[1] == 1:
+        return 1.0
+    corr = np.corrcoef(x, rowvar=False)
+    corr = np.nan_to_num(corr, nan=0.0)
+    np.fill_diagonal(corr, 1.0)
+    # Rounded so 2.9999999 (floating point for 3) does not lose a whole unit
+    # to ``floor``.
+    eig = np.round(np.abs(np.linalg.eigvalsh(corr)), 9)
+    return float(sum((1.0 if v >= 1.0 else 0.0) + (v - math.floor(v)) for v in eig))
+
+
+#: Fewest common observations for a trial series to join the eigenvalue count.
+MIN_SERIES_OBS_FOR_NEFF = 20
+
+
+def n_search_families(db: Session, families: Sequence[str] | None = None) -> int:
+    """Distinct search families (see :func:`trial_family`): a lower bound on N.
+
+    Without *families* every ledger context counts, plus one family per
+    AlphaCrafter job run (D10); with *families* only those contexts do.
+    """
+    query = select(
+        TrialLedgerEntry.context, TrialLedgerEntry.trial_key, TrialLedgerEntry.metadata_json
+    )
+    if families is not None:
+        query = query.where(TrialLedgerEntry.context.in_(list(families)))
+    found = {trial_family(c, k, m) for c, k, m in db.execute(query).all()}
+    if families is None or DISCOVER_LEGACY_FAMILY in families:
+        found |= {
+            f"alphacrafter:{run_id}"
+            for (run_id,) in db.execute(select(AcTrialLedger.run_id).distinct())
+        }
+    return max(1, len(found))
+
+
+def effective_n_trials(db: Session, families: Sequence[str] | None = None) -> int:
+    """Effective number of independent trials.
+
+    Without *families* (display, unchanged): a lower bound, the number of
+    distinct search families (see :func:`trial_family`), AlphaCrafter job runs
+    included. The truth lies between this and :func:`resolve_n_trials`.
+
+    With *families* (ADR 0025 series path): trials that carry their return or
+    IC series in ``metadata_json["series"]`` enter the Li-Ji eigenvalue count of
+    their correlation matrix (aligned on their last common observations);
+    trials without one count raw, the conservative direction. Distinct
+    ``config_hash`` counts once, as in :func:`resolve_n_trials`.
+    """
+    if families is None:
+        return n_search_families(db)
+
+    wanted = list(dict.fromkeys(families))
+    total = 0.0
+    if DISCOVER_LEGACY_FAMILY in wanted:
+        total += _discover_legacy_count(db)
     rows = db.execute(
-        select(TrialLedgerEntry.context, TrialLedgerEntry.trial_key, TrialLedgerEntry.metadata_json)
+        select(TrialLedgerEntry.config_hash, TrialLedgerEntry.trial_key, TrialLedgerEntry.metadata_json)
+        .where(TrialLedgerEntry.context.in_([f for f in wanted if f != DISCOVER_LEGACY_FAMILY]))
+        .order_by(TrialLedgerEntry.created_at)
     ).all()
-    families = {trial_family(c, k, m) for c, k, m in rows}
-    # Each AlphaCrafter job run searched one family of factors (D10).
-    families |= {f"alphacrafter:{run_id}" for (run_id,) in db.execute(select(AcTrialLedger.run_id).distinct())}
-    return max(1, len(families))
+    seen: set[str] = set()
+    series: list[list[float]] = []
+    raw = 0
+    for config_hash, trial_key, meta in rows:
+        key = config_hash or f"row:{trial_key}"
+        if key in seen:
+            continue
+        seen.add(key)
+        values = (meta or {}).get("series")
+        clean = [float(v) for v in values or [] if v is not None and np.isfinite(float(v))]
+        if len(clean) >= MIN_SERIES_OBS_FOR_NEFF:
+            series.append(clean)
+        else:
+            raw += 1
+    if series:
+        common = min(len(s) for s in series)
+        if common >= MIN_SERIES_OBS_FOR_NEFF:
+            matrix = np.column_stack([s[-common:] for s in series])
+            total += li_ji_effective_number(matrix)
+        else:  # pragma: no cover - guarded by the per-series minimum
+            raw += len(series)
+    total += raw
+    return max(1, int(math.ceil(total - 1e-9)))
+
+
+def diebold_mariano_hln(d: Sequence[float], h: int = 1, lag: int | None = None) -> dict[str, float | int | None]:
+    """One-sided Diebold-Mariano test that the mean loss differential is > 0.
+
+    ``d`` is the loss differential series (e.g. Brier(A) - Brier(B); positive
+    means B forecasts better). The long-run variance is Newey-West (Bartlett
+    weights) at ``lag`` (default ``h - 1``, the overlap of h-step forecasts);
+    the statistic carries the Harvey-Leybourne-Newbold (1997) small-sample
+    factor sqrt((T + 1 - 2h + h(h-1)/T) / T) and is read against a t with
+    T - 1 degrees of freedom. With ``h = 1`` and no lag it equals the
+    one-sample t statistic. ADR 0025 (statsmodels is not a dependency).
+    """
+    from scipy.stats import t as _t
+
+    x = np.asarray([v for v in d if v is not None and np.isfinite(v)], dtype=float)
+    n = len(x)
+    lags = (h - 1) if lag is None else int(lag)
+    if n < 3:
+        return {"stat": None, "p_value": None, "n": n, "mean": float(x.mean()) if n else None}
+    dev = x - x.mean()
+    lrv = float(dev @ dev) / n
+    for k in range(1, min(lags, n - 1) + 1):
+        weight = 1.0 - k / (lags + 1.0)
+        lrv += 2.0 * weight * float(dev[k:] @ dev[:-k]) / n
+    if lrv <= 0:
+        return {"stat": None, "p_value": None, "n": n, "mean": float(x.mean())}
+    dm = float(x.mean()) / math.sqrt(lrv / n)
+    hln = math.sqrt(max(0.0, (n + 1 - 2 * h + h * (h - 1) / n) / n))
+    stat = dm * hln
+    return {"stat": stat, "p_value": float(_t.sf(stat, n - 1)), "n": n, "mean": float(x.mean())}
 
 
 def dsr_hurdle_curve(

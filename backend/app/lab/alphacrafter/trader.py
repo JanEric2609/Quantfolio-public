@@ -36,6 +36,7 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.foundation import quant_metrics as qm
 from app.foundation.models.entities import FactorsLibrary, ScreenerRun, TraderBacktest
 from app.lab.alphacrafter.miner import _factor_values
 from app.lab.alphacrafter.panel import build_panel
@@ -209,6 +210,16 @@ class TraderAgent:
                     continue
 
                 n_rebalances = int((weights.diff().abs().sum(axis=1) > 1e-9).sum())
+                # ADR 0025: one trader trial per config key, recorded once
+                # (a daily re-run of the same grid is not a new trial).
+                config_key = qm.config_digest(asdict(config))
+                qm.record_trial(
+                    db,
+                    qm.ALPHACRAFTER_TRADER_FAMILY,
+                    config_key,
+                    {"config": asdict(config)},
+                    config_hash=config_key,
+                )
 
                 trader_run = TraderBacktest(
                     screener_run_id=h.screener_outputs.get("screener_run_id") or None,
@@ -234,6 +245,7 @@ class TraderAgent:
                         max_drawdown=bt.max_drawdown,
                         total_return=bt.total_return,
                         trades=n_rebalances,
+                        n_obs=int(equity.notna().sum()),
                     )
                 )
             except Exception as exc:
@@ -257,6 +269,7 @@ class TraderAgent:
                     "sharpe_ratio": r.sharpe_ratio,
                     "max_drawdown": r.max_drawdown,
                     "total_return": r.total_return,
+                    "n_obs": r.n_obs,
                     "rank": r.rank,
                 }
                 for r in results
@@ -291,6 +304,8 @@ class TraderResult:
     total_return: float
     trades: int
     rank: int = 0
+    # Daily observations behind the Sharpe (for the dossier's deflation).
+    n_obs: int = 0
 
 
 # --- Pure strategy helpers (synchronous, unit-testable) -----------------------
@@ -530,6 +545,17 @@ async def run_trader(
             # to have a non-degenerate std (a single fold always yields
             # exactly 0.0 for both legs, which is a cold-start, not a
             # genuinely bad WFE).
+            # ADR 0025: every config evaluated is one trader trial, recorded
+            # once per config key, before the walk-forward gate rejects any
+            # (a rejected config was still searched over).
+            config_key = qm.config_digest(asdict(config))
+            qm.record_trial(
+                db,
+                qm.ALPHACRAFTER_TRADER_FAMILY,
+                config_key,
+                {"config": asdict(config)},
+                config_hash=config_key,
+            )
             wf_result = await walk_forward_test(spec, prices_df)
             wfe: float | None = None
             if wf_result.periods_tested >= 2:
@@ -573,6 +599,7 @@ async def run_trader(
                     max_drawdown=bt.max_drawdown,
                     total_return=bt.total_return,
                     trades=n_rebalances,
+                    n_obs=int(equity.notna().sum()),
                 )
             )
         except Exception as exc:  # one bad config shouldn't sink the sweep

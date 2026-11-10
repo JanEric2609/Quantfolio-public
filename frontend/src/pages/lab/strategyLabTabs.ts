@@ -28,7 +28,7 @@ export const STRATEGY_LAB_TABS: StrategyLabTab[] = [
   },
   {
     to: "/graduation",
-    label: "Graduation",
+    label: "Capital ladder",
     consequence: "Tracks the LLM advisor's paper record. Graduating no longer unlocks real-money advice.",
   },
   {

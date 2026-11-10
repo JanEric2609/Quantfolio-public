@@ -5,9 +5,93 @@ import { toast } from "sonner";
 import { Card } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { api, type EvolutionStatus, type EvolutionStrategy } from "../../lib/api";
+import { api, type EvolutionPairedTest, type EvolutionStatus, type EvolutionStrategy } from "../../lib/api";
 import { formatDate, formatNumber } from "../../lib/format";
 import { formatMetricNumber, formatMetricPercent } from "../../components/composed/MetricTile";
+
+const MINIMUM_LABELS: Record<string, string> = {
+  trading_days: "trading days since spawn",
+  horizons: "non-overlapping horizons resolved",
+  pairs: "matched forecast pairs",
+};
+
+function PairedTestCard({ test }: { test: EvolutionPairedTest }) {
+  const { rule, last } = test;
+  const fmtPct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)} %`);
+  return (
+    <Card className="p-5 space-y-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold">Promotion test (pre-registered)</h3>
+        {last && <Badge variant="outline">{last.verdict.replaceAll("_", " ")}</Badge>}
+      </div>
+      <p className="text-xs text-text-muted">
+        {rule.endpoint}; {rule.test}. Up to {rule.max_looks} looks, one every{" "}
+        {rule.look_spacing_trading_days} trading days, each at p &lt; {rule.nominal_alpha_per_look} (overall{" "}
+        {rule.overall_alpha}). A challenger not better at the last look is retired.
+      </p>
+      {!last ? (
+        <p className="text-sm text-text-muted">No round has run for this pair yet.</p>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+          <dl className="space-y-1">
+            <div className="flex justify-between gap-2">
+              <dt className="text-text-secondary">Mean Brier gain d̄</dt>
+              <dd className="tabular-nums">{fmt(last.mean_d, 4)}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-text-secondary">DM statistic</dt>
+              <dd className="tabular-nums">{fmt(last.dm_stat, 2)}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-text-secondary">p-value</dt>
+              <dd className="tabular-nums">{fmt(last.p_value, 4)}</dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-text-secondary">Looks used</dt>
+              <dd className="tabular-nums">
+                {last.looks_done} of {rule.max_looks}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-2">
+              <dt className="text-text-secondary">Next look</dt>
+              <dd>{last.next_look_on ? formatDate(last.next_look_on) : "—"}</dd>
+            </div>
+          </dl>
+          <div className="space-y-1">
+            <p className="text-text-secondary">Minimums</p>
+            <ul className="space-y-0.5">
+              {Object.entries(last.minimums).map(([k, ok]) => (
+                <li key={k} className={ok ? "text-text-primary" : "text-text-muted"}>
+                  {ok ? "✓" : "·"} {MINIMUM_LABELS[k] ?? k}
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-text-muted">
+              {last.n_pairs} pairs over {last.n_dates} days, {last.horizons_resolved} horizons,{" "}
+              {last.trading_days_since_spawn} trading days.
+            </p>
+            <p className="text-text-secondary pt-1">Guardrails</p>
+            <ul className="space-y-0.5 text-xs">
+              <li className={last.guardrails.return_ok ? "" : "text-text-muted"}>
+                {last.guardrails.return_ok ? "✓" : "·"} return gap, lower 90 %:{" "}
+                {fmtPct(last.guardrails.return_diff_lower_90_annual)} a year (floor {fmtPct(rule.return_floor_annual)})
+              </li>
+              <li className={last.guardrails.mdd_ok ? "" : "text-text-muted"}>
+                {last.guardrails.mdd_ok ? "✓" : "·"} max drawdown {fmtPct(last.guardrails.mdd_challenger)} vs
+                champion {fmtPct(last.guardrails.mdd_champion)} (slack {fmtPct(rule.mdd_slack)})
+              </li>
+            </ul>
+          </div>
+          <p className="sm:col-span-2 text-xs text-text-muted">
+            {last.reason}
+            {last.mcnemar &&
+              ` · Where they disagree on direction, the challenger was right ${last.mcnemar.challenger_right} times and the champion ${last.mcnemar.champion_right} (McNemar p ${last.mcnemar.p_value.toFixed(3)}, display only).`}
+          </p>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 const fmt = (v: number | null | undefined, digits = 3) => formatMetricNumber(v, digits, "pending");
 const pct = (v: number | null | undefined) => formatMetricPercent(v, 2, "pending");
@@ -102,10 +186,11 @@ export function EvolutionTab() {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <p className="text-sm text-text-secondary max-w-2xl">
-          The champion strategy defends its 4-axis score against a mutated challenger every
-          trading day. A challenger that wins decisively over enough decisions is promoted;
-          the champion's sustained record feeds the{" "}
-          <Link to="/graduation" className="text-accent underline">graduation check</Link>.
+          Champion and challenger each run their own paper sleeve and forecast the same Discover
+          shortlist every trading day. The challenger is promoted only when its forecasts are
+          better by a pre-registered paired test; the 4-axis score is shown for context. The
+          champion's paper record feeds the{" "}
+          <Link to="/graduation" className="text-accent underline">capital ladder</Link>.
         </p>
         <Button
           variant="outline"
@@ -122,6 +207,8 @@ export function EvolutionTab() {
         <StrategyCard label="Champion" strategy={data.champion} />
         <StrategyCard label="Challenger" strategy={data.challenger} />
       </div>
+
+      {data.paired_test && <PairedTestCard test={data.paired_test} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="p-5">

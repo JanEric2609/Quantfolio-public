@@ -33,6 +33,8 @@ def _call_with_timeout(fn: Callable[[], _T], timeout_s: float, unavailable_msg: 
         return future.result(timeout=timeout_s)
     except FutureTimeoutError:
         return provider_result("justetf", ok=False, error=unavailable_msg)
+    except Exception as exc:  # network down, DNS, websocket, scraper breakage
+        return provider_result("justetf", ok=False, error=f"justETF request failed: {exc}")
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
@@ -79,15 +81,19 @@ class JustETFProvider(MarketDataProvider):
 
         def _fetch():
             quote = justetf_scraping.load_live_quote(symbol)
-            return {
-                "symbol": symbol,
-                "price": float(quote.last) if quote.last else None,
-                "bid": float(quote.bid) if quote.bid else None,
-                "ask": float(quote.ask) if quote.ask else None,
-                "currency": quote.currency,
-                "exchange": quote.exchange,
-                "timestamp": quote.timestamp.isoformat() if quote.timestamp else None,
-            }
+            return provider_result(
+                self.name,
+                ok=True,
+                data={
+                    "symbol": symbol,
+                    "price": float(quote.last) if quote.last else None,
+                    "bid": float(quote.bid) if quote.bid else None,
+                    "ask": float(quote.ask) if quote.ask else None,
+                    "currency": quote.currency,
+                    "exchange": quote.exchange,
+                    "timestamp": quote.timestamp.isoformat() if quote.timestamp else None,
+                },
+            )
 
         return _call_with_timeout(
             _fetch,

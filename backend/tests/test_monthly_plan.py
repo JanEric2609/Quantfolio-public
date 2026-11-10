@@ -194,7 +194,7 @@ def test_unlocked_tilt_receives_its_shortfall(monkeypatch):
     db = _memory_db()
     user = _user(db)
     _position(db, user.id, "IE00B4L5Y983", "iShares Core MSCI World", 36_000.0)
-    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db: {
+    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db, *a, **k: {
         "tilt_unlocked": True, "tilt_reason": "", "satellite_unlocked": False, "satellite_reason": "locked",
     })
 
@@ -213,8 +213,8 @@ def test_small_satellite_buy_is_routed_to_core(monkeypatch):
     user = _user(db)
     _position(db, user.id, "IE00B4L5Y983", "iShares Core MSCI World", 9_000.0)
     _position(db, user.id, "DE0007164600", "SAP SE", 600.0)
-    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db: {
-        "tilt_unlocked": False, "tilt_reason": "locked", "satellite_unlocked": True, "satellite_reason": "",
+    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db, *a, **k: {
+        "tilt_unlocked": False, "tilt_reason": "locked", "satellite_unlocked": True, "satellite_reason": "", "satellite_target_pct": 10.0,
     })
 
     plan = build_monthly_plan(db, user.id, now=NOW)
@@ -230,8 +230,8 @@ def test_large_satellite_shortfall_becomes_one_order_with_fee_note(monkeypatch):
     user = _user(db)
     upsert_public_settings(db, {"monthly_contribution_eur": 2_000})
     _position(db, user.id, "IE00B4L5Y983", "iShares Core MSCI World", 30_000.0)
-    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db: {
-        "tilt_unlocked": False, "tilt_reason": "locked", "satellite_unlocked": True, "satellite_reason": "",
+    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db, *a, **k: {
+        "tilt_unlocked": False, "tilt_reason": "locked", "satellite_unlocked": True, "satellite_reason": "", "satellite_target_pct": 10.0,
     })
 
     plan = build_monthly_plan(db, user.id, now=NOW)
@@ -275,7 +275,7 @@ def test_tilt_money_is_shared_across_two_factor_etfs(monkeypatch):
     user = _user(db)
     _position(db, user.id, "IE00B4L5Y983", "iShares Core MSCI World", 36_000.0)
     upsert_public_settings(db, {"plan_tilt_isins": "IE00BP3QZ825, IE00BP3QZB59"})
-    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db: {
+    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db, *a, **k: {
         "tilt_unlocked": True, "tilt_reason": "", "satellite_unlocked": False, "satellite_reason": "locked",
     })
 
@@ -294,7 +294,7 @@ def test_tilt_money_goes_to_the_leg_that_is_behind(monkeypatch):
     _position(db, user.id, "IE00BP3QZ825", "World Momentum", 1_600.0)
     _position(db, user.id, "IE00BP3QZB59", "World Value", 1_000.0)
     upsert_public_settings(db, {"plan_tilt_isins": "IE00BP3QZ825, IE00BP3QZB59"})
-    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db: {
+    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db, *a, **k: {
         "tilt_unlocked": True, "tilt_reason": "", "satellite_unlocked": False, "satellite_reason": "locked",
     })
 
@@ -325,7 +325,8 @@ def test_satellite_asks_for_the_gate_until_it_has_run():
     db = _memory_db()
     state = monthly_plan.evidence_state(db)
     assert state["satellite_unlocked"] is False
-    assert "app.lab.evidence_gate" in state["satellite_reason"]
+    assert "app.lab.evidence_gate" in state["satellite_gate_reason"]
+    assert "capital ladder" in state["satellite_reason"]
 
 
 def test_a_locked_gate_run_keeps_the_satellite_at_zero_and_says_why():
@@ -339,11 +340,15 @@ def test_a_locked_gate_run_keeps_the_satellite_at_zero_and_says_why():
 
     satellite = _sleeve(plan, "satellite")
     assert satellite["unlocked"] is False and satellite["target_pct"] == 0.0
-    assert "500 trials" in satellite["status"] and "scalable:gbm, DSR 0.01" in satellite["status"]
+    assert "capital ladder" in satellite["status"]
+    gate_reason = plan["evidence"]["satellite"]["gate_reason"]
+    assert "500 trials" in gate_reason and "scalable:gbm, DSR 0.01" in gate_reason
     assert plan["no_change"] is True
 
 
-def test_the_latest_gate_run_wins_and_its_broker_sets_the_fee():
+def test_the_latest_gate_run_wins_and_its_broker_sets_the_fee(monkeypatch):
+    """The ladder sets the weight (ADR 0025); the latest gate run's broker still sets the fee."""
+    monkeypatch.setattr(monthly_plan, "_ladder_satellite", lambda *a, **k: (10.0, "ladder: Tuition", None))
     db = _memory_db()
     user = _user(db)
     upsert_public_settings(db, {"monthly_contribution_eur": 2_000})
@@ -393,7 +398,7 @@ def test_a_sleeve_past_the_band_is_sold_down_and_the_proceeds_go_to_the_core(mon
     _position(db, user.id, "IE00B4L5Y983", "iShares Core MSCI World", 70_000.0, ticker="EUNL.DE")
     _position(db, user.id, "IE00BP3QZ825", "World Momentum", 30_000.0)
     upsert_public_settings(db, {"plan_tilt_isins": "IE00BP3QZ825"})
-    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db: {
+    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db, *a, **k: {
         "tilt_unlocked": True, "tilt_reason": "", "satellite_unlocked": False, "satellite_reason": "locked",
     })
 
@@ -421,7 +426,7 @@ def test_a_wider_band_means_no_sale(monkeypatch):
     _position(db, user.id, "IE00B4L5Y983", "iShares Core MSCI World", 70_000.0)
     _position(db, user.id, "IE00BP3QZ825", "World Momentum", 30_000.0)
     upsert_public_settings(db, {"plan_tilt_isins": "IE00BP3QZ825", "plan_drift_band_pp": 15})
-    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db: {
+    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db, *a, **k: {
         "tilt_unlocked": True, "tilt_reason": "", "satellite_unlocked": False, "satellite_reason": "locked",
     })
 
@@ -534,9 +539,9 @@ def test_satellite_text_shows_the_gate_date_trials_and_goes_stale_after_14_days(
     _gate_run(db, False, [], "no mined score passed", n_trials=500)  # computed 2026-09-25
 
     fresh = monthly_plan.evidence_state(db, datetime(2026, 10, 5, tzinfo=UTC))
-    assert "500 trials" in fresh["satellite_reason"] and "as of 2026-09-25" in fresh["satellite_reason"]
+    assert "500 trials" in fresh["satellite_gate_reason"] and "as of 2026-09-25" in fresh["satellite_gate_reason"]
     assert fresh["satellite_gate"]["stale"] is False
 
     stale = monthly_plan.evidence_state(db, datetime(2026, 10, 20, tzinfo=UTC))
     assert stale["satellite_gate"]["stale"] is True
-    assert "out of date" in stale["satellite_reason"]
+    assert "out of date" in stale["satellite_gate_reason"]

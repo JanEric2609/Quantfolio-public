@@ -505,6 +505,120 @@ def seed_paper_portfolio_from_real(
     return portfolio
 
 
+#: ``managed_by`` of a sleeve no strategy drives any more (also used by the
+#: verification context for futile mandates).
+RETIRED = "retired"
+
+
+def clone_paper_portfolio(
+    db: Session,
+    source_id: str,
+    *,
+    mandate: str,
+    name: str,
+) -> PaperPortfolio:
+    """A new sleeve holding exactly the source's book now (ADR 0025 WS3).
+
+    Same positions, same cash, same timestamp: a challenger starts from the
+    champion's current book, not from the real book, so the two differ only
+    in the decisions made from here. Holdings are costed at today's EUR quote
+    (the seed rule: the run starts at a return of 0). Idempotent per mandate.
+    """
+    source = db.get(PaperPortfolio, source_id)
+    if source is None:
+        raise ValueError("source portfolio not found")
+    existing = (
+        db.query(PaperPortfolio)
+        .filter(PaperPortfolio.user_id == source.user_id, PaperPortfolio.mandate == mandate)
+        .one_or_none()
+    )
+    if existing is not None:
+        return existing
+    cash = _current_cash_balance(source, db)
+    plan: list[dict[str, Any]] = []
+    rate_cache: dict[str, dict[str, float] | None] = {}
+    for h in db.query(PaperHolding).filter(PaperHolding.portfolio_id == source_id).all():
+        if h.quantity is None or h.quantity <= 0:
+            continue
+        price: Decimal | None = None
+        if h.ticker:
+            try:
+                eur = paper_quote_eur(db, h.ticker, rate_cache=rate_cache).get("price")
+            except Exception:  # noqa: BLE001 - fall back to the source's cost
+                eur = None
+            if eur and eur > 0:
+                price = Decimal(str(eur))
+        plan.append({
+            "isin": h.isin, "ticker": h.ticker, "name": h.name, "quantity": h.quantity,
+            "price": price if price is not None else h.avg_buy_price, "asset_type": h.asset_type,
+        })
+    bench_base = _benchmark_base_quote(db)
+    now = now_utc()
+    clone = PaperPortfolio(
+        user_id=source.user_id,
+        name=name,
+        currency=source.currency,
+        initial_cash=cash,
+        managed_by="llm",
+        mandate=mandate,
+        mandate_config_json=json.dumps({
+            "seeded_from": "clone", "source_portfolio_id": source_id, "as_of": now.isoformat(),
+            "cash_seeded": float(cash),
+        }),
+        inception_at=now,
+    )
+    db.add(clone)
+    db.flush()
+    _set_benchmark_base(clone, bench_base)
+    _apply_seed(db, clone.id, plan)
+    recompute_baseline_value(db, clone.id, commit=False)
+    db.commit()
+    db.refresh(clone)
+    logger.info("clone_paper_portfolio: %s cloned from %s (%d holdings)", clone.id, source_id, len(plan))
+    return clone
+
+
+def archive_paper_portfolio(db: Session, portfolio_id: str, *, reason: str) -> PaperPortfolioArchive | None:
+    """Record a sleeve's run in ``paper_portfolio_archives`` and stop driving it.
+
+    Unlike :func:`reset_portfolio` nothing is deleted or reseeded: the sleeve
+    keeps its history and is marked ``retired``, so no cycle or review runs it
+    again. Returns ``None`` when it is already retired.
+    """
+    portfolio = db.get(PaperPortfolio, portfolio_id)
+    if portfolio is None or portfolio.managed_by == RETIRED:
+        return None
+    try:
+        final = get_summary(db, portfolio_id)
+    except Exception as exc:  # noqa: BLE001 - a pricing outage must not block an archive
+        logger.warning("archive: final NAV unavailable for %s: %s", portfolio_id, exc)
+        final = {}
+    holdings_q = db.query(PaperHolding).filter(PaperHolding.portfolio_id == portfolio_id)
+    trades_q = db.query(PaperTrade).filter(PaperTrade.portfolio_id == portfolio_id)
+    payload = {
+        "final": {
+            "total_value": final.get("total_value"),
+            "total_return_pct": final.get("total_return_pct"),
+            "benchmark_return_pct": (final.get("benchmark") or {}).get("total_return_pct"),
+            "as_of": now_utc().isoformat(),
+        },
+        "portfolio": {"name": portfolio.name, "mandate": portfolio.mandate},
+        "holdings": _rows(holdings_q, ("ticker", "isin", "name", "asset_type", "quantity", "avg_buy_price")),
+        "trades": _rows(trades_q, ("date", "ticker", "side", "quantity", "price", "value", "fee")),
+        "kept_in_place": True,
+    }
+    archive = PaperPortfolioArchive(
+        portfolio_id=portfolio_id, user_id=portfolio.user_id,
+        inception_at=portfolio.inception_at or portfolio.created_at,
+        reason=reason[:200], payload_json=json.dumps(payload, default=str),
+    )
+    db.add(archive)
+    portfolio.managed_by = RETIRED
+    db.commit()
+    logger.info("archived paper portfolio %s (%s)", portfolio_id, reason)
+    return archive
+
+
 def _current_cash_balance(portfolio: PaperPortfolio, db: Session) -> Decimal:
     """Current cash (see ``foundation.paper_cash.paper_cash_balance``)."""
     from app.foundation.paper_cash import paper_cash_balance

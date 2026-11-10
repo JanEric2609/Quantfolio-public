@@ -134,14 +134,20 @@ def test_more_trials_on_the_ledger_raise_the_bar():
     assert many < few
 
 
-def test_the_gate_reads_the_ledger_count(tmp_path):
+def test_the_gate_reads_the_lab_families_only(tmp_path):
+    """ADR 0025: N is the sum over the lab study families, not the ledger total."""
     db = _memory_db()
     for i in range(DEFAULT_N_TRIALS_FLOOR + 5):
-        record_trial(db, "test", str(i))
+        record_trial(db, "satellite", str(i))
+    for i in range(3):
+        record_trial(db, "pooled_model", f"p{i}")
+    for i in range(40):  # searches the lab gate did not select from
+        record_trial(db, "advisor_challenger", f"a{i}")
+        record_trial(db, "alphacrafter_miner", f"m{i}")
     db.commit()
-    assert db.query(TrialLedgerEntry).count() == DEFAULT_N_TRIALS_FLOOR + 5
+    assert db.query(TrialLedgerEntry).count() == DEFAULT_N_TRIALS_FLOOR + 5 + 3 + 80
     result = run_evidence_gate(db, panel_dir=_write(tmp_path), persist=False)
-    assert result is not None and result.n_trials == DEFAULT_N_TRIALS_FLOOR + 5
+    assert result is not None and result.n_trials == DEFAULT_N_TRIALS_FLOOR + 5 + 3
 
 
 def test_pbo_is_not_measured_on_a_short_or_single_record():

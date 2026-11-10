@@ -16,17 +16,21 @@ Families (one per question a selection could be made in):
   Nichtveranlagungsbescheinigung covers the depot neither sleeve pays tax.
   Shown, never gating, because the ten-year horizon is mostly taxed years.
 
-Per candidate: Deflated Sharpe Ratio against the whole trial ledger
-(`resolve_n_trials`, at least 500), Newey-West t, Sharpe. Per family: CSCV
+Per candidate: Deflated Sharpe Ratio against the effective trial count of
+the lab study families (`effective_n_trials(db, LAB_FAMILIES)`, ADR 0025),
+Newey-West t, Sharpe. Per family: CSCV
 PBO over the months every candidate covers, or none when too short to
 measure (fails closed, never shown as a measured 100 %).
 
 The satellite unlocks only when a mined score (ridge or trees, never the
 value + momentum baseline) has DSR >= 0.95 in `satellite_after_tax` and that
 family's PBO is measured and <= 50 % (`spec.py`, fixed before any result).
-The verdict is stored as an `EvidenceGateRun` row; `decision.monthly_plan`
-reads the latest one (through `foundation.factor_evidence.latest_evidence_gate`)
-to set the satellite's target (report Phase 4).
+The verdict is stored as an `EvidenceGateRun` row. Since ADR 0025 it no
+longer sets the satellite's target (the capital ladder does); the monthly
+plan still shows it. `admission.py` holds the DSR/PBO admission filter for
+backtest-selected candidates (excess returns, family N_eff, observed
+cross-trial Sharpe variance): it decides whether a lab strategy may become a
+future third ladder slot.
 
 ## Public surface (facade `app.lab.evidence_gate`)
 

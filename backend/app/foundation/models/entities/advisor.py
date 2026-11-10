@@ -178,3 +178,38 @@ class AdvisorGraduationTransition(Base):
     reason: Mapped[str] = mapped_column(Text, default="")
     criteria_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class AdvisorShadowForecast(Base):
+    """One strategy's forecast for one shortlist ticker on one day (ADR 0025 WS3).
+
+    Champion and challenger both forecast every candidate of the day's Discover
+    shortlist, so the paired promotion test compares them on identical
+    questions. ``p_beat``: probability of beating the benchmark (EUR) over
+    ``horizon_days`` trading days; ``band_low``/``band_high``: p5/p95 of the
+    stock's EUR return. Filled on resolution: ``beat``, ``brier``, ``rps``.
+    """
+
+    __tablename__ = "advisor_shadow_forecasts"
+    __table_args__ = (
+        UniqueConstraint("strategy_id", "forecast_date", "ticker", name="uq_shadow_forecast"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    strategy_id: Mapped[str] = mapped_column(
+        ForeignKey("advisor_strategies.id", ondelete="CASCADE"), index=True
+    )
+    forecast_date: Mapped[date] = mapped_column(Date, index=True)
+    ticker: Mapped[str] = mapped_column(String(32))
+    horizon_days: Mapped[int] = mapped_column(Integer, default=21)
+    p_beat: Mapped[float] = mapped_column(Float)
+    band_low: Mapped[float] = mapped_column(Float)
+    band_high: Mapped[float] = mapped_column(Float)
+    realised_return: Mapped[float | None] = mapped_column(Float, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    beat: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    brier: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+

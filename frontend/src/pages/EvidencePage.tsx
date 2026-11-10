@@ -19,9 +19,17 @@ import {
 
 /**
  * Evidence dashboard (ADR 0015): the global trial ledger and n_trials
- * resolver that back the graduation gate's Deflated Sharpe deflation — the
- * mechanism that makes the "silent period" un-gameable. Read-only.
+ * resolver behind every Deflated Sharpe deflation, now counted per family
+ * (ADR 0025): each gate deflates by the searches its candidate came from. Read-only.
  */
+const GATE_LABELS: Record<string, string> = {
+  evidence_gate: "Evidence gate (lab studies)",
+  advisor: "Advisor champion",
+  alphacrafter_miner: "AlphaCrafter factor admission",
+  alphacrafter_trader: "AlphaCrafter dossier conviction",
+  alphacrafter_tuning: "AlphaCrafter tuning",
+};
+
 export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}) {
   const Heading = headingLevel === 1 ? "h1" : "h2";
   const [summary, setSummary] = useState<NTrialsSummaryResponse | null>(null);
@@ -96,8 +104,8 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
         <p className="text-sm text-text-secondary mt-1 max-w-2xl">
           The checks a strategy must pass before it gets any of your money. Documented factor
           premia are tested with a prior from the literature; mined signals must clear the
-          Deflated Sharpe test against every trial ever run, so each new idea tried anywhere
-          makes the bar higher for all of them.
+          Deflated Sharpe test against every trial of the search they were picked from, so each
+          new idea tried in that search makes its bar higher.
         </p>
       </div>
 
@@ -110,11 +118,14 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-text-secondary">Trials counted against each test</CardTitle>
+            <CardTitle className="text-sm text-text-secondary">All trials, every search</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-semibold">{summary.resolved}</div>
-            <p className="mt-1 text-xs text-text-muted">Every ledger row, across all contexts.</p>
+            <p className="mt-1 text-xs text-text-muted">
+              The total over every family. No gate uses it: each counts only the searches its candidate came
+              from (below).
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -127,7 +138,7 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
             <div className="text-2xl font-semibold">{summary.effective ?? "—"}</div>
             <p className="mt-1 text-xs text-text-muted">
               Configurations of one run share data and signal, so they count once here. The true number of
-              independent tests lies between this and the count on the left; the gates use the higher one.
+              independent tests lies between this and the count on the left.
             </p>
           </CardContent>
         </Card>
@@ -146,6 +157,36 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
           </CardContent>
         </Card>
       </div>
+
+      {(summary.gates ?? []).length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Trials behind each gate</CardTitle>
+            <CardDescription>
+              A gate deflates only by the trials its candidate was picked from. Where a trial stored its
+              return or IC series, correlated trials count less (effective N).
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y divide-border text-sm">
+              {(summary.gates ?? []).map((g) => (
+                <li key={g.gate} className="flex flex-wrap items-baseline justify-between gap-2 py-2">
+                  <span>
+                    <span className="font-medium">{GATE_LABELS[g.gate] ?? g.gate}</span>
+                    <span className="ml-2 font-mono text-xs text-text-muted">{g.families.join(", ")}</span>
+                  </span>
+                  <span className="tabular-nums">
+                    N = {g.n_trials}
+                    {g.n_effective !== g.n_trials && (
+                      <span className="text-text-muted"> (effective {g.n_effective})</span>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       {curve.length > 1 && (
         <Card>
@@ -173,8 +214,8 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
 
       {Object.keys(summary.by_context).length + (summary.ac_trial_count ?? 0) > 0 && (
         <TrialsByContextCard
-          byContext={summary.by_context}
-          acTrials={summary.ac_trial_count ?? 0}
+          byContext={summary.by_family ?? summary.by_context}
+          acTrials={summary.by_family ? 0 : summary.ac_trial_count ?? 0}
           resolved={summary.resolved}
         />
       )}

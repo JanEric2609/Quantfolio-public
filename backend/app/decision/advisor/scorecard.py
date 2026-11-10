@@ -38,6 +38,7 @@ from app.foundation.quant_metrics import (
     historical_cvar,
     max_drawdown,
     probabilistic_sharpe_ratio,
+    ADVISOR_FAMILIES,
     resolve_n_trials,
     sharpe_ratio,
     sharpe_standard_error,
@@ -116,6 +117,7 @@ def compute_advisor_scorecard(
     *,
     window_days: int = DEFAULT_WINDOW_DAYS,
     portfolio_id: str | None = None,
+    strategy: Any | None = None,
 ) -> AdvisorScorecard | None:
     """Compute and upsert the 4-axis scorecard for a paper sleeve.
 
@@ -132,7 +134,16 @@ def compute_advisor_scorecard(
             .one_or_none()
         )
     else:
+        # The current champion's sleeve (ADR 0025: after a promotion it is
+        # the strategy's own "adv-<id>" sleeve), else the "advisor" sleeve.
+        from app.decision.advisor.strategy import get_champion
+
+        champion = get_champion(db, user_id)
         portfolio = (
+            db.get(PaperPortfolio, champion.portfolio_id)
+            if champion is not None and champion.portfolio_id
+            else None
+        ) or (
             db.query(PaperPortfolio)
             .filter(PaperPortfolio.user_id == user_id, PaperPortfolio.mandate == ADVISOR_MANDATE)
             .one_or_none()
@@ -146,17 +157,33 @@ def compute_advisor_scorecard(
     # Prefer sleeve-attributed predictions (PR2); fall back to the legacy
     # user-wide window only when the sleeve has no attributed rows yet.
     pred_window = DiscoveryPrediction.predicted_at >= now_utc() - timedelta(days=window_days)
-    preds = (
-        db.query(DiscoveryPrediction)
-        .filter(
-            DiscoveryPrediction.user_id == user_id,
-            DiscoveryPrediction.portfolio_id == portfolio.id,
-            pred_window,
+    if strategy is not None:
+        # ADR 0025: a strategy is scored only on its own calls, made since it
+        # was created. No fallback: with none of its own rows the axes stay
+        # empty ("insufficient data"), never borrowed from another strategy.
+        preds = (
+            db.query(DiscoveryPrediction)
+            .filter(
+                DiscoveryPrediction.user_id == user_id,
+                DiscoveryPrediction.strategy_id == strategy.id,
+                DiscoveryPrediction.predicted_at >= strategy.created_at,
+                pred_window,
+            )
+            .all()
         )
-        .all()
-    )
-    prediction_scope = "portfolio"
-    if not preds:
+        prediction_scope = "strategy"
+    else:
+        preds = (
+            db.query(DiscoveryPrediction)
+            .filter(
+                DiscoveryPrediction.user_id == user_id,
+                DiscoveryPrediction.portfolio_id == portfolio.id,
+                pred_window,
+            )
+            .all()
+        )
+        prediction_scope = "portfolio"
+    if not preds and strategy is None:
         preds = (
             db.query(DiscoveryPrediction)
             .filter(DiscoveryPrediction.user_id == user_id, pred_window)
@@ -230,11 +257,10 @@ def compute_advisor_scorecard(
                 returns, risk_free=risk_free, periods_per_year=CALENDAR_DAYS_PER_YEAR
             )
         )
-        # n_trials = the global ledger-backed trial count (Finding F15, ADR
-        # 0015) — counting only this user's AdvisorStrategy rows ran 2-6,
-        # making the deflation a rounding error; resolve_n_trials() counts the
-        # true search breadth across every context.
-        n_trials = resolve_n_trials(db)
+        # ADR 0025 (amending ADR 0015 ruling #9): N is the trials the champion
+        # was selected among, its own lineage of champions and challengers,
+        # not the global ledger. Display only; no gate reads this DSR.
+        n_trials = resolve_n_trials(db, ADVISOR_FAMILIES)
         dsr = float(
             deflated_sharpe_ratio(
                 returns, n_trials, risk_free=risk_free, periods_per_year=CALENDAR_DAYS_PER_YEAR

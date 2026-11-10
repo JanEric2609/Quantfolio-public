@@ -29,7 +29,7 @@ import numpy as np
 from sqlalchemy.orm import Session
 
 from app.foundation.factor_evidence import TILT_EVIDENCE_REGION, latest_evidence_gate_record
-from app.foundation.quant_metrics import resolve_n_trials
+from app.foundation.quant_metrics import LAB_FAMILIES, resolve_n_trials
 from app.foundation.settings import get_public_settings
 from app.lab.factor_premia import latest_cards
 from app.lab.factor_premia.strategies import AFTER_TAX_FACTOR, IMPLEMENTATION_COST, PUBLICATION_DECAY
@@ -216,7 +216,11 @@ def build_history(db: Session, *, now: datetime | None = None) -> dict[str, Any]
     record = latest_evidence_gate_record(db, TILT_EVIDENCE_REGION)
     tilt = [_tilt_card(c, today) for c in latest_cards(db)]
     try:
-        n_trials = int(record["n_trials"]) if record and record.get("n_trials") else resolve_n_trials(db)
+        n_trials = (
+            int(record["n_trials"])
+            if record and record.get("n_trials")
+            else resolve_n_trials(db, LAB_FAMILIES)
+        )
     except Exception:  # noqa: BLE001 - a missing ledger only drops the number
         n_trials = None
     return {

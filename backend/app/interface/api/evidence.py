@@ -21,9 +21,15 @@ from app.foundation.core.db import get_db
 from app.foundation.models.entities import AcTrialLedger, TrialLedgerEntry, User
 from app.foundation.auth import current_user
 from app.foundation.quant_metrics import (
+    ADVISOR_FAMILIES,
+    ALPHACRAFTER_MINER_FAMILY,
+    ALPHACRAFTER_TRADER_FAMILY,
+    ALPHACRAFTER_TUNING_FAMILY,
     DEFAULT_N_TRIALS_FLOOR,
+    LAB_FAMILIES,
     dsr_hurdle_curve,
     effective_n_trials,
+    n_trials_by_family,
     resolve_n_trials,
 )
 from app.lab.factor_premia import latest_cards
@@ -40,9 +46,11 @@ def n_trials_summary(
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
-    """The ledger-backed global trial count every DSR call site deflates against.
+    """Trial counts per family and per gate, with the global total underneath.
 
-    ``resolved`` is what every gate actually uses (the raw count, at least 1);
+    ADR 0025: a gate's N counts only the families its candidate was selected
+    from (``gates``, built from ``by_family``). ``resolved`` is the global
+    total, a conservative researcher-level number no gate uses any more;
     ``raw_count``/``by_context`` are the ledger contents that number is
     derived from, so a claimed trial count can be checked rather than trusted.
     ``effective`` counts independent search families (a lower bound on the
@@ -61,8 +69,28 @@ def n_trials_summary(
     ac_count = db.query(func.count(AcTrialLedger.id)).scalar() or 0
     resolved = resolve_n_trials(db)
     effective = effective_n_trials(db)
+    by_family = n_trials_by_family(db)
+    # ADR 0025: each gate's own N, the families its candidate was selected from.
+    gate_families = {
+        "evidence_gate": list(LAB_FAMILIES),
+        "advisor": list(ADVISOR_FAMILIES),
+        "alphacrafter_miner": [ALPHACRAFTER_MINER_FAMILY],
+        "alphacrafter_trader": [ALPHACRAFTER_TRADER_FAMILY],
+        "alphacrafter_tuning": [ALPHACRAFTER_TUNING_FAMILY],
+    }
+    gates = [
+        {
+            "gate": gate,
+            "families": families,
+            "n_trials": resolve_n_trials(db, families),
+            "n_effective": effective_n_trials(db, families),
+        }
+        for gate, families in gate_families.items()
+    ]
     grid = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, resolved, effective]
     return {
+        "by_family": by_family,
+        "gates": gates,
         "resolved": resolved,
         "floor": DEFAULT_N_TRIALS_FLOOR,
         "raw_count": int(raw_count),

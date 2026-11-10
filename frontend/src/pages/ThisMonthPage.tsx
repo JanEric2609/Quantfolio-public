@@ -323,13 +323,40 @@ function CashBreakdown({ cash }: { cash: PlanCash }) {
   );
 }
 
-/** When the stock-picking evidence gate last ran, and what the factor-tilt check says. */
+/** What the capital ladder allows for stock picks, the lab gate's last run, and the factor-tilt check. */
 function EvidenceBlock({ evidence }: { evidence: NonNullable<MonthlyPlan["evidence"]> }) {
   const gate = evidence.satellite.gate;
+  const ladder = evidence.satellite.ladder;
+  const picks = evidence.satellite.picks ?? [];
   return (
     <div className="space-y-2 text-sm text-text-secondary">
+      <p>
+        <span className="font-medium text-text-primary">Stock picks:</span>{" "}
+        {ladder ? (
+          <>
+            {ladder.weight_pct.toFixed(1)} % of the book, funded by the{" "}
+            {ladder.slot === "llm" ? "LLM advisor" : "rules control (Mandate B)"} at stage {ladder.stage} (
+            {ladder.stage_name}) on the <Link to="/graduation" className="text-accent underline-offset-2 hover:underline">capital ladder</Link>.
+          </>
+        ) : (
+          <>
+            0 %: no candidate is past the Paper stage of the{" "}
+            <Link to="/graduation" className="text-accent underline-offset-2 hover:underline">capital ladder</Link>.
+          </>
+        )}
+      </p>
+      {picks.length > 0 && (
+        <ul className="ml-4 list-disc text-xs">
+          {picks.map((p) => (
+            <li key={p.isin ?? p.ticker ?? p.name}>
+              {p.name}
+              {p.ticker ? ` (${p.ticker})` : ""}: {p.weight_pct.toFixed(2)} % of the book
+            </li>
+          ))}
+        </ul>
+      )}
       <p className="flex flex-wrap items-center gap-2">
-        <span className="font-medium text-text-primary">Stock picks:</span>
+        <span className="font-medium text-text-primary">Lab evidence gate:</span>
         {gate ? (
           <>
             checked {gate.as_of ? formatDate(gate.as_of) : "on an unknown date"} against {gate.n_trials} trials

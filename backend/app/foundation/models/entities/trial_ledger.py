@@ -45,6 +45,11 @@ class TrialLedgerEntry(Base):
     # not double-count the same hypothesis test as two trials.
     trial_key: Mapped[str] = mapped_column(String(128), nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    # ADR 0025: the configuration tested. Trials of one family with the same
+    # hash are one trial (a daily re-test is not a new hypothesis).
+    config_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # One search run (e.g. one tuning job); trials selected among together.
+    selection_set_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # When the hypothesis was registered — condition 5 of the ADR 0015 gate
     # (out-of-sample confirmation on data timestamped after registration)
     # reads this, not created_at, once out-of-sample checking lands.

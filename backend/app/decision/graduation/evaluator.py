@@ -1,4 +1,11 @@
-"""Evaluate whether the LLM has earned the right to advise the real portfolio.
+"""The old graduation gate, kept for display (legacy since ADR 0025).
+
+The capital ladder (``ladder.py``) decides what the satellite may hold. These
+criteria are still computed and shown, each marked ``legacy``; nothing reads
+the verdict. The Deflated Sharpe, PBO and minimum-track-record checks moved to
+the lab (``app.lab.evidence_gate.admission``), where they screen
+backtest-selected candidates; learning maturity is display only.
+
 
 ``evaluate_graduation`` is a pure read of persisted state — paper-portfolio
 NAV snapshots, competition results, AI trades and reflection cycles — turned
@@ -8,12 +15,10 @@ so it is cheap to call from an API handler or a scheduled job.
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-import numpy as np
 from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import (
@@ -31,6 +36,10 @@ from app.foundation.models.entities import (
 from app.foundation import quant_metrics as qm
 
 _PERIODS_PER_YEAR = 252
+_MOVED_TO_LAB = (
+    "Moved to the lab (ADR 0025): it screens backtest-selected strategies before they may become "
+    "ladder candidates. A forward paper record is judged by the capital ladder's e-processes."
+)
 
 
 @dataclass(frozen=True)
@@ -81,6 +90,8 @@ class GraduationCriterion:
     target: float | None
     detail: str
     blocking: bool = True
+    # ADR 0025: every criterion here is legacy (display only).
+    legacy: bool = True
 
 
 @dataclass
@@ -161,14 +172,18 @@ def _ai_portfolios(db: Session, user_id: str) -> list[PaperPortfolio]:
     Returns:
     	portfolios (list[PaperPortfolio]): The advisor champion/challenger portfolios.
     """
-    from app.decision.advisor.cycle import ADVISOR_MANDATE
-    from app.decision.advisor.strategy import CHALLENGER_MANDATE
+    from sqlalchemy import or_
 
+    # "advisor" and the pre-ADR-0025 shared "advisor-challenger" sleeve, plus
+    # each strategy's own "adv-<id>" sleeve since then.
     return (
         db.query(PaperPortfolio)
         .filter(
             PaperPortfolio.user_id == user_id,
-            PaperPortfolio.mandate.in_([ADVISOR_MANDATE, CHALLENGER_MANDATE]),
+            or_(
+                PaperPortfolio.mandate.in_(["advisor", "advisor-challenger"]),
+                PaperPortfolio.mandate.like("adv-%"),
+            ),
         )
         .all()
     )
@@ -281,7 +296,9 @@ def _search_breadth(db: Session, portfolio_ids: set[str]) -> tuple[int, int, int
     )
     # The ledger is the global count; the champion is also picked from these
     # portfolios and these competition rounds, so never deflate for fewer.
-    n_trials = max(qm.resolve_n_trials(db), len(portfolio_ids), competition_decisions)
+    n_trials = max(
+        qm.resolve_n_trials(db, qm.ADVISOR_FAMILIES), len(portfolio_ids), competition_decisions
+    )
     return review_cycles, competition_decisions, n_trials
 
 
@@ -355,7 +372,6 @@ def evaluate_graduation(
     champion: PaperPortfolio | None = None
     champion_snaps: list[PaperSnapshot] = []
     champion_returns: list[float] = []
-    champion_dsr = 0.0
 
     if champion_strategy is not None and champion_strategy.portfolio_id:
         champion = db.get(PaperPortfolio, champion_strategy.portfolio_id)
@@ -367,8 +383,6 @@ def evaluate_graduation(
                 .all()
             )
             champion_returns = _nav_returns(champion_snaps)
-            if len(champion_returns) >= 3:
-                champion_dsr = qm.deflated_sharpe_ratio(champion_returns, n_trials=n_trials)
 
     if champion is None:
         for p in portfolios:
@@ -381,14 +395,12 @@ def evaluate_graduation(
             rets = _nav_returns(snaps)
             if len(rets) < 3:
                 continue
-            dsr = qm.deflated_sharpe_ratio(rets, n_trials=n_trials)
-            if champion is None or dsr > champion_dsr or (
-                math.isclose(dsr, champion_dsr) and len(rets) > len(champion_returns)
-            ):
+            # Without a champion strategy: the longest record (selecting by
+            # Deflated Sharpe moved to the lab with the DSR itself, ADR 0025).
+            if champion is None or len(rets) > len(champion_returns):
                 champion = p
                 champion_snaps = snaps
                 champion_returns = rets
-                champion_dsr = dsr
 
     criteria: list[GraduationCriterion] = []
     metrics: dict[str, Any] = {
@@ -424,18 +436,13 @@ def evaluate_graduation(
     )
     sharpe = qm.sharpe_ratio(champion_returns) if n_returns >= 3 else 0.0
     sortino = qm.sortino_ratio(champion_returns) if n_returns >= 3 else 0.0
-    min_trl = (
-        qm.min_track_record_length(champion_returns) if n_returns >= 3 else float("inf")
-    )
     metrics.update(
         {
-            "dsr": round(champion_dsr, 4),
+            "dsr": None,
             "psr": round(psr, 4),
             "sharpe": round(sharpe, 4),
             "sortino": round(sortino, 4),
-            "min_track_record_length": (
-                None if min_trl == float("inf") else round(min_trl, 1)
-            ),
+            "min_track_record_length": None,
             "observations": n_obs,
         }
     )
@@ -443,16 +450,12 @@ def evaluate_graduation(
         GraduationCriterion(
             key="statistical_skill",
             label="Statistically significant skill (Deflated Sharpe)",
-            passed=champion_dsr >= cfg.min_dsr,
-            progress=_clamp01(champion_dsr / cfg.min_dsr),
-            value=round(champion_dsr, 4),
+            passed=False,
+            progress=0.0,
+            value=None,
             target=cfg.min_dsr,
-            detail=(
-                f"Deflated Sharpe {champion_dsr:.2%} vs {cfg.min_dsr:.0%} required "
-                f"(deflated for {n_trials} trials: {len(portfolios)} portfolios, "
-                f"{competition_decisions} competition rounds; "
-                f"{review_cycles} routine reviews not counted as trials)."
-            ),
+            detail=_MOVED_TO_LAB,
+            blocking=False,
         )
     )
 
@@ -575,7 +578,8 @@ def evaluate_graduation(
             progress=_clamp01(cycles / cfg.min_learning_cycles),
             value=float(cycles),
             target=float(cfg.min_learning_cycles),
-            detail=f"{cycles} of {cfg.min_learning_cycles} reflection/self-critique cycles.",
+            detail=f"{cycles} of {cfg.min_learning_cycles} reflection/self-critique cycles (display only).",
+            blocking=False,
         )
     )
 
@@ -637,75 +641,18 @@ def evaluate_graduation(
         )
     )
 
-    # 9. Probability of Backtest Overfitting (CSCV) — ADR 0015 condition 3 ---
-    variant_returns: list[list[float]] = []
-    for p in portfolios:
-        snaps_p = (
-            db.query(PaperSnapshot)
-            .filter(PaperSnapshot.portfolio_id == p.id)
-            .order_by(PaperSnapshot.date.asc())
-            .all()
+    # 9-10. PBO and the Minimum Track Record Length moved to the lab (ADR 0025).
+    metrics["pbo"] = None
+    for key, label, target in (
+        ("backtest_overfitting", "Low probability of backtest overfitting (CSCV)", cfg.max_pbo),
+        ("sufficient_track_record_length", "Observations clear the Minimum Track Record Length", None),
+    ):
+        criteria.append(
+            GraduationCriterion(
+                key=key, label=label, passed=False, progress=0.0, value=None, target=target,
+                detail=_MOVED_TO_LAB, blocking=False,
+            )
         )
-        rets_p = _nav_returns(snaps_p)
-        if len(rets_p) >= 3:
-            variant_returns.append(rets_p)
-    pbo_assessable = len(variant_returns) >= 2
-    if pbo_assessable:
-        min_len = min(len(r) for r in variant_returns)
-        matrix = np.array([r[-min_len:] for r in variant_returns]).T
-        pbo = qm.probability_of_backtest_overfitting(matrix)
-        pbo_progress = 1.0 if pbo <= cfg.max_pbo else _clamp01(cfg.max_pbo / pbo)
-    else:
-        # Fail closed, matching probability_of_backtest_overfitting's own
-        # convention: too few search variants to assess overfitting honestly.
-        # Zero data reads as zero progress, not the ceiling formula's ~0.5.
-        pbo = 1.0
-        pbo_progress = 0.0
-    # The fail-closed 1.0 is a verdict, not a measurement: report it as absent
-    # so the dashboard shows "—" instead of a measured-looking "PBO 100.0%".
-    pbo_reported = round(pbo, 4) if pbo_assessable else None
-    metrics["pbo"] = pbo_reported
-    criteria.append(
-        GraduationCriterion(
-            key="backtest_overfitting",
-            label="Low probability of backtest overfitting (CSCV)",
-            passed=pbo_assessable and pbo <= cfg.max_pbo,
-            progress=pbo_progress,
-            value=pbo_reported,
-            target=cfg.max_pbo,
-            detail=(
-                f"PBO {pbo:.1%} vs {cfg.max_pbo:.0%} ceiling across "
-                f"{len(variant_returns)} search variant(s)."
-                if len(variant_returns) >= 2
-                else "Need ≥2 portfolio variants with return history to assess overfitting."
-            ),
-        )
-    )
-
-    # 10. Minimum Track Record Length enforcement — ADR 0015 condition 4 ----
-    mtrl_value = metrics["min_track_record_length"]
-    if mtrl_value is None:
-        mtrl_pass = False
-        mtrl_progress = 0.0
-        mtrl_detail = "Not enough return history to compute the Minimum Track Record Length."
-    else:
-        mtrl_pass = n_obs >= mtrl_value
-        mtrl_progress = _clamp01(n_obs / mtrl_value) if mtrl_value > 0 else 1.0
-        mtrl_detail = (
-            f"{n_obs} observations vs MTRL {mtrl_value:.1f} required for the "
-            "measured Deflated Sharpe to be statistically trustworthy."
-        )
-    criteria.append(
-        GraduationCriterion(
-            key="sufficient_track_record_length",
-            label="Observations clear the Minimum Track Record Length",
-            passed=mtrl_pass,
-            progress=mtrl_progress,
-            value=float(n_obs),
-            target=mtrl_value,
-            detail=mtrl_detail,
-        )
-    )
 
     # 11. Out-of-sample confirmation since ledger registration — ADR 0015
     #     condition 5. The champion-promotion path (advisor/strategy.py)
@@ -761,7 +708,8 @@ def evaluate_graduation(
 
     blocking = [c for c in criteria if c.blocking]
     graduated = bool(blocking) and all(c.passed for c in blocking)
-    overall = sum(c.progress for c in blocking) / len(blocking) if blocking else 0.0
+    shown = [c for c in criteria if c.detail != _MOVED_TO_LAB]
+    overall = sum(c.progress for c in shown) / len(shown) if shown else 0.0
 
     return GraduationResult(
         graduated=graduated,

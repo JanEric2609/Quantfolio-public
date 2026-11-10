@@ -253,10 +253,6 @@ ignore_imports = [
     # strategy.py reaches it directly (dissolves the strategy->cycle back-edge).
     "app.decision.advisor.strategy -> app.decision.paper_portfolio",
     "app.decision.advisor.recommendations -> app.decision.graduation.state",
-    # The evolution registrar lives in advisor/jobs.py; its body legitimately
-    # scores graduation as part of each evolution round.
-    "app.decision.advisor.jobs -> app.decision.graduation.evaluator",
-    "app.decision.advisor.jobs -> app.decision.graduation.state",
     # Sanctioned public-surface edge (Wave A): advisor reads discover's
     # STYLE_FRAMINGS via discover.framings — the ONE documented
     # advisor→discover-family reach, pending a shared-facades extraction.
@@ -266,13 +262,6 @@ ignore_imports = [
     "app.decision.advisor.cycle -> app.decision.discover.predictor",
     "app.decision.graduation.state -> app.decision.advisor.strategy",
     "app.decision.graduation.evaluator -> app.decision.advisor.strategy",
-    # _ai_portfolios() reads ADVISOR_MANDATE so it scopes to advisor's own
-    # champion/challenger sleeves instead of the broader (and wrong)
-    # managed_by == "llm" filter, which also matched llm_portfolio's unrelated
-    # mandate A/B portfolios. Submodule import (not the advisor facade root)
-    # deliberately, to avoid pulling in advisor.jobs's own graduation
-    # evaluator/state imports and forming a package-level cycle.
-    "app.decision.graduation.evaluator -> app.decision.advisor.cycle",
     "app.decision.llm_portfolio.mirror -> app.decision.paper_portfolio",
     "app.decision.llm_portfolio.review -> app.decision.paper_portfolio",
     "app.decision.llm_portfolio.gates -> app.decision.discover.tradeability",
@@ -330,7 +319,6 @@ ignore_imports = [
     # rows shrink only.
     "app.decision.discover.jobs -> app.decision.advisor.scorecard",
     "app.decision.graduation.evaluator -> app.decision.advisor.strategy",
-    "app.decision.graduation.evaluator -> app.decision.advisor.cycle",
     "app.decision.graduation.state -> app.decision.advisor.strategy",
 ]
 
@@ -373,8 +361,6 @@ source_modules = [
 forbidden_modules = ["app.decision.graduation.*"]
 allow_indirect_imports = true
 ignore_imports = [
-    "app.decision.advisor.jobs -> app.decision.graduation.evaluator",
-    "app.decision.advisor.jobs -> app.decision.graduation.state",
     "app.decision.advisor.recommendations -> app.decision.graduation.state",
 ]
 
