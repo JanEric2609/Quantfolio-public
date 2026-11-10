@@ -34,7 +34,8 @@ tuned after the fact:
    so the guard is a half step, not an exit.
 7. Trades: only where a position is off target by more than ``BAND`` of NAV
    and the order is at least ``MIN_ORDER_EUR``. Sells first, then buys from
-   the cash they free.
+   the cash they free. Sells pass A's sell gates (ADR 0012/0013), so a name
+   that leaves the selection is sold down by at most a third per review.
 """
 from __future__ import annotations
 
@@ -267,18 +268,44 @@ def run_rules_review(
 
     orders: list[dict[str, Any]] = []
     if nav > 0:
-        # Sells first: they fund the buys.
+        # Sells first: they fund the buys. They pass the same sell gates as
+        # A's (ADR 0012/0013): at most a third of a position per review and
+        # within the trailing-window cap, never below the ETF floor. A name
+        # the rules dropped is therefore wound down over several reviews,
+        # exactly as A would have to, so A - B measures choices, not limits.
+        from app.decision.llm_portfolio.gates import check_sell_gates
+        from app.foundation.sell_caps import CUMULATIVE_SELL_WINDOW_DAYS, cumulative_sell_totals
+
+        asset_types = {
+            (h.ticker or "").upper(): h.asset_type
+            for h in db.query(PaperHolding).filter(PaperHolding.portfolio_id == portfolio.id).all()
+        }
+        gate_book = {t: (v, asset_types.get(t)) for t, (v, _, _) in book.items()}
+        cumulative = cumulative_sell_totals(db, portfolio.id, CUMULATIVE_SELL_WINDOW_DAYS)
         for ticker, (value, qty, isin) in sorted(book.items()):
             target_value = targets.get(ticker, 0.0) * nav
             excess = value - target_value
             if value <= 0:
                 continue
-            # A name the rules no longer hold is sold outright, however small;
-            # otherwise only a drift past the band is worth an order.
+            # A name the rules no longer hold is sold however small the
+            # position; otherwise only a drift past the band is worth an order.
             if target_value > 0 and (excess <= BAND * nav or excess < MIN_ORDER_EUR):
                 continue
-            sell_qty = qty if target_value <= 0 else qty * excess / value
+            wanted = qty if target_value <= 0 else qty * excess / value
             price = value / qty
+            sell_gate = check_sell_gates(
+                ticker=ticker,
+                quantity=Decimal(str(wanted)).quantize(Decimal("0.000001"), rounding="ROUND_DOWN"),
+                price=Decimal(str(price)),
+                book=gate_book,
+                cash=cash,
+                mandate_config=config,
+                cumulative_totals=cumulative,
+            )
+            if not sell_gate["passed"]:
+                orders.append({"side": "sell", "ticker": ticker, "skipped": sell_gate["reason"]})
+                continue
+            sell_qty = float(sell_gate["quantity"])
             fee = paper_order_fee(db, ticker, sell_qty * price, isin=isin, side="sell")
             try:
                 execute_trade(db, portfolio.id, ticker, "sell", sell_qty, price, confidence=None,

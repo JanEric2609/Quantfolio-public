@@ -41,7 +41,7 @@ The composite's calibration axis is now the mean of two parts: 1 − RPS for the
 
 ### 4. Mandate B is the rules control
 
-B runs the same weekly review on the same shortlist, under A's limits: at most 15 % in one stock, at least 40 % in ETFs. It makes no LLM call; the frozen rules are in `llm_portfolio/rules.py`:
+B runs the same weekly review on the same shortlist, under A's limits: at most 15 % in one stock, at least 40 % in ETFs, and A's sell gates (at most a third of a position per review and the trailing-window cap of ADR 0012/0013), so a dropped name is wound down over several reviews. It makes no LLM call; the frozen rules are in `llm_portfolio/rules.py`:
 
 - **Signal:** 12-1 month momentum on EUR closes, positive momentum only.
 - **Volatility filter:** with 4 or more eligible names, the most volatile quarter is dropped.

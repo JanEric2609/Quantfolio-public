@@ -229,11 +229,17 @@ def refresh_gdelt_news(
     stamps = _stamps(start, clock - timedelta(minutes=20))
     stats: dict[str, Any] = {"members": len(members), "aliases": len(index), "files": 0, "missing": 0, "mentions": 0}
     pending: dict[tuple[str, date, str], tuple[Mention, str]] = {}
+    # The watermark stops before the first slice with a file that did not
+    # come back, so a failed download is retried next night. MAX_HOURS still
+    # bounds the retry: a file GDELT never publishes is given up after 30 h.
+    complete_through: str | None = None
+    gap = False
     for stamp in stamps:
         for kind in KINDS:
             payload = fetch(FILE_URL.format(stamp=stamp, kind=kind))
             if payload is None:
                 stats["missing"] += 1
+                gap = True
                 continue
             stats["files"] += 1
             try:
@@ -241,9 +247,11 @@ def refresh_gdelt_news(
                     pending.setdefault((mention.symbol, mention.seen_at.date(), mention.title_key), (mention, source))
             except (zipfile.BadZipFile, csv.Error) as exc:
                 logger.info("gdelt: %s %s unreadable: %s", stamp, kind, exc)
+        if not gap:
+            complete_through = stamp
     stats["mentions"] = _store(db, pending)
-    if stamps:
-        upsert_public_settings(db, {THROUGH_KEY: stamps[-1]})
+    if complete_through is not None:
+        upsert_public_settings(db, {THROUGH_KEY: complete_through})
     db.query(NewsMention).filter(NewsMention.day < clock.date() - timedelta(days=KEEP_DAYS)).delete()
     db.commit()
     logger.info("gdelt refresh: %s", stats)

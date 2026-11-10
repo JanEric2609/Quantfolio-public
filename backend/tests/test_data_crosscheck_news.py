@@ -308,10 +308,11 @@ def test_gdelt_keeps_articles_about_the_company_once():
         _row("20261110031500", "apple inc", "Apple unveils"),  # US: Finnhub covers it
     ])
     fetched: list[str] = []
+    empty = _zip([])
 
     def fetch(url):
         fetched.append(url)
-        return file1 if "20261110031500.gkg" in url else None
+        return file1 if "20261110031500.gkg" in url else empty
 
     out = gdelt_news.refresh_gdelt_news(db, now=now, fetch=fetch)
     assert out["mentions"] == 2
@@ -322,6 +323,34 @@ def test_gdelt_keeps_articles_about_the_company_once():
     fetched.clear()
     gdelt_news.refresh_gdelt_news(db, now=now + timedelta(minutes=30), fetch=fetch)
     assert len(fetched) == 2 * 2 and db.query(NewsMention).count() == 2
+
+
+def test_gdelt_retries_a_slice_whose_file_did_not_come_back():
+    db = _memory_db()
+    db.add(IndexUniverseMember(index_key="msci_world", isin="CH0038863350", name="NESTLE SA",
+                               symbol="NESN.SW", symbol_ok=True))
+    db.commit()
+    now = datetime(2026, 11, 10, 4, 0, tzinfo=UTC)
+    story = _zip([_row("20261110031500", "nestle", "Nestle cuts outlook again")])
+    empty = _zip([])
+    down = {"on": True}
+
+    def fetch(url):
+        if "20261110031500.gkg" in url:
+            return None if down["on"] else story
+        return empty
+
+    first = gdelt_news.refresh_gdelt_news(db, now=now, fetch=fetch)
+    assert first["missing"] == 1 and first["mentions"] == 0
+    # The watermark stops before the failed slice ...
+    from app.foundation.settings import get_public_settings
+
+    assert get_public_settings(db)[gdelt_news.THROUGH_KEY] == "20261110030000"
+    # ... so the next run picks the story up once the file is back.
+    down["on"] = False
+    second = gdelt_news.refresh_gdelt_news(db, now=now + timedelta(minutes=30), fetch=fetch)
+    assert second["mentions"] == 1
+    assert get_public_settings(db)[gdelt_news.THROUGH_KEY] == "20261110040000"
 
 
 def test_control_center_lists_unconfirmed_cross_check_errors():
