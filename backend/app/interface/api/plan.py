@@ -118,6 +118,8 @@ class PlanCash(BaseModel):
     savings_eur: float
     broker_cash_eur: float
     broker_cash_by_broker: dict[str, float] = {}
+    # Trading 212's overnight savings pot: in the book, never investable cash.
+    savings_pot_eur: float = 0.0
     emergency_reserve_eur: float
     reserve_set: bool
     investable_eur: float

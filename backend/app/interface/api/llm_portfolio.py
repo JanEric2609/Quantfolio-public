@@ -302,6 +302,7 @@ def get_divergence(
             "missing_in_real": raw.get("missing_in_real", []),
             "missing_in_paper": raw.get("missing_in_paper", []),
             "weight_diffs": raw.get("weight_diffs", []),
+            "summary": raw.get("summary"),
         },
         "performance_delta": raw.get("perf_delta", 0.0),
         "advice_cards": [

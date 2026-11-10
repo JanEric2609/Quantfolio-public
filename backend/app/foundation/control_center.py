@@ -128,6 +128,7 @@ def attention_items(db: Session, *, today: date | None = None) -> list[dict[str,
     _backup_items(db, now, items)
     _price_items(db, now, items)
     _cross_check_items(db, now, items)
+    _sentiment_items(db, now, items)
     _evidence_gate_items(db, now, items)
     _stuck_job_items(db, heartbeat, now, items)
     _disk_items(items)
@@ -619,6 +620,29 @@ def _cross_check_items(db: Session, now: datetime, items: list[AttentionItem]) -
             ", ".join(f"{r.symbol} ({r.pattern})" for r in warns[:10])
             + ". Usually a dividend the next weekly re-pull restates, or bars that stopped updating.",
             "/settings/status#coverage", "View coverage",
+        ))
+
+
+def _sentiment_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
+    """The worker scored recent news with the keyword fallback because FinBERT is not installed or failed to load."""
+    from app.foundation.models.entities import NewsItem
+
+    since = now - timedelta(days=3)
+    rows = (
+        db.query(NewsItem.sentiment_source, func.count())
+        .filter(NewsItem.fetched_at >= since, NewsItem.sentiment_source.in_(("lexicon", "finbert")))
+        .group_by(NewsItem.sentiment_source)
+        .all()
+    )
+    counts = {source: n for source, n in rows}
+    if counts.get("lexicon") and not counts.get("finbert"):
+        items.append(AttentionItem(
+            "news-sentiment-fallback", "warning",
+            "News sentiment runs on a keyword list, not FinBERT",
+            f"{counts['lexicon']} articles of the last 3 days were scored by the fallback; "
+            "the stock pages, reports and Discover ignore those labels. Install the worker's "
+            "bert extra (pip install -e \".[bert]\") and restart quantfolio-worker.",
+            "/settings/status", "View status",
         ))
 
 

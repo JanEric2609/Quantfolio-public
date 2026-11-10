@@ -48,7 +48,7 @@ function LongHistoryCard({ data, years }: { data: LongHistoryProjection; years: 
       <ul className="list-disc space-y-0.5 pl-4">
         <li>
           In {years} years: median {eur(t.median)}, bad case (5th percentile) {eur(t.p5)}; {pct(t.p_below_contributed, 0)} of
-          paths end below the {eur(t.contributed)} you put in.
+          paths end below the {eur(t.contributed)} paid in by then (portfolio today plus what you add).
         </li>
         <li>
           After selling everything at the end and paying the flat tax on the nominal gain: median {eur(data.after_tax.median)}
@@ -129,7 +129,13 @@ export function ScenariosView() {
   const metrics: MetricItem[] = [
     { label: `Median in ${years} years`, value: eur(d?.terminal.median), hint: "today's euros" },
     { label: "Bad case (5th percentile)", value: eur(d?.terminal.p5), hint: "1 path in 20 ends lower" },
-    { label: "Money you put in", value: eur(d?.terminal.contributed) },
+    { label: "Portfolio today", value: eur(d?.terminal.start_value) },
+    {
+      label: `You add over ${years} years`,
+      value: eur(d?.terminal.future_contributions),
+      hint: contribution ? `${eur(num(contribution))} a month` : undefined,
+    },
+    { label: "Total paid in by then", value: eur(d?.terminal.contributed), hint: "today's portfolio plus what you add" },
     {
       label: "Chance of the goal",
       value: g ? pct(g.probability, 0) : "-",
@@ -208,7 +214,7 @@ export function ScenariosView() {
               labels={fan.map((f) => f.year)}
               bands={fan.map((f) => ({ p05: f.p5, p25: f.p25, median: f.p50, p75: f.p75, p95: f.p95 }))}
               lines={[
-                { name: "Money put in", data: fan.map((f) => f.contributed), dashed: true },
+                { name: "Total paid in (portfolio today + contributions)", data: fan.map((f) => f.contributed), dashed: true },
                 ...(g ? [{ name: "Goal", data: fan.map(() => g.goal_eur), color: "#f59e0b", dashed: true }] : []),
               ]}
               xName="Years from now"

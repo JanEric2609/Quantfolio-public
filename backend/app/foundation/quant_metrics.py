@@ -1240,7 +1240,13 @@ def effective_n_trials(db: Session, families: Sequence[str] | None = None) -> in
     return max(1, int(math.ceil(total - 1e-9)))
 
 
-def diebold_mariano_hln(d: Sequence[float], h: int = 1, lag: int | None = None) -> dict[str, float | int | None]:
+def diebold_mariano_hln(
+    d: Sequence[float],
+    h: int = 1,
+    lag: int | None = None,
+    positions: Sequence[int] | None = None,
+    max_gap: int = 5,
+) -> dict[str, float | int | None]:
     """One-sided Diebold-Mariano test that the mean loss differential is > 0.
 
     ``d`` is the loss differential series (e.g. Brier(A) - Brier(B); positive
@@ -1250,10 +1256,17 @@ def diebold_mariano_hln(d: Sequence[float], h: int = 1, lag: int | None = None) 
     factor sqrt((T + 1 - 2h + h(h-1)/T) / T) and is read against a t with
     T - 1 degrees of freedom. With ``h = 1`` and no lag it equals the
     one-sample t statistic. ADR 0025 (statsmodels is not a dependency).
+
+    ``positions`` (trading-day index of each element of ``d``) marks gaps: an
+    autocovariance term whose two observations lie more than ``max_gap`` trading
+    days apart is dropped, because matched forecasts are not contiguous days
+    (plan 2026-11-10, WP4). Without it ``d`` is taken as contiguous.
     """
     from scipy.stats import t as _t
 
-    x = np.asarray([v for v in d if v is not None and np.isfinite(v)], dtype=float)
+    keep = [i for i, v in enumerate(d) if v is not None and np.isfinite(v)]
+    x = np.asarray([d[i] for i in keep], dtype=float)
+    pos = np.asarray([positions[i] for i in keep], dtype=float) if positions is not None else None
     n = len(x)
     lags = (h - 1) if lag is None else int(lag)
     if n < 3:
@@ -1262,7 +1275,10 @@ def diebold_mariano_hln(d: Sequence[float], h: int = 1, lag: int | None = None) 
     lrv = float(dev @ dev) / n
     for k in range(1, min(lags, n - 1) + 1):
         weight = 1.0 - k / (lags + 1.0)
-        lrv += 2.0 * weight * float(dev[k:] @ dev[:-k]) / n
+        prod = dev[k:] * dev[:-k]
+        if pos is not None:
+            prod = prod[(pos[k:] - pos[:-k]) <= max_gap]
+        lrv += 2.0 * weight * float(prod.sum()) / n
     if lrv <= 0:
         return {"stat": None, "p_value": None, "n": n, "mean": float(x.mean())}
     dm = float(x.mean()) / math.sqrt(lrv / n)

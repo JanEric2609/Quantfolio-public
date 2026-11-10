@@ -8079,6 +8079,11 @@
           "savings_eur": {
             "title": "Savings Eur",
             "type": "number"
+          },
+          "savings_pot_eur": {
+            "default": 0.0,
+            "title": "Savings Pot Eur",
+            "type": "number"
           }
         },
         "required": [
@@ -17269,6 +17274,17 @@
             ],
             "title": "Interest 30D Eur"
           },
+          "interest_rate_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interest Rate Basis"
+          },
           "interest_rate_measured": {
             "anyOf": [
               {
@@ -17291,6 +17307,27 @@
               }
             ],
             "title": "Last Success At"
+          },
+          "last_summary": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Summary"
           },
           "last_sync_at": {
             "anyOf": [
@@ -17349,6 +17386,17 @@
             "default": true,
             "title": "Read Only",
             "type": "boolean"
+          },
+          "savings_pot": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Savings Pot"
           },
           "source": {
             "title": "Source",

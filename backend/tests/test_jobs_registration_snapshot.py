@@ -38,6 +38,7 @@ from app.decision.discover.jobs import (
     register_analyst_estimates_snapshot_job,
     register_discover_ml_training_job,
     register_discover_refresh_job,
+    register_discover_stage_precompute_job,
     register_discover_universe_prefetch_job,
     register_discovery_resolution_job,
     register_discovery_review_job,
@@ -74,6 +75,7 @@ from app.worker import (
     register_snapshot_paper_portfolios_job,
     register_telegram_daily_reminder_job,
     register_telegram_polling_job,
+    register_venue_instruments_job,
     register_watchlist_price_checker_job,
     send_telegram_daily_reminders,
 )
@@ -145,6 +147,7 @@ EXPECTED_REGISTRATIONS = {
     "price_cross_check": {"trigger": "cron", "hour": 4, "minute": 20},
     "analyst_estimates_snapshot": {"trigger": "cron", "hour": 4, "minute": 45},
     "discover_universe_prefetch": {"trigger": "cron", "hour": 1, "minute": 15},
+    "discover_stage_precompute": {"trigger": "cron", "hour": 3, "minute": 0},
     "forward_lab_nightly": {"trigger": "cron", "hour": 4, "minute": 30},
     "news_tone_nightly": {"trigger": "cron", "hour": 5, "minute": 0},
     "telegram_daily_reminder": {"trigger": "cron", "hour": 20, "minute": 0},
@@ -160,6 +163,7 @@ EXPECTED_REGISTRATIONS = {
     "monthly_plan_snapshot": {"trigger": "cron", "hour": 7, "minute": 10},
     "trade_check_daily": {"trigger": "cron", "hour": 22, "minute": 30},
     "bar_repull_weekly": {"trigger": "cron", "day_of_week": "sun", "hour": 5, "minute": 0},
+    "venue_instruments_weekly": {"trigger": "cron", "day_of_week": "mon", "hour": 3, "minute": 10},
     "scalable_sync": {"trigger": "interval", "hours": 1},
     "trading212_sync": {"trigger": "interval", "hours": 1},
     "llm_mandate_a_review": {
@@ -260,6 +264,7 @@ def _drive_all_registrations(sched):
     returns["discover_ml_training"] = register_discover_ml_training_job(sched)
     returns["analyst_estimates_snapshot"] = register_analyst_estimates_snapshot_job(sched)
     returns["discover_universe_prefetch"] = register_discover_universe_prefetch_job(sched)
+    returns["discover_stage_precompute"] = register_discover_stage_precompute_job(sched)
     returns["forward_lab_nightly"] = register_forward_lab_job(sched)
     returns["news_tone_nightly"] = register_news_tone_job(sched)
     returns["advisor_rl_training"] = register_advisor_rl_training_job(sched)
@@ -268,6 +273,7 @@ def _drive_all_registrations(sched):
     returns["insider_trading_refresh"] = register_insider_trading_refresh_job(sched)
     returns["gdelt_news_refresh"] = register_gdelt_news_job(sched)
     returns["price_cross_check"] = register_price_cross_check_job(sched)
+    returns["venue_instruments_weekly"] = register_venue_instruments_job(sched)
     return returns
 
 
@@ -374,7 +380,11 @@ EXPECTED_SCHEDULER_DEFAULTS = {"misfire_grace_time": 300, "coalesce": True, "max
 
 def test_scheduler_defaults_snapshot():
     assert jobs.SCHEDULER_JOB_DEFAULTS == EXPECTED_SCHEDULER_DEFAULTS
-    assert jobs.WORKER_THREAD_POOL_SIZE == 19
+    assert jobs.WORKER_THREAD_POOL_SIZE == 20
+    # A tracked job holds two connections (session + advisory lock).
+    from app.foundation.core.db import pool_capacity
+
+    assert (pool_capacity("postgresql://u@h/d") or 0) >= 2 * jobs.WORKER_THREAD_POOL_SIZE
     # A caller mutating the returned dict must not change the shared defaults.
     jobs.scheduler_job_defaults()["misfire_grace_time"] = 1
     assert jobs.SCHEDULER_JOB_DEFAULTS == EXPECTED_SCHEDULER_DEFAULTS

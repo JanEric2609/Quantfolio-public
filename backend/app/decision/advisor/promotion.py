@@ -281,7 +281,8 @@ def evaluate_paired_promotion(
     looks.append(today.isoformat())
     state["looks"] = looks
     result.look, result.looks_done = look, len(looks)
-    dm = diebold_mariano_hln(d_t, h=HORIZON_DAYS, lag=NW_LAG)
+    positions = [int(np.busday_count(days[0], day)) for day in days] if days else None
+    dm = diebold_mariano_hln(d_t, h=HORIZON_DAYS, lag=NW_LAG, positions=positions)
     result.dm_stat, result.p_value = dm["stat"], dm["p_value"]
     better = dm["p_value"] is not None and dm["p_value"] < POCOCK_NOMINAL_ALPHA
     if better and return_ok and mdd_ok:

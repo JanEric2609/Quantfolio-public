@@ -447,16 +447,26 @@ class TestPipelineStages:
 
         from app.foundation.models.entities import NewsItem
 
+        for n, label in enumerate(("positive", "positive", "negative", "positive")):
+            db.add(
+                NewsItem(
+                    id=uuid4().hex,
+                    title=f"{label} AAPL headline {n}",
+                    url=f"http://example.com/{n}",
+                    source="test",
+                    ticker="AAPL",
+                    sentiment_score=Decimal("0.9"),
+                    sentiment_label=label,
+                    sentiment_source="finbert",
+                    published_at=datetime.now(UTC) - timedelta(days=5),
+                )
+            )
+        # A keyword-fallback label is no sentiment: it must not count.
         db.add(
             NewsItem(
-                id=uuid4().hex,
-                title="Positive AAPL headline",
-                url="http://example.com",
-                source="test",
-                ticker="AAPL",
-                sentiment_score=Decimal("0.6"),
-                sentiment_label="positive",
-                published_at=datetime.now(UTC) - timedelta(days=5),
+                id=uuid4().hex, title="Profits surge", url="http://example.com/lex", source="test", ticker="AAPL",
+                sentiment_score=Decimal("0.95"), sentiment_label="positive", sentiment_source="lexicon",
+                published_at=datetime.now(UTC) - timedelta(days=2),
             )
         )
         db.commit()
@@ -473,8 +483,9 @@ class TestPipelineStages:
         assert scores["revenue_growth"] == pytest.approx(0.10)
         assert scores["fundamentals_score"] > 0.5
         assert scores["analyst_estimate_score"] == pytest.approx(0.9)
-        assert scores["sentiment_score"] == pytest.approx(0.6)
-        assert scores["social_mentions"] == 1
+        # net tone (3 positive - 1 negative) / 4 = 0.5, mapped to 0-1: 0.75
+        assert scores["sentiment_score"] == pytest.approx(0.75)
+        assert scores["social_mentions"] == 4
         assert scores["concerns"] == []
 
 
@@ -915,3 +926,54 @@ class TestTradeabilityGate:
         assert bad.status == "rejected"
         assert bad.reject_stage == "tradeability_gate"
         assert missing.status == "pending"
+
+def test_industry_cap_sees_yfinance_industry_when_finnhub_repeats_the_sector(monkeypatch):
+    """WP2c: DVN and MTDR (both Finnhub 'Energy'/'Energy') meet the one-per-industry cap."""
+    from app.decision.discover import pipeline as pl
+
+    db = _memory_db()
+    monkeypatch.setattr(
+        "app.foundation.market.fundamentals",
+        lambda _db, _s: {"data": {"pe_ratio": 10.0, "sector": "Energy", "industry": "Energy"}, "source": "fake"},
+    )
+    monkeypatch.setattr(pl, "_yfinance_classification", lambda _s: ("Energy", "Oil & Gas E&P"))
+
+    class _Reg:
+        def get_analyst_estimates(self, symbol):
+            return {"ok": False}
+
+    monkeypatch.setattr(pl, "build_provider_registry", lambda _db: _Reg())
+    results = []
+    for sym, comp in (("DVN", 0.7), ("MTDR", 0.6)):
+        scores, _ = pl.stage_sentiment_fundamentals(db, sym)
+        assert scores["industry"] == "Oil & Gas E&P"
+        assert scores["provider_industry"] == "Energy"
+        results.append({"symbol": sym, "composite_score": comp, "lane": "stock",
+                        "scores": {"sentiment_fundamentals": scores, "portfolio_fit": {}}})
+    selected, capped = pl.apply_sector_cap(results, 15)
+    assert [r["symbol"] for r in selected] == ["DVN"]
+    assert [r["symbol"] for r in capped] == ["MTDR"]
+
+
+def test_holding_company_pe_is_skipped_and_two_quality_fails_exclude(monkeypatch):
+    """WP2e: Investor AB's P/E is not scored; a stock failing two quality checks is excluded (D5)."""
+    from app.decision.discover import pipeline as pl
+
+    assert pl._is_holding_company("INVE-B.ST", None)
+    assert pl._is_holding_company("XYZ", "Asset Management")
+    assert not pl._is_holding_company("AAPL", "Consumer Electronics")
+
+    db = _memory_db()
+    monkeypatch.setattr(
+        "app.foundation.market.fundamentals",
+        lambda _db, _s: {"data": {"pe_ratio": 6.2, "sector": "Financial Services",
+                                  "industry": "Asset Management"}, "source": "fake"},
+    )
+
+    class _Reg:
+        def get_analyst_estimates(self, symbol):
+            return {"ok": False}
+
+    monkeypatch.setattr(pl, "build_provider_registry", lambda _db: _Reg())
+    scores, _ = pl.stage_sentiment_fundamentals(db, "INVE-B.ST")
+    assert scores["pe"] is None and scores["pe_skipped"] == "holding_company"

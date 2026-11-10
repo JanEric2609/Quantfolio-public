@@ -64,6 +64,9 @@ def _ensure_model() -> tuple[Any, Any] | None:
 # ---------------------------------------------------------------------------
 
 _LABELS = ["positive", "negative", "neutral"]
+SOURCE_FINBERT = "finbert"
+SOURCE_LEXICON = "lexicon"
+SOURCE_PROVIDER = "provider"
 _MAX_LENGTH = 512
 _BATCH_SIZE = 16
 
@@ -109,9 +112,19 @@ def _fallback_lexicon_score(text: str) -> dict[str, Any]:
 
 def score_batch(texts: list[str]) -> list[dict[str, Any] | None]:
     """Score a list of texts. Returns one dict per input (or fallback)."""
+    return score_batch_with_source(texts)[0]
+
+
+def score_batch_with_source(texts: list[str]) -> tuple[list[dict[str, Any] | None], str]:
+    """``(scores, "finbert" | "lexicon")``: the scorer that really ran.
+
+    The keyword fallback gives five distinct scores and cannot tell "3 Ultra-High-Yield
+    Stocks Screaming Buys" (negative) from a buy signal; callers store the source so
+    readers can ignore lexicon labels.
+    """
     pair = _ensure_model()
     if pair is None:
-        return [_fallback_lexicon_score(t) for t in texts]
+        return [_fallback_lexicon_score(t) for t in texts], SOURCE_LEXICON
 
     model, tokenizer = pair
     import torch
@@ -129,7 +142,21 @@ def score_batch(texts: list[str]) -> list[dict[str, Any] | None]:
             idx = int(row.argmax())
             results.append({"label": _LABELS[idx], "score": float(row[idx])})
 
-    return results
+    return results, SOURCE_FINBERT
+
+
+def scorer_is_fallback() -> bool:
+    """True when FinBERT cannot be used (``transformers`` missing or the model failed to load).
+
+    Cheap: checks the import, not the model, unless the model was already tried.
+    """
+    if _available is False:
+        return True
+    if _available is True:
+        return False
+    import importlib.util
+
+    return importlib.util.find_spec("transformers") is None
 
 
 def enrich_news_items(db: Any, *, ticker: str | None = None, limit: int = 200) -> int:
@@ -143,7 +170,13 @@ def enrich_news_items(db: Any, *, ticker: str | None = None, limit: int = 200) -
     """
     from app.foundation.models.entities import NewsItem
 
-    query = db.query(NewsItem).filter(NewsItem.sentiment_label.is_(None))
+    from sqlalchemy import or_
+
+    # Rows the keyword fallback labelled are scored again once FinBERT can run.
+    unscored = NewsItem.sentiment_label.is_(None)
+    if not scorer_is_fallback():
+        unscored = or_(unscored, NewsItem.sentiment_source == SOURCE_LEXICON)
+    query = db.query(NewsItem).filter(unscored)
     if ticker:
         query = query.filter(NewsItem.ticker == ticker.upper())
     rows = query.order_by(NewsItem.published_at.desc()).limit(limit).all()
@@ -151,7 +184,7 @@ def enrich_news_items(db: Any, *, ticker: str | None = None, limit: int = 200) -
         return 0
 
     texts = [f"{r.title or ''} {r.summary or ''}" for r in rows]
-    scores = score_batch(texts)
+    scores, source = score_batch_with_source(texts)
 
     enriched = 0
     for row, score in zip(rows, scores):
@@ -159,20 +192,66 @@ def enrich_news_items(db: Any, *, ticker: str | None = None, limit: int = 200) -
             continue
         row.sentiment_label = score["label"]
         row.sentiment_score = round(score["score"], 4)
+        row.sentiment_source = source
         enriched += 1
 
     if enriched:
         db.commit()
-        logger.info("Enriched %d news items with FinBERT sentiment.", enriched)
+        if source == SOURCE_LEXICON:
+            logger.warning("Enriched %d news items with the keyword fallback (FinBERT unavailable); readers ignore them.", enriched)
+        else:
+            logger.info("Enriched %d news items with FinBERT sentiment.", enriched)
 
     return enriched
 
 
-def aggregate_sentiment(db: Any, ticker: str, days: int = 21) -> dict[str, Any]:
-    """Aggregate sentiment scores for *ticker* over recent news.
+def real_sentiment_clause() -> Any:
+    """SQL predicate: the article's sentiment is real (FinBERT or the provider's), not the keyword fallback."""
+    from sqlalchemy import or_
 
-    Returns a dict with per-label counts, average score, and an overall
-    weighted label — suitable for direct JSON serialisation.
+    from app.foundation.models.entities import NewsItem
+
+    return or_(NewsItem.sentiment_source.is_(None), NewsItem.sentiment_source != SOURCE_LEXICON)
+
+
+def has_real_sentiment(item: Any) -> bool:
+    """Whether *item* carries a label a reader may use (not NULL, not the keyword fallback)."""
+    return item.sentiment_label is not None and getattr(item, "sentiment_source", None) != SOURCE_LEXICON
+
+
+MIN_SCORED_FOR_TONE = 3
+
+
+def net_tone(positive: int, negative: int, scored: int) -> float | None:
+    """(positive - negative) / scored, in [-1, 1]; None under :data:`MIN_SCORED_FOR_TONE` scored articles."""
+    if scored < MIN_SCORED_FOR_TONE:
+        return None
+    return (positive - negative) / scored
+
+
+def tone_unit(rows: list[Any]) -> tuple[float | None, int]:
+    """``(tone on 0-1, scored count)`` of news rows: net tone mapped from [-1, 1], None under three scored.
+
+    Only labels FinBERT or the provider gave count; the stored score is the
+    *confidence* of the label (a confident negative also scores 0.9), so the
+    labels, not the scores, carry the direction.
+    """
+    real = [r for r in rows if has_real_sentiment(r)]
+    pos = sum(1 for r in real if r.sentiment_label == "positive")
+    neg = sum(1 for r in real if r.sentiment_label == "negative")
+    tone = net_tone(pos, neg, len(real))
+    return (None if tone is None else (tone + 1.0) / 2.0), len(real)
+
+
+def aggregate_sentiment(db: Any, ticker: str, days: int = 21) -> dict[str, Any]:
+    """Aggregate sentiment for *ticker* over the headlines of the last *days* days.
+
+    Returns per-label shares, the **net tone** ((positive - negative) / scored,
+    ``None`` under three scored articles), the count of scored articles and an
+    overall label. Articles whose label came from the keyword fallback count as
+    unscored. ``avg_score`` is kept for older clients and is the mean tone of
+    the scored articles; the context builder reads ``finbert_score`` (net tone),
+    ``news_count`` (scored) and ``headlines``.
     """
     from datetime import UTC, datetime, timedelta
 
@@ -185,39 +264,42 @@ def aggregate_sentiment(db: Any, ticker: str, days: int = 21) -> dict[str, Any]:
         .order_by(NewsItem.published_at.desc())
         .all()
     )
+    empty = {
+        "ticker": ticker.upper(),
+        "total": 0,
+        "scored": 0,
+        "positive_pct": 0.0,
+        "negative_pct": 0.0,
+        "neutral_pct": 0.0,
+        "unscored_pct": 0.0,
+        "avg_score": 0.0,
+        "net_tone": None,
+        "finbert_score": None,
+        "news_count": 0,
+        "headlines": [],
+        "overall": "unscored",
+        "articles": [],
+    }
     if not rows:
-        return {
-            "ticker": ticker.upper(),
-            "total": 0,
-            "positive_pct": 0.0,
-            "negative_pct": 0.0,
-            "neutral_pct": 0.0,
-            "unscored_pct": 0.0,
-            "avg_score": 0.0,
-            "overall": "neutral",
-            "articles": [],
-        }
+        return empty
 
-    # "unscored" is tracked separately from "neutral": a NULL sentiment_label
-    # means FinBERT never ran on this row (e.g. the model/dependency was
-    # unavailable), not that it scored the article as neutral. Collapsing the
-    # two silently misrepresented "100% unscored" as "100% neutral".
+    # "unscored" is tracked separately from "neutral": a NULL label means no
+    # scorer ran, and a keyword-fallback label is not a score either.
     counts = {"positive": 0, "negative": 0, "neutral": 0, "unscored": 0}
     score_sum = 0.0
     score_count = 0
     articles: list[dict[str, Any]] = []
 
     for r in rows:
-        label = r.sentiment_label if r.sentiment_label is not None else "unscored"
+        real = has_real_sentiment(r)
+        label = r.sentiment_label if real else "unscored"
         if label in counts:
             counts[label] += 1
-        score: float | None
-        if r.sentiment_score is not None:
+        score: float | None = None
+        if real and r.sentiment_score is not None:
             score = float(r.sentiment_score)
             score_sum += score
             score_count += 1
-        else:
-            score = None
         articles.append({
             "title": r.title,
             "source": r.source,
@@ -227,17 +309,18 @@ def aggregate_sentiment(db: Any, ticker: str, days: int = 21) -> dict[str, Any]:
         })
 
     total = len(rows)
-    pos_pct = counts["positive"] / total
-    neg_pct = counts["negative"] / total
-    neu_pct = counts["neutral"] / total
-    unscored_pct = counts["unscored"] / total
-    avg = score_sum / score_count if score_count else 0.0
+    scored = total - counts["unscored"]
+    tone = net_tone(counts["positive"], counts["negative"], scored)
+    pos_pct, neg_pct = counts["positive"] / total, counts["negative"] / total
+    neu_pct, unscored_pct = counts["neutral"] / total, counts["unscored"] / total
 
     if counts["unscored"] == total:
         overall = "unscored"
-    elif pos_pct > neg_pct and pos_pct > neu_pct:
+    elif tone is None:
+        overall = "unscored"
+    elif tone > 0.15:
         overall = "positive"
-    elif neg_pct > pos_pct and neg_pct > neu_pct:
+    elif tone < -0.15:
         overall = "negative"
     else:
         overall = "neutral"
@@ -245,11 +328,16 @@ def aggregate_sentiment(db: Any, ticker: str, days: int = 21) -> dict[str, Any]:
     return {
         "ticker": ticker.upper(),
         "total": total,
+        "scored": scored,
         "positive_pct": round(pos_pct, 3),
         "negative_pct": round(neg_pct, 3),
         "neutral_pct": round(neu_pct, 3),
         "unscored_pct": round(unscored_pct, 3),
-        "avg_score": round(avg, 4),
+        "avg_score": round(score_sum / score_count, 4) if score_count else 0.0,
+        "net_tone": round(tone, 4) if tone is not None else None,
+        "finbert_score": round(tone, 4) if tone is not None else None,
+        "news_count": scored,
+        "headlines": [a["title"] for a in articles if a["sentiment_label"] != "unscored"][:5],
         "overall": overall,
         "articles": articles,
     }

@@ -1,7 +1,7 @@
 import {
   BrainCircuit, CalendarCheck, Calculator, CreditCard, FlaskConical, Home, Inbox, LandPlot,
   LineChart, Newspaper, PieChart, Settings, ShieldCheck, Table2, ListChecks, FileText, Target,
-  Wallet, Receipt, Repeat, Briefcase, ArrowLeftRight, Activity, Gauge, Library, Star, type LucideIcon,
+  Wallet, Receipt, Repeat, Briefcase, GraduationCap, ArrowLeftRight, Activity, Gauge, Library, Star, type LucideIcon,
 } from "lucide-react";
 import { isStrategyLabPath } from "../pages/lab/strategyLabTabs";
 
@@ -96,6 +96,7 @@ export const ROUTE_ENTRIES: RouteEntry[] = [
     match: isStrategyLabPath,
     keywords: ["evidence", "advisor", "mandates", "graduation", "capital ladder", "paper"],
   },
+  { id: "learn", to: "/learn", label: "Learn", icon: GraduationCap, group: "money", keywords: ["tutorial", "teach", "how it works", "quiz"] },
   { id: "settings", to: "/settings", label: "Control Center", icon: Settings, group: "admin", keywords: ["settings", "connections", "status"] },
 ];
 

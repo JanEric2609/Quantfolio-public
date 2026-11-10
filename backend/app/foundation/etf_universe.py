@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from datetime import timedelta
 from typing import Any
@@ -55,6 +56,12 @@ _LONG_ONLY = "epg-longOnly"
 # classifier (todo 22) is the single source of truth for them.
 
 
+def _has_keyword(name: str, keywords: Any) -> bool:
+    """Whole-word match (plural endings allowed): "estr" must not fire inside "Westrock"."""
+    lowered = name.lower()
+    return any(re.search(rf"(?<!\w){re.escape(kw)}(?:s|e|n)?(?!\w)", lowered) for kw in keywords)
+
+
 def is_money_market_fund(etf_name: str) -> bool:
     """True if *etf_name* matches a known overnight-rate/money-market fund pattern.
 
@@ -63,8 +70,7 @@ def is_money_market_fund(etf_name: str) -> bool:
     volatility, mechanically bound to short-term policy rates) so scoring and
     LLM prompting can avoid treating them like equities.
     """
-    name_lower = etf_name.lower()
-    return any(kw in name_lower for kw in _MONEY_MARKET_KEYWORDS)
+    return _has_keyword(etf_name, _MONEY_MARKET_KEYWORDS)
 
 
 def is_bond_fund(etf_name: str) -> bool:
@@ -76,8 +82,7 @@ def is_bond_fund(etf_name: str) -> bool:
     fund and an overnight-rate fund, so this function does not attempt to
     disambiguate them itself.
     """
-    name_lower = etf_name.lower()
-    return any(kw in name_lower for kw in _BOND_KEYWORDS)
+    return _has_keyword(etf_name, _BOND_KEYWORDS)
 
 
 def _derive_tf_class(etf_name: str, strategy: str | None) -> str:

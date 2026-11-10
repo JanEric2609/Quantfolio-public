@@ -214,7 +214,7 @@ estimate over 21 trading days and the trust ledger records 126 as well.
 ### Claims, recent falls and insider selling (review of run dd3fe7b9, 2026-11-07)
 
 - A thesis loses a sentence with an unsupported claim instead of being rejected for it: diversification at a correlation from 0.5, "downside protection", "market-implied", "alpha factors". A thesis left under 40 characters is still rejected. Rejected text goes to the log of the process that ran Discover (the API's for a manual run).
-- `key_risks` always carry, whoever writes them: gate volatility above 60 %, a close at least 20 % below the 3-month high (`fall_from_3m_high`, which 12-1 momentum cannot show), correlation from 0.5, and net insider selling of at least 0.25 % of market value over 90 days (a judgement, not a tested signal). A stated volatility counts as one risk however it is worded.
+- `key_risks` always carry, whoever writes them: gate volatility above 60 %, a close at least 15 % below the 3-month high (`fall_from_3m_high`, which 12-1 momentum cannot show), correlation from 0.5, and net insider selling of at least 0.25 % of market value over 90 days (a judgement, not a tested signal). A stated volatility counts as one risk however it is worded.
 - `pit_insider_signal_for_symbol` counts a trade once: a joint Form 4 repeats it per reporting owner.
 
 ### Dossier text and shortlist details (review of run 4b6f5ebf, 2026-11-07)
@@ -241,3 +241,17 @@ cache and analyst targets past 3 days (`foundation/analyst_cache.py`, which
 the run reads first). The run's pre-ingest skips a series already holding
 the last completed weekday (`_bars_current`), and each candidate's cached
 history is dropped once its stages are done. `UNIVERSE_RULE_VERSION` is 3.
+
+## Tradeability of shares outside the EU and the US (2026-11-10, WP3, D3)
+
+`tradeability.assess` used to call every such share "low", which rejected 40 of the top 50 composites of run 31a6009a (28 Tokyo, 6 Hong Kong, 5 Toronto, 1 Lisbon). It now looks the ISIN up (given, or from `index_universe_members` by symbol) in `venue_instruments`, filled weekly (Mon 03:10 UTC) from Deutsche Börse's "all tradable instruments" files for Xetra and Börse Frankfurt (`foundation/venue_instruments.py`). Listed: "medium", reason "Listed in Frankfurt; confirm at Scalable before ordering". Not listed: "low", reason "No German listing found (Xetra and Börse Frankfurt lists checked)". No list stored yet, or no ISIN: the old "availability uncertain" answer. No gettex or EIX list is published, so Frankfurt is a proxy, not proof. `.LS` and `.IR` count as EU venues.
+
+## Stage cache (2026-11-10, WP9)
+
+`stage_cache.py` caches the four user-independent stages (momentum, backtest against the benchmark, verification gate, quant signals) per (symbol, stage, bar date) in `discover_stage_cache`. The nightly `discover_stage_precompute` job (03:00 UTC, after the 01:15 prefetch) fills it for the universe's stocks; a run loads an entry when its bar date equals the symbol's latest stored bar and computes (and stores) otherwise. Every result is JSON-roundtripped (`canonical`) whether computed or loaded, so a run cannot tell the two apart. Portfolio fit, ranking and the LLM stay on demand; stages that read news or fundamentals are never cached. The key carries the arguments the symbol fixes (`is_etf`, `asset_class`); the benchmark's own bars are assumed to arrive with the symbol's in the same nightly prefetch.
+
+**Not built, on purpose (WP9 steps 4 and 5).** Skipping the expensive stages for names the tradeability gate rejects would shrink the shadow ledger's cohort: `shadow_ledger._POST_PIPELINE_STAGES` counts a `tradeability_gate` rejection as still evaluable, so those names' scores are needed. The 4-worker candidate loop was the fallback for a postponed cache; the cache exists, so it is not needed.
+
+## Shortlist stability draws (WP12b)
+
+`stage_momentum_quality` stores `momentum_12_1m_shifts`: the 12-1 momentum with both window ends moved 1 to 5 trading days back, computed from the bars the stage already loaded. `shortlist_stability.stability` draws one shift per draw (0 to 5, the same for every name) and replaces the momentum signal by the shifted cross-sectional rank. Entries cached before this change carry no shifts; those names keep their own rank until the cache rolls over.

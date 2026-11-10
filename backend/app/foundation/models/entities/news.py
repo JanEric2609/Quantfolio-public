@@ -18,12 +18,19 @@ class NewsItem(Base):
     ticker: Mapped[str | None] = mapped_column(String(32), index=True)
     sentiment_score: Mapped[Decimal | None] = mapped_column(Numeric(6, 4))
     sentiment_label: Mapped[str | None] = mapped_column(String(24))
+    # Who produced the label: "finbert", "provider" (the feed supplied it) or
+    # "lexicon" (the keyword fallback, which readers treat as unscored); NULL on
+    # rows written before the column existed.
+    sentiment_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     relevance_score: Mapped[Decimal | None] = mapped_column(Numeric(4, 3), nullable=True)
     relevance_label: Mapped[str | None] = mapped_column(String(16), nullable=True)
     relevance_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     is_macro: Mapped[bool] = mapped_column(default=False)
+    # The symbol whose feed returned the article. ``ticker`` is set only when
+    # the article names that company (WP5c); this keeps where it came from.
+    feed_ticker: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
 
 class UserNewsRelevance(Base):

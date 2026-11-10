@@ -32,7 +32,7 @@ from .asset import Asset as Asset
 from .attribution import AttributionRun as AttributionRun
 from .audit import AuditLog as AuditLog
 from .backfill import BackfillJob as BackfillJob
-from .broker import BrokerInstrument as BrokerInstrument, BrokerPie as BrokerPie, BrokerPosition as BrokerPosition, BrokerSyncLog as BrokerSyncLog
+from .broker import VenueInstrument as VenueInstrument, BrokerInstrument as BrokerInstrument, BrokerPie as BrokerPie, BrokerPosition as BrokerPosition, BrokerSyncLog as BrokerSyncLog
 from .fx import FxRate as FxRate
 from .auth import (
     PasswordResetToken as PasswordResetToken,
@@ -59,6 +59,7 @@ from .discover import (
     AcTrialLedger as AcTrialLedger,
     DiscoverCandidate as DiscoverCandidate,
     DiscoverRun as DiscoverRun,
+    DiscoverStageCache as DiscoverStageCache,
     DiscoveryConfig as DiscoveryConfig,
     DiscoveryConfigReview as DiscoveryConfigReview,
     DiscoveryPrediction as DiscoveryPrediction,

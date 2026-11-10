@@ -136,6 +136,7 @@ export const appChildren: RouteObject[] = [
       { path: "accuracy", ...lazyNamed(() => import("../pages/mandates/AccuracyTab"), "AccuracyTab"), handle: { title: "Mandates — Accuracy" } },
       { path: "divergence", ...lazyNamed(() => import("../pages/mandates/DivergenceTab"), "DivergenceTab"), handle: { title: "Mandates — Divergence" } },
     ] },
+    { path: "learn", ...lazyNamed(() => import("../pages/learn/LearnPage"), "LearnPage"), handle: { title: "Learn" } },
     { path: "graduation", ...lazyNamed(() => import("../pages/GraduationPage"), "GraduationPage"), handle: { title: "Strategy lab — Capital ladder" } },
     // The paper book used to be a Portfolio tab; the URL is unchanged.
     { path: "portfolio/paper", ...lazyNamed(() => import("../pages/portfolio/PaperPortfolioTab"), "PaperPortfolioTab"), handle: { title: "Strategy lab — Paper portfolio", noPageHeader: true } },

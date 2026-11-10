@@ -29,6 +29,8 @@ from app.foundation.etf_universe import EtfUniverseProvider
 from app.foundation.settings import get_public_settings
 from app.foundation.text_safety import ascii_safe
 
+from app.foundation.sentiment import real_sentiment_clause
+
 logger = logging.getLogger(__name__)
 
 
@@ -690,6 +692,7 @@ def build_universe(
         select(NewsItem)
         .where(
             NewsItem.sentiment_label == "positive",
+            real_sentiment_clause(),
             NewsItem.published_at >= cutoff,
             NewsItem.ticker.isnot(None),
         )

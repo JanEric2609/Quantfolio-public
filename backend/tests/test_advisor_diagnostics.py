@@ -22,6 +22,7 @@ from app.foundation.models.entities import (
     LlmPortfolioDecision,
     PaperHolding,
     PaperPortfolio,
+    PaperSnapshot,
     PaperTrade,
     PriceCache,
     StrategyLesson,
@@ -955,3 +956,55 @@ def test_llm_probe_flags_a_completion_cut_off_at_the_token_limit() -> None:
     assert check["data"]["truncated"] is True
     assert "finish_reason=length" in check["detail"]
     assert "thesis" in (check["remedy"] or "")
+
+
+def _stale_trade_with_skip(reason: str):
+    db = _memory_db()
+    user = _user(db)
+    champ, _ = _strategies(db, user)
+    _healthy_jobs(db)
+    _discover_run(db, user, ["AAA", "BBB"])
+    _seed_prices(db, "AAA")
+    _seed_prices(db, "BBB")
+    _healthy_cycles(db, champ, payload={"skipped": [{"ticker": "AAA", "action": "sell", "reason": reason}]})
+    db.add(
+        PaperTrade(
+            id=uuid4().hex, portfolio_id=champ.id, ticker="AAA", side="buy",
+            quantity=Decimal("10"), price=Decimal("100"), value=Decimal("1000"),
+            date=datetime.now(UTC) - timedelta(days=21),
+        )
+    )
+    db.commit()
+    return _check(run_advisor_diagnostics(db, user.id), "trade_activity")
+
+
+def test_the_remedy_follows_the_reason_orders_were_skipped() -> None:
+    """WP7c: one fixed remedy did not fit a book blocked by the sell cap."""
+    cap = _stale_trade_with_skip("sell cap exhausted (ADR 0013: bought or already sold within the last 28 days)")
+    assert "sell cap" in cap["remedy"] and "no action needed" in cap["remedy"] and "until about" in cap["remedy"]
+    cash = _stale_trade_with_skip("unfundable — €17 available after funding sells, below the €25 minimum ticket")
+    assert cash["remedy"].startswith("No cash until a sell clears")
+    met = _stale_trade_with_skip("target weight already met")
+    assert "target already met" in met["remedy"]  # today's text stands
+
+
+def test_a_scorecard_waiting_for_daily_returns_is_pending_not_a_blocker() -> None:
+    db = _memory_db()
+    user = _user(db)
+    champ, _ = _strategies(db, user)
+    _healthy_jobs(db)
+    today = date.today()
+    db.add(AdvisorScorecard(
+        id=uuid4().hex, user_id=user.id, portfolio_id=champ.id,
+        window_start=today - timedelta(days=90), window_end=today, n_predictions=20, n_resolved=20,
+        brier_avg=0.18, mz_slope=0.9, mz_r2=0.6,  # calibration and magnitude; no NAV axes yet
+    ))
+    for i in range(28):  # 27 daily returns of the 30 the NAV axes need
+        db.add(PaperSnapshot(portfolio_id=champ.id, date=today - timedelta(days=28 - i), total_value=Decimal("50000")))
+    db.commit()
+    report = run_advisor_diagnostics(db, user.id)
+    check = _check(report, "scorecard")
+    assert check["data"]["waiting_on_returns"] is True
+    assert check["status"] == WARN and check["data"]["expected_on"]
+    assert "scorecard" not in [b["key"] for b in report["blocking"]]
+    assert any(p["key"] == "scorecard" and p["expected_on"] for p in report["pending"])

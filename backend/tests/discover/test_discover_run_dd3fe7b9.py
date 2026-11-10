@@ -115,7 +115,7 @@ def test_a_large_recent_fall_is_a_risk_and_reaches_the_prompt():
 
 
 def test_a_small_fall_or_an_older_stored_score_is_not():
-    assert deterministic_risks({"momentum_quality": {"fall_from_3m_high": 0.19}}, {}) == ([], [])
+    assert deterministic_risks({"momentum_quality": {"fall_from_3m_high": 0.14}}, {}) == ([], [])
     assert deterministic_risks({"momentum_quality": {}}, {}) == ([], [])
     assert "below the highest" not in _grounding_prompt_lines({"momentum_quality": {"fall_from_3m_high": 0.1}}, {})
 

@@ -102,7 +102,7 @@ def test_the_dossier_prompt_has_no_stale_ratio(monkeypatch):
 
     def _llm(_db, messages, timeout_s=120.0, **_kw):
         seen.append(messages[1]["content"])
-        return json.dumps({"thesis": "CTVA had {corporate_action}.", "key_risks": []})
+        return json.dumps({"thesis": "CTVA had {corporate_action}. It is a seed company.", "key_risks": []})
 
     monkeypatch.setattr("app.decision.discover.dossier_writer._local_llm_sync", _llm)
     # The fundamentals cache still holds the provider's stale figures.

@@ -1,394 +1,20 @@
-import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { AlertTriangle, CalendarCheck, CheckCircle2, ChevronRight, Info, Lock, RefreshCw, Settings2 } from "lucide-react";
+import { AlertTriangle, CalendarCheck, Info, RefreshCw, Settings2 } from "lucide-react";
 import { CrashGuardBanner } from "../components/composed/CrashGuardBanner";
 import { PageHeader } from "../components/composed/PageHeader";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Skeleton } from "../components/ui/skeleton";
-import { formatCurrency, formatDate, formatDateTime, formatMonth, formatPercentPoints } from "../lib/format";
-import {
-  getMonthlyPlan,
-  type MonthlyPlan,
-  type PlanAction,
-  type PlanCash,
-  type PlanEtfSuggestions,
-  type PlanSavingsPlans,
-  type PlanSleeve,
-  type RunningSavingsPlan,
-  type SuggestedFund,
-} from "../lib/api";
-
-// The plan API reports shares in percent units (12.5 = 12,5 %), not fractions.
-function pct(value: number): string {
-  return formatPercentPoints(value, { digits: value >= 10 || value === 0 ? 0 : 1 });
-}
-
-/** Current share vs target; the tick marks the target, the faint band the cap. */
-function SleeveBar({ sleeve }: { sleeve: PlanSleeve }) {
-  const current = Math.min(100, sleeve.current_pct);
-  return (
-    <div className="relative h-2 w-full overflow-hidden rounded-full bg-surface-2" aria-hidden>
-      {sleeve.key !== "core" && (
-        <div className="absolute inset-y-0 left-0 bg-text-secondary/10" style={{ width: `${sleeve.max_pct}%` }} />
-      )}
-      <div
-        className={`absolute inset-y-0 left-0 rounded-full ${sleeve.unlocked ? "bg-accent" : "bg-text-secondary/40"}`}
-        style={{ width: `${current}%` }}
-      />
-      <div className="absolute inset-y-0 w-0.5 bg-text-primary" style={{ left: `calc(${Math.min(99.5, sleeve.target_pct)}%)` }} />
-    </div>
-  );
-}
-
-const ACTION_BADGE: Record<PlanAction["kind"], { label: string; variant: "warning" | "secondary" | "danger" }> = {
-  savings_plan: { label: "Savings plan", variant: "secondary" },
-  order: { label: "Single order", variant: "warning" },
-  sale: { label: "Sale", variant: "danger" },
-  one_off: { label: "Optional one-off", variant: "secondary" },
-};
-
-/** One required or optional step: what, where, how much; the "how to" sits behind an expander. */
-function ActionRow({ action }: { action: PlanAction }) {
-  const badge = ACTION_BADGE[action.kind] ?? ACTION_BADGE.order;
-  return (
-    <div className="border-b border-border py-3 last:border-0">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-text-primary">{action.instrument}</span>
-            {action.ticker && <span className="font-mono text-xs text-text-secondary">{action.ticker}</span>}
-            <Badge variant={badge.variant}>{badge.label}</Badge>
-            {action.broker_label && <Badge variant="outline">{action.broker_label}</Badge>}
-          </div>
-        </div>
-        <div className="shrink-0 font-display text-xl font-semibold tabular-nums text-text-primary">
-          {action.kind === "sale" ? "−" : ""}
-          {formatCurrency(action.amount_eur, "EUR")}
-        </div>
-      </div>
-      <details className="group mt-1">
-        <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-xs text-accent hover:underline">
-          <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" /> How to
-        </summary>
-        <p className="mt-1 text-sm text-text-secondary">{action.note}</p>
-      </details>
-    </div>
-  );
-}
-
-/** A collapsed section: the information stays, the page stays short. */
-function Details({ title, summary, children }: { title: string; summary?: string; children: ReactNode }) {
-  return (
-    <details className="group rounded-lg border border-border bg-surface-1">
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium text-text-primary">
-        <ChevronRight className="h-4 w-4 shrink-0 transition-transform group-open:rotate-90" />
-        {title}
-        {summary && <span className="ml-auto min-w-0 truncate text-xs font-normal text-text-secondary">{summary}</span>}
-      </summary>
-      <div className="space-y-3 border-t border-border p-4">{children}</div>
-    </details>
-  );
-}
-
-type LookThrough = NonNullable<MonthlyPlan["core_look_through"]>;
-
-/** One sleeve in the plan-vs-target view: now → after this month against its target; the rest behind "Details". */
-function SleeveRow({ sleeve, lookThrough, fund }: { sleeve: PlanSleeve; lookThrough?: LookThrough | null; fund?: SuggestedFund | null }) {
-  const positions = sleeve.positions ?? [];
-  const moved = sleeve.contribution_eur > 0 || (sleeve.sale_eur ?? 0) > 0 || (sleeve.reinvest_eur ?? 0) > 0;
-  return (
-    <li className="space-y-2 py-3" data-testid={`sleeve-${sleeve.key}`}>
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <span className="flex min-w-0 items-center gap-2 font-medium text-text-primary">
-          {sleeve.unlocked ? (
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-success" aria-hidden />
-          ) : (
-            <Lock className="h-4 w-4 shrink-0 text-text-secondary" aria-hidden />
-          )}
-          <span>{sleeve.label}</span>
-        </span>
-        <span className="text-xs tabular-nums text-text-secondary">
-          {formatCurrency(sleeve.current_eur, "EUR")} · now {pct(sleeve.current_pct)}
-          {moved ? ` → ${pct(sleeve.after_pct)}` : ""} · target {pct(sleeve.target_pct)}
-          {sleeve.key === "core" ? "" : ` · cap ${pct(sleeve.max_pct)}`}
-          {sleeve.unlocked ? "" : " · locked"}
-        </span>
-      </div>
-      <SleeveBar sleeve={sleeve} />
-      {sleeve.contribution_eur > 0 && (
-        <p className="text-sm text-text-primary">+{formatCurrency(sleeve.contribution_eur, "EUR")} this month</p>
-      )}
-      {(sleeve.sale_eur ?? 0) > 0 && (
-        <p className="text-sm text-danger">−{formatCurrency(sleeve.sale_eur ?? 0, "EUR")} sold</p>
-      )}
-      {(sleeve.reinvest_eur ?? 0) > 0 && (
-        <p className="text-sm text-text-primary">+{formatCurrency(sleeve.reinvest_eur ?? 0, "EUR")} from the sale</p>
-      )}
-      {sleeve.status && <p className="text-sm text-text-secondary">{sleeve.status}</p>}
-      {(fund || lookThrough || positions.length > 0 || !sleeve.unlocked) && (
-        <details className="group">
-          <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-xs text-accent hover:underline">
-            <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90" /> Details
-          </summary>
-          <div className="mt-2 space-y-2">
-            {fund && (fund.isin || sleeve.unlocked) && (
-              <p className="text-sm text-text-secondary">
-                <span className="font-medium text-text-primary">
-                  {sleeve.unlocked ? "Suggested fund" : "Suggested fund once unlocked"}: {fund.isin ?? fund.name}.{" "}
-                </span>
-                {fund.why} <span className="text-text-muted">Rule, not a forecast.</span>
-              </p>
-            )}
-            {lookThrough && (
-              <p className="text-sm text-text-secondary">
-                {lookThrough.em_pct != null ? (
-                  <>
-                    Looking through the funds, {pct(lookThrough.em_pct)} of the core is emerging markets; the world market
-                    (MSCI ACWI, FTSE All-World) holds about {pct(lookThrough.world_em_pct)}.
-                    {lookThrough.unknown_eur > 0 &&
-                      ` The split of ${formatCurrency(lookThrough.unknown_eur, "EUR")} of it is not known and is left out.`}
-                  </>
-                ) : (
-                  <>
-                    The emerging-markets split of your core funds is not known, so there is no look-through; the world
-                    market (MSCI ACWI, FTSE All-World) holds about {pct(lookThrough.world_em_pct)}.
-                  </>
-                )}
-              </p>
-            )}
-            {positions.length > 0 && (
-              <ul className="space-y-1 text-sm">
-                {positions.slice(0, 6).map((p) => (
-                  <li key={p.isin + p.name} className="flex justify-between gap-3">
-                    <span className="min-w-0 truncate text-text-secondary" title={p.isin}>{p.name}</span>
-                    <span className="shrink-0 tabular-nums text-text-primary">{formatCurrency(p.value_eur, "EUR")}</span>
-                  </li>
-                ))}
-                {positions.length > 6 && <li className="text-xs text-text-secondary">+{positions.length - 6} more</li>}
-              </ul>
-            )}
-            {!sleeve.unlocked && (
-              <Link to="/settings/profile#monthly-plan" className="text-xs text-accent underline-offset-2 hover:underline">
-                Open in settings
-              </Link>
-            )}
-          </div>
-        </details>
-      )}
-    </li>
-  );
-}
-
-/** Bond, cash and gold lines from the owner's targets (rule-based, not a forecast). */
-function EtfLines({ suggestions }: { suggestions: PlanEtfSuggestions }) {
-  return (
-    <div className="space-y-4">
-      {suggestions.lines.map((line) => (
-        <div key={line.line} data-testid={`etf-line-${line.line}`} className="space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-text-primary">{line.label}</span>
-            <Badge variant="secondary">Rule, not a forecast</Badge>
-            <span className="ml-auto text-xs tabular-nums text-text-secondary">
-              now {pct(line.current_pct)} · target {pct(line.target_pct)}
-            </span>
-          </div>
-          {line.status === "under" && line.fund ? (
-            <p className="text-sm text-text-secondary">
-              <span className="font-medium text-text-primary">
-                Add about {formatCurrency(line.amount_eur ?? 0, "EUR")}: {line.fund.isin}.{" "}
-              </span>
-              {line.fund.why}
-            </p>
-          ) : (
-            <p className="text-sm text-text-secondary">Within the band; nothing to do.</p>
-          )}
-          {line.warning && <p className="text-sm text-warn">{line.warning}</p>}
-          {line.evidence && <p className="text-sm text-text-secondary">{line.evidence}</p>}
-          <p className="text-xs text-text-muted">Tax (estimate, not tax advice): {line.tax_note}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const SLEEVE_NAMES: Record<string, string> = { core: "Core", tilt: "Factor tilt", satellite: "Stock picks" };
-
-function PlanLine({ p }: { p: RunningSavingsPlan }) {
-  return (
-    <li className="flex justify-between gap-3">
-      <span className="min-w-0">
-        <span className="block truncate text-text-primary" title={p.isin ?? undefined}>{p.name}</span>
-        <span className="text-xs text-text-secondary">
-          {p.broker_label}
-          {p.next_execution_date ? ` · next ${formatDate(p.next_execution_date)}` : ""}
-          {p.dynamization_rate ? ` · grows ${p.dynamization_rate} %/yr` : ""}
-          {p.not_running_reason === "paused" ? " · paused" : ""}
-          {p.not_running_reason === "overdue" ? " · overdue, no run seen" : ""}
-          {p.declared ? " · set by you" : p.inferred ? " · read from its orders" : ""}
-        </span>
-      </span>
-      <span className="shrink-0 tabular-nums text-text-primary">
-        {p.monthly_eur != null
-          ? `${formatCurrency(p.monthly_eur, "EUR")}/month`
-          : p.frequency === "UNKNOWN"
-            ? `${formatCurrency(p.amount_eur, "EUR")}, ${p.pie_id ? "not counted" : (p.runs ?? 0) > 1 ? "schedule not recognised" : "ran once so far"}`
-            : `${formatCurrency(p.amount_eur, "EUR")} ${p.frequency.toLowerCase()}`}
-      </span>
-    </li>
-  );
-}
-
-/** Savings plans the brokers already run, grouped by sleeve, checked against the monthly budget. */
-function RunningPlans({ running, contribution }: { running: PlanSavingsPlans; contribution: number }) {
-  const active = running.items.filter((p) => p.running !== false);
-  const stopped = running.items.filter((p) => p.running === false);
-  const groups = ["core", "tilt", "satellite"]
-    .map((key) => ({ key, items: active.filter((p) => p.sleeve === key) }))
-    .filter((g) => g.items.length > 0);
-  const picks = running.other_budget_eur ?? 0;
-  return (
-    <div className="space-y-3">
-      <p className="text-sm text-text-secondary">
-        {formatCurrency(running.monthly_eur, "EUR")} a month, read from your broker
-        {running.synced_at ? ` as of ${formatDateTime(running.synced_at)}` : ""}.
-      </p>
-      {running.last_fetch_failed && (
-        <p className="flex gap-2 text-sm text-warning">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>The last sync could not read your savings plans, so this list may be out of date. A plan you deleted can still show here.</span>
-        </p>
-      )}
-      {groups.map((g) => (
-        <div key={g.key}>
-          <div className="flex justify-between text-xs font-medium uppercase tracking-wide text-text-secondary">
-            <span>{SLEEVE_NAMES[g.key] ?? g.key}</span>
-            <span className="tabular-nums">{formatCurrency(running.by_sleeve[g.key] ?? 0, "EUR")}/month</span>
-          </div>
-          <ul className="mt-1 space-y-2 text-sm">
-            {g.items.map((p, i) => <PlanLine key={`${p.broker}-${p.isin ?? p.name}-${i}`} p={p} />)}
-          </ul>
-        </div>
-      ))}
-      {running.core_needed_eur != null && contribution > 0 && (
-        <p className="border-t border-border pt-2 text-sm text-text-secondary">
-          Budget check: of your {formatCurrency(contribution, "EUR")} a month,{" "}
-          {picks > 0 ? `${formatCurrency(picks, "EUR")} goes into your own plans and ` : ""}
-          the core plans need {formatCurrency(running.core_needed_eur, "EUR")}; they run{" "}
-          {formatCurrency(running.by_sleeve.core ?? 0, "EUR")}.
-        </p>
-      )}
-      {stopped.length > 0 && (
-        <div>
-          <div className="text-xs font-medium uppercase tracking-wide text-text-secondary">Not running (not counted)</div>
-          <ul className="mt-1 space-y-2 text-sm">
-            {stopped.map((p, i) => <PlanLine key={`${p.broker}-${p.isin ?? p.name}-${i}`} p={p} />)}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Overnight/Tagesgeld-type savings and free broker cash against the fixed emergency reserve. Giro money never counts. */
-function CashBreakdown({ cash }: { cash: PlanCash }) {
-  const total = cash.savings_eur + cash.broker_cash_eur;
-  return (
-    <div className="space-y-1 text-sm tabular-nums">
-      <p className="pb-1 text-text-secondary">
-        Savings accounts and free broker cash; your giro account is spending money and never counts.
-      </p>
-      <div className="flex justify-between gap-3">
-        <span className="text-text-secondary">Overnight / savings accounts (Scalable overnight, DKB Tagesgeld)</span>
-        <span className="shrink-0">{formatCurrency(cash.savings_eur, "EUR")}</span>
-      </div>
-      <div className="flex justify-between"><span className="text-text-secondary">Free at the broker</span><span>{formatCurrency(cash.broker_cash_eur, "EUR")}</span></div>
-      {cash.reserve_set ? (
-        <>
-          <div className="flex justify-between"><span className="text-text-secondary">Emergency reserve</span><span>−{formatCurrency(cash.emergency_reserve_eur, "EUR")}</span></div>
-          <div className="flex justify-between border-t border-border pt-1 font-medium text-text-primary">
-            <span>Investable</span><span>{formatCurrency(cash.investable_eur, "EUR")}</span>
-          </div>
-        </>
-      ) : (
-        total > 0 && (
-          <p className="pt-1 text-text-secondary">
-            Set your emergency reserve in the <Link to="/settings/profile#monthly-plan" className="text-accent underline-offset-2 hover:underline">plan settings</Link> to see how much is investable.
-          </p>
-        )
-      )}
-    </div>
-  );
-}
-
-/** What the capital ladder allows for stock picks, the lab gate's last run, and the factor-tilt check. */
-function EvidenceBlock({ evidence }: { evidence: NonNullable<MonthlyPlan["evidence"]> }) {
-  const gate = evidence.satellite.gate;
-  const ladder = evidence.satellite.ladder;
-  const picks = evidence.satellite.picks ?? [];
-  return (
-    <div className="space-y-2 text-sm text-text-secondary">
-      <p>
-        <span className="font-medium text-text-primary">Stock picks:</span>{" "}
-        {ladder ? (
-          <>
-            {ladder.weight_pct.toFixed(1)} % of the book, funded by the{" "}
-            {ladder.slot === "llm" ? "LLM advisor" : "rules control (Mandate B)"} at stage {ladder.stage} (
-            {ladder.stage_name}) on the <Link to="/graduation" className="text-accent underline-offset-2 hover:underline">capital ladder</Link>.
-          </>
-        ) : (
-          <>
-            0 %: no candidate is past the Paper stage of the{" "}
-            <Link to="/graduation" className="text-accent underline-offset-2 hover:underline">capital ladder</Link>.
-          </>
-        )}
-      </p>
-      {picks.length > 0 && (
-        <ul className="ml-4 list-disc text-xs">
-          {picks.map((p) => (
-            <li key={p.isin ?? p.ticker ?? p.name}>
-              {p.name}
-              {p.ticker ? ` (${p.ticker})` : ""}: {p.weight_pct.toFixed(2)} % of the book
-            </li>
-          ))}
-        </ul>
-      )}
-      <p className="flex flex-wrap items-center gap-2">
-        <span className="font-medium text-text-primary">Lab evidence gate:</span>
-        {gate ? (
-          <>
-            checked {gate.as_of ? formatDate(gate.as_of) : "on an unknown date"} against {gate.n_trials} trials
-            {gate.stale && <Badge variant="warning">out of date</Badge>}
-          </>
-        ) : (
-          "not checked yet"
-        )}
-      </p>
-      <p>
-        <span className="font-medium text-text-primary">Factor tilt:</span>{" "}
-        {evidence.tilt.unlocked
-          ? "evidence passed and a tilt fund is chosen."
-          : evidence.tilt.passed
-            ? "evidence passed, but no tilt fund is chosen. Set one in the plan settings to use it."
-            : "no factor strategy has passed its evidence check yet."}
-      </p>
-      <Link to="/evidence" className="text-accent underline-offset-2 hover:underline">Open the evidence page</Link>
-    </div>
-  );
-}
-
-/** This month's buys summed per broker: the one-line "where" above the steps. Sales are left out. */
-function buysByBroker(actions: PlanAction[], fallback: string): [string, number][] {
-  const out = new Map<string, number>();
-  for (const a of actions) {
-    if (a.kind === "sale" || a.kind === "one_off") continue;
-    const where = a.broker_label ?? fallback;
-    out.set(where, (out.get(where) ?? 0) + a.amount_eur);
-  }
-  return [...out.entries()];
-}
+import { formatCurrency, formatDate, formatDateTime, formatMonth } from "../lib/format";
+import { getMonthlyPlan } from "../lib/api";
+import { ActionRow, buysByBroker } from "./plan/ActionList";
+import { CashBreakdown, RunningPlans } from "./plan/RunningPlans";
+import { EtfLines, EvidenceBlock } from "./plan/EvidenceBlock";
+import { SleeveRow } from "./plan/SleeveRows";
+import { StatusStrip } from "./plan/StatusStrip";
+import { Details, pct } from "./plan/shared";
 
 /**
  * "This month" answers one question: what do I do with this month's money?
@@ -501,34 +127,31 @@ export function ThisMonthPage() {
         )}
       </Card>
 
-      {/* 2. The plan against its targets, after this month's money. */}
-      {sleeves.length > 0 && (
-        <Card data-testid="month-plan-vs-target">
-          <CardHeader className="pb-0">
-            <CardTitle className="text-base">Your plan vs target</CardTitle>
-            <CardDescription>
-              Book {formatCurrency(data.book_eur, "EUR")}. The bar is today&apos;s share, the tick the target, the faint
-              band the cap. Locked parts get money only once their evidence check passes.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ul className="divide-y divide-border">
-              {sleeves.map((s) => (
-                <SleeveRow
-                  key={s.key}
-                  sleeve={s}
-                  lookThrough={s.key === "core" ? data.core_look_through : null}
-                  fund={data.suggested_funds?.find((f) => f.sleeve === s.key) ?? null}
-                />
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
+      <StatusStrip plan={data} />
 
-      {/* 3. Everything else, collapsed. */}
+      {/* Everything else, collapsed. */}
       <section className="space-y-3" aria-labelledby="month-more">
         <h2 id="month-more" className="text-sm font-semibold text-text-primary">More detail</h2>
+        {sleeves.length > 0 && (
+          <Details title="Your plan vs target" summary={`book ${formatCurrency(data.book_eur, "EUR")}`}>
+            <div data-testid="month-plan-vs-target">
+              <p className="pb-2 text-sm text-text-secondary">
+                The bar is today&apos;s share, the tick the target, the faint band the cap. Locked parts get money only
+                once their evidence check passes.
+              </p>
+              <ul className="divide-y divide-border">
+                  {sleeves.map((s) => (
+                    <SleeveRow
+                      key={s.key}
+                      sleeve={s}
+                      lookThrough={s.key === "core" ? data.core_look_through : null}
+                      fund={data.suggested_funds?.find((f) => f.sleeve === s.key) ?? null}
+                    />
+                  ))}
+                </ul>
+            </div>
+          </Details>
+        )}
         {data.cash && (
           <Details title="Cash" summary={`${formatCurrency(data.cash.investable_eur, "EUR")} investable`}>
             <CashBreakdown cash={data.cash} />

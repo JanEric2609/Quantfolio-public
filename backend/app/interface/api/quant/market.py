@@ -69,8 +69,8 @@ def market_sentiment(
                     # hasn't scored this row yet, which is distinct from a
                     # genuine "neutral" score — collapsing the two here made
                     # every unscored article silently look neutral downstream.
-                    "sentiment_label": a.sentiment_label,
-                    "sentiment_score": float(a.sentiment_score) if a.sentiment_score is not None else None,
+                    "sentiment_label": None if a.sentiment_source == "lexicon" else a.sentiment_label,
+                    "sentiment_score": float(a.sentiment_score) if a.sentiment_score is not None and a.sentiment_source != "lexicon" else None,
                 }
                 for a in db_articles
             ]

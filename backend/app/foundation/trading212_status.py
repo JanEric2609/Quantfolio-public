@@ -156,6 +156,9 @@ def status(db: Session, user_id: str) -> dict[str, Any]:
         "pies_stale": pies_stale,
         "interest_30d_eur": raw.get("interest_30d_eur"),
         "interest_rate_measured": raw.get("interest_rate_measured"),
+        "interest_rate_basis": raw.get("interest_rate_basis"),
+        "savings_pot": raw.get("savings_pot"),
+        "last_summary": raw.get("last_summary"),
         "pending_reconciliation": len([
             p for p in pending_reconciliation(db, user_id) if p.source == SOURCE
         ]),

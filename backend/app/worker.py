@@ -21,6 +21,7 @@ from app.decision.discover.jobs import (
     register_analyst_estimates_snapshot_job,
     register_discover_ml_training_job,
     register_discover_refresh_job,
+    register_discover_stage_precompute_job,
     register_discover_universe_prefetch_job,
     register_discovery_resolution_job,
     register_discovery_review_job,
@@ -578,6 +579,26 @@ def register_gdelt_news_job(scheduler: Any | None = None) -> str:
     return register_cron_job("gdelt_news_refresh", gdelt_news_inner, scheduler=scheduler, hour=4, minute=0)
 
 
+def register_venue_instruments_job(scheduler: Any | None = None) -> str:
+    """Register the weekly refresh of Xetra's and Börse Frankfurt's instrument lists (Mon 03:10 UTC).
+
+    The lists feed the tradeability gate for shares outside the EU and the US
+    (``foundation.venue_instruments``, plan 2026-11-10, WP3).
+    """
+
+    def venue_instruments_inner() -> None:
+        from app.foundation.core.db import SessionLocal
+        from app.foundation import venue_instruments
+
+        with SessionLocal() as db:
+            logger.info("venue_instruments: %s", venue_instruments.refresh(db))
+
+    return register_cron_job(
+        "venue_instruments_weekly", venue_instruments_inner, scheduler=scheduler,
+        day_of_week="mon", hour=3, minute=10,
+    )
+
+
 def register_price_cross_check_job(scheduler: Any | None = None) -> str:
     """Register the nightly second-source price check (04:20 UTC).
 
@@ -1128,6 +1149,7 @@ def build_scheduler() -> Any:
     register_insider_trading_refresh_job(scheduler)
     register_gdelt_news_job(scheduler)
     register_price_cross_check_job(scheduler)
+    register_venue_instruments_job(scheduler)
     register_price_backfill_daily_job(scheduler)
     register_bar_repull_job(scheduler)
     # Read-only and TAN-free, unlike DKB; wakes hourly, syncs per scalable_sync_hours.
@@ -1158,6 +1180,7 @@ def build_scheduler() -> Any:
     register_discover_ml_training_job(scheduler)
     register_analyst_estimates_snapshot_job(scheduler)
     register_discover_universe_prefetch_job(scheduler)
+    register_discover_stage_precompute_job(scheduler)
     register_forward_lab_job(scheduler)
     register_news_tone_job(scheduler)
     register_monthly_envelope_rollover_job(scheduler)

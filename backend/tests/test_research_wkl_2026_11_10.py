@@ -175,3 +175,50 @@ def test_growth_says_which_period_it_covers():
     assert _fact("quarter_yoy") == "revenue growth of +27.0 % in the latest quarter against the same quarter a year earlier"
     assert _fact("ttm_yoy").endswith("over the last twelve months against the twelve before")
     assert _fact(None).endswith("against a year earlier")
+
+
+# --- WP6 (plan 2026-11-10): the report is about the company it is for -------------------
+
+
+def _context(**kw):
+    technicals = research.price_technicals(_bars(), TODAY)
+    ctx = {"ticker": "WKL.AS", "company": {"name": "Wolters Kluwer N.V.", "ticker": "WKL.AS",
+                                         "sector": "Industrials", "industry": "Specialty Business Services"},
+           "technicals": technicals, "fundamentals": {**WKL, **WKL_LEVERAGE, "name": "Wolters Kluwer N.V."},
+           "recent_news": [], "recommendations": []}
+    ctx.update(kw)
+    return ctx
+
+
+def test_the_user_message_opens_with_the_company():
+    msg = research._build_user_message(_context())
+    assert msg.splitlines()[0] == "Company: Wolters Kluwer N.V. (WKL.AS), sector Industrials, industry Specialty Business Services"
+
+
+def test_the_heading_is_written_in_code_and_a_model_title_is_dropped():
+    model = "# Winkworth Group (WKL.AS) Research Report\n\n## 1. Executive Summary\nWolters Kluwer is steady.\n\n## 2. Price Action\nAccumulation and sharp recovery.\n\n## 3. Technical View\nRSI is fine."
+    out = research.assemble_report(model, _context())
+    assert out.splitlines()[0] == "# Wolters Kluwer N.V. (WKL.AS)"
+    assert "Winkworth" not in out
+    assert "sharp recovery" not in out and "Accumulation" not in out  # Price Action comes from the figures
+    assert "Last close 88.06" in out and "## 3. Technical View" in out
+
+
+def test_price_action_states_only_computed_figures():
+    text = research.price_action_text(research.price_technicals(_bars(), TODAY))
+    assert "still in progress" in text and "12 months" in text and "52-week range" in text
+    assert "earnings" not in text.lower() and "accumulation" not in text.lower()
+    assert research.price_action_text(None) == "Price history is not available."
+
+
+def test_a_report_naming_another_company_is_caught_and_falls_back_to_the_figures():
+    ctx = _context()
+    assert research.foreign_companies("Wolters Kluwer N.V. grew; Winkworth Group lags.", ctx) == ["Winkworth Group"]
+    assert research.foreign_companies("Wolters Kluwer N.V. is steady.", ctx) == []
+    fallback = research.fallback_report(ctx)
+    assert fallback.startswith("# Wolters Kluwer N.V. (WKL.AS)") and "withheld" in fallback
+
+
+def test_the_summary_skips_headings():
+    body = "## 1. Executive Summary\n\nThe stock is up.\n\n## 2. Price Action\nx"
+    assert research.summary_of(body) == "The stock is up."

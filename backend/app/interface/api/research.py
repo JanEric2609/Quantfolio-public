@@ -5,6 +5,7 @@ risk-profile updates, and the aggregated stock context endpoint.
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -161,11 +162,27 @@ async def get_stock_context(
     if "chart" in parts:
         from app.foundation.research import _price_history
         result["price_history"] = _price_history(db, ticker_upper, days=365)
+        if result["price_history"]:
+            # One price on the page: the quote carries its time, and a bar dated
+            # today is an unfinished session (88.06 against a quote of 87.36).
+            last_bar = str(result["price_history"][-1]["date"])[:10]
+            result["price_basis"] = {
+                "last_bar_date": last_bar,
+                "last_session_in_progress": last_bar >= datetime.now(UTC).date().isoformat(),
+            }
 
     # News
     if "news" in parts:
         from app.foundation.research import _recent_news
         result["news"] = _recent_news(db, ticker_upper)
+        if not result["news"]:
+            # A stock the owner does not hold has no feed job: fetch it on open.
+            from app.foundation.news import fetch_symbol_news
+            try:
+                if fetch_symbol_news(db, ticker_upper):
+                    result["news"] = _recent_news(db, ticker_upper)
+            except Exception:  # noqa: BLE001 - news never blocks the page
+                db.rollback()
 
     # Fundamentals
     if "fundamentals" in parts:

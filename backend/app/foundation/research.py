@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.foundation.portfolio.name_resolver import resolve_position_name
 from app.foundation.models.entities import (
+    Asset,
     MultiHorizonVerdict,
     NewsItem,
     StockResearchReport,
@@ -174,6 +176,9 @@ def _latest_fundamentals(db: Session, ticker: str) -> dict[str, Any] | None:
     if not isinstance(data, dict) or not data:
         return None
     out = dict(data)
+    # ROE and debt/equity divide by a book equity too small to mean anything (WKL.AS:
+    # 146 % and 590 %); the report hides both, the page greys them.
+    out["book_ratios_unreliable"] = book_ratios_unreliable_in(data)
     # Leverage that does not divide by book equity, for the page and the prompt.
     nd = net_debt_to_ebitda(data)
     if nd is not None:
@@ -193,8 +198,11 @@ def _recent_news(db: Session, ticker: str, limit: int = 10) -> list[dict[str, An
         .limit(limit)
         .all()
     )
+    from app.foundation.sentiment import has_real_sentiment
+
     return [{"title": r.title, "source": r.source, "published_at": str(r.published_at),
-             "sentiment_label": r.sentiment_label, "sentiment_score": float(r.sentiment_score or 0)} for r in rows]
+             "sentiment_label": r.sentiment_label if has_real_sentiment(r) else None,
+             "sentiment_score": float(r.sentiment_score or 0) if has_real_sentiment(r) else None} for r in rows]
 
 
 def _existing_recommendations(db: Session, ticker: str) -> list[dict[str, Any]]:
@@ -255,16 +263,36 @@ def _user_risk_profile(db: Session, user_id: str) -> str:
 # Context assembly
 # ---------------------------------------------------------------------------
 
+def _company(db: Session, ticker: str, fund: dict[str, Any] | None) -> dict[str, Any]:
+    """Who the stock is: name, sector and industry, so the report cannot be about someone else.
+
+    The WKL.AS report was titled "Winkworth Group": the prompt opened with the
+    ticker and never stated the company.
+    """
+    name = (fund or {}).get("name")
+    if not name:
+        asset = db.query(Asset).filter(Asset.symbol == ticker.upper()).first()
+        name = asset.name if asset is not None else None
+    return {
+        "name": str(name) if name else None,
+        "ticker": ticker,
+        "sector": (fund or {}).get("sector"),
+        "industry": (fund or {}).get("industry"),
+    }
+
+
 def build_context(db: Session, ticker: str, user_id: str) -> dict[str, Any]:
     """Gather all data dimensions into one dict for the LLM prompt."""
     q = quote(db, ticker)
     price_history = _price_history(db, ticker)
+    fund = _latest_fundamentals(db, ticker)
     return {
         "ticker": ticker,
+        "company": _company(db, ticker, fund),
         "quote": q,
         "price_history": price_history,
         "technicals": price_technicals(price_history),
-        "fundamentals": _latest_fundamentals(db, ticker),
+        "fundamentals": fund,
         "recent_news": _recent_news(db, ticker),
         "recommendations": _existing_recommendations(db, ticker),
         "portfolio_context": _portfolio_context(db, user_id),
@@ -331,6 +359,9 @@ a concise but thorough stock research report.  The report must include:
 7. **Conclusion & Recommendation** — actionable verdict (BUY / HOLD / SELL) with confidence (0-1).
 
 Rules:
+- Do not write a title or a company name as a heading; the report's title is
+  added for you. The company is the one named on the "Company:" line, and no
+  other company is the subject.
 - Quote only figures given below, with the period they cover. Do not compute
   or estimate indicators yourself: the price figures were computed from the
   daily closes. If a figure is missing, say it is not available.
@@ -438,8 +469,15 @@ def _fundamentals_lines(fund: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _company_line(context: dict[str, Any]) -> str:
+    company = context.get("company") or {}
+    name = company.get("name") or context["ticker"]
+    where = ", ".join(f"{label} {value}" for label, value in (("sector", company.get("sector")), ("industry", company.get("industry"))) if value)
+    return f"Company: {name} ({context['ticker']})" + (f", {where}" if where else "")
+
+
 def _build_user_message(context: dict[str, Any]) -> str:
-    parts = [f"## {context['ticker']} Research Context\n"]
+    parts = [_company_line(context), f"\n## {context['ticker']} Research Context\n"]
     q = context.get("quote", {})
     if q:
         parts.append(f"**Current Price:** {q.get('price', 'N/A')} {q.get('currency') or ''} | Source: {q.get('source', 'N/A')}")
@@ -454,7 +492,8 @@ def _build_user_message(context: dict[str, Any]) -> str:
     if news:
         parts.append("\n**Recent News:**")
         for n in news[:5]:
-            parts.append(f"- [{n.get('sentiment_label', 'neutral')}] {n['title']} ({n['source']}, {n['published_at'][:10]})")
+            tag = n.get("sentiment_label") or "not scored"
+            parts.append(f"- [{tag}] {n['title']} ({n['source']}, {n['published_at'][:10]})")
     else:
         parts.append("\n**Recent News:** none stored for this stock.")
 
@@ -473,6 +512,126 @@ def _build_user_message(context: dict[str, Any]) -> str:
 
     parts.append("\n---\nGenerate the research report now.")
     return "\n".join(parts)
+
+
+
+# ---------------------------------------------------------------------------
+# Assembling the report: heading, Price Action and the company guard
+# ---------------------------------------------------------------------------
+
+_HEADING = re.compile(r"^(?:#{1,4} .*|\*\*\d+\.[^*]+\*\*)$")  # callers pass stripped lines
+_COMPANY_SUFFIX = re.compile(
+    r"\b((?:[A-Z][\w&.\-]+)(?: [A-Z][\w&.\-]+){0,3}) (?:Group|Inc\.?|plc|PLC|Corp\.?|Corporation|N\.V\.|AG|SE|Ltd\.?|Holdings|S\.A\.)(?![\w])"
+)
+
+
+def report_title(context: dict[str, Any]) -> str:
+    company = context.get("company") or {}
+    name = company.get("name")
+    return f"# {name} ({context['ticker']})" if name else f"# {context['ticker']}"
+
+
+def _strip_leading_heading(text: str) -> str:
+    """Drop any title the model wrote before its first section (it once named the wrong company)."""
+    lines = text.lstrip().splitlines()
+    while lines and (not lines[0].strip() or re.match(r"^#\s+\S", lines[0])):
+        lines.pop(0)
+    return "\n".join(lines)
+
+
+def price_action_text(t: dict[str, Any] | None) -> str:
+    """The Price Action section, written from the computed figures only."""
+    if not t:
+        return "Price history is not available."
+    def n(key: str, suffix: str = "") -> str | None:
+        return None if t.get(key) is None else f"{t[key]}{suffix}"
+    parts: list[str] = []
+    last = f"Last close {t['last_close']} on {t['last_close_date']}"
+    parts.append(last + (" (that session was still in progress)." if t.get("last_session_in_progress") else "."))
+    returns = [f"{label} {v}" for label, v in (("1 week", n("return_1w_pct", " %")), ("1 month", n("return_1m_pct", " %")),
+                                              ("3 months", n("return_3m_pct", " %")), ("6 months", n("return_6m_pct", " %")),
+                                              ("12 months", n("return_12m_pct", " %"))) if v]
+    if returns:
+        parts.append("Returns over the period: " + ", ".join(returns) + ".")
+    if t.get("high_52w") is not None and t.get("low_52w") is not None:
+        below = f", {t['pct_below_52w_high']} % below the high" if t.get("pct_below_52w_high") is not None else ""
+        parts.append(f"52-week range {t['low_52w']} ({t['low_52w_date']}) to {t['high_52w']} ({t['high_52w_date']}){below}.")
+    averages = []
+    for key, label in (("sma_50", "50-day"), ("sma_200", "200-day")):
+        if t.get(key) is not None:
+            above = t.get("above_" + key)
+            averages.append(f"{'above' if above else 'below'} its {label} average of {t[key]}")
+    if averages:
+        parts.append("The last close is " + " and ".join(averages) + ".")
+    risk = []
+    if t.get("volatility_3m_annual_pct") is not None:
+        risk.append(f"volatility over the last 3 months {t['volatility_3m_annual_pct']} % annualised")
+    if t.get("max_drawdown_12m_pct") is not None:
+        risk.append(f"largest fall from a peak in 12 months {t['max_drawdown_12m_pct']} %")
+    if risk:
+        parts.append(risk[0][0].upper() + "; ".join(risk)[1:] + ".")
+    if t.get("avg_volume_20d_completed"):
+        parts.append(f"Average daily volume over the last 20 completed sessions: {t['avg_volume_20d_completed']:,}.")
+    return " ".join(parts)
+
+
+def replace_section(report: str, title_words: str, body: str) -> str:
+    """Replace the body of the section whose heading contains *title_words*; append one when absent."""
+    lines = report.splitlines()
+    for i, line in enumerate(lines):
+        if _HEADING.match(line.strip()) and title_words.lower() in line.lower():
+            j = i + 1
+            while j < len(lines) and not _HEADING.match(lines[j].strip()):
+                j += 1
+            return "\n".join([*lines[: i + 1], "", body, "", *lines[j:]]).strip()
+    return report.rstrip() + f"\n\n## Price Action\n\n{body}"
+
+
+def summary_of(report_body: str) -> str:
+    """The first prose paragraph of the report (headings skipped)."""
+    paragraphs: list[list[str]] = [[]]
+    for raw in report_body.splitlines():  # a blank line ends a paragraph (linear, no regex backtracking)
+        line = raw.strip()
+        if line:
+            paragraphs[-1].append(line)
+        elif paragraphs[-1]:
+            paragraphs.append([])
+    for lines in paragraphs:
+        if lines and not all(_HEADING.match(line) for line in lines):
+            return "\n".join(line for line in lines if not _HEADING.match(line)).strip()
+    return ""
+
+
+def foreign_companies(text: str, context: dict[str, Any]) -> list[str]:
+    """Company-looking names in *text* that are neither the subject nor in the data given to the model."""
+    company = context.get("company") or {}
+    known = " ".join(
+        str(x) for x in (company.get("name"), context["ticker"], company.get("industry"),
+                         *[n.get("title") for n in context.get("recent_news", [])],
+                         *[r.get("verdict") for r in context.get("recommendations", [])]) if x
+    ).lower()
+    out = []
+    for m in _COMPANY_SUFFIX.finditer(text):
+        first = m.group(1).split()[0].lower()
+        if first in known or m.group(0).lower() in known:
+            continue
+        out.append(m.group(0))
+    return out
+
+
+def fallback_report(context: dict[str, Any]) -> str:
+    """The report written from the figures alone, when the model's text named another company twice."""
+    parts = [report_title(context), "", "## Price Action", "", price_action_text(context.get("technicals")), "",
+             "## Fundamentals", ""]
+    parts += [line for line in _fundamentals_lines(context.get("fundamentals")) if line.strip()]
+    parts += ["", "_The written analysis was withheld: the model's text named a company that is not this stock._"]
+    return "\n".join(parts)
+
+
+def assemble_report(model_text: str, context: dict[str, Any]) -> str:
+    body = _strip_leading_heading(model_text)
+    body = replace_section(body, "price action", price_action_text(context.get("technicals")))
+    return f"{report_title(context)}\n\n{body}"
 
 
 # ---------------------------------------------------------------------------
@@ -515,10 +674,24 @@ async def generate_report(db: Session, ticker: str, user_id: str, *,
             "generated_at": datetime.now(UTC).isoformat(),
             "error": str(exc),
         }
-    report_text = completion.content
+    model_text = completion.content
+    if model_text and foreign_companies(model_text, context):
+        logger.warning("research: report for %s names another company %s; regenerating once",
+                       ticker, foreign_companies(model_text, context))
+        try:
+            retry = await llm_call(db, "batch_research", messages, timeout_s=120.0, user_id=user_id)
+            model_text = retry.content
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LLM retry failed for %s: %s", ticker, exc)
+    if model_text and foreign_companies(model_text, context):
+        report_text = fallback_report(context)
+    elif model_text:
+        report_text = assemble_report(model_text, context)
+    else:
+        # No model text after the retry: the figures still make a report.
+        report_text = fallback_report(context)
 
-    # Extract summary (first paragraph)
-    summary = report_text.split("\n\n")[0] if report_text else ""
+    summary = summary_of(report_text.split("\n", 1)[1] if report_text else "")
     try:
         report = save_report(db, ticker, user_id, report_text, summary, context)
     except Exception as exc:

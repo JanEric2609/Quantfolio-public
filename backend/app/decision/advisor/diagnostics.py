@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -775,6 +776,7 @@ def _check_trade_activity(
             "proposed nothing to execute."
         )
 
+    reason_remedy = None if upstream_broken else _skip_remedy(dominant, trades)
     if total == 0:
         return Check(
             key="trade_activity",
@@ -785,7 +787,7 @@ def _check_trade_activity(
             remedy=(
                 f"Fix '{upstream_broken}' first — this stage cannot recover on its own."
                 if upstream_broken
-                else "Work upstream: candidate feed → price history → LLM decision."
+                else reason_remedy or "Work upstream: candidate feed → price history → LLM decision."
             ),
         )
     if last_age_days is not None and last_age_days > 7:
@@ -804,7 +806,7 @@ def _check_trade_activity(
             remedy=(
                 f"Fix '{upstream_broken}' first; trade flow resumes from there."
                 if upstream_broken
-                else (
+                else reason_remedy or (
                     "Open Paper Portfolios → Advisor Loop and read the 'Not executed' panel; "
                     "if every reason is 'target already met', the candidate shortlist is stale."
                 )
@@ -817,6 +819,26 @@ def _check_trade_activity(
         detail=f"{total} trades; last one {last_age_days} days ago.",
         data=data,
     )
+
+
+def _skip_remedy(dominant: str | None, trades: list[Any]) -> str | None:
+    """The remedy that fits the reason the latest cycle skipped most orders, or None for the generic one."""
+    if not dominant:
+        return None
+    from app.foundation.sell_caps import CUMULATIVE_SELL_WINDOW_DAYS
+
+    reason = dominant.lower()
+    if reason.startswith("sell cap exhausted"):
+        recent = [t.date for t in trades if t.date is not None]
+        horizon = ""
+        if recent:
+            oldest = min(recent)
+            oldest_day = oldest.date() if isinstance(oldest, datetime) else oldest
+            horizon = f" until about {(oldest_day + timedelta(days=CUMULATIVE_SELL_WINDOW_DAYS)).isoformat()}"
+        return f"The sell cap (ADR 0013) blocks further sells{horizon}; no action needed."
+    if reason.startswith("unfundable"):
+        return "No cash until a sell clears; no action needed."
+    return None  # target already met and the rest: the generic text stands
 
 
 def _check_prediction_ledger(db: Session, user_id: str, portfolio_ids: list[str], ref: datetime) -> Check:
@@ -1097,6 +1119,25 @@ def _check_scorecard(
                     "Nothing to do but wait for the horizon; check the "
                     "discovery_resolution job is running so the rows resolve on time."
                 ),
+            )
+        nav_returns = max(snapshots - 1, 0)
+        if axes["calibration"] and axes["magnitude"] and 0 < nav_returns < MIN_RETURNS_FOR_RATIOS:
+            # Only the NAV axes are missing and a calendar fills them: not a fault.
+            missing = MIN_RETURNS_FOR_RATIOS - nav_returns
+            expected = (datetime.now(UTC) + timedelta(days=math.ceil(missing * 7 / 5))).date().isoformat()
+            data["waiting_on_returns"] = True
+            data["expected_on"] = expected
+            return Check(
+                key="scorecard",
+                label="Scorecard",
+                status=WARN,
+                detail=(
+                    f"{detail_text} Not a fault: the sleeve has {nav_returns} of "
+                    f"{MIN_RETURNS_FOR_RATIOS} daily returns the NAV axes need; the {MIN_RETURNS_FOR_RATIOS}th "
+                    f"arrives about {expected}."
+                ),
+                data=data,
+                remedy="Nothing to do but wait for the daily snapshots to accumulate.",
             )
         return Check(
             key="scorecard",
@@ -1744,8 +1785,11 @@ def run_advisor_diagnostics(
     pending = [
         {"key": c.key, "label": c.label, "detail": c.detail, "remedy": c.remedy}
         for c in checks
-        if c.status == WARN and bool(c.data.get("waiting_on_horizon"))
+        if c.status == WARN and bool(c.data.get("waiting_on_horizon") or c.data.get("waiting_on_returns"))
     ]
+    for entry, c in zip(pending, [c for c in checks if c.status == WARN
+                                 and bool(c.data.get("waiting_on_horizon") or c.data.get("waiting_on_returns"))]):
+        entry["expected_on"] = c.data.get("expected_on") or c.data.get("next_prediction_resolves_at")
 
     counts = {level: sum(1 for c in checks if c.status == level) for level in (OK, WARN, FAIL, SKIPPED)}
     waiting_note = (

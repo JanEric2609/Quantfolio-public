@@ -348,3 +348,18 @@ def test_looks_are_spaced_and_counted():
         db, champion, challenger, today=np.busday_offset(day, 21, roll="forward").astype(date), state=state
     )
     assert second.look == 2 and len(state["looks"]) == 2
+
+
+def test_dm_drops_autocovariance_pairs_more_than_five_trading_days_apart():
+    """WP4: a gap in the matched forecasts must not be read as an adjacent day."""
+    rng = np.random.default_rng(7)
+    d = list(rng.normal(0.01, 0.05, 40))
+    contiguous = diebold_mariano_hln(d, h=5, lag=4, positions=list(range(40)))
+    assert contiguous["stat"] == pytest.approx(diebold_mariano_hln(d, h=5, lag=4)["stat"])
+    # A 30-day hole in the middle: pairs across it are dropped, so the stat differs.
+    gapped_pos = list(range(20)) + list(range(50, 70))
+    gapped = diebold_mariano_hln(d, h=5, lag=4, positions=gapped_pos)
+    assert gapped["stat"] != pytest.approx(contiguous["stat"])
+    # Dropping the cross-gap pairs is the same as the plain statistic when every pair is far apart.
+    far = diebold_mariano_hln(d, h=5, lag=4, positions=[i * 10 for i in range(40)])
+    assert far["n"] == 40

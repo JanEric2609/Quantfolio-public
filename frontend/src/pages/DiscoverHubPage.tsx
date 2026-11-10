@@ -186,6 +186,8 @@ export function DiscoverHubPage() {
     }
   };
 
+  const stabilityLanes = (runDetail?.params_json?.shortlist_stability?.lanes ?? {}) as Record<string, { text?: string }>;
+  const stabilityLines = Object.values(stabilityLanes).map((l) => l.text).filter((t): t is string => !!t);
   const shortlistedCands = runDetail?.shortlisted ?? [];
   const rejectedCands = runDetail?.rejected ?? [];
   const allCandidates = [...shortlistedCands, ...rejectedCands];
@@ -255,6 +257,11 @@ export function DiscoverHubPage() {
             )}
             {hasResults && (
               <div className="space-y-4">
+                {stabilityLines.length > 0 && (
+                  <p data-testid="shortlist-stability" className="text-xs text-text-muted">
+                    {stabilityLines.join(" ")} (Shadow: weights varied by ±25 %; sector caps not re-applied.)
+                  </p>
+                )}
                 <ShortlistCards candidates={allCandidates} onOpenDossier={handleOpenDossier} tiers={tiers} />
                 <RejectedTable candidates={allCandidates} />
               </div>

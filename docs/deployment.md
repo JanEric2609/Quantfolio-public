@@ -78,7 +78,7 @@ After changing the unit files or this `.env`, `quantfolio-update-app` installs u
 
 When `REDIS_URL` is set explicitly (environment or `.env`), the **market-data provider rate limiters** (`foundation/providers/rate_limiter.py`) also live in Redis (key prefix `quantfolio:ratelimit:`), so the API and the worker draw from one quota per vendor instead of one each. If Redis is unreachable the limiters fall back to the per-process window and retry Redis after 30 s; provider calls are never blocked on it.
 
-**Tuning knobs** (all optional): `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` (PostgreSQL connection pool per process, default 10 + 24 — the worker runs up to 17 job threads and a tracked job holds two connections) and `PRICE_BACKFILL_WORKERS` (symbols backfilled concurrently, default 4; 1 is sequential; SQLite always runs sequentially).
+**Tuning knobs** (all optional): `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` (PostgreSQL connection pool per process, default 10 + 30 — the worker runs up to 20 job threads and a tracked job holds two connections) and `PRICE_BACKFILL_WORKERS` (symbols backfilled concurrently, default 4; 1 is sequential; SQLite always runs sequentially).
 
 **`LLM_LOCAL_URL`** is read by the settings resolver at startup and can be overridden by the Control Center `llm_base_url` setting (no app restart required). Similarly, **`FRONTEND_ORIGIN`** (comma-separated allowed origins) is honored at runtime via the settings resolver; adding a new origin does not require a rebuild or restart.
 
@@ -417,7 +417,7 @@ cd /opt/quantfolio
 runuser -u quantfolio -- git pull --ff-only
 
 cd backend
-runuser -u quantfolio -- .venv/bin/python -m pip install --disable-pip-version-check -e ".[dkb_robo]"
+runuser -u quantfolio -- .venv/bin/python -m pip install --disable-pip-version-check -e ".[dkb_robo,bert]"
 runuser -u quantfolio -- .venv/bin/alembic upgrade head
 cd ..
 
@@ -443,6 +443,17 @@ grep -q 'id="root"' /opt/quantfolio/frontend/dist/index.html
 ```
 
 **Note:** The Caddyfile in `/etc/caddy/` is **not** overwritten by the updater; it is a static configuration file set during Stage 4 deployment.
+
+## News sentiment (FinBERT)
+
+The worker scores news with `ProsusAI/finbert`, installed by the `bert` extra (`transformers`; the update and install scripts pass it). The first load downloads about 440 MB from huggingface.co into `HF_HOME` (`/opt/quantfolio/.cache/huggingface`, set in `quantfolio-worker.service`; the `quantfolio` user must be able to write there) and needs about 1 GB of worker memory. Without it the worker falls back to a keyword list; those labels are stored with `sentiment_source = 'lexicon'`, every reader ignores them, and Control Center shows "News sentiment runs on a keyword list".
+
+After the first deploy with the extra, null the old keyword labels once so the worker rescores them:
+
+```sql
+update news_items set sentiment_label = null, sentiment_score = null
+ where sentiment_source is distinct from 'finbert' and sentiment_source is distinct from 'provider';
+```
 
 ## Optional Features
 

@@ -417,3 +417,99 @@ def derive_signals_from_scores(scores: dict[str, Any] | Any) -> dict[str, float]
         signals["insider_signal"] = max(0.0, min(1.0, 0.5 + 0.1 * cluster + flow_nudge))
 
     return signals
+
+
+# ---------------------------------------------------------------------------
+# Rank every signal before weighting (plan 2026-11-10, WP2a / D1)
+# ---------------------------------------------------------------------------
+
+# A signal with fewer distinct values than this inside a lane carries no
+# ranking information there (a mid-rank of three values is a coin flip spread
+# over 0-1): it is left out of that lane's composite.
+RANK_MIN_DISTINCT = 5
+
+# Signals that are never re-ranked: a cash fund's neutral 0.5 is not evidence.
+_UNRANKED_TYPES = frozenset({"money_market"})
+
+
+def rank_signals_within_lanes(
+    entries: list[tuple[str, str, dict[str, float]]],
+    *,
+    min_lane_size: int,
+) -> list[dict[str, float]]:
+    """Replace each signal by its mid-rank percentile inside the candidate's lane.
+
+    ``entries`` is ``(lane, instrument_type, signals)`` per candidate. Raw
+    0-1 signals multiplied by weights do not weight what they claim: on the
+    985 scored stocks of run 31a6009a momentum (a uniform rank, sd 0.29) held
+    81 % of the composite's variance at a weight of 15 %, portfolio fit
+    (sd 0.05) 1 % at 15 %. A rank gives every signal the same spread.
+
+    * A lane smaller than ``min_lane_size`` keeps its raw values.
+    * A signal with fewer than :data:`RANK_MIN_DISTINCT` distinct values in
+      its lane is dropped from that lane's composite.
+    * Money-market candidates keep their raw signals and take no part in the
+      ranks.
+    """
+    out: list[dict[str, float]] = [dict(sig) for _, _, sig in entries]
+    by_lane: dict[str, list[int]] = {}
+    for i, (lane, itype, _) in enumerate(entries):
+        if itype not in _UNRANKED_TYPES:
+            by_lane.setdefault(lane, []).append(i)
+    for idxs in by_lane.values():
+        if len(idxs) < min_lane_size:
+            continue
+        keys = {k for i in idxs for k in entries[i][2]}
+        for key in keys:
+            members = [i for i in idxs if key in entries[i][2]]
+            values = [float(entries[i][2][key]) for i in members]
+            if len(set(round(v, 6) for v in values)) < RANK_MIN_DISTINCT:
+                for i in members:
+                    out[i].pop(key, None)
+                continue
+            order = sorted(range(len(values)), key=lambda j: values[j])
+            ranks = [0.0] * len(values)
+            pos = 0
+            while pos < len(order):
+                end = pos
+                while end + 1 < len(order) and values[order[end + 1]] == values[order[pos]]:
+                    end += 1
+                mid = (pos + end) / 2 + 1  # average 1-based rank of the tie group
+                for j in order[pos : end + 1]:
+                    ranks[j] = mid
+                pos = end + 1
+            n = len(values)
+            for j, i in enumerate(members):
+                out[i][key] = round((ranks[j] - 0.5) / n, 4)
+    return out
+
+
+def variance_shares(
+    signal_sets: list[dict[str, float]],
+    ic_data: list[dict[str, Any] | None] | None = None,
+    weights: dict[str, float] | None = None,
+) -> dict[str, float]:
+    """Each signal's share of the composite's variance: cov(contribution, composite) / var(composite).
+
+    The shares sum to 1. Logged per run, before and after ranking, so the gap
+    between a signal's weight and what it moves is visible.
+    """
+    n = len(signal_sets)
+    if n < 2:
+        return {}
+    contribs: list[dict[str, float]] = []
+    for i, sig in enumerate(signal_sets):
+        eff = _effective_weights(sig, (ic_data[i] if ic_data else None), weights)
+        contribs.append({k: sig[k] * wt for k, wt in eff.items()})
+    totals = [sum(c.values()) for c in contribs]
+    mean_t = sum(totals) / n
+    var_t = sum((t - mean_t) ** 2 for t in totals) / n
+    if var_t <= 0:
+        return {}
+    shares: dict[str, float] = {}
+    for k in {k for c in contribs for k in c}:
+        vals = [c.get(k, 0.0) for c in contribs]
+        mean_k = sum(vals) / n
+        cov = sum((vals[i] - mean_k) * (totals[i] - mean_t) for i in range(n)) / n
+        shares[k] = round(cov / var_t, 4)
+    return dict(sorted(shares.items(), key=lambda kv: -kv[1]))

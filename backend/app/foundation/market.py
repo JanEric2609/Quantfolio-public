@@ -66,6 +66,7 @@ def quote(db: Session, ticker: str) -> dict[str, Any]:
             "currency": cached.currency,
             "source": cached.source,
             "stale": False,
+            "as_of": cached.fetched_at.isoformat() if cached.fetched_at else None,
         }
 
     live_result = build_provider_registry(db).get_quote(ticker)
@@ -78,6 +79,7 @@ def quote(db: Session, ticker: str) -> dict[str, Any]:
             "currency": live.get("currency", "EUR"),
             "source": live.get("source", live_result.get("provider", "provider")),
             "stale": False,
+            "as_of": datetime.now(UTC).isoformat(),
             "message": "; ".join(live_result.get("quality", {}).get("warnings", [])) or None,
         }
     if cached:
@@ -87,6 +89,7 @@ def quote(db: Session, ticker: str) -> dict[str, Any]:
             "currency": cached.currency,
             "source": cached.source,
             "stale": True,
+            "as_of": cached.fetched_at.isoformat() if cached.fetched_at else None,
             "message": "Returning cached quote because live market data is unavailable.",
         }
     return {

@@ -153,6 +153,7 @@ export function DiagnosticsTab() {
               {report.pending.map((p) => (
                 <li key={p.key}>
                   <span className="font-medium text-text-secondary">{p.label}</span> — {p.detail}
+                  {p.expected_on && <span className="block">Expected: {p.expected_on}</span>}
                 </li>
               ))}
             </ul>

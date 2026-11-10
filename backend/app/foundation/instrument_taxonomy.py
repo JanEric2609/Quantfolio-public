@@ -42,6 +42,10 @@ def classify_instrument(symbol: str, source: str | None = None, name: str | None
     this runs once per candidate inside the pipeline loop). Fails open to
     ``"equity"``.
     """
+    if source == "screen_index":
+        # An index constituent is a stock whatever its name or ticker looks
+        # like ("Smurfit Westrock" contains "estr"; WDC is also a theme ETF).
+        return "equity"
     if name:
         try:
             from app.foundation.etf_universe import is_bond_fund, is_money_market_fund

@@ -211,3 +211,22 @@ Settings (Control Center, the plan page): `ladder_tuition_budget_pct` (1.0), `la
 
 A third ladder slot for lab-admitted strategies; residualised (CUPED-style) excess returns, which would need
 their own pre-registration; `pg_try_advisory_lock` in `_track_job`; the factor-ranking pipeline's own rank-IC e-process.
+
+## Amendment 2026-11-10: the bets clip at 3 sigma, not 1
+
+**Defect.** `e_processes` clipped `x / sigma` to [-1, 1]. A bet on a clipped value tests the *median* of the excess return, not its mean, so skew alone moved both e-processes. Simulated with the ladder's own functions (504 days, 10 % tracking error, Earned bound 20 %):
+
+| Daily excess returns | Reaches Earned | Harm fires |
+|---|---|---|
+| Gaussian, zero alpha | 4.7 % | 4.1 % |
+| Skew -0.30, zero alpha | 13.5 % | 1.7 % |
+| Skew -0.85, zero alpha | 59 % | 0.3 % |
+| Skew +0.85, alpha +3 %/yr | 0.5 % | 46 % |
+
+A negatively skewed sleeve with no edge (the usual shape of a strategy that sells insurance) climbed the ladder; a positively skewed sleeve with a real edge was punished.
+
+**Change.** `CLIP_SIGMAS = 3.0` (`foundation/capital_ladder.py`). `y = clip(x / sigma, -3, 3) / 3`, so `y` is again in [-1, 1], `1 + lambda * y` stays positive and `LAMBDAS` and every threshold are unchanged. With the clip at 3 sigma, skew -0.85 at zero alpha reaches Earned in 5.3 % of paths, with the same power under a real edge. `tests/test_capital_ladder.py` now simulates 2,000 paths each for skew 0, -0.3, -0.85 and +0.85 and fails when either rate exceeds its nominal bound plus three Monte Carlo standard errors (it fails at a clip of 1).
+
+**Residual limit.** A 3-sigma clip still trims extreme days; the guarantee is approximate for very heavy tails. `ladder_evidence_daily` is deterministic from the paper snapshots: rows written before this change are recomputed by the next ladder run for the owner's candidates once `ladder_evidence_daily` is cleared (no rows existed on 2026-11-10).
+
+**Also.** The ladder skips a paper snapshot day that is still the advisor cycle's provisional live-quote row (the rule the trust ledger already has). The Diebold-Mariano test in the paired promotion drops autocovariance pairs more than five trading days apart (matched forecasts are not contiguous). `candidate_gate.one_sided_t_e_value` documents that Wang and Ramdas, Theorem 4.11, is proved for mean = 0.

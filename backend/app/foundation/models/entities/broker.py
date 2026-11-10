@@ -133,3 +133,20 @@ class BrokerInstrument(Base):
     type: Mapped[str | None] = mapped_column(String(24), nullable=True)
     currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class VenueInstrument(Base):
+    """One instrument a German venue lists (Xetra, Börse Frankfurt), by ISIN.
+
+    From Deutsche Börse's "all tradable instruments" files. A listing there is
+    the nearest checkable proxy for a Scalable line (gettex and EIX publish no
+    list). Replaced per venue on each refresh; ``as_of`` is the file's date.
+    """
+
+    __tablename__ = "venue_instruments"
+
+    venue: Mapped[str] = mapped_column(String(16), primary_key=True)
+    isin: Mapped[str] = mapped_column(String(12), primary_key=True)
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    as_of: Mapped[date | None] = mapped_column(Date, nullable=True)

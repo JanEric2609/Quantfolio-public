@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+import math
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
@@ -97,13 +98,27 @@ class AlpacaProvider(MarketDataProvider):
             # Alpaca's default `adjustment=raw` stores unadjusted closes; a
             # stored series must be total return (plan 2026-10-12, D1).
             params: dict[str, Any] = {"timeframe": "1Day", "adjustment": "all"}
+            if not start and days:
+                # Without `start` Alpaca answers from the start of the current
+                # day (two bars). Trading days -> calendar days, plus holidays.
+                start = (datetime.now(UTC).date() - timedelta(days=math.ceil(days * 1.6))).isoformat()
             if start:
                 params["start"] = start
             if end:
                 params["end"] = end
-            data = self._get(f"/stocks/{normalized}/bars", params=params)
-            bars = data.get("bars") if isinstance(data, dict) else None
-            if not isinstance(bars, list):
+            params["limit"] = 10000
+            bars: list[Any] | None = None
+            for _page in range(50):
+                data = self._get(f"/stocks/{normalized}/bars", params=params)
+                page = data.get("bars") if isinstance(data, dict) else None
+                if not isinstance(page, list):
+                    break
+                bars = [*(bars or []), *page]
+                token = data.get("next_page_token") if isinstance(data, dict) else None
+                if not token:
+                    break
+                params["page_token"] = token
+            if bars is None:
                 return self.unavailable("history", f"Alpaca returned no bars for {normalized}.")
             rows: list[dict[str, Any]] = []
             for bar in bars:

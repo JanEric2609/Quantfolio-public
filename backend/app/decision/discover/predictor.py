@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import DiscoveryPrediction
 from app.foundation.models.entities._core import now_utc
-from app.decision.discover.ledger import DEFAULT_HORIZON_DAYS, add_trading_days
+from app.decision.discover.ledger import DEFAULT_HORIZON_DAYS, add_trading_days, supersede_same_day
 from app.foundation.market import latest_cached_close
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,7 @@ def store_prediction(
     )
     db.add(prediction)
     db.flush()
+    supersede_same_day(db, prediction)
     logger.debug(
         "store_prediction: created %s for %s (score=%.3f, direction=%s)",
         prediction.id,

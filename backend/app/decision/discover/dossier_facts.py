@@ -285,7 +285,7 @@ _LEAD = frozenset({
     "a", "an", "the", "its", "their", "his", "her", "low", "lower", "high", "higher", "strong", "weak",
     "significant", "elevated", "moderate", "positive", "negative", "robust", "solid", "attractive", "notable",
     "substantial", "considerable", "current", "trailing", "premium", "healthy", "minimal", "limited",
-    "annual", "recent", "past", "estimated", "projected", "expected", "stable", "rising", "falling", "large", "small", "sharp", "deep", "big",
+    "annual", "annualized", "annualised", "recent", "past", "estimated", "projected", "expected", "stable", "rising", "falling", "large", "small", "sharp", "deep", "big",
 })
 #: Words that build the sentence around a key; never taken for a repeat of the phrase.
 _STRUCTURE = frozenset({
@@ -364,6 +364,18 @@ def _trailing(after: str, phrase: str) -> str:
     return after
 
 
+#: Words that can repeat around a figure's phrase without repeating its noun.
+_NOUN_SKIP = _LEAD | _STRUCTURE | _TRAILING_FILLER | frozenset({
+    "about", "roughly", "around", "times", "percent", "again", "which", "their", "there", "these", "those",
+})
+_MARK_L, _MARK_R = "\x00", "\x01"
+
+
+def _nouns(phrase: str) -> set[str]:
+    """The content words of a figure phrase ("volatility" in "an annual volatility of 21 %")."""
+    return {w for w in _words(phrase) if len(w) >= 5 and w not in _NOUN_SKIP}
+
+
 def render(text: str, facts: list[Fact], allowed_terms: list[str]) -> tuple[str, list[str]]:
     """Substitute ``{key}`` with its phrase; drop sentences that cite no such key or write a figure.
 
@@ -385,15 +397,30 @@ def render(text: str, facts: list[Fact], allowed_terms: list[str]) -> tuple[str,
             problems.append(f"writes a figure itself instead of citing its key: \"{sentence[:120]}\"")
             continue
         out, pos, last_phrase = "", 0, None
+        phrases: list[str] = []
         for m in SLOT.finditer(sentence):
             between = sentence[pos : m.start()]
             if last_phrase is not None:
                 between = _trailing(between, last_phrase)
             last_phrase = by_key[m.group(1)]
-            out = _fill(out + between, last_phrase)
+            filled = _fill(out + between, last_phrase)
+            if filled.endswith(last_phrase) or filled.endswith(last_phrase[:1].upper() + last_phrase[1:]):
+                cut = len(filled) - len(last_phrase)
+                filled = filled[:cut] + _MARK_L + filled[cut:] + _MARK_R  # the inserted phrase, marked
+                phrases.append(last_phrase)
+            out = filled
             pos = m.end()
         tail = sentence[pos:]
         if last_phrase is not None:
             tail = _trailing(tail, last_phrase)
-        kept.append(re.sub(r"\s+([,.;:!?])", r"\1", out + tail).strip())
+        whole = out + tail
+        # The model's own words around a phrase must not repeat the phrase's noun
+        # ("annual volatility at an annual volatility of 21 %", 5 of 15 dossiers).
+        outside = set(_words(re.sub(rf"{_MARK_L}.*?{_MARK_R}", " ", whole)))
+        clash = sorted({w for p in phrases for w in _nouns(p) & outside})
+        if clash:
+            problems.append(f"repeats what a figure already says ({', '.join(clash)}): \"{sentence[:120]}\"")
+            continue
+        whole = whole.replace(_MARK_L, "").replace(_MARK_R, "")
+        kept.append(re.sub(r"\s+([,.;:!?])", r"\1", whole).strip())
     return " ".join(kept).strip(), problems

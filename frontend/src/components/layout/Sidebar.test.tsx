@@ -9,7 +9,7 @@ import { useUiStore } from "../../lib/store";
 
 const TOOLS = ["Quant Lab", "Strategy lab"];
 const ALWAYS = [
-  "Home", "This month", "Portfolio", "Tax", "Budget", "Discover", "Watchlist", "News", "Can I trust it?",
+  "Home", "This month", "Portfolio", "Tax", "Budget", "Learn", "Discover", "Watchlist", "News", "Can I trust it?",
 ];
 
 function renderSidebar(path = "/plan") {
@@ -32,7 +32,7 @@ describe("Sidebar", () => {
     useUiStore.setState({ showResearchTools: false });
   });
 
-  it("lists nine destinations with the research tools collapsed, and Control Center in the footer", () => {
+  it("lists ten destinations with the research tools collapsed, and Control Center in the footer", () => {
     const nav = renderSidebar();
 
     expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual(ALWAYS);
@@ -41,13 +41,13 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: "Control Center" })).toHaveAttribute("href", "/settings");
   });
 
-  it("lists all eleven primary destinations once the switch is on, and remembers the choice", async () => {
+  it("lists all twelve primary destinations once the switch is on, and remembers the choice", async () => {
     const nav = renderSidebar();
 
     await userEvent.click(screen.getByRole("switch", { name: "Show research tools" }));
 
     expect(within(nav).getAllByRole("link").map((a) => a.textContent)).toEqual([...ALWAYS, ...TOOLS]);
-    expect(within(nav).getAllByRole("link")).toHaveLength(11);
+    expect(within(nav).getAllByRole("link")).toHaveLength(12);
     expect(localStorage.getItem("quantfolio:showResearchTools")).toBe("true");
   });
 
@@ -55,7 +55,7 @@ describe("Sidebar", () => {
     useUiStore.setState({ showResearchTools: true });
     const nav = renderSidebar();
 
-    expect(within(nav).getAllByRole("link")).toHaveLength(11);
+    expect(within(nav).getAllByRole("link")).toHaveLength(12);
   });
 
   it("opens the research tools by itself while you are in one, and locks the switch", () => {

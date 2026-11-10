@@ -4,8 +4,11 @@ Extracted from ``api/news.py`` so the background scheduler can auto-refresh
 news without duplicating the provider-iteration and storage logic.
 """
 
+import json
 import logging
 import re
+import time
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -15,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.foundation.live_positions import live_positions, set_position_ticker
 from app.foundation.models.entities import (
     Asset,
+    Fundamental,
     Holding,
     NewsItem,
     Portfolio,
@@ -165,9 +169,15 @@ def store_news_item(db: Session, item: dict[str, Any], provider: str, symbol: st
         or item.get("providerPublishTime")
         or item.get("published"),
     )
+    attributed = symbol
+    if symbol and names_company(db, symbol, str(title), item.get("summary")) is False:
+        # The feed of `symbol` returned an article about someone else (a Qualcomm
+        # piece under AAPL): it keeps `feed_ticker` but names no company of ours.
+        attributed = None
     if existing:
         existing.fetched_at = datetime.now(UTC)
-        existing.ticker = existing.ticker or (symbol.upper() if symbol else None)
+        existing.ticker = existing.ticker or (attributed.upper() if attributed else None)
+        existing.feed_ticker = existing.feed_ticker or (symbol.upper() if symbol else None)
         return False
 
     db.add(
@@ -176,9 +186,11 @@ def store_news_item(db: Session, item: dict[str, Any], provider: str, symbol: st
             summary=item.get("summary"),
             url=url,
             source=str(item.get("source") or item.get("publisher") or provider)[:80],
-            ticker=symbol.upper() if symbol else None,
+            ticker=attributed.upper() if attributed else None,
             sentiment_score=item.get("sentiment_score"),
             sentiment_label=item.get("sentiment_label"),
+            sentiment_source="provider" if item.get("sentiment_label") else None,
+            feed_ticker=symbol.upper() if symbol else None,
             published_at=published,
             fetched_at=datetime.now(UTC),
             is_macro=symbol is None,
@@ -294,6 +306,23 @@ def _batch_resolve_assets(db: Session, symbols: list[str]) -> dict[str, Asset]:
     return resolved
 
 
+MACRO_FEED_ITEMS = 60
+
+
+def _store_macro_feed_items(db: Session, cached: list[dict[str, Any]]) -> int:
+    """Keep the newest general-feed articles with no ticker (``feed_ticker`` null)."""
+    # The 30-minute rss_refresh job keeps the feeds fetched in this process; a
+    # news refresh never waits on the network for them.
+    from app.foundation.rss_provider import cached_items
+
+    items = cached or cached_items()
+    stored = 0
+    for item in items[:MACRO_FEED_ITEMS]:
+        if store_news_item(db, item, "rss", None):
+            stored += 1
+    return stored
+
+
 def refresh_news_for_user(
     db: Session,
     user_id: str,
@@ -407,6 +436,14 @@ def refresh_news_for_user(
             except Exception as exc:
                 logger.warning("Failed to store news item for %s: %s", symbol or "market", exc)
 
+    # Market-wide feed items (no holding named) were fetched but never kept, so
+    # `is_macro` was false on every row. Store the newest ones symbol-less; the
+    # tagger below marks them macro or drops their relevance as usual.
+    try:
+        created += _store_macro_feed_items(db, _rss_items)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Macro feed items not stored: %s", exc)
+
     try:
         db.commit()
     except Exception:
@@ -460,29 +497,210 @@ MACRO_DOMAINS: set[str] = {
 }
 
 
-def _score_news_item(item: NewsItem, keywords: set[str]) -> tuple[float, str, set[str]] | None:
-    """Score one item via cheap keyword matching; ``None`` when nothing matched.
+# ---------------------------------------------------------------------------
+# Company matching (WP5b/5c, plan 2026-11-10)
+#
+# The old matcher tested ``kw in TEXT.upper()`` for every ticker, so the owner's
+# tickers C, O, MA, LOW and ACC (and words like CASH, CORE) matched inside
+# ordinary words: 434 of 724 items were "high", for reasons like "C, MA, O".
+# Company terms are now the company's name (case-insensitive, whole words) and
+# a ticker of four or more characters as a whole token in its original case.
+# ---------------------------------------------------------------------------
 
-    Unmatched items stay unscored (NULL relevance) instead of receiving junk
-    0.0 rows — audit §5 junk-match fix.
+_NAME_SUFFIXES: set[str] = {
+    "INC", "CORP", "CORPORATION", "LTD", "LIMITED", "LLC", "AG", "SE", "SA", "NV", "N.V.", "PLC", "CO",
+    "COMPANY", "HOLDINGS", "HOLDING", "GROUP", "THE", "CLASS", "A", "B", "C", "ORD", "ADR", "SPA", "AB", "ASA",
+    "OYJ", "KGAA", "S.A.", "A.G.", "&",
+}
+# A first word that names a sector or a country, not a company: "Banco" alone matches every bank story.
+_GENERIC_FIRST_WORDS: set[str] = {
+    "BANK", "BANCO", "BANCA", "GLOBAL", "UNITED", "AMERICAN", "GENERAL", "FIRST", "NEW", "INTERNATIONAL",
+    "NATIONAL", "ROYAL", "GRUPO", "DEUTSCHE", "SAINT", "ST", "CHINA", "JAPAN", "WESTERN", "SOUTHERN", "NORTHERN",
+    "EASTERN", "ENERGY", "FINANCIAL", "CAPITAL", "REALTY", "TECHNOLOGIES", "TECHNOLOGY",
+}
+# Index phrases an ETF's name carries; the fund's news is about the index.
+_INDEX_PHRASES: tuple[str, ...] = (
+    "MSCI World", "MSCI ACWI", "MSCI Emerging Markets", "MSCI Europe", "MSCI EMU", "MSCI USA", "MSCI Japan",
+    "FTSE All-World", "FTSE 100", "S&P 500", "S&P 400", "Nasdaq 100", "Euro Stoxx 50", "Stoxx Europe 600",
+    "DAX", "Dow Jones", "Russell 2000", "Russell 1000", "MDAX", "CAC 40",
+)
+_SHORT_MACRO_CASE_SENSITIVE = {"ecb": ("ECB",), "fed": ("Fed", "FED"), "gdp": ("GDP",), "cpi": ("CPI",), "ppi": ("PPI",), "pmi": ("PMI",)}
+
+
+@dataclass
+class RelevanceMatcher:
+    """Company terms (title/summary match) and macro terms, compiled once per tagging run."""
+
+    company: list[tuple[str, re.Pattern[str]]]
+    macro: list[tuple[str, re.Pattern[str]]]
+
+
+def _clean_name_words(name: str) -> list[str]:
+    words = [w.strip(".,;:!?()[]{}\"'") for w in name.split()]
+    return [w for w in words if w and w.upper() not in _NAME_SUFFIXES]
+
+
+def company_terms(name: str | None, symbol: str | None = None, isin: str | None = None) -> list[tuple[str, re.Pattern[str]]]:
+    """Terms that identify a holding in a headline: its name, a 4+ character ticker, its ISIN."""
+    terms: list[tuple[str, re.Pattern[str]]] = []
+    if name:
+        indexes = [p for p in _INDEX_PHRASES if re.search(rf"(?<!\w){re.escape(p)}(?!\w)", name, re.IGNORECASE)]
+        for phrase in indexes:
+            terms.append((phrase, re.compile(rf"(?<!\w){re.escape(phrase)}(?!\w)", re.IGNORECASE)))
+        if not indexes:
+            words = [w for w in _clean_name_words(name) if w.upper() not in _ETF_STOPWORDS]
+            if words:
+                take = words[:2] if (len(words[0]) < 5 or words[0].upper() in _GENERIC_FIRST_WORDS) and len(words) > 1 else words[:1]
+                phrase = " ".join(take)
+                if len(phrase) >= 4:
+                    terms.append((phrase, re.compile(rf"(?<!\w){re.escape(phrase)}(?!\w)", re.IGNORECASE)))
+    if symbol:
+        bare = symbol.split(".")[0]
+        if len(bare) >= 4 and bare.isalnum():
+            terms.append((bare, re.compile(rf"(?<![A-Za-z0-9]){re.escape(bare)}(?![A-Za-z0-9])")))  # case-sensitive
+    if isin:
+        terms.append((isin.upper(), re.compile(re.escape(isin.upper()))))
+    return terms
+
+
+def _macro_terms() -> list[tuple[str, re.Pattern[str]]]:
+    out: list[tuple[str, re.Pattern[str]]] = []
+    for kw in sorted(MACRO_DOMAINS):
+        if kw in _SHORT_MACRO_CASE_SENSITIVE:
+            alt = "|".join(re.escape(c) for c in _SHORT_MACRO_CASE_SENSITIVE[kw])
+            out.append((kw, re.compile(rf"(?<![A-Za-z0-9])(?:{alt})(?![A-Za-z0-9])")))
+        else:
+            out.append((kw, re.compile(rf"(?<!\w){re.escape(kw)}(?!\w)", re.IGNORECASE)))
+    return out
+
+
+def build_matcher(db: Session, user_id: str) -> RelevanceMatcher:
+    """The user's holdings as company terms, plus the macro vocabulary."""
+    symbols = portfolio_symbols(db, user_id)
+    names: dict[str, str] = {}
+    for asset in db.query(Asset).filter(Asset.symbol.in_(symbols)).all() if symbols else []:
+        if asset.name and asset.symbol:
+            names[asset.symbol.upper()] = asset.name
+    company: list[tuple[str, re.Pattern[str]]] = []
+    seen: set[str] = set()
+    for sym in symbols:
+        for term in company_terms(names.get(sym.upper()), sym):
+            if term[0] not in seen:
+                seen.add(term[0])
+                company.append(term)
+    for pos in live_positions(db, user_id, include_unreconciled=True):
+        for term in company_terms(pos.name, pos.ticker, pos.isin):
+            if term[0] not in seen:
+                seen.add(term[0])
+                company.append(term)
+    return RelevanceMatcher(company=company, macro=_macro_terms())
+
+
+def _score_news_item(item: NewsItem, matcher: RelevanceMatcher) -> tuple[float, str, set[str]] | None:
+    """Score one item; ``None`` when nothing matched (it keeps NULL relevance).
+
+    A company term in the title is high, in the summary only medium; a macro
+    term alone is low. The matched terms are the stored reason.
     """
-    text = f"{item.title or ''} {item.summary or ''}".upper()
-    matched: set[str] = set()
-    for kw in keywords:
-        if kw in text:
-            matched.add(kw)
-    if not matched:
+    title, summary = item.title or "", item.summary or ""
+    in_title = {t for t, p in matcher.company if p.search(title)}
+    in_summary = {t for t, p in matcher.company if p.search(summary)} - in_title
+    if in_title:
+        return 0.8, "high", in_title | in_summary
+    if in_summary:
+        return 0.5, "medium", in_summary
+    macro = {t for t, p in matcher.macro if p.search(title) or p.search(summary)}
+    if macro:
+        return 0.2, "low", macro
+    return None
+
+
+def _known_name(db: Session, symbol: str) -> tuple[str | None, str | None]:
+    """``(name, asset_type)`` of *symbol* from the asset table, else from the stored fundamentals payload."""
+    asset = db.query(Asset).filter(Asset.symbol == symbol.upper()).first()
+    if asset is not None and asset.name:
+        return asset.name, asset.asset_type
+    row = db.query(Fundamental).filter(Fundamental.ticker == symbol.upper()).first()
+    if row is not None:
+        try:
+            name = json.loads(row.data_json or "{}").get("name")
+        except ValueError:
+            name = None
+        if isinstance(name, str) and name.strip():
+            return name.strip(), None
+    return None, None
+
+
+def names_company(db: Session, symbol: str, title: str, summary: str | None) -> bool | None:
+    """Whether an article names the company behind *symbol*; ``None`` when no name is known to test against."""
+    name, asset_type = _known_name(db, symbol)
+    if name is None:
         return None
+    if asset_type == "etf":
+        return True  # ETF news was chosen by keyword upstream
+    text_terms = company_terms(name, symbol)
+    if not text_terms:
+        return None
+    return any(p.search(title) or p.search(summary or "") for _, p in text_terms)
 
-    score = min(len(matched) * 0.15, 1.0)
-    if item.is_macro:
-        score = min(score + 0.3, 1.0)
 
-    if score >= 0.6:
-        return score, "high", matched
-    if score >= 0.3:
-        return score, "medium", matched
-    return score, "low", matched
+_SYMBOL_NEWS_TRIED: dict[str, float] = {}
+_SYMBOL_NEWS_RETRY_S = 3600.0
+
+
+def fetch_symbol_news(db: Session, symbol: str, limit: int = 8) -> int:
+    """Fetch and store one symbol's news (a stock page for a name the owner does not hold).
+
+    Held names get their feed from the refresh job; others had ``recent_news: []``
+    forever. At most one attempt per symbol an hour. Returns the articles stored.
+    """
+    key = symbol.upper()
+    now = time.monotonic()
+    if now - _SYMBOL_NEWS_TRIED.get(key, -_SYMBOL_NEWS_RETRY_S) < _SYMBOL_NEWS_RETRY_S:
+        return 0
+    _SYMBOL_NEWS_TRIED[key] = now
+    result = build_provider_registry(db).get_news(key, limit=limit)
+    rows = result.get("data") if result.get("ok") else []
+    stored = 0
+    for item in rows or []:
+        try:
+            if store_news_item(db, item, str(result.get("provider", "unknown")), key):
+                stored += 1
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("fetch_symbol_news: failed to store an item for %s: %s", key, exc)
+    db.commit()
+    if stored:
+        try:
+            from app.foundation.sentiment import enrich_news_items
+
+            enrich_news_items(db, ticker=key, limit=limit)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("fetch_symbol_news: sentiment deferred to the worker: %s", exc)
+    return stored
+
+
+def retag_news(db: Session) -> dict[str, int]:
+    """One-off after the WP5 deploy: re-attribute stored articles and clear every relevance tag.
+
+    ``feed_ticker`` takes the old ``ticker`` (the feed's symbol); ``ticker`` stays
+    only where the article names that company; ``user_news_relevance`` and the
+    item-level relevance columns are cleared so the next refresh tags everything
+    with the new matcher. Returns the counts.
+    """
+    moved = cleared = 0
+    for item in db.query(NewsItem).yield_per(500):
+        if item.feed_ticker is None and item.ticker:
+            item.feed_ticker = item.ticker
+            if names_company(db, item.ticker, item.title or "", item.summary) is False:
+                item.ticker = None
+                cleared += 1
+            moved += 1
+        item.relevance_score = None
+        item.relevance_label = None
+        item.relevance_reason = None
+    db.query(UserNewsRelevance).delete(synchronize_session=False)
+    db.commit()
+    return {"feed_ticker_set": moved, "ticker_cleared": cleared}
 
 
 def tag_relevance(db: Session, user_id: str) -> dict[str, Any]:
@@ -491,28 +709,7 @@ def tag_relevance(db: Session, user_id: str) -> dict[str, Any]:
     Returns a dict with ``tagged``, ``high``, ``medium``, and ``low`` keys.
     Items with zero keyword/entity matches are skipped and keep NULL scores.
     """
-    symbols = portfolio_symbols(db, user_id)
-    keywords: set[str] = set()
-    for sym in symbols:
-        keywords.add(sym.upper())
-
-    # Also collect ISINs from the synced positions and ETF name keywords for relevance
-    for pos in live_positions(db, user_id, include_unreconciled=True):
-        if pos.isin:
-            keywords.add(pos.isin.upper())
-
-    # Add ETF asset name keywords for better RSS news relevance matching
-    if symbols:
-        etf_assets = (
-            db.query(Asset)
-            .filter(Asset.symbol.in_(symbols), Asset.asset_type == "etf")
-            .all()
-        )
-        for asset in etf_assets:
-            if asset.name:
-                keywords.update(_etf_keywords(asset.name))
-
-    keywords.update({k.upper() for k in MACRO_DOMAINS})
+    matcher = build_matcher(db, user_id)
 
     untagged = (
         db.query(NewsItem)
@@ -530,7 +727,7 @@ def tag_relevance(db: Session, user_id: str) -> dict[str, Any]:
 
     for item in untagged:
         try:
-            scored = _score_news_item(item, keywords)
+            scored = _score_news_item(item, matcher)
         except Exception as exc:
             logger.warning("tag_relevance: failed to score news item %s: %s", item.id, exc)
             continue

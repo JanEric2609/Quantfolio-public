@@ -59,6 +59,7 @@ from app.foundation.models.entities._core import now_utc
 from app.foundation.capital_ladder import (  # noqa: F401 - re-exported for the facade
     AUTHORISATION_MONTHS,
     BRIER_VETO,
+    CLIP_SIGMAS,
     CS_ALPHA,
     DEFAULTS,
     DRAWDOWN_BAND_K,
@@ -126,7 +127,11 @@ def e_processes(
     """(E_t, H_t): the skill and harm betting e-processes, one value per day."""
     arr = np.asarray(x, dtype=float)
     sig = np.asarray(sigma, dtype=float)
-    y = np.where(np.isfinite(sig) & (sig > 0), np.clip(arr / np.where(sig > 0, sig, 1.0), -1.0, 1.0), 0.0)
+    y = np.where(
+        np.isfinite(sig) & (sig > 0),
+        np.clip(arr / np.where(sig > 0, sig, 1.0), -CLIP_SIGMAS, CLIP_SIGMAS) / CLIP_SIGMAS,
+        0.0,
+    )
     lam = np.asarray(LAMBDAS)[:, None]
     skill = np.cumprod(1.0 + lam * y[None, :], axis=1).mean(axis=0)
     harm = np.cumprod(1.0 - lam * y[None, :], axis=1).mean(axis=0)
@@ -411,6 +416,22 @@ def _retire(db: Session, candidate: LadderCandidate, when: datetime, reason: str
 # --- Measurement --------------------------------------------------------------
 
 
+def _snapshot_job_days(db: Session) -> set[date]:
+    """Days whose paper snapshots the 00:00 job rewrote at the close (a run on day D + 1 values D).
+
+    The trust ledger has the same rule (``verification.daily_ledger``); it is not
+    imported because the verification context is facade-only.
+    """
+    from app.foundation.models.entities import JobRun
+
+    runs = (
+        db.query(JobRun.started_at)
+        .filter(JobRun.job_name == "snapshot_paper_portfolios", JobRun.status.in_(("success", "warning")))
+        .all()
+    )
+    return {aware(started).date() - timedelta(days=1) for (started,) in runs if started is not None}
+
+
 def paired_excess(
     db: Session,
     candidate: LadderCandidate,
@@ -420,13 +441,16 @@ def paired_excess(
     bench_closes: dict[str, float] | None = None,
 ) -> tuple[list[date], list[float]]:
     """(days, x) with x = sleeve return - benchmark EUR return on identical dates."""
+    closed = _snapshot_job_days(db)
     nav = {
         d: float(v)
-        for d, v in db.query(PaperSnapshot.date, PaperSnapshot.total_value)
+        for d, v, created in db.query(PaperSnapshot.date, PaperSnapshot.total_value, PaperSnapshot.created_at)
         .filter(PaperSnapshot.portfolio_id == candidate.portfolio_id,
                 PaperSnapshot.date >= start, PaperSnapshot.date <= end)
         .all()
-        if v is not None and float(v) > 0
+        # A day's row is final once the 00:00 job rewrote it; the advisor cycle's
+        # live-quote row of the same day is provisional and is skipped.
+        if v is not None and float(v) > 0 and (d in closed or (created is not None and aware(created).date() > d))
     }
     if bench_closes is None:
         from app.foundation.eur_prices import benchmark_ticker, eur_closes

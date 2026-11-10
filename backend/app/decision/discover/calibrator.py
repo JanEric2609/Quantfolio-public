@@ -159,6 +159,7 @@ def training_rows(db: Session, prediction: DiscoveryPrediction) -> list[tuple[fl
             DiscoveryPrediction.conviction.isnot(None),
             DiscoveryPrediction.excess_return.isnot(None),
             DiscoveryPrediction.id != prediction.id,
+            DiscoveryPrediction.superseded_by_run_id.is_(None),
             # Same source only: Discover's composite score and an advisor
             # sleeve's LLM confidence are different scales (scoring.ic_group).
             DiscoveryPrediction.portfolio_id.is_(None)
@@ -207,3 +208,85 @@ def calibrate_prediction(db: Session, prediction_id: str, *, user_id: str) -> Di
 
 
 __all__ = ["CALIBRATOR_VERSION", "CalibrationFit", "calibrate_prediction", "fit_calibrator", "training_rows"]
+
+
+# ---------------------------------------------------------------------------
+# Outcome band (plan 2026-11-10, WP12a)
+# ---------------------------------------------------------------------------
+
+#: Fewer issue dates than this and no band is shown.
+BAND_MIN_DATES = 20
+BAND_LEVEL = 0.8
+#: A pick counts as matured once the whole horizon has passed (21 trading days is about 29 calendar days).
+BAND_MIN_AGE_DAYS = 29
+
+
+def conformal_band(values: list[float], level: float = BAND_LEVEL) -> tuple[float, float] | None:
+    """Split-conformal band with no model: the empirical quantiles with the finite-sample correction.
+
+    For ``n`` values the band runs from the order statistic at rank
+    ``floor((1 - level) / 2 * (n + 1))`` to the one at rank
+    ``ceil((1 + level) / 2 * (n + 1))`` (1-based, clipped to 1 and n). None below
+    :data:`BAND_MIN_DATES` values.
+    """
+    n = len(values)
+    if n < BAND_MIN_DATES:
+        return None
+    ordered = sorted(values)
+    lo = max(1, int(np.floor((1 - level) / 2 * (n + 1))))
+    hi = min(n, int(np.ceil((1 + level) / 2 * (n + 1))))
+    return float(ordered[lo - 1]), float(ordered[hi - 1])
+
+
+def outcome_band(db: Session, user_id: str, lane: str, now: datetime | None = None) -> dict[str, Any] | None:
+    """What past Discover picks of one lane ended at, against MSCI World, after 21 trading days.
+
+    Resolved excess returns of Discover's own picks (not the advisor's, not
+    superseded same-day reruns), at least a horizon old, averaged per issue date
+    (the picks of one date share one market move) so ``n`` counts dates. This
+    replaces an uncalibrated conviction (0.64 stated against a 40 % hit rate over
+    227 resolved buys) with the spread of what actually happened, until the
+    calibrator has data (:data:`MIN_N_EFF` issue dates). ``lane`` is ``"stock"`` or ``"fund"``.
+    """
+    from datetime import timedelta
+
+    from app.decision.discover.candidate_gate import _resolve_cohort_instrument_type
+
+    clock = now or datetime.now(UTC)
+    rows = (
+        db.query(DiscoveryPrediction.predicted_at, DiscoveryPrediction.excess_return, DiscoveryPrediction.features_json)
+        .filter(
+            DiscoveryPrediction.user_id == user_id,
+            DiscoveryPrediction.portfolio_id.is_(None),
+            DiscoveryPrediction.superseded_by_run_id.is_(None),
+            DiscoveryPrediction.outcome_status == "resolved",
+            DiscoveryPrediction.excess_return.isnot(None),
+        )
+        .all()
+    )
+    per_date: dict[date, list[float]] = {}
+    for predicted_at, excess, features in rows:
+        if predicted_at is None or _utc(predicted_at) > clock - timedelta(days=BAND_MIN_AGE_DAYS):
+            continue
+        is_fund = _resolve_cohort_instrument_type(features) in ("etf", "fund", "bond", "money_market")
+        if (lane == "fund") != is_fund:
+            continue
+        per_date.setdefault(_utc(predicted_at).date(), []).append(float(excess))
+    means = [float(np.mean(v)) for v in per_date.values()]
+    band = conformal_band(means)
+    if band is None:
+        return None
+    low, high = band
+    return {
+        "lane": lane,
+        "n_dates": len(means),
+        "level": BAND_LEVEL,
+        "low": round(low, 4),
+        "high": round(high, 4),
+        "horizon_trading_days": 21,
+        "text": (
+            f"Past {'funds' if lane == 'fund' else 'stock picks'} ended between {low * 100:+.1f} % and "
+            f"{high * 100:+.1f} % against MSCI World after 21 trading days "
+            f"({int(BAND_LEVEL * 100)} % of {len(means)} issue dates)."
+        ),
+    }

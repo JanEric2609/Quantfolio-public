@@ -46,6 +46,9 @@ class Trading212StatusOut(BaseModel):
     pies_stale: bool = False
     interest_30d_eur: str | None = None
     interest_rate_measured: str | None = None
+    interest_rate_basis: str | None = None
+    savings_pot: str | None = None
+    last_summary: dict[str, str | None] | None = None
     pending_reconciliation: int = 0
     read_only: bool = True
 

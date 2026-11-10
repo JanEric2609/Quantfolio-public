@@ -47,7 +47,7 @@ chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
 cd "${APP_DIR}/backend"
 as_app_user python3 -m venv .venv
 as_app_user "${APP_DIR}/backend/.venv/bin/python" -m pip install -U pip
-as_app_user "${APP_DIR}/backend/.venv/bin/python" -m pip install --disable-pip-version-check -e ".[dkb_robo]"
+as_app_user "${APP_DIR}/backend/.venv/bin/python" -m pip install --disable-pip-version-check -e ".[dkb_robo,bert]"
 
 cd "${APP_DIR}/frontend"
 as_app_user npm ci

@@ -310,3 +310,18 @@ class TestResolvePaperAssetTypeDelegatesToLadder:
         db = _memory_db()
 
         assert resolve_paper_asset_type(db, "UNKNOWNTICKER") == "stock"
+
+
+def test_index_stocks_are_equity_whatever_their_name_says():
+    for symbol, name in [
+        ("SW", "Smurfit Westrock plc"), ("TPR", "Tapestry, Inc."),
+        ("PBB.DE", "Deutsche Pfandbriefbank AG"), ("WDC", "Western Digital Corporation"),
+    ]:
+        assert classify_instrument(symbol, "screen_index", name) == "equity", name
+
+
+def test_word_boundaries_keep_real_funds_classified():
+    assert classify_instrument("XEON.DE", None, "Xtrackers II EUR Overnight Rate Swap UCITS ETF") == "money_market"
+    assert classify_instrument("CBE3.L", None, "iShares € Govt Bond 3-5yr UCITS ETF") == "bond"
+    assert classify_instrument("X", None, "Smurfit Westrock plc") == "equity"
+    assert classify_instrument("X", None, "Deutsche Pfandbriefbank AG") == "equity"

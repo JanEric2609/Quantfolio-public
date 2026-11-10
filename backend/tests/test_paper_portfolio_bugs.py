@@ -13,6 +13,7 @@ Bug 3 — Divergence delta sane: compute_divergence perf_delta is purely
 """
 from __future__ import annotations
 
+import pytest
 from decimal import Decimal
 from unittest.mock import patch
 from uuid import uuid4
@@ -781,3 +782,40 @@ class TestZeroCostBasisFallback:
         assert not (summary["total_return_pct"] != summary["total_return_pct"]), (  # NaN check
             "total_return_pct must be a finite number, not NaN"
         )
+
+
+class TestDivergenceSummary:
+    """WP10a: the divergence carries euro values and a per-mandate summary."""
+
+    def test_overlap_in_value_and_largest_gaps(self):
+        from app.decision.llm_portfolio.divergence import compute_divergence
+        from app.foundation.models.entities import Holding, Portfolio
+
+        db = _memory_db()
+        user = _user(db)
+        portfolio = PaperPortfolio(
+            id=uuid4().hex, user_id=user.id, name="Mandate A", initial_cash=Decimal("5000"),
+            baseline_value=Decimal("35000"), mandate="A", managed_by="llm", mandate_config_json="{}",
+        )
+        db.add(portfolio)
+        db.commit()
+        for ticker, qty, price in (("AAA", "10", "100"), ("BBB", "5", "200"), ("CCC", "2", "50")):
+            db.add(PaperHolding(id=uuid4().hex, portfolio_id=portfolio.id, isin=None, ticker=ticker, name=ticker,
+                                quantity=Decimal(qty), avg_buy_price=Decimal(price), asset_type="stock"))
+        real = Portfolio(id=uuid4().hex, user_id=user.id, name="Real")
+        db.add(real)
+        db.commit()
+        # AAA held in full, BBB at 3 of 5, CCC not held; DDD only in the real book.
+        for ticker, qty, price in (("AAA", "10", "100"), ("BBB", "3", "200"), ("DDD", "4", "75")):
+            db.add(Holding(id=uuid4().hex, portfolio_id=real.id, isin=None, ticker=ticker, name=ticker,
+                           asset_type="stock", quantity=Decimal(qty), avg_buy_price=Decimal(price)))
+        db.commit()
+
+        summary = compute_divergence(db, user.id, portfolio.id)["summary"]
+        # mandate value 1000 + 1000 + 100 = 2100; shared = 1000 (AAA) + min(1000, 600) (BBB) = 1600
+        assert summary["mandate_value_eur"] == 2100.0
+        assert summary["overlap_pct"] == pytest.approx(76.2, abs=0.1)
+        assert (summary["only_in_mandate"], summary["only_in_book"], summary["quantity_differs"]) == (1, 1, 1)
+        gaps = summary["largest_gaps"]
+        assert [g["ticker"] for g in gaps] == ["BBB", "DDD", "CCC"]
+        assert gaps[0] == {"ticker": "BBB", "kind": "quantity_differs", "gap_eur": 400.0}

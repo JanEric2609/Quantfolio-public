@@ -415,6 +415,65 @@ def discover_universe_prefetch_inner(
     return report
 
 
+STAGE_PRECOMPUTE_MAX_SECONDS = 2 * 3600
+
+
+def discover_stage_precompute_inner(db: Any, *, max_seconds: float = STAGE_PRECOMPUTE_MAX_SECONDS) -> dict[str, Any]:
+    """After the prefetch: compute the user-independent stages for every universe stock (WP9).
+
+    A morning run then loads them by (symbol, stage, bar date) instead of
+    computing them. Bounded by *max_seconds*; what is left is computed on demand.
+    """
+    import time
+    from datetime import UTC, datetime
+
+    from app.decision.discover import pipeline, stage_cache, universe
+    from app.foundation.models.entities import IndexUniverseMember
+
+    started = time.monotonic()
+    rows = db.query(IndexUniverseMember).filter(
+        IndexUniverseMember.symbol.isnot(None), IndexUniverseMember.symbol_ok.is_(True),
+    ).all()
+    static = (
+        universe._DAX40 + universe._EUROSTOXX50 + universe._SP100 + universe._NASDAQ100 + universe._EU_MIDCAP
+        + universe._US_MIDCAP + universe._STOXX600 + universe._FTSE100 + universe._CAC40 + universe._SP500
+        + universe._NIKKEI225
+    )
+    stocks = pipeline._ordered_unique([*sorted({m.symbol.upper() for m in rows}), *(s.upper() for s in static)])
+    report: dict[str, Any] = {"symbols": 0, "stages": 0, "stopped_early": False, "pruned": 0}
+    for symbol in stocks:
+        if time.monotonic() - started > max_seconds:
+            report["stopped_early"] = True
+            break
+        report["stages"] += stage_cache.warm_symbol(db, symbol, {
+            "momentum_quality": pipeline.stage_momentum_quality,
+            "backtest_vs_benchmark": pipeline.stage_backtest_vs_benchmark,
+            "verification_gate": pipeline.stage_verification_gate,
+            "quant_signals": pipeline.stage_quant_signals,
+        })
+        report["symbols"] += 1
+    report["pruned"] = stage_cache.prune(db)
+    logger.info("discover_stage_precompute: %s at %s", report, datetime.now(UTC).isoformat())
+    return report
+
+
+def register_discover_stage_precompute_job(scheduler: Any | None = None) -> str:
+    """Register the nightly stage precompute (03:00 UTC, after the 01:15 prefetch; plan 2026-11-10, WP9)."""
+    from app.foundation.core.db import SessionLocal
+
+    def _inner() -> None:
+        db = SessionLocal()
+        try:
+            discover_stage_precompute_inner(db)
+        except Exception:
+            logger.exception("discover_stage_precompute job failed")
+            db.rollback()
+        finally:
+            db.close()
+
+    return register_cron_job("discover_stage_precompute", _inner, scheduler=scheduler, hour=3, minute=0)
+
+
 def register_discover_universe_prefetch_job(scheduler: Any | None = None) -> str:
     """Register the nightly universe prefetch (01:15 UTC; plan 2026-11-08, §6)."""
     from app.foundation.core.db import SessionLocal

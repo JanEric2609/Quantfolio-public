@@ -37,6 +37,8 @@ from app.decision.discover.composite import (
     composite_contributions,
     compute_weighted_composite,
     derive_signals_from_scores,
+    rank_signals_within_lanes,
+    variance_shares,
 )
 from app.decision.discover.config import get_or_seed_active_config
 from app.decision.discover.data_quality import BOOK_EQUITY_CONCERN, stamp_data_quality
@@ -147,6 +149,14 @@ def _run_cached(key: Any, compute: Any) -> Any:
     if key not in memo.values:
         memo.values[key] = compute()
     return memo.values[key]
+
+
+def _cached(db: Session, symbol: str, stage: str, fn: Any, *args: Any, **kwargs: Any) -> Any:
+    """A user-independent stage through the nightly cache (``stage_cache``), keyed by the arguments the symbol fixes."""
+    from app.decision.discover import stage_cache
+
+    variant = stage_cache.stage_variant(is_etf=bool(kwargs.get("is_etf")), asset_class=kwargs.get("asset_class"))
+    return stage_cache.cached_stage(db, symbol, stage, fn, *args, variant=variant, **kwargs)
 
 
 def _timed(stage: str, fn: Any, *args: Any, **kwargs: Any) -> Any:
@@ -461,6 +471,9 @@ def _preingest_one(symbol: str) -> tuple[str, bool]:
             result = ingester.ingest_bar_prices(symbol, start_date=start)
         else:
             result = ingester.ingest_bar_prices(symbol, days=_PREINGEST_DAYS)
+        if result.get("short"):
+            logger.warning("pre-ingest: %s is short: %s", symbol, result.get("message"))
+            return symbol, False
         return symbol, bool(result.get("success"))
     except Exception:
         logger.debug("pre-ingest failed for %s", symbol, exc_info=True)
@@ -1155,6 +1168,26 @@ def _yfinance_revenue_growth(symbol: str) -> float | None:
         return None
 
 
+_HOLDING_COMPANY_SYMBOLS = frozenset({
+    "INVE-A.ST", "INVE-B.ST", "INDU-A.ST", "INDU-C.ST", "LATO-B.ST", "KINV-B.ST", "LUND-B.ST",
+    "GBLB.BR", "SOF.BR", "EXOR.AS", "EXO.MI", "PRX.AS", "CVC.AS",
+})
+
+
+def _is_holding_company(symbol: str, industry: Any) -> bool:
+    """A listed holding company, whose P/E mirrors the value of its stakes (WP2e)."""
+    if symbol.upper() in _HOLDING_COMPANY_SYMBOLS:
+        return True
+    return isinstance(industry, str) and _label_key(industry) in {"assetmanagement", "conglomerates"}
+
+
+def _industry_is_missing(sector: Any, industry: Any) -> bool:
+    """No industry, or one that only repeats the sector (so the industry cap cannot see it)."""
+    if not isinstance(industry, str) or not industry.strip():
+        return True
+    return isinstance(sector, str) and _label_key(industry) == _label_key(sector)
+
+
 def _yfinance_classification(symbol: str) -> tuple[str | None, str | None]:
     """yfinance's ``(sector, industry)``, for a symbol the main provider left unclassified."""
     try:
@@ -1260,6 +1293,15 @@ def stage_sentiment_fundamentals(
         # "revenue growth" (25 % vs +11 % reported) passed the financials check.
         if rg is not None and result["sector"] is None and result["industry"] is None:
             result["sector"], result["industry"] = _yfinance_classification(symbol)
+        elif _industry_is_missing(result["sector"], result["industry"]):
+            # Finnhub files every US name's industry under the sector, which
+            # turns the one-per-industry cap off (DVN and MTDR, 2026-11-10).
+            # yfinance carries a real industry; the provider's label is kept.
+            y_sector, y_industry = _yfinance_classification(symbol)
+            if y_industry and not _industry_is_missing(y_sector, y_industry):
+                result["provider_sector"], result["provider_industry"] = result["sector"], result["industry"]
+                result["sector"] = y_sector or result["sector"]
+                result["industry"] = y_industry
         rg, rg_concern = _sane_revenue_growth(
             symbol, rg, sector=result["sector"], industry=result["industry"],
             source=str(fund_result.get("source") or ""),
@@ -1272,6 +1314,12 @@ def stage_sentiment_fundamentals(
             # profitability or debt, so they are neither scored nor shown.
             pb = roe = de = None
             result["concerns"].append(BOOK_EQUITY_CONCERN)
+
+        if pe is not None and _is_holding_company(symbol, result["industry"]):
+            # A holding company's P/E is mostly the revaluation of what it owns
+            # (Investor AB: 6.2 from portfolio gains); it would score as cheap.
+            pe = None
+            result["pe_skipped"] = "holding_company"
 
         result["pe"] = pe
         result["pb"] = pb
@@ -1324,14 +1372,14 @@ def stage_sentiment_fundamentals(
             .all()
         )
         if rows:
-            result["social_mentions"] = len(rows)
-            scores = [float(r.sentiment_score) for r in rows if r.sentiment_score is not None]
-            if scores:
-                avg = sum(scores) / len(scores)
-                if avg < 0:
-                    result["sentiment_score"] = round(max(0.0, min(1.0, (avg + 1.0) / 2.0)), 4)
-                else:
-                    result["sentiment_score"] = round(max(0.0, min(1.0, avg)), 4)
+            from app.foundation.sentiment import tone_unit
+
+            unit, scored = tone_unit(rows)
+            # Only articles FinBERT (or the provider) scored count; the keyword
+            # fallback is no sentiment, so a name with only those has none.
+            result["social_mentions"] = scored
+            if unit is not None:
+                result["sentiment_score"] = round(max(0.0, min(1.0, unit)), 4)
     except Exception as exc:
         logger.debug("stage_sentiment_fundamentals: sentiment query failed for %s: %s", symbol, exc)
         result["concerns"].append("sentiment_unavailable")
@@ -1385,6 +1433,10 @@ def _closes_in_eur(db: Session, symbol: str, df: pd.DataFrame, *, fx_days: int =
     out = df.loc[keep].copy()
     out["close"] = [eur[d] for d in days[keep]]
     return out, "eur"
+
+
+#: Trading days the 12-1 momentum window ends are moved back in the stability draws.
+MOMENTUM_SHIFT_DAYS = 5
 
 
 def stage_momentum_quality(
@@ -1471,8 +1523,18 @@ def stage_momentum_quality(
     if vol > _VOL_MAX:
         concerns.append(f"elevated 6m volatility {vol:.1%}")
 
+    # The same 12-1 momentum with the window ends moved 1-5 trading days back,
+    # for the shortlist stability draws (WP12b); the bars are already loaded.
+    shifted: list[float | None] = []
+    for back in range(1, MOMENTUM_SHIFT_DAYS + 1):
+        if len(df) >= 252 + back and df["close"].iloc[-252 - back] != 0:
+            shifted.append(round(float(df["close"].iloc[-21 - back] / df["close"].iloc[-252 - back] - 1.0), 4))
+        else:
+            shifted.append(None)
+
     scores = {
         "momentum_12_1m": round(float(momentum), 4),
+        "momentum_12_1m_shifts": shifted,
         "volatility_6m": round(vol, 4),
         "max_drawdown": round(mdd, 4),
         "trailing_1m_annualized_return": round(float(trailing_1m_annualized_return), 4),
@@ -1843,6 +1905,11 @@ def stage_verification_gate(
         concerns.append(f"volatility {vol:.1%} exceeds {_VOL_MAX:.0%}")
     if sharpe < _SHARPE_DELTA_MIN and vol > 0.30:
         concerns.append(f"negative Sharpe {sharpe:.2f} with elevated vol")
+
+    if not is_etf and len(concerns) >= 2:
+        # Decision D5 (plan 2026-11-10): one failed check stays a listed risk,
+        # two exclude the stock (FIX: volatility 62 %, drawdown 52 %).
+        return None, "verification_gate: fails two quality checks: " + "; ".join(concerns)
 
     scores = {
         "volatility": round(vol, 4),
@@ -2700,7 +2767,7 @@ def _candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = _timed("momentum_quality", stage_momentum_quality, db, symbol, is_etf=is_etf)
+            s, r = _timed("momentum_quality", _cached, db, symbol, "momentum_quality", stage_momentum_quality, db, symbol, is_etf=is_etf)
             if r:
                 reject_stage = "momentum_quality"
                 reject_reason = r
@@ -2716,7 +2783,7 @@ def _candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = _timed("backtest_vs_benchmark", stage_backtest_vs_benchmark, db, symbol, is_etf=is_etf, asset_class=asset_class)
+            s, r = _timed("backtest_vs_benchmark", _cached, db, symbol, "backtest_vs_benchmark", stage_backtest_vs_benchmark, db, symbol, is_etf=is_etf, asset_class=asset_class)
             if r:
                 reject_stage = "backtest_vs_benchmark"
                 reject_reason = r
@@ -2727,7 +2794,7 @@ def _candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = _timed("verification_gate", stage_verification_gate, db, symbol, is_etf=is_etf)
+            s, r = _timed("verification_gate", _cached, db, symbol, "verification_gate", stage_verification_gate, db, symbol, is_etf=is_etf)
             if r:
                 reject_stage = "verification_gate"
                 reject_reason = r
@@ -2738,7 +2805,7 @@ def _candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = _timed("quant_signals", stage_quant_signals, db, symbol, is_etf=is_etf, asset_class=asset_class)
+            s, r = _timed("quant_signals", _cached, db, symbol, "quant_signals", stage_quant_signals, db, symbol, is_etf=is_etf, asset_class=asset_class)
             if r:
                 reject_stage = "quant_signals"
                 reject_reason = r
@@ -2859,13 +2926,34 @@ def _candidate_pipeline(
     signal_config = get_or_seed_active_config(db, "signal_weights")
     cfg_json = signal_config.config_json if isinstance(signal_config.config_json, dict) else {}
     signal_weights = cfg_json.get("weights") if isinstance(cfg_json, dict) else None
-    for result in shortlisted:
+    raw_signals = [derive_signals_from_scores(r["scores"]) for r in shortlisted]
+    # Rank every signal inside its lane before weighting (WP2a, ADR 0017
+    # amendment): raw signals of different spread do not carry their weights.
+    ranked_signals = rank_signals_within_lanes(
+        [
+            (r.get("lane") or LANE_STOCK, instrument_types.get(r["symbol"], "equity"), sig)
+            for r, sig in zip(shortlisted, raw_signals)
+        ],
+        min_lane_size=MOMENTUM_RANK_MIN_CANDIDATES,
+    )
+    ic_list = [
+        r["scores"].get("alpha_miner") if isinstance(r["scores"].get("alpha_miner"), dict) else {}
+        for r in shortlisted
+    ]
+    try:
+        logger.info(
+            "composite variance shares before ranking: %s; after: %s",
+            variance_shares(raw_signals, ic_list, signal_weights),
+            variance_shares(ranked_signals, ic_list, signal_weights),
+        )
+    except Exception:  # noqa: BLE001 - a log line never stops a run
+        logger.debug("variance shares failed", exc_info=True)
+    for result, raw_sig, signals, alpha_miner in zip(shortlisted, raw_signals, ranked_signals, ic_list):
         scores = result["scores"]
-        alpha_miner = scores.get("alpha_miner")
-        if not isinstance(alpha_miner, dict):
-            alpha_miner = {}
-        signals = derive_signals_from_scores(scores)
         composite = compute_weighted_composite(signals, ic_data=alpha_miner, weights=signal_weights)
+        scores["composite_legacy"] = round(
+            compute_weighted_composite(raw_sig, ic_data=alpha_miner, weights=signal_weights), 4,
+        )
         scores["composite_raw"] = round(composite, 4)
         scores["composite_inputs"] = composite_contributions(
             signals, ic_data=alpha_miner, weights=signal_weights,
