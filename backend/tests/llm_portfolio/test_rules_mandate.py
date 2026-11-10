@@ -101,6 +101,30 @@ def test_latest_shortlist_is_the_newest_completed_run_only():
     assert [c.symbol for c in latest_shortlist(db, user.id)] == ["NEW1", "NEW2"]
 
 
+def test_latest_shortlist_keeps_the_pipeline_order_when_cut():
+    """Twelve names, cut at ten: the best ten by composite (then fit), not the first ten alphabetically."""
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    run = DiscoverRun(user_id=user.id, status="completed", created_at=datetime.now(UTC))
+    db.add(run)
+    db.flush()
+    # A01 sorts first but scores worst; Z01/Z02 sort last but score best.
+    composites = {f"A{i:02d}": 0.10 + i / 100 for i in range(1, 11)} | {"Z01": 0.90, "Z02": 0.80}
+    for sym, comp in composites.items():
+        db.add(DiscoverCandidate(run_id=run.id, symbol=sym, source="test", status="shortlisted",
+                                 scores_json=json.dumps({"composite": comp})))
+    # A tie on composite goes to the better portfolio fit.
+    db.add(DiscoverCandidate(run_id=run.id, symbol="B00", source="test", status="shortlisted",
+                             scores_json=json.dumps({"composite": 0.80, "portfolio_fit": {"fit_score": 0.9}})))
+    db.commit()
+    top = [c.symbol for c in latest_shortlist(db, user.id)]
+    assert len(top) == 10
+    assert top[:3] == ["Z01", "B00", "Z02"]
+    assert "A01" not in top and "A02" not in top and "A03" not in top
+
+
 # ── the review ──────────────────────────────────────────────────────────────
 
 
@@ -165,8 +189,11 @@ def test_rules_review_sells_a_name_that_left_the_selection(monkeypatch):
         from app.decision import paper_portfolio
 
         rules.run_rules_review(db, user.id, p, paper=paper_portfolio)
-    tickers = {h.ticker for h in db.query(PaperHolding).all() if float(h.quantity) > 0}
-    assert "GONE" not in tickers and "UP1" in tickers
+    held = {h.ticker: float(h.quantity) for h in db.query(PaperHolding).all() if float(h.quantity) > 0}
+    assert "UP1" in held
+    # A's sell gates bind B too (ADR 0012): a dropped name loses at most a
+    # third per review instead of being sold outright.
+    assert 5 * 2 / 3 - 1e-6 <= held["GONE"] < 5
 
 
 def test_crash_guard_needs_a_bear_market_and_rising_volatility():
