@@ -126,7 +126,7 @@ def test_the_writers_distant_earnings_line_goes_too():
 
 def test_every_earnings_and_drawdown_line_counts_once():
     required = [
-        "Earnings event: Next earnings report: 2026-11-11, 4 days from now.",
+        "Earnings event: The next earnings report on 2026-11-11 (in 4 days).",
         "Drawdown: fell 39.3% peak to trough in the window measured, past the 30% the quality check allows.",
     ]
     out = merge_risks(required, ["Event risk from earnings on 2026-11-11", "Maximum drawdown of 39.3% exceeds 30% threshold"])

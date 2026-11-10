@@ -102,10 +102,10 @@ def test_no_calendar_leaves_scores_unchanged():
 
 def test_dossier_text_names_the_date_and_session():
     sf = {"next_earnings_date": "2026-09-30", "days_to_earnings": 2, "earnings_hour": "amc", "earnings_date_to": None}
-    assert _earnings_text(sf) == "Next earnings report: 2026-09-30, after the close, 2 days from now."
+    assert _earnings_text(sf) == "the next earnings report on 2026-09-30, after the close (in 2 days)"
     unconfirmed = {**sf, "earnings_hour": None, "earnings_date_to": "2026-10-02"}
     assert _earnings_text(unconfirmed) == (
-        "Next earnings report: 2026-09-30 to 2026-10-02 (not confirmed), 2 days from now."
+        "the next earnings report on 2026-09-30 to 2026-10-02 (not confirmed) (in 2 days)"
     )
     assert _earnings_text({}) is None
     assert date.fromisoformat(sf["next_earnings_date"])  # stays an ISO date

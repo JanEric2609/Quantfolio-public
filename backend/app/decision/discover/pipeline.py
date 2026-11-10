@@ -12,7 +12,6 @@ import json
 import logging
 import math
 import os
-import re
 import statistics
 import threading
 import time
@@ -25,6 +24,7 @@ from typing import Any, cast
 import pandas as pd
 from sqlalchemy.orm import Session
 
+from app.foundation.fundamentals_context import FINANCIALS, book_ratios_unreliable
 from app.foundation.core.db import SessionLocal
 from app.foundation.data_backbone.ingest import DataIngester
 from app.foundation.etf_classes import classify_etf, index_key
@@ -1139,7 +1139,7 @@ def attach_earnings_calendar(db: Session, symbol: str, scores: dict[str, Any]) -
 #: Revenue growth means nothing comparable for these (plan 2026-10-12, D8):
 #: Finnhub's revenueGrowthTTMYoy counts gross interest income for banks
 #: (JPM 109 % vs about 14 % actual; BAC/C 99 %, USB 84 %).
-_FINANCIALS = re.compile(r"financ|bank|insurance|capital markets|mortgage", re.I)
+_FINANCIALS = FINANCIALS
 #: |growth| above this needs a second provider within _RG_CONFIRM_PP.
 _RG_MAX_UNCONFIRMED = 1.0
 _RG_CONFIRM_PP = 0.10
@@ -1186,28 +1186,8 @@ def _sane_revenue_growth(
     return rg, None
 
 
-_BOOK_MAX_PB = 50.0
-_BOOK_MAX_DE_PCT = 1000.0
-_BOOK_MAX_ROE = 1.0
-_BOOK_LEVERED_DE_PCT = 300.0
-
-
-def _book_ratios_unreliable(
-    pb: float | None, roe: float | None, de: float | None, *, sector: str | None, industry: str | None,
-) -> bool:
-    """True when buybacks or losses have left book equity near zero.
-
-    PM's P/B of 2936 and D/E of 18608 % on 2026-11-05 scored as data (Discover
-    audit, 2026-11-06). A high ROE alone is real (NVDA 110 % with D/E 15 %), so
-    it counts only with heavy leverage. A bank's debt/equity is its business:
-    high leverage does not mark its equity as near zero.
-    """
-    if pb is not None and pb > _BOOK_MAX_PB:
-        return True
-    if roe is not None and de is not None and roe > _BOOK_MAX_ROE and de > _BOOK_LEVERED_DE_PCT:
-        return True
-    financial = bool(_FINANCIALS.search(f"{sector or ''} {industry or ''}"))
-    return de is not None and de > _BOOK_MAX_DE_PCT and not financial
+# Moved to foundation (shared with the research report and the strength score).
+_book_ratios_unreliable = book_ratios_unreliable
 
 
 def stage_sentiment_fundamentals(

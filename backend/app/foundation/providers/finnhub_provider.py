@@ -103,6 +103,8 @@ class FinnhubProvider(MarketDataProvider):
                 # |growth| > 100 % (pipeline._sane_revenue_growth, plan 2026-10-12).
                 "revenue_growth": _scaled(metric.get("revenueGrowthTTMYoy"), 0.01),
                 "earnings_growth": _scaled(metric.get("epsGrowthTTMYoy"), 0.01),
+                # Twelve months against the twelve before; yfinance's is one quarter.
+                "growth_basis": "ttm_yoy",
                 "dividend_yield": _scaled(metric.get("currentDividendYieldTTM"), 0.01),
                 "beta": _float(metric.get("beta")),
                 "market_cap": _scaled(profile.get("marketCapitalization"), 1e6),

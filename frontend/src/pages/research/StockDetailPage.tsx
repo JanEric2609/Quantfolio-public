@@ -18,6 +18,7 @@ import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { InfoTooltip } from "../../components/ui/InfoTooltip";
 import { formatCompact, formatNumber, formatPercent, formatPercentPoints } from "../../lib/format";
+import { formatFundamental, formatSignalValue } from "../../lib/strengthScore";
 
 /* ---------- helpers ---------- */
 
@@ -69,13 +70,15 @@ function buildCandlestickOption(
       { left: 60, right: 24, top: 16, height: "58%" },
       { left: 60, right: 24, top: "76%", height: "16%" },
     ],
+    // Axis colours come from the registered light/dark theme (EChart picks it).
     xAxis: [
-      { type: "category", data: dates, gridIndex: 0, axisLine: { lineStyle: { color: "#262626" } }, axisLabel: { color: "#b3b3b3", show: false }, splitLine: { show: false } },
-      { type: "category", data: dates, gridIndex: 1, axisLine: { lineStyle: { color: "#262626" } }, axisLabel: { color: "#b3b3b3" }, splitLine: { show: false } },
+      { type: "category", data: dates, gridIndex: 0, axisLabel: { show: false }, splitLine: { show: false } },
+      { type: "category", data: dates, gridIndex: 1, splitLine: { show: false } },
     ],
     yAxis: [
-      { type: "value", gridIndex: 0, axisLine: { lineStyle: { color: "#262626" } }, axisLabel: { color: "#b3b3b3" }, splitLine: { lineStyle: { color: "#1a1a1a" } } },
-      { type: "value", gridIndex: 1, axisLine: { lineStyle: { color: "#262626" } }, axisLabel: { color: "#b3b3b3" }, splitLine: { show: false }, splitNumber: 2 },
+      // scale: a price axis starting at 0 squeezed 67-92 into the top sliver.
+      { type: "value", gridIndex: 0, scale: true },
+      { type: "value", gridIndex: 1, splitLine: { show: false }, splitNumber: 2, axisLabel: { show: false } },
     ],
     series: [
       {
@@ -161,7 +164,7 @@ export function StockDetailPage() {
   // Fetch stock context
   const ctx = useQuery<StockContext>({
     queryKey: ["stock-context", tk],
-    queryFn: () => api<StockContext>(`/api/research/stock/${encodeURIComponent(tk)}`),
+    queryFn: () => api<StockContext>(`/api/research/stock/${encodeURIComponent(tk)}?include=report,chart,news,fundamentals`),
     enabled: !!tk,
     staleTime: 5 * 60_000,
   });
@@ -239,7 +242,10 @@ export function StockDetailPage() {
   const pScore = piotroski.data?.score;
   const pSignals = piotroski.data?.signals ?? [];
   const pTotal = piotroski.data?.max ?? 9;
-  const pColor = pScore == null ? "text-text-muted" : pScore >= 7 ? "text-success" : pScore >= 4 ? "text-warn" : "text-danger";
+  // Judged as a share of the criteria that apply: a company where ROE and
+  // debt/equity are not meaningful is scored out of fewer than 9.
+  const pShare = pScore == null || pTotal === 0 ? null : pScore / pTotal;
+  const pColor = pShare == null ? "text-text-muted" : pShare >= 7 / 9 ? "text-success" : pShare >= 4 / 9 ? "text-warn" : "text-danger";
 
   // Sentiment aggregation
   const sentiment = useQuery<SentimentResponse>({
@@ -522,33 +528,41 @@ export function StockDetailPage() {
                       <span className={`text-3xl font-display font-bold ${pColor}`}>{pScore}</span>
                       <span className="text-sm text-text-muted">/ {pTotal}</span>
                       <span className={`text-sm font-medium ${pColor}`}>
-                        {pScore >= 7 ? "Strong fundamentals" : pScore >= 4 ? "Mixed signals" : "Weak fundamentals"}
+                        {pShare != null && pShare >= 7 / 9 ? "Strong fundamentals" : pShare != null && pShare >= 4 / 9 ? "Mixed signals" : "Weak fundamentals"}
                       </span>
                     </div>
                     <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
                       {pSignals.map((s) => (
                         <div
                           key={s.name}
+                          title={s.note}
                           className={`rounded-md border p-2 text-center ${
-                            s.pass
-                              ? "border-success/30 bg-success/10"
-                              : "border-danger/30 bg-danger/10"
+                            s.pass == null
+                              ? "border-border bg-surface-2"
+                              : s.pass
+                                ? "border-success/30 bg-success/10"
+                                : "border-danger/30 bg-danger/10"
                           }`}
                         >
                           <div className="text-[10px] text-text-muted leading-tight">{s.name}</div>
-                          <div className={`text-xs font-semibold mt-0.5 ${s.pass ? "text-success" : "text-danger"}`}>
-                            {s.pass ? "✓" : "✗"}
+                          <div className={`text-xs font-semibold mt-0.5 ${s.pass == null ? "text-text-muted" : s.pass ? "text-success" : "text-danger"}`}>
+                            {s.pass == null ? "n/m" : s.pass ? "✓" : "✗"}
                           </div>
                           {s.value != null && (
-                            <div className="text-[9px] text-text-muted mt-0.5">
-                              {typeof s.value === "number" ? (Math.abs(s.value) < 1 ? formatPercent(s.value, { digits: 1 }) : formatNumber(s.value, { digits: 2 })) : s.value}
-                            </div>
+                            <div className="text-[9px] text-text-muted mt-0.5">{formatSignalValue(s)}</div>
                           )}
                         </div>
                       ))}
                     </div>
+                    {pSignals.some((s) => s.note) && (
+                      <ul className="text-[10px] text-text-muted space-y-0.5">
+                        {pSignals.filter((s) => s.note).map((s) => (
+                          <li key={s.name}><span className="font-medium">{s.name}:</span> {s.note}</li>
+                        ))}
+                      </ul>
+                    )}
                     <p className="text-[10px] text-text-muted italic">
-                      Uses proxy metrics from available provider data. Scores ≥7 indicate strong fundamentals; ≤3 suggest caution.
+                      Uses proxy metrics from available provider data. Strong at 7 of 9 criteria or the same share of those that apply; n/m = not meaningful for this company, left out.
                     </p>
                   </div>
                 ) : (
@@ -562,12 +576,12 @@ export function StockDetailPage() {
               <CardContent className="pt-6">
                 {fundamentals && Object.keys(fundamentals).length > 0 ? (
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {Object.entries(fundamentals).map(([k, v]) => (
+                    {Object.entries(fundamentals)
+                      .filter(([, v]) => v != null && v !== "")
+                      .map(([k, v]) => (
                       <div key={k} className="rounded-md border border-border bg-surface-2 p-3">
                         <div className="text-[11px] uppercase tracking-wider text-text-muted">{k.replace(/_/g, " ")}</div>
-                        <div className="text-sm font-semibold mt-1">
-                          {typeof v === "number" ? formatNumber(v, { digits: 2, minDigits: 0 }) : String(v ?? "—")}
-                        </div>
+                        <div className="text-sm font-semibold mt-1">{formatFundamental(k, v)}</div>
                       </div>
                     ))}
                   </div>

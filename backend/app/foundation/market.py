@@ -359,7 +359,15 @@ def fundamentals(db: Session, ticker: str) -> dict[str, Any]:
     # for the FUNDAMENTALS_TTL window, and every candidate that passed
     # through the screener scores as fundamentals-neutral for a week.
     is_shallow_screen_stub = cached is not None and cached.source == "universe_screen"
-    if cached and not is_shallow_screen_stub and _is_fresh(cached.fetched_at, FUNDAMENTALS_TTL):
+    # A yfinance payload from before the leverage fields (2026-11-10) is
+    # fetched again once, so net debt / EBITDA appears without a week's wait.
+    is_old_shape = cached is not None and cached.source == "yfinance" and '"ebitda"' not in (cached.data_json or "")
+    if (
+        cached
+        and not is_shallow_screen_stub
+        and not is_old_shape
+        and _is_fresh(cached.fetched_at, FUNDAMENTALS_TTL)
+    ):
         return {
             "ticker": ticker,
             "data": json.loads(cached.data_json or "{}"),

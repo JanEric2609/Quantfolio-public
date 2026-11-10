@@ -96,6 +96,15 @@ def _fetch_split_events(symbol: str) -> Any:
     return box.get("events")
 
 
+def fetch_split_events(symbol: str) -> Any:
+    """Public name for :func:`_fetch_split_events` (same deadline and permits).
+
+    Yahoo lists a spin-off as a split too: Corteva's seed spin-off on
+    2026-10-01 reads 6.665.
+    """
+    return _fetch_split_events(symbol)
+
+
 def _finite(value: Any) -> float:
     """``value`` as a float; 0.0 for None, NaN or anything unreadable."""
     try:

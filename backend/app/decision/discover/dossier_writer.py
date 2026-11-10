@@ -21,7 +21,9 @@ from app.decision.discover.candidate_gate import (
 )
 from app.decision.discover.composite import ic_signal_usable
 from app.decision.discover.config import DEFAULT_PROMPT_TEMPLATE
+from app.decision.discover.corporate_action import STALE_RATIO_KEYS, corporate_action_text
 from app.decision.discover.data_quality import BOOK_EQUITY_CONCERN, data_quality_score
+from app.foundation.fundamentals_context import growth_basis
 from app.decision.discover.dossier_facts import (
     SLOT_RULES,
     Fact,
@@ -308,6 +310,8 @@ def _fetch_fundamentals(symbol: str, db: Session) -> dict[str, Any] | None:
             "de_ratio": _as_float("debt_equity"),
             "market_cap": _as_float("market_cap"),
             "revenue_growth": _as_float("revenue_growth"),
+            # One quarter (yfinance) or twelve months (Finnhub) against a year earlier.
+            "growth_basis": growth_basis(data, result.get("source")),
             # ADR 0014 §6: ground the equity branch of the dossier prompt in
             # sector/industry rather than leaving the LLM to infer them.
             "sector": data.get("sector"),
@@ -674,11 +678,11 @@ def _grounding_prompt_lines(scores: dict[str, Any], annual: dict[str, Any]) -> s
     earnings_line = _earnings_text(sf)
     if earnings_line and _earnings_is_near(sf):
         lines.append(
-            f"{earnings_line} The price usually moves several times a normal day's range on the report; "
+            f"Earnings: {earnings_line}. The price usually moves several times a normal day's range on the report; "
             "name it as event risk in key_risks."
         )
     elif earnings_line:
-        lines.append(f"{earnings_line} That is too far off to be a key risk; leave it out of key_risks.")
+        lines.append(f"Earnings: {earnings_line}. That is too far off to be a key risk; leave it out of key_risks.")
 
     buyers = _as_dict(scores.get("insider_signal")).get("cluster_buy_score")
     if isinstance(buyers, (int, float)) and 0 < buyers < MIN_CLUSTER_BUYERS:
@@ -741,7 +745,7 @@ def _filings_text(db: Session, symbol: str) -> str | None:
 
 
 def _earnings_text(sf: dict[str, Any]) -> str | None:
-    """The next-earnings sentence built from attach_earnings_calendar's fields, or None."""
+    """The next earnings report as a noun phrase from attach_earnings_calendar's fields, or None."""
     report_day = sf.get("next_earnings_date")
     days = sf.get("days_to_earnings")
     if not isinstance(report_day, str) or not isinstance(days, int) or days < 0:
@@ -749,13 +753,15 @@ def _earnings_text(sf: dict[str, Any]) -> str | None:
     window_end = sf.get("earnings_date_to")
     when = f"{report_day} to {window_end} (not confirmed)" if isinstance(window_end, str) else report_day
     hour = _EARNINGS_HOURS.get(str(sf.get("earnings_hour")))
+    # A noun phrase, so a sentence can cite it: as a sentence ("Next earnings
+    # report: 2026-11-11, 1 days from now, so ...") the model spliced it into
+    # "Upcoming results in Next earnings report: ..." (ABN, run 57c8f8b8).
+    in_days = "today" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
+    head = f"the next earnings report on {when}{', ' + hour if hour else ''}"
     if days <= EARNINGS_IMMINENT_DAYS:
         # CI reported on its 2026-11-05 run date: the score could not see the results.
-        return (
-            f"Next earnings report: {when}{', ' + hour if hour else ''}, {days} days from now, so the price and "
-            "analyst targets used here may predate the results."
-        )
-    return f"Next earnings report: {when}{', ' + hour if hour else ''}, {days} days from now."
+        return f"{head} ({in_days}; the price and analyst targets used here may predate it)"
+    return f"{head} ({in_days})"
 
 
 def write_dossier(
@@ -828,6 +834,13 @@ def write_dossier(
     backtest_raw = _as_dict(scores.get("backtest_vs_benchmark"))
     mom_raw = _as_dict(scores.get("momentum_quality"))
     sf_scores = _as_dict(scores.get("sentiment_fundamentals"))
+    corporate_action = sf_scores.get("corporate_action")
+    if corporate_action:
+        # A split or spin-off after the last report (corporate_action.py): the
+        # reported-figure ratios describe the company before it.
+        for key in (*STALE_RATIO_KEYS, "forward_pe"):
+            if key in fundamentals:
+                fundamentals[key] = None
     if sf_scores:
         # The pipeline's checked figures win over the raw re-fetch above: it
         # drops a bank's revenue growth (gross interest income) and fills a
@@ -1068,6 +1081,7 @@ def write_dossier(
             is_fund=instrument_type in ("etf", "fund"),
             recent_fall_limit=RECENT_FALL_LIMIT,
             filings_text=filings_text,
+            corporate_action_text=corporate_action_text(corporate_action),
         )
         candidate_name = candidate.get("name") if isinstance(candidate, dict) else getattr(candidate, "name", None)
         digit_terms = allowed_digit_terms(
@@ -1950,7 +1964,7 @@ def deterministic_risks(
     sf = _as_dict(scores.get("sentiment_fundamentals"))
     earnings_line = _earnings_text(sf)
     if earnings_line and _earnings_is_near(sf):
-        earnings.append(f"Earnings event: {earnings_line}")
+        earnings.append(f"Earnings event: {earnings_line[:1].upper()}{earnings_line[1:]}.")
     rest: list[str] = []
     drawdown = _as_dict(scores.get("verification_gate")).get("max_drawdown")
     if isinstance(drawdown, (int, float)) and drawdown > RISK_DRAWDOWN_LIMIT:
@@ -1972,12 +1986,8 @@ def deterministic_risks(
     correlation = _as_dict(scores.get("portfolio_fit")).get("correlation")
     if isinstance(correlation, (int, float)) and correlation >= DIVERSIFIER_MAX_CORRELATION:
         rest.append(f"Overlap: a weekly correlation of {correlation:.2f} with the portfolio adds little diversification.")
-    cluster_score = signal_breakdown.get("insider_cluster_buy_score")
-    if cluster_score:
-        rest.append(
-            f"Insider activity: {int(cluster_score)} distinct insider(s) opportunistically bought in "
-            "the trailing 30 days (SEC filings, best-effort ticker match)."
-        )
+    # Insider buying is evidence for a long position, not a risk to it (ADM's
+    # first "risk" in run 57c8f8b8); the buyers are among the facts already.
     flow = _as_dict(scores.get("insider_signal")).get("net_insider_flow_usd")
     market_cap = sf.get("market_cap")
     if (

@@ -29,6 +29,7 @@ from app.decision.discover.dossier_writer import (
     ledger_return_range,
     write_dossier,
 )
+from app.decision.discover.corporate_action import attach_corporate_action
 from app.decision.discover.calibrator import calibrate_prediction
 from app.decision.discover.ledger import DEFAULT_HORIZON_DAYS
 from app.decision.discover.predictor import store_prediction
@@ -830,6 +831,7 @@ def _generate_dossiers(
         try:
             if classify_instrument(cand.symbol, cand.source, cand.name or cand.symbol) == "equity":
                 _attach_earnings(db, cand)
+                _attach_corporate_action(db, cand)
             candidate_dict = _candidate_to_dict(cand)
             raw_dossier = write_dossier(
                 db, candidate_dict, profile,
@@ -950,6 +952,18 @@ def _fill_isin(db: Session, cand: DiscoverCandidate) -> None:
     except Exception:  # noqa: BLE001 - a missing ISIN only leaves the badge unknown
         db.rollback()
         logger.debug("ISIN lookup failed for %s", cand.symbol, exc_info=True)
+
+
+def _attach_corporate_action(db: Session, cand: DiscoverCandidate) -> None:
+    """Hide a shortlisted stock's reported-figure ratios after a recent split or spin-off."""
+    try:
+        scores = json.loads(cand.scores_json) if cand.scores_json else {}
+    except ValueError:
+        return
+    if not isinstance(scores, dict):
+        return
+    cand.scores_json = json.dumps(attach_corporate_action(cand.symbol, scores))
+    db.commit()
 
 
 def _attach_earnings(db: Session, cand: DiscoverCandidate) -> None:
