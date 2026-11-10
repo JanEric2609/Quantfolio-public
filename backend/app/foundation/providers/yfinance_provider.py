@@ -171,6 +171,9 @@ class YFinanceProvider(MarketDataProvider):
                 # quarter a year earlier, in reported currency.
                 "revenue_growth": info.get("revenueGrowth"),
                 "growth_basis": "quarter_yoy",
+                # The period those growth figures end on: a half-year reporter
+                # (Wolters Kluwer) shows H1 here, not a quarter.
+                "latest_period_end": _epoch_date(info.get("mostRecentQuarter")),
                 "earnings_growth": info.get("earningsGrowth"),
                 "eps": info.get("trailingEps"),
                 "market_cap": info.get("marketCap"),
@@ -375,6 +378,14 @@ def _positive_float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return result if result > 0 else None
+
+
+def _epoch_date(value: Any) -> str | None:
+    """ISO date of a Unix timestamp (Yahoo's ``mostRecentQuarter``), else None."""
+    try:
+        return datetime.fromtimestamp(float(value), UTC).date().isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
 
 
 def _fcf_yield(info: dict[str, Any]) -> float | None:

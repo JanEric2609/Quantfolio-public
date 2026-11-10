@@ -2679,6 +2679,8 @@ export type VerdictsResponse = {
   ticker: string;
   verdicts: MultiHorizonVerdict[];
   generated_at: string;
+  /** Set when the model's answer could not be read as verdicts. */
+  error?: string | null;
 };
 
 // --- Phase 6: Piotroski F-Score types ---

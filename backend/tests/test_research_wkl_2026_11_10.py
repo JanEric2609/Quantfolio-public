@@ -105,7 +105,7 @@ def test_the_prompt_judges_leverage_by_net_debt_and_labels_the_figures():
     }
     msg = research._build_user_message(context)
     assert "590" not in msg and "146" not in msg
-    assert "Net debt / EBITDA: 2.1x (manageable)" in msg
+    assert "Net debt / EBITDA: 2.1x (provider debt incl. leases over unadjusted EBITDA) (manageable)" in msg
     assert "Book equity is too small" in msg
     assert ("Revenue growth in the latest quarter against the same quarter a year earlier, "
             "reported currency: -0.6 %") in msg

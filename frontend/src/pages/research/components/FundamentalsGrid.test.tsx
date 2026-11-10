@@ -21,3 +21,11 @@ describe("FundamentalsGrid", () => {
     expect(screen.queryByText("name")).toBeNull();
   });
 });
+
+describe("FundamentalsGrid reporting period", () => {
+  it("names the period the growth figures end on", () => {
+    render(<FundamentalsGrid fundamentals={{ revenue_growth: -0.006, growth_basis: "quarter_yoy", latest_period_end: "2026-06-30" }} />);
+    expect(screen.getByTestId("fund-period-note").textContent).toContain("2026-06-30");
+    expect(screen.queryByTestId("fund-latest_period_end")).toBeNull();
+  });
+});

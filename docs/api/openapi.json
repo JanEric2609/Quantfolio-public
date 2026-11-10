@@ -18582,6 +18582,28 @@
       },
       "VerdictResponse": {
         "properties": {
+          "cached": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cached"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
           "generated_at": {
             "title": "Generated At",
             "type": "string"
@@ -32285,6 +32307,18 @@
               "description": "Comma-separated data to include",
               "title": "Include",
               "type": "string"
+            }
+          },
+          {
+            "description": "Look-back window of the chart, in days",
+            "in": "query",
+            "name": "chart_days",
+            "required": false,
+            "schema": {
+              "default": 365,
+              "description": "Look-back window of the chart, in days",
+              "title": "Chart Days",
+              "type": "integer"
             }
           }
         ],

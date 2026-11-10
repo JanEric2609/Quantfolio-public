@@ -38,6 +38,8 @@ class VerdictResponse(OrmModel):
     ticker: str
     verdicts: list[dict[str, Any]]
     generated_at: str
+    error: str | None = None
+    cached: bool | None = None
 
 
 class RiskProfileIn(BaseModel):
@@ -122,6 +124,7 @@ async def get_stock_verdicts(
 async def get_stock_context(
     ticker: str,
     include: str = Query("report,chart,news", description="Comma-separated data to include"),
+    chart_days: Annotated[int, Query(description="Look-back window of the chart, in days"), DAYS_BOUND] = 365,
     db: Session = Depends(get_db),
     user: User = Depends(current_user),
 ) -> dict[str, Any]:
@@ -161,7 +164,7 @@ async def get_stock_context(
     # Price history for chart
     if "chart" in parts:
         from app.foundation.research import _price_history
-        result["price_history"] = _price_history(db, ticker_upper, days=365)
+        result["price_history"] = _price_history(db, ticker_upper, days=min(max(chart_days, 5), 1830))
         if result["price_history"]:
             # One price on the page: the quote carries its time, and a bar dated
             # today is an unfinished session (88.06 against a quote of 87.36).
