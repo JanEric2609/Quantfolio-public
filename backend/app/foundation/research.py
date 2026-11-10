@@ -743,7 +743,7 @@ def normalise_verdicts(raw: Any) -> list[dict[str, Any]]:
         horizon = str(item.get("horizon", "")).strip().lower().replace(" ", "")
         verdict = str(item.get("verdict", "")).strip().upper()
         try:
-            confidence = float(item.get("confidence"))
+            confidence = float(item.get("confidence") or 0.0) if item.get("confidence") is not None else math.nan
         except (TypeError, ValueError):
             continue
         if horizon not in VERDICT_HORIZONS or verdict not in ("BUY", "HOLD", "SELL") or math.isnan(confidence):
