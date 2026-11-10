@@ -519,7 +519,7 @@ def _build_user_message(context: dict[str, Any]) -> str:
 # Assembling the report: heading, Price Action and the company guard
 # ---------------------------------------------------------------------------
 
-_HEADING = re.compile(r"^(#{1,4}\s+.*|\*\*\d+\.[^*]+\*\*)\s*$")
+_HEADING = re.compile(r"^(?:#{1,4} .*|\*\*\d+\.[^*]+\*\*)$")  # callers pass stripped lines
 _COMPANY_SUFFIX = re.compile(
     r"\b((?:[A-Z][\w&.\-]+)(?: [A-Z][\w&.\-]+){0,3}) (?:Group|Inc\.?|plc|PLC|Corp\.?|Corporation|N\.V\.|AG|SE|Ltd\.?|Holdings|S\.A\.)(?![\w])"
 )
