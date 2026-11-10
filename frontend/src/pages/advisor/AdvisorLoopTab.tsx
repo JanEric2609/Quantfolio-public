@@ -38,9 +38,9 @@ export function AdvisorLoopTab() {
         ideas → this cycle trades them on paper →{" "}
         <Link to="/advisor/evolution" className="text-accent underline">Evolution</Link>{" "}
         pits champion vs challenger →{" "}
-        <Link to="/graduation" className="text-accent underline">Graduation</Link> tests whether that paper
-        record is statistically real. It is paper only: nothing here sets weights for your real book
-        (only <Link to="/plan" className="text-accent underline">This month</Link> does), and the
+        the <Link to="/graduation" className="text-accent underline">capital ladder</Link> turns the champion&apos;s
+        paper record into how much of your book may go to stock picks. It is paper only: nothing here trades
+        your real book (only <Link to="/plan" className="text-accent underline">This month</Link> sets weights), and the
         "What would change" tab is research.
       </p>
       <PaperRunCard portfolioId={data.portfolio_id} invalidate={[["advisor-cycle-latest"]]} />

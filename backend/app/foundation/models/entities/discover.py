@@ -118,6 +118,9 @@ class DiscoveryPrediction(Base):
     # Paper sleeve attribution (advisor loop PR2): which paper portfolio's
     # cycle produced this prediction. NULL for pure discover predictions.
     portfolio_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    # Advisor strategy whose cycle wrote this call (ADR 0025 WS3); the
+    # evolution scorecard filters on it. NULL for Discover and older rows.
+    strategy_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     # What produced this call (ADR 0018 §10): cohort id, code sha, config and
     # prompt hashes, served model, calibrator version, degradation flags.
     # NULL on rows written before the stamp existed (the legacy cohort).

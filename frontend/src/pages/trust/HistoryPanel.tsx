@@ -141,7 +141,7 @@ function Panel({ data }: { data: TrustHistory }) {
           <div className="flex flex-wrap items-start justify-between gap-2">
             <h3 className="text-sm font-semibold text-text-primary">Stock-picking satellite</h3>
             {sat.available ? (
-              <StatusChip passed={sat.unlocked} label={sat.unlocked ? "Passed: unlocked" : "Did not pass: stays locked"} />
+              <StatusChip passed={sat.unlocked} label={sat.unlocked ? "Passed: may join the ladder" : "Did not pass"} />
             ) : (
               <StatusChip passed={null} label="Not graded yet" />
             )}
@@ -151,7 +151,7 @@ function Panel({ data }: { data: TrustHistory }) {
             {sat.best?.dsr != null
               ? ` Best mined score: Deflated Sharpe ${sat.best.dsr.toFixed(2)} against a bar of ${sat.dsr_bar}.`
               : ""}
-            {!sat.unlocked && sat.available ? " That is why stock picks stay locked." : ""}
+            {" "}How much your book holds in stock picks is set by the capital ladder from paper records; this check only decides whether a backtest-picked strategy may become a ladder candidate.
           </p>
           {sat.reason ? <p className="text-[11px] text-text-muted">{sat.reason}</p> : null}
         </Card>

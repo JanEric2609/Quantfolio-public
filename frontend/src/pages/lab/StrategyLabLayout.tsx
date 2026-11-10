@@ -6,7 +6,7 @@ import { STRATEGY_LAB_TABS, activeStrategyLabTab } from "./strategyLabTabs";
 const TABS = STRATEGY_LAB_TABS.map(({ to, label }) => ({ to, label }));
 
 /**
- * Wraps Evidence, the LLM advisor, Mandates, Graduation and the paper portfolio
+ * Wraps Evidence, the LLM advisor, Mandates, the capital ladder and the paper portfolio
  * in one "Strategy lab" with a shared tab row and a line on what each means for
  * real money. A pathless layout route: every tab keeps its own URL.
  */

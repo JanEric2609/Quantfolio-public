@@ -10,11 +10,16 @@ enforces hard VaR/CVaR/max-drawdown ceilings (risk_gate), lets a thin LLM
 wrapper choose trades within the gate-passing set (llm_decision), and runs
 the daily paper-trade cycle (cycle) over champion/challenger strategy state
 (strategy) with self-critique lessons (reflection), evolution rounds
-(evolution — each round now also runs the real Multi-Agent Council via the
+(evolution — each round also runs the real Multi-Agent Council via the
 `llm_portfolio` facade to populate `CompetitionDecision.council_result_json`;
-promotion/scoring itself stays driven entirely by `AdvisorScorecard`, not the
-council), per-cohort scorecards (scorecard), diagnostics, user-facing
-recommendations, and scheduler registrations (jobs).
+since ADR 0025 promotion is the pre-registered paired Diebold-Mariano test on
+matched shadow forecasts (promotion, shadow), never the council, and the
+composite 4-axis score is display only), per-cohort scorecards (scorecard),
+diagnostics, user-facing recommendations, and scheduler registrations (jobs).
+ADR 0025 also gives each strategy its own sleeve (`adv-<id>`, a clone of the
+champion's book at spawn) and lets each sleeve run one cycle a day, claimed
+first through the `uq_llm_decision_cycle_slot` index; the 10:00 job runs both
+sleeves and the evolution round runs none.
 
 ## Public surface (facade `app.decision.advisor`)
 
@@ -26,7 +31,8 @@ recommendations, and scheduler registrations (jobs).
 ## Key collaborators
 
 - In: `discover.jobs` (scorecard refresh), `graduation.evaluator` /
-  `graduation.state` (champion read), `app.interface.api.advisor`, `app.worker`.
+  `graduation.state` (champion read), `app.interface.api.advisor`, `app.worker`
+  (stale cycle-claim reaper).
 - Out: `paper_portfolio` (root facade — trade execution, summaries, seeding),
   `llm_portfolio.review._local_llm_sync`, `discover.{calibrator,ledger,
   predictor,framings}` — all seeded Wave-F debt, see below. `evolution` also

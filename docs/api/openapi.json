@@ -25043,7 +25043,7 @@
     },
     "/api/evidence/n-trials": {
       "get": {
-        "description": "The ledger-backed global trial count every DSR call site deflates against.\n\n``resolved`` is what every gate actually uses (the raw count, at least 1);\n``raw_count``/``by_context`` are the ledger contents that number is\nderived from, so a claimed trial count can be checked rather than trusted.\n``effective`` counts independent search families (a lower bound on the\nnumber of independent tests) and ``hurdle_curve`` the annualised Sharpe\na strategy with five years of daily returns must beat at each N.",
+        "description": "Trial counts per family and per gate, with the global total underneath.\n\nADR 0025: a gate's N counts only the families its candidate was selected\nfrom (``gates``, built from ``by_family``). ``resolved`` is the global\ntotal, a conservative researcher-level number no gate uses any more;\n``raw_count``/``by_context`` are the ledger contents that number is\nderived from, so a claimed trial count can be checked rather than trusted.\n``effective`` counts independent search families (a lower bound on the\nnumber of independent tests) and ``hurdle_curve`` the annualised Sharpe\na strategy with five years of daily returns must beat at each N.",
         "operationId": "n_trials_summary_api_evidence_n_trials_get",
         "responses": {
           "200": {
@@ -25465,6 +25465,30 @@
           }
         },
         "summary": "History",
+        "tags": [
+          "graduation"
+        ]
+      }
+    },
+    "/api/graduation/ladder": {
+      "get": {
+        "description": "The capital ladder (ADR 0025): per candidate its stage, weight, e-values,\ntracking error, relative drawdown against its band, days of evidence, the\nnext stage and what it needs, and the history for a chart; plus which\ncandidate funds the satellite this month. Advisory only.",
+        "operationId": "ladder_api_graduation_ladder_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ladder Api Graduation Ladder Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ladder",
         "tags": [
           "graduation"
         ]

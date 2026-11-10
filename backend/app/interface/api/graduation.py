@@ -1,7 +1,8 @@
-"""Graduation API: the LLM's path from paper portfolio to real-portfolio advice.
+"""Graduation API: the capital ladder and the old graduation criteria.
 
-``GET /status`` reports progress toward graduation (always available, so the
-user can watch the LLM earn trust). ``POST /recommendations`` is gated on a
+``GET /ladder`` reports the capital ladder (ADR 0025): how much of the book
+stock picks may hold, per candidate and stage. ``GET /status`` keeps its shape
+with the old criteria marked legacy and a ``ladder`` field added. ``POST /recommendations`` is gated on a
 graduated verdict; when unlocked it reuses the
 existing recommendation engine and surfaces results into the Review Inbox.
 
@@ -19,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import GraduationAssessment, User
 from app.foundation.auth import current_user
-from app.decision.graduation import GraduationResult, evaluate_graduation
+from app.decision.graduation import GraduationResult, evaluate_graduation, ladder_state
 from app.foundation.settings import get_public_settings
 from app.interface.api.params import LimitQuery
 
@@ -102,13 +103,23 @@ def status(
         dict[str, Any]: Graduation assessment including per-criterion progress,
             overall progress, metrics, and recommendations unlock status.
     """
-    from app.decision.graduation.state import apply_graduation_state
+    from app.foundation.models.entities import AdvisorGraduationState
 
     result = evaluate_graduation(db, user.id)
     _persist_if_due(db, user.id, result)
-    state = apply_graduation_state(db, user.id, result)
+    # ADR 0025: the capital ladder writes the switch (nightly); the old
+    # criteria are display only and no longer flip it.
+    state = (
+        db.query(AdvisorGraduationState).filter(AdvisorGraduationState.user_id == user.id).one_or_none()
+        or AdvisorGraduationState(user_id=user.id, graduated=False)
+    )
+    ladder = ladder_state(db, user.id)
+    graduated = any(c["stage"] >= 2 for c in ladder["candidates"])
     payload = result.to_dict()
-    payload["recommendations_unlocked"] = result.graduated
+    payload["legacy_graduated"] = result.graduated
+    payload["graduated"] = graduated
+    payload["recommendations_unlocked"] = graduated
+    payload["ladder"] = ladder
     payload["passive_core"] = _passive_core_block(db)
     payload["state"] = {
         "graduated": state.graduated,
@@ -120,6 +131,19 @@ def status(
         "strategy_id": state.strategy_id,
     }
     return payload
+
+
+@router.get("/ladder")
+def ladder(
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> dict[str, Any]:
+    """The capital ladder (ADR 0025): per candidate its stage, weight, e-values,
+    tracking error, relative drawdown against its band, days of evidence, the
+    next stage and what it needs, and the history for a chart; plus which
+    candidate funds the satellite this month. Advisory only.
+    """
+    return ladder_state(db, user.id)
 
 
 @router.get("/transitions")
@@ -204,16 +228,19 @@ async def generate_real_recommendations(
     """
     verdict = evaluate_graduation(db, user.id)
     _persist_if_due(db, user.id, verdict)
-    if not verdict.graduated:
+    # ADR 0025: unlocked by the capital ladder (a candidate at Earned or
+    # above), never by the legacy criteria.
+    ladder = ladder_state(db, user.id)
+    if not any(c["stage"] >= 2 for c in ladder["candidates"]):
         raise HTTPException(
             status_code=409,
             detail={
                 "code": "not_graduated",
                 "message": (
-                    "The LLM has not yet proven itself on the paper portfolio. "
-                    "Recommendations stay locked until every graduation criterion "
-                    "is met."
+                    "No candidate has reached the Earned stage of the capital ladder. "
+                    "Recommendations stay locked until one does."
                 ),
+                "ladder": ladder,
                 "graduation": verdict.to_dict(),
                 "passive_core": _passive_core_block(db),
             },

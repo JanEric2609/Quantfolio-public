@@ -248,7 +248,12 @@ DEFAULT_PUBLIC_SETTINGS: dict[str, Any] = {
     # depot is synced, DKB otherwise).
     "plan_broker": "auto",
     "plan_tilt_max_pct": 15,
-    "plan_satellite_max_pct": 10,
+    # ADR 0025: the hard ceiling over the capital ladder's satellite weight.
+    "plan_satellite_max_pct": 20,
+    "ladder_tuition_budget_pct": 1.0,
+    "ladder_bad_alpha_pct": -3.0,
+    "ladder_proven_weight_pct": 15.0,
+    "ladder_owner_veto": False,
     "plan_min_order_eur": 1000,
     # Sell only when an unlocked sleeve sits this many percentage points above
     # its target and a year of contributions cannot bring it back (Phase 4).

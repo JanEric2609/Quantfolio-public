@@ -23,6 +23,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from app.lab.alphacrafter.universe import MINER_UNIVERSE, resolve_miner_universe
+from app.foundation import quant_metrics as qm
 from app.foundation.models.entities import AlphacrafterJobRun, Holding, Portfolio
 from app.lab.alphacrafter.dossier import DossierBuilder, build_dossier
 from app.lab.alphacrafter.ic_decay import auto_retire_factors
@@ -561,6 +562,9 @@ async def run_daily_alphacrafter(
             "total_return": top.total_return,
             "rebalance_freq": top.config.rebalance_freq,
             "position_size": top.config.position_size,
+            # ADR 0025: the winner was selected among the trader family.
+            "n_obs": top.n_obs,
+            "n_trials": qm.resolve_n_trials(db, (qm.ALPHACRAFTER_TRADER_FAMILY,)),
         }
 
         # Collect target symbols: basket anchor + portfolio holdings.

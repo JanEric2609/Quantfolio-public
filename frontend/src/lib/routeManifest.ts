@@ -94,7 +94,7 @@ export const ROUTE_ENTRIES: RouteEntry[] = [
   {
     id: "strategy-lab", to: "/evidence", label: "Strategy lab", icon: FlaskConical, group: "tools", researchTool: true,
     match: isStrategyLabPath,
-    keywords: ["evidence", "advisor", "mandates", "graduation", "paper"],
+    keywords: ["evidence", "advisor", "mandates", "graduation", "capital ladder", "paper"],
   },
   { id: "settings", to: "/settings", label: "Control Center", icon: Settings, group: "admin", keywords: ["settings", "connections", "status"] },
 ];

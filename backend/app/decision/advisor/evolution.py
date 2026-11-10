@@ -1,15 +1,16 @@
 """Champion vs challenger evolution engine (PR2 C3).
 
-Each round: both sleeves run their daily advisor cycle (same universe, same
-real-book seed basis, same cadence), get scored on the 4-axis scorecard, and
+Each round: both sleeves (each run once a day by the 10:00 ``advisor_cycle``
+job, ADR 0025; the round itself runs no cycle) get scored on the 4-axis scorecard, and
 the round is recorded as ``CompetitionRun``/``CompetitionDecision`` rows so
 graduation's ``_competition_win_rate`` keeps working.
 
-Promotion is guarded against small-sample luck: the challenger must beat the
-champion's composite 4-axis score by ``PROMOTION_MARGIN`` with at least
-``MIN_RESOLVED_DECISIONS`` resolved predictions on BOTH sleeves. A marginal
-winner keeps competing; a decisive loser is retired and a fresh mutation
-spawned.
+Promotion (ADR 0025) is the pre-registered paired test of :mod:`promotion`:
+both strategies forecast the same shortlist every day (:mod:`shadow`), and the
+challenger must have the better Brier score by a one-sided Diebold-Mariano
+test at planned looks, with return and drawdown guardrails. A challenger not
+better at the sixth look is retired and a fresh clone spawned. The composite
+4-axis score below stays on screen as a display only.
 """
 from __future__ import annotations
 
@@ -17,7 +18,7 @@ import asyncio
 import json
 import logging
 import math
-from datetime import UTC
+from datetime import UTC, date
 from typing import Any, Callable
 
 from sqlalchemy.orm import Session
@@ -30,19 +31,20 @@ from app.foundation.models.entities import (
     PaperPortfolio,
 )
 from app.foundation.models.entities._core import now_utc
-from app.decision.advisor.cycle import run_advisor_cycle
 from app.decision.advisor.reflection import reflect_on_cycle
 from app.decision.advisor.scorecard import compute_advisor_scorecard
 from app.decision.advisor.strategy import (
     ensure_champion,
     get_active_challenger,
     promote_challenger,
+    retire_strategy,
     spawn_challenger,
 )
 from app.foundation.models.entities import DiscoveryPrediction
 
 logger = logging.getLogger(__name__)
 
+# The retired composite rule's constants, kept for display and old callers.
 MIN_RESOLVED_DECISIONS = 20
 PROMOTION_MARGIN = 0.02
 _COINFLIP_BRIER = 0.25
@@ -387,9 +389,10 @@ def _run_competition_council(
         orchestrator = llm_portfolio.CompetitionOrchestrator(config_a, config_b, debate_config)
 
         competition_rules = (
-            f"Champion vs challenger evolution round. Challenger promotes if its "
-            f"composite score beats the champion's by more than {PROMOTION_MARGIN}, "
-            f"with at least {MIN_RESOLVED_DECISIONS} resolved predictions on both sleeves."
+            "Champion vs challenger evolution round. The challenger is promoted only by a "
+            "pre-registered paired test: both strategies forecast the same shortlist every "
+            "day, and the challenger's Brier score must be better by a one-sided "
+            "Diebold-Mariano test at planned looks, with return and drawdown guardrails."
         )
         result = asyncio.run(
             orchestrator.run_competition(context_a, context_b, competition_rules, run_id)
@@ -411,69 +414,80 @@ def run_evolution_round(
     min_resolved: int = MIN_RESOLVED_DECISIONS,
     margin: float = PROMOTION_MARGIN,
     reflect: bool = True,
+    today: date | None = None,
 ) -> dict[str, Any]:
     """Run one champion-vs-challenger evolution round for *user_id* (C3).
 
-    Steps: ensure both strategies exist → run both sleeves' daily cycles →
-    score both on the 4-axis card → record the round → promote / retire /
-    keep-observing under the small-sample guard → reflect lessons.
+    Steps: ensure both strategies exist → resolve due shadow forecasts →
+    score both on the 4-axis card (display) → apply the pre-registered paired
+    promotion test (ADR 0025, :mod:`promotion`) → record the round → promote /
+    retire / keep observing → reflect lessons. Runs no advisor cycle.
+
+    ``min_resolved`` and ``margin`` belong to the retired composite rule; they
+    are accepted for old callers and only shown in the summary.
 
     Returns a summary dict with scores, the verdict, and any strategy churn.
     """
+    from app.decision.advisor.promotion import evaluate_paired_promotion
+    from app.decision.advisor.shadow import resolve_shadow_forecasts
+
+    day = today or now_utc().date()
     champion = ensure_champion(db, user_id)
     challenger = get_active_challenger(db, user_id) or spawn_challenger(db, user_id)
     if champion.portfolio_id is None or challenger.portfolio_id is None:
         raise ValueError("champion/challenger strategy is missing its backing portfolio_id")
 
-    champ_cycle = run_advisor_cycle(db, user_id, strategy=champion, llm_call=llm_call)
-    chall_cycle = run_advisor_cycle(db, user_id, strategy=challenger, llm_call=llm_call)
+    try:
+        resolve_shadow_forecasts(db, today=day)
+    except Exception:  # noqa: BLE001 - resolution retries tomorrow
+        logger.warning("evolution: shadow forecast resolution failed", exc_info=True)
+        db.rollback()
 
-    champ_card = compute_advisor_scorecard(db, user_id, portfolio_id=champion.portfolio_id)
-    chall_card = compute_advisor_scorecard(db, user_id, portfolio_id=challenger.portfolio_id)
-
+    champ_card = compute_advisor_scorecard(
+        db, user_id, portfolio_id=champion.portfolio_id, strategy=champion
+    )
+    chall_card = compute_advisor_scorecard(
+        db, user_id, portfolio_id=challenger.portfolio_id, strategy=challenger
+    )
     champ_score, champ_detail = composite_score(champ_card)
     chall_score, chall_detail = composite_score(chall_card)
-
     n_champ = champ_card.n_resolved if champ_card else 0
     n_chall = chall_card.n_resolved if chall_card else 0
-    sample_ok = n_champ >= min_resolved and n_chall >= min_resolved
-    scores_ok = champ_score is not None and chall_score is not None
-
-    verdict = "observing"
-    if scores_ok and sample_ok:
-        assert champ_score is not None and chall_score is not None
-        if chall_score > champ_score + margin:
-            verdict = "promote"
-        elif chall_score < champ_score - margin:
-            verdict = "retire_challenger"
-        else:
-            verdict = "marginal_keep_observing"
-    elif scores_ok and not sample_ok:
-        verdict = "insufficient_sample"
 
     run = _open_evolution_run(db, champion, challenger)
+    state = json.loads(run.state_json or "{}")
+    paired_state = dict(state.get("paired_test") or {})
+    paired = evaluate_paired_promotion(db, champion, challenger, today=day, state=paired_state)
+    state["paired_test"] = paired_state
+    state["last_result"] = paired.as_dict()
+    run.state_json = json.dumps(state, default=str)
+    verdict = paired.verdict
+
     champ_council_json, chall_council_json, debate_json = _run_competition_council(
         db, champion=champion, challenger=challenger, run_id=run.id,
     )
     challenger_wins = verdict == "promote"
+    looked = paired.look is not None
+    paired_detail = {"paired_test": paired.as_dict()}
     _record_round(
         db, run,
         portfolio_id=champion.portfolio_id,
-        score=champ_score, detail=champ_detail, scorecard=champ_card,
-        winner=scores_ok and sample_ok and not challenger_wins,
+        score=champ_score, detail={**champ_detail, **paired_detail}, scorecard=champ_card,
+        winner=looked and not challenger_wins,
         council_result_json=champ_council_json,
         debate_report_json=debate_json,
     )
     _record_round(
         db, run,
         portfolio_id=challenger.portfolio_id,
-        score=chall_score, detail=chall_detail, scorecard=chall_card,
+        score=chall_score, detail={**chall_detail, **paired_detail}, scorecard=chall_card,
         winner=challenger_wins,
         council_result_json=chall_council_json,
         debate_report_json=debate_json,
     )
     run.current_round += 1
     run.updated_at = now_utc()
+    db.flush()
 
     promoted_id: str | None = None
     new_challenger_id: str | None = None
@@ -482,13 +496,12 @@ def run_evolution_round(
         promoted_id = challenger.id
         run.status = "completed"
         run.ended_at = now_utc()
+        db.commit()
         new_challenger_id = spawn_challenger(db, user_id).id
     elif verdict == "retire_challenger":
-        challenger.role = "retired"
-        challenger.retired_at = now_utc()
         run.status = "completed"
         run.ended_at = now_utc()
-        db.flush()
+        retire_strategy(db, challenger, reason=f"retired: {paired.reason}")
         new_challenger_id = spawn_challenger(db, user_id).id
 
     # Reflection (A2): each sleeve distils lessons from its own track record.
@@ -506,6 +519,8 @@ def run_evolution_round(
     db.commit()
     summary = {
         "verdict": verdict,
+        "reason": paired.reason,
+        "paired_test": paired.as_dict(),
         "champion_strategy_id": champion.id,
         "challenger_strategy_id": challenger.id,
         "champion_score": champ_score,
@@ -515,11 +530,7 @@ def run_evolution_round(
         "promoted_strategy_id": promoted_id,
         "new_challenger_id": new_challenger_id,
         "lessons_created": lessons_created,
-        "cycles": {
-            "champion": champ_cycle.get("status"),
-            "challenger": chall_cycle.get("status"),
-        },
         "competition_run_id": run.id,
     }
-    logger.info("evolution round for %s: %s", user_id, verdict)
+    logger.info("evolution round for %s: %s (%s)", user_id, verdict, paired.reason)
     return summary

@@ -26,7 +26,10 @@ ROLE_CHAMPION = "champion"
 ROLE_CHALLENGER = "challenger"
 ROLE_RETIRED = "retired"
 
+#: The one sleeve every challenger shared before ADR 0025 (archived by the
+#: one-time split, :func:`split_shared_challenger_sleeve`).
 CHALLENGER_MANDATE = "advisor-challenger"
+SPLIT_SETTING_KEY = "advisor_sleeves_split_at"
 
 _MAX_CANDIDATE_BOUNDS = (5, 15)
 
@@ -110,13 +113,25 @@ def _mutate_config(base: dict[str, Any], rng: random.Random) -> dict[str, Any]:
     return cfg
 
 
-def _seed_challenger_portfolio(db: Session, user_id: str) -> PaperPortfolio:
-    """Seed (or reuse) the challenger sleeve from the real book (same basis)."""
-    from app.decision.paper_portfolio import seed_paper_portfolio_from_real
+def strategy_mandate(strategy_id: str) -> str:
+    """The paper-portfolio mandate of one strategy's own sleeve (ADR 0025).
 
-    return seed_paper_portfolio_from_real(
-        db, user_id, mandate=CHALLENGER_MANDATE, name="Advisor Challenger"
-    )
+    16 characters, inside ``PaperPortfolio.mandate``'s 24. A sleeve is never
+    reused by another strategy.
+    """
+    return f"adv-{strategy_id[:12]}"
+
+
+def retire_strategy(db: Session, strategy: AdvisorStrategy, *, reason: str) -> None:
+    """Retire *strategy* and archive its sleeve (kept in place, no longer driven)."""
+    from app.decision.paper_portfolio import archive_paper_portfolio
+
+    strategy.role = ROLE_RETIRED
+    strategy.retired_at = now_utc()
+    db.flush()
+    if strategy.portfolio_id:
+        archive_paper_portfolio(db, strategy.portfolio_id, reason=reason)
+    db.commit()
 
 
 def spawn_challenger(
@@ -127,21 +142,32 @@ def spawn_challenger(
 ) -> AdvisorStrategy:
     """Create a new challenger as a bounded mutation of the champion (C2).
 
-    Any existing active challenger is retired first (one at a time). The
-    challenger reuses the challenger sleeve portfolio, whose book is reset to
-    the same real-book basis is NOT done here — the evolution round compares
-    both sleeves over the same window, so a persistent sleeve is fine.
+    Any existing active challenger is retired first (one at a time) and its
+    sleeve archived. The new challenger gets its own sleeve, a clone of the
+    champion's current book (same positions, same cash, same moment), so the
+    two differ only in the decisions made from here (ADR 0025).
     """
+    from uuid import uuid4
+
+    from app.decision.paper_portfolio import clone_paper_portfolio
+
     champion = ensure_champion(db, user_id)
     rng = random.Random(seed)
 
     existing = get_active_challenger(db, user_id)
     if existing is not None:
-        existing.role = ROLE_RETIRED
-        existing.retired_at = now_utc()
+        retire_strategy(db, existing, reason="challenger replaced")
 
-    portfolio = _seed_challenger_portfolio(db, user_id)
+    strategy_id = str(uuid4())
+    if not champion.portfolio_id:
+        raise ValueError("champion has no sleeve to clone")
+    portfolio = clone_paper_portfolio(
+        db, champion.portfolio_id,
+        mandate=strategy_mandate(strategy_id),
+        name=f"Advisor Challenger {strategy_id[:8]}",
+    )
     challenger = AdvisorStrategy(
+        id=strategy_id,
         user_id=user_id,
         role=ROLE_CHALLENGER,
         portfolio_id=portfolio.id,
@@ -149,6 +175,19 @@ def spawn_challenger(
         parent_strategy_id=champion.id,
     )
     db.add(challenger)
+    db.flush()
+
+    # ADR 0025: every spawned strategy is one trial of the advisor lineage,
+    # the family the promotion test's alpha is split over.
+    from app.foundation import quant_metrics as qm
+
+    qm.record_trial(
+        db,
+        context=qm.ADVISOR_CHALLENGER_FAMILY,
+        trial_key=challenger.id,
+        metadata={"user_id": user_id, "parent_strategy_id": champion.id},
+        config_hash=qm.config_digest(challenger.config_json or {}),
+    )
     db.commit()
     db.refresh(challenger)
     logger.info(
@@ -161,13 +200,13 @@ def spawn_challenger(
 def promote_challenger(db: Session, challenger: AdvisorStrategy) -> AdvisorStrategy:
     """Flip roles: challenger → champion, old champion → retired (C3).
 
-    The promoted strategy keeps its own portfolio sleeve; graduation and the
-    divergence diff always follow the *current champion's* sleeve.
+    The champion pointer moves to the challenger's own sleeve; the old
+    champion's sleeve is archived and no longer driven (ADR 0025). Graduation
+    and the divergence diff always follow the *current champion's* sleeve.
     """
     champion = get_champion(db, challenger.user_id)
     if champion is not None:
-        champion.role = ROLE_RETIRED
-        champion.retired_at = now_utc()
+        retire_strategy(db, champion, reason="champion replaced by promotion")
     challenger.role = ROLE_CHAMPION
     challenger.promoted_at = now_utc()
 
@@ -186,3 +225,35 @@ def promote_challenger(db: Session, challenger: AdvisorStrategy) -> AdvisorStrat
         challenger.id, champion.id if champion else None,
     )
     return challenger
+
+
+def split_shared_challenger_sleeve(db: Session, user_id: str) -> bool:
+    """One-time reset (ADR 0025): end the shared ``advisor-challenger`` sleeve.
+
+    Marked by the app setting ``advisor_sleeves_split_at``. Retires the current
+    challenger, archives the shared sleeve, and spawns a fresh challenger
+    cloned from the champion's sleeve. The owner accepted that the advisor's
+    paper comparison history restarts. Returns True when it ran now.
+    """
+    from app.foundation.settings import get_public_settings, upsert_public_settings
+
+    if get_public_settings(db).get(SPLIT_SETTING_KEY):
+        return False
+    challenger = get_active_challenger(db, user_id)
+    shared = (
+        db.query(PaperPortfolio)
+        .filter(PaperPortfolio.user_id == user_id, PaperPortfolio.mandate == CHALLENGER_MANDATE)
+        .one_or_none()
+    )
+    if challenger is not None and (shared is None or challenger.portfolio_id == shared.id):
+        retire_strategy(db, challenger, reason="sleeve split (ADR 0025)")
+        challenger = None
+    if shared is not None:
+        from app.decision.paper_portfolio import archive_paper_portfolio
+
+        archive_paper_portfolio(db, shared.id, reason="shared challenger sleeve ended (ADR 0025)")
+    if get_champion(db, user_id) is not None and challenger is None:
+        spawn_challenger(db, user_id)
+    upsert_public_settings(db, {SPLIT_SETTING_KEY: now_utc().isoformat()})
+    logger.info("split_shared_challenger_sleeve: done for user %s", user_id)
+    return True

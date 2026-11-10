@@ -192,8 +192,31 @@ class PaperSnapshot(Base):
     portfolio: Mapped[PaperPortfolio] = relationship(back_populates="snapshots")
 
 
+# Statuses that hold an advisor sleeve's one cycle slot for the day (plan
+# 2026-11-10 WS1, ADR 0025). ``failed`` is deliberately absent: a failed run
+# frees the slot so a retry can claim it. Mandate reviews never set
+# ``cycle_date`` and are outside the index.
+ADVISOR_CYCLE_SLOT_STATUSES = ("running", "completed", "idle_no_candidates", "idle_no_trades")
+_SLOT_PREDICATE = (
+    "cycle_date IS NOT NULL AND status IN ("
+    + ", ".join(f"'{s}'" for s in ADVISOR_CYCLE_SLOT_STATUSES)
+    + ")"
+)
+
+
 class LlmPortfolioDecision(Base):
     __tablename__ = "llm_portfolio_decisions"
+    __table_args__ = (
+        Index(
+            "uq_llm_decision_cycle_slot",
+            "portfolio_id",
+            "mandate",
+            "cycle_date",
+            unique=True,
+            sqlite_where=sa_text(_SLOT_PREDICATE),
+            postgresql_where=sa_text(_SLOT_PREDICATE),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
     portfolio_id: Mapped[str] = mapped_column(
@@ -206,6 +229,9 @@ class LlmPortfolioDecision(Base):
     context_token_estimate: Mapped[int | None] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(24), default="pending")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The advisor cycle's claimed day (UTC). Set only on advisor-cycle rows;
+    # with the partial unique index above it allows one cycle per sleeve per day.
+    cycle_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     # Outcome scoring (filled by the weekly scoring job once horizon_weeks elapses).
     # verdict ∈ {hit, miss, partial}; horizon_weeks comes from the decision's
     # structured expectation. See services/llm_portfolio/scoring.py.

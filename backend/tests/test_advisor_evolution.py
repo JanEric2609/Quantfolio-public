@@ -1,10 +1,10 @@
 """Champion/challenger evolution tests (PR2 group C).
 
-Acceptance: a challenger seeded to outperform on the 4 axes gets promoted;
-one that underperforms is discarded (and a fresh mutation spawned); a
-marginal winner within the small-sample guard is NOT promoted; rounds are
-recorded as CompetitionRun/CompetitionDecision so graduation's win-rate
-keeps working.
+Acceptance (ADR 0025): a challenger that forecasts the shared shortlist
+clearly better is promoted by the paired test; one not better by the sixth
+look is retired (and a fresh clone spawned); equal forecasters and small
+samples are NOT promoted; rounds are recorded as CompetitionRun/
+CompetitionDecision so graduation's win-rate keeps working.
 """
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -13,11 +13,17 @@ from uuid import uuid4
 import pytest
 from conftest import _memory_db
 
+import numpy as np
+
+from promotion_helpers import seed_paired_history
+
 from app.foundation.models.entities import (
     AdvisorScorecard,
     CompetitionDecision,
     CompetitionRun,
     DiscoveryPrediction,
+    PaperPortfolio,
+    PaperPortfolioArchive,
     PaperSnapshot,
     User,
 )
@@ -47,7 +53,9 @@ def _seed_sleeve(db, user: User, portfolio_id: str, *, good: bool, n_preds: int 
     good=False → falling NAV, overconfident misses, inverted magnitudes.
     """
     today = date.today()
-    for i in range(30):
+    # 31 snapshots (through today) = the 30 returns the ratio axes need; the
+    # evolution round no longer runs a cycle that would add today's (ADR 0025).
+    for i in range(31):
         nav = 100_000 * (1 + (0.004 if good else -0.01)) ** i
         db.add(
             PaperSnapshot(
@@ -75,24 +83,31 @@ def _seed_sleeve(db, user: User, portfolio_id: str, *, good: bool, n_preds: int 
 
 
 def test_outperforming_challenger_is_promoted():
+    """ADR 0025: a challenger that forecasts the same shortlist clearly better
+    (paired Brier, DM test) is promoted at its first planned look."""
     db = _memory_db()
     user = _user(db)
     champion = ensure_champion(db, user.id)
     challenger = spawn_challenger(db, user.id, seed=1)
+    seed_paired_history(db, user.id, champion, challenger, challenger_edge=0.3)
 
-    _seed_sleeve(db, user, champion.portfolio_id, good=False)
-    _seed_sleeve(db, user, challenger.portfolio_id, good=True)
-
-    summary = run_evolution_round(db, user.id, min_resolved=5, reflect=False)
-    assert summary["verdict"] == "promote"
+    summary = run_evolution_round(db, user.id, reflect=False)
+    assert summary["verdict"] == "promote", summary["reason"]
     assert summary["promoted_strategy_id"] == challenger.id
+    assert summary["paired_test"]["look"] == 1
 
     db.refresh(challenger)
+    db.refresh(champion)
     assert challenger.role == "champion"
     assert get_champion(db, user.id).id == challenger.id
-    # A fresh challenger was spawned to keep the arena running.
+    # The champion pointer moved to the challenger's own sleeve; the old
+    # champion's sleeve is archived and no longer driven.
+    assert db.get(PaperPortfolio, champion.portfolio_id).managed_by == "retired"
+    assert db.query(PaperPortfolioArchive).filter_by(portfolio_id=champion.portfolio_id).count() == 1
+    # A fresh challenger was spawned on its own sleeve.
     new_challenger = get_active_challenger(db, user.id)
     assert new_challenger is not None and new_challenger.id != challenger.id
+    assert new_challenger.portfolio_id not in (challenger.portfolio_id, champion.portfolio_id)
 
     # Round recorded for graduation's win-rate.
     run = db.query(CompetitionRun).filter(CompetitionRun.name == "Champion vs Challenger").one()
@@ -102,39 +117,41 @@ def test_outperforming_challenger_is_promoted():
     assert len(winners) == 1 and winners[0].portfolio_id == challenger.portfolio_id
 
 
-def test_underperforming_challenger_is_discarded():
+def test_challenger_not_better_by_the_sixth_look_is_retired():
     db = _memory_db()
     user = _user(db)
     champion = ensure_champion(db, user.id)
     challenger = spawn_challenger(db, user.id, seed=2)
+    seed_paired_history(db, user.id, champion, challenger, challenger_edge=-0.1)
 
-    _seed_sleeve(db, user, champion.portfolio_id, good=True)
-    _seed_sleeve(db, user, challenger.portfolio_id, good=False)
-
-    summary = run_evolution_round(db, user.id, min_resolved=5, reflect=False)
-    assert summary["verdict"] == "retire_challenger"
+    day = date.today()
+    verdicts = []
+    for _ in range(6):
+        summary = run_evolution_round(db, user.id, reflect=False, today=day)
+        verdicts.append(summary["verdict"])
+        day = np.busday_offset(day, 21, roll="forward").astype(date)
+    assert verdicts[:5] == ["observing"] * 5
+    assert verdicts[5] == "retire_challenger"
 
     db.refresh(challenger)
     db.refresh(champion)
     assert challenger.role == "retired" and challenger.retired_at is not None
     assert champion.role == "champion"
-    # A new mutation was spawned.
+    assert db.get(PaperPortfolio, challenger.portfolio_id).managed_by == "retired"
     new_challenger = get_active_challenger(db, user.id)
     assert new_challenger is not None and new_challenger.id != challenger.id
 
 
-def test_marginal_winner_is_not_promoted():
+def test_equal_forecasters_keep_observing():
     db = _memory_db()
     user = _user(db)
     champion = ensure_champion(db, user.id)
     challenger = spawn_challenger(db, user.id, seed=3)
+    seed_paired_history(db, user.id, champion, challenger, challenger_edge=0.0)
 
-    # Identical performance → inside the promotion margin.
-    _seed_sleeve(db, user, champion.portfolio_id, good=True)
-    _seed_sleeve(db, user, challenger.portfolio_id, good=True)
-
-    summary = run_evolution_round(db, user.id, min_resolved=5, reflect=False)
-    assert summary["verdict"] == "marginal_keep_observing"
+    summary = run_evolution_round(db, user.id, reflect=False)
+    assert summary["verdict"] == "observing"
+    assert summary["paired_test"]["look"] == 1
     db.refresh(champion)
     db.refresh(challenger)
     assert champion.role == "champion"
@@ -146,13 +163,13 @@ def test_small_sample_blocks_promotion():
     user = _user(db)
     champion = ensure_champion(db, user.id)
     challenger = spawn_challenger(db, user.id, seed=4)
+    # A clear edge, but 30 dates x 3 tickers = 90 pairs < 200.
+    seed_paired_history(db, user.id, champion, challenger, challenger_edge=0.3, days=30)
 
-    _seed_sleeve(db, user, champion.portfolio_id, good=False, n_preds=6)
-    _seed_sleeve(db, user, challenger.portfolio_id, good=True, n_preds=6)
-
-    # Clear 4-axis win but nowhere near the required decision sample.
-    summary = run_evolution_round(db, user.id, min_resolved=100, reflect=False)
-    assert summary["verdict"] == "insufficient_sample"
+    summary = run_evolution_round(db, user.id, reflect=False)
+    assert summary["verdict"] == "observing"
+    assert summary["paired_test"]["minimums"]["pairs"] is False
+    assert summary["paired_test"]["look"] is None
     db.refresh(challenger)
     assert challenger.role == "challenger"  # no lucky-streak promotion
 

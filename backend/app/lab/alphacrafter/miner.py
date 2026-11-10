@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import FactorsLibrary
 from app.foundation import quant_factors
+from app.foundation import quant_metrics as qm
 from app.lab.alphacrafter import factor_dsl
 from app.lab.alphacrafter.panel import build_panel
 from app.lab.alphacrafter.shared_memory import (
@@ -44,6 +45,18 @@ DEFAULT_LOOKBACK_YEARS = 5.0
 DEFAULT_HORIZON_DAYS = 5
 DEFAULT_MIN_IC = 0.02
 DEFAULT_MIN_ICIR = 0.3
+
+# Factor admission (ADR 0025, plan 2026-11-10 WS2). The flat IC/ICIR bar above
+# admitted any factor clearing it, however many formulas had been tried. A
+# factor now enters the library only when its IC series' deflated ICIR
+# (``deflated_ic_sharpe`` at the miner family's N_eff, the function tuning
+# already uses) is at least ADMIT_DEFLATED, and leaves only below
+# RETIRE_DEFLATED, so a daily re-test does not flip it in and out. The flat
+# thresholds still fill ``FactorCandidate.validation_notes`` for display.
+ADMIT_DEFLATED = 0.95
+RETIRE_DEFLATED = 0.80
+#: IC observations kept on the trial row for the Li-Ji N_eff (about a year).
+TRIAL_SERIES_OBS = 252
 
 
 class MinerAgent:
@@ -96,7 +109,9 @@ class MinerAgent:
         llm_status = "skipped"
         factor_states = []
 
-        # 1. Evaluate and persist deterministic seed factors immediately
+        # 1. Evaluate the deterministic seed factors, then admit them together
+        # (every formula is a trial before any one is judged).
+        seed_candidates: list[FactorCandidate] = []
         for d in factor_defs:
             candidate = evaluate_candidate(
                 panel,
@@ -109,10 +124,11 @@ class MinerAgent:
                 min_icir=min_icir,
             )
             n_evaluated += 1
+            seed_candidates.append(candidate)
 
+        for candidate in admit_candidates(db, seed_candidates, horizon):
             if candidate.valid:
                 n_valid += 1
-                persist_candidate(db, candidate)
                 n_persisted += 1
                 deterministic_count += 1
 
@@ -151,8 +167,8 @@ class MinerAgent:
                 extras = []
                 llm_status = "failed"
 
-            for extra in extras:
-                candidate = evaluate_candidate(
+            extra_candidates = [
+                evaluate_candidate(
                     panel,
                     name=extra.get("name", "unknown_extra"),
                     formula=extra.get("formula", ""),
@@ -162,11 +178,12 @@ class MinerAgent:
                     min_ic=min_ic,
                     min_icir=min_icir,
                 )
-                n_evaluated += 1
-
+                for extra in extras
+            ]
+            n_evaluated += len(extra_candidates)
+            for candidate in admit_candidates(db, extra_candidates, horizon):
                 if candidate.valid:
                     n_valid += 1
-                    persist_candidate(db, candidate)
                     n_persisted += 1
                     llm_count += 1
 
@@ -223,6 +240,8 @@ class FactorCandidate:
     ic_series: list[float] = field(default_factory=list)
     # Database id once persisted to FactorsLibrary (None until then).
     id: str | None = None
+    # Deflated ICIR at the miner family's N_eff (ADR 0025); None until judged.
+    deflated_icir: float | None = None
 
 
 # --- Pure metric helpers (synchronous, unit-testable) -------------------------
@@ -425,6 +444,93 @@ def evaluate_candidate(
         )
 
 
+def miner_trial_hash(candidate: FactorCandidate, horizon: int) -> str:
+    """One miner trial = one distinct factor formula at one horizon."""
+    return qm.config_digest(
+        {"name": candidate.name, "formula": candidate.formula, "dsl": candidate.dsl, "horizon": horizon}
+    )
+
+
+def admission_decision(deflated: float, *, currently_admitted: bool) -> bool:
+    """Hysteresis: admit at ``ADMIT_DEFLATED``, keep until below ``RETIRE_DEFLATED``."""
+    if currently_admitted:
+        return deflated >= RETIRE_DEFLATED
+    return deflated >= ADMIT_DEFLATED
+
+
+def _oriented(series: list[float]) -> list[float]:
+    """IC series signed so the factor's own direction is positive.
+
+    A factor with a negative mean IC is used inverted (Trader orients by IC),
+    so its evidence is the inverted series.
+    """
+    if not series:
+        return []
+    sign = -1.0 if float(np.nanmean(series)) < 0 else 1.0
+    return [sign * float(v) for v in series]
+
+
+def _deflated(oriented: list[float], n_eff: int) -> float:
+    """Deflated ICIR; a constant positive IC series (zero spread) is certain."""
+    clean = [v for v in oriented if np.isfinite(v)]
+    if len(clean) >= 3 and float(np.std(clean)) < 1e-12:
+        return 1.0 if float(np.mean(clean)) > 0 else 0.0
+    return float(qm.deflated_ic_sharpe(clean, n_trials=n_eff)) if clean else 0.0
+
+
+def admit_candidates(
+    db: Session, candidates: list[FactorCandidate], horizon: int
+) -> list[FactorCandidate]:
+    """Record each candidate as a miner trial, then admit or retire it.
+
+    Every candidate is recorded first (the first evaluation of a formula +
+    horizon is the trial; a later re-evaluation is the same row), so the N
+    each one is deflated against includes the whole batch. An admitted
+    candidate is persisted to ``FactorsLibrary``; an active factor whose
+    deflated ICIR falls below ``RETIRE_DEFLATED`` is retired. Sets
+    ``candidate.valid`` to the admission verdict. Returns *candidates*.
+    """
+    if not candidates:
+        return candidates
+    for candidate in candidates:
+        digest = miner_trial_hash(candidate, horizon)
+        oriented = _oriented(candidate.ic_series)
+        qm.record_trial(
+            db,
+            qm.ALPHACRAFTER_MINER_FAMILY,
+            digest,
+            {"name": candidate.name, "horizon": horizon, "series": oriented[-TRIAL_SERIES_OBS:]},
+            config_hash=digest,
+        )
+    db.commit()
+    n_eff = qm.effective_n_trials(db, (qm.ALPHACRAFTER_MINER_FAMILY,))
+    for candidate in candidates:
+        oriented = _oriented(candidate.ic_series)
+        deflated = _deflated(oriented, n_eff)
+        candidate.deflated_icir = deflated
+        active = db.execute(
+            select(FactorsLibrary).where(
+                FactorsLibrary.name == candidate.name, FactorsLibrary.retired_at.is_(None)
+            )
+        ).scalars().first()
+        admitted = admission_decision(deflated, currently_admitted=active is not None)
+        candidate.valid = admitted
+        candidate.validation_notes = (
+            f"{candidate.validation_notes}; deflated ICIR {deflated:.3f} at N_eff {n_eff}"
+            f" ({'admitted' if admitted else 'not admitted'})"
+        )
+        if admitted:
+            persist_candidate(db, candidate)
+        elif active is not None:
+            active.retired_at = datetime.now(UTC)
+            db.commit()
+            logger.info(
+                "Miner: retired factor %s (deflated ICIR %.3f < %.2f)",
+                candidate.name, deflated, RETIRE_DEFLATED,
+            )
+    return candidates
+
+
 def persist_candidate(db: Session, candidate: FactorCandidate) -> str:
     """Upsert a candidate into ``FactorsLibrary`` (by name, among active rows).
 
@@ -540,9 +646,8 @@ async def run_miner(
             min_ic=min_ic,
             min_icir=min_icir,
         )
-        if candidate.valid:
-            persist_candidate(db, candidate)
         candidates.append(candidate)
+    admit_candidates(db, candidates, horizon)
 
     # 2. LLM extra proposals (best-effort, fail-open)
     merged_extra = list(extra_factors or [])
@@ -556,8 +661,8 @@ async def run_miner(
         except Exception as exc:
             logger.warning("Miner: LLM proposal step timed out or failed (non-fatal): %s", exc)
 
-    for extra in merged_extra:
-        candidate = evaluate_candidate(
+    extra_candidates = [
+        evaluate_candidate(
             panel,
             name=extra.get("name", "unknown_extra"),
             formula=extra.get("formula", ""),
@@ -567,9 +672,10 @@ async def run_miner(
             min_ic=min_ic,
             min_icir=min_icir,
         )
-        if candidate.valid:
-            persist_candidate(db, candidate)
-        candidates.append(candidate)
+        for extra in merged_extra
+    ]
+    admit_candidates(db, extra_candidates, horizon)
+    candidates.extend(extra_candidates)
 
     candidates.sort(key=lambda c: abs(c.icir), reverse=True)
     return candidates

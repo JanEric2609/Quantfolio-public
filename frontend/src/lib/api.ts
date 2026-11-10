@@ -3317,6 +3317,11 @@ export interface PlanEvidence {
     unlocked: boolean;
     reason: string;
     gate: { computed_at: string | null; as_of: string | null; n_trials: number; stale: boolean } | null;
+    /** ADR 0025: the capital-ladder candidate that funds the satellite this month. */
+    ladder?: LadderFunding | null;
+    /** Its paper holdings in the satellite sleeve, scaled to the ladder weight. */
+    picks?: { ticker: string | null; isin: string | null; name: string; weight_pct: number; target_eur: number }[];
+    target_pct?: number;
   };
 }
 
@@ -3520,9 +3525,51 @@ export interface EvolutionLesson {
   created_at: string | null;
 }
 
+/** ADR 0025: the pre-registered paired promotion test and its latest result. */
+export interface EvolutionPairedTest {
+  rule: {
+    endpoint: string;
+    test: string;
+    overall_alpha: number;
+    nominal_alpha_per_look: number;
+    max_looks: number;
+    look_spacing_trading_days: number;
+    min_trading_days: number;
+    min_horizons: number;
+    min_pairs: number;
+    return_floor_annual: number;
+    mdd_slack: number;
+  };
+  last: {
+    verdict: string;
+    reason: string;
+    n_pairs: number;
+    n_dates: number;
+    horizons_resolved: number;
+    trading_days_since_spawn: number;
+    minimums: Record<string, boolean>;
+    mean_d: number | null;
+    dm_stat: number | null;
+    p_value: number | null;
+    look: number | null;
+    looks_done: number;
+    next_look_on: string | null;
+    nominal_alpha: number;
+    guardrails: {
+      return_diff_lower_90_annual?: number | null;
+      return_ok?: boolean;
+      mdd_champion?: number | null;
+      mdd_challenger?: number | null;
+      mdd_ok?: boolean;
+    };
+    mcnemar: { challenger_right: number; champion_right: number; p_value: number } | null;
+  } | null;
+}
+
 export interface EvolutionStatus {
   champion: EvolutionStrategy | null;
   challenger: EvolutionStrategy | null;
+  paired_test?: EvolutionPairedTest;
   rounds: {
     run_id: string;
     status: string;
@@ -3653,6 +3700,74 @@ export interface GraduatedRecommendationsResponse {
  *
  * @returns The current graduation status.
  */
+/** ADR 0025: one capital-ladder candidate (an epoch of a slot). */
+export interface LadderCandidateState {
+  candidate_id: string;
+  slot: "llm" | "rules" | string;
+  kind: string;
+  ref_id: string;
+  portfolio_id: string;
+  config_hash: string;
+  epoch: number;
+  pi: number;
+  born_at: string;
+  stage: number;
+  stage_name: string;
+  stage_since: string | null;
+  weight_pct: number;
+  e_skill: number;
+  e_harm: number;
+  thresholds: { earned: number; proven: number; harm: number };
+  tracking_error: number | null;
+  relative_drawdown: number;
+  drawdown_band: number | null;
+  days_of_evidence: number;
+  tuition_min_days: number;
+  brier: number | null;
+  vetoed: boolean;
+  next_stage: string | null;
+  next_step: string;
+  expires_at: string;
+  confidence_sequence: { alpha_low: number; alpha_high: number; level: number } | null;
+  bayes: {
+    prior_mean: number;
+    prior_sd: number;
+    posterior_mean: number;
+    posterior_sd: number;
+    quarter_kelly_weight: number;
+    note: string;
+  } | null;
+  history: { day: string; e_skill: number | null; e_harm: number | null; rel_drawdown: number | null; stage: number }[];
+}
+
+export interface LadderFunding {
+  candidate_id: string;
+  slot: string;
+  kind: string;
+  portfolio_id: string;
+  epoch: number;
+  stage: number;
+  stage_name: string;
+  e_skill: number;
+  weight_pct: number;
+  as_of: string;
+}
+
+export interface LadderState {
+  candidates: LadderCandidateState[];
+  funding: LadderFunding | null;
+  satellite_weight_pct: number;
+  epoch_guarantee: { earned_ever_max: number; proven_ever_max: number; earned_epoch1: number; proven_epoch1: number };
+  note: string;
+  estimate: boolean;
+  not_tax_advice: boolean;
+  not_financial_advice: boolean;
+}
+
+export async function getLadderState(): Promise<LadderState> {
+  return api<LadderState>("/api/graduation/ladder");
+}
+
 export async function getGraduationStatus(): Promise<GraduationStatus> {
   return api<GraduationStatus>("/api/graduation/status");
 }
@@ -3668,8 +3783,19 @@ export async function generateGraduatedRecommendations(): Promise<GraduatedRecom
 
 // --- ADR 0015 Phase 1/2: trial ledger evidence -----------------------------
 
+export interface NTrialsGateCount {
+  gate: string;
+  families: string[];
+  n_trials: number;
+  n_effective: number;
+}
+
 export interface NTrialsSummaryResponse {
-  /** What every Deflated Sharpe gate uses: the real ledger count. */
+  /** ADR 0025: trials per family (ac_trial_ledger as distinct hashes). */
+  by_family?: Record<string, number>;
+  /** ADR 0025: each gate's N, the families its candidate was selected from. */
+  gates?: NTrialsGateCount[];
+  /** Global total over every family: a conservative number no gate uses. */
   resolved: number;
   floor: number;
   raw_count: number;

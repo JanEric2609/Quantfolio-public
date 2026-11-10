@@ -21,6 +21,12 @@ def register_advisor_cycle_job(scheduler: Any | None = None) -> str:
     skipped via a configurable holiday list (public setting
     ``advisor_market_holidays`` or env ``ADVISOR_MARKET_HOLIDAYS``, both
     comma-separated ISO dates); no trade happens on closed days.
+
+    This is the one trigger for both advisor sleeves (ADR 0025): the champion
+    runs first, then the active challenger, each claiming its own sleeve's day,
+    then both write their shadow forecasts for the same shortlist. The first
+    run after deploy also ends the shared challenger sleeve (one-time). The
+    evolution round no longer runs cycles.
     """
 
     def advisor_cycle_inner() -> None:
@@ -31,6 +37,12 @@ def register_advisor_cycle_job(scheduler: Any | None = None) -> str:
         from app.foundation.core.db import SessionLocal
         from app.foundation.models.entities import User
         from app.decision.advisor.cycle import run_advisor_cycle
+        from app.decision.advisor.shadow import run_shadow_forecasts
+        from app.decision.advisor.strategy import (
+            get_active_challenger,
+            get_champion,
+            split_shared_challenger_sleeve,
+        )
         from app.foundation.settings import get_public_settings
 
         today = datetime.now(UTC).date()
@@ -50,15 +62,38 @@ def register_advisor_cycle_job(scheduler: Any | None = None) -> str:
                 return
             for user in db.query(User).all():
                 try:
-                    result = run_advisor_cycle(db, user.id)
-                    logger.info(
-                        "advisor_cycle user=%s status=%s trades=%d",
-                        user.id,
-                        result.get("status"),
-                        len(result.get("trades") or []),
-                    )
+                    # One-time (ADR 0025): end the shared challenger sleeve.
+                    split_shared_challenger_sleeve(db, user.id)
                 except Exception:
-                    logger.error("advisor_cycle failed for user %s", user.id, exc_info=True)
+                    logger.error("advisor_cycle: sleeve split failed for %s", user.id, exc_info=True)
+                    db.rollback()
+                for role, lookup in (("champion", get_champion), ("challenger", get_active_challenger)):
+                    try:
+                        strategy = lookup(db, user.id)
+                        if role == "challenger" and strategy is None:
+                            continue
+                        result = run_advisor_cycle(db, user.id, strategy=strategy)
+                        logger.info(
+                            "advisor_cycle user=%s role=%s status=%s trades=%d",
+                            user.id,
+                            role,
+                            result.get("status"),
+                            len(result.get("trades") or []),
+                        )
+                    except Exception:
+                        logger.error(
+                            "advisor_cycle %s failed for user %s", role, user.id, exc_info=True
+                        )
+                        db.rollback()
+                try:
+                    # After both sleeves ran: both forecast the same shortlist.
+                    strategies = [
+                        s for s in (get_champion(db, user.id), get_active_challenger(db, user.id))
+                        if s is not None
+                    ]
+                    run_shadow_forecasts(db, user.id, strategies)
+                except Exception:
+                    logger.error("advisor_cycle: shadow forecasts failed for %s", user.id, exc_info=True)
                     db.rollback()
         finally:
             db.close()
@@ -71,10 +106,10 @@ def register_advisor_cycle_job(scheduler: Any | None = None) -> str:
 def register_evolution_job(scheduler: Any | None = None) -> str:
     """Register the daily champion-vs-challenger evolution round (PR2 C4).
 
-    Runs Mon-Fri at 10:30 UTC, after the advisor cycle (whose champion run is
-    idempotent — the evolution round re-invoking it is a no-op). Each round
-    scores both sleeves on the 4-axis card, records the round, and
-    promotes/retires the challenger under the small-sample guard.
+    Runs Mon-Fri at 10:30 UTC. It runs no advisor cycle (ADR 0025): the
+    10:00 ``advisor_cycle`` job is the one trigger for both sleeves, and each
+    claims its own day. The round only scores both sleeves, decides
+    promote/retire/keep, and reflects lessons.
     """
 
     def evolution_inner() -> None:
@@ -85,8 +120,6 @@ def register_evolution_job(scheduler: Any | None = None) -> str:
         from app.foundation.core.db import SessionLocal
         from app.foundation.models.entities import User
         from app.decision.advisor.evolution import run_evolution_round
-        from app.decision.graduation.evaluator import evaluate_graduation
-        from app.decision.graduation.state import apply_graduation_state
         from app.foundation.settings import get_public_settings
 
         today = datetime.now(UTC).date()
@@ -114,10 +147,8 @@ def register_evolution_job(scheduler: Any | None = None) -> str:
                         summary.get("champion_score"),
                         summary.get("challenger_score"),
                     )
-                    # Graduation state stays authoritative; inbox-card
-                    # emission (emit_rec_cards) died with the review inbox.
-                    verdict = evaluate_graduation(db, user.id)
-                    apply_graduation_state(db, user.id, verdict)
+                    # The graduation state is written by the nightly capital
+                    # ladder job now (ADR 0025), not here.
                 except Exception:
                     logger.error("evolution_round failed for user %s", user.id, exc_info=True)
                     db.rollback()

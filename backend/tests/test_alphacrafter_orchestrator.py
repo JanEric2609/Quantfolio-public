@@ -133,8 +133,9 @@ class TestOrchestratorEndToEnd:
         db.add(AppSetting(key="alphacrafter_min_icir", value_json="0.0"))
         db.commit()
 
-        # Step 4: Seed bars for the universe (~120 days, 5 symbols).
-        universe = _seed_trend_bars(db, n_symbols=5, days=120)
+        # Step 4: Seed bars for the universe (~500 days, 5 symbols: enough history
+        # for a factor to clear the deflated admission of ADR 0025).
+        universe = _seed_trend_bars(db, n_symbols=5, days=500)
 
         # Step 3 + 5: Patch provider registry to avoid network, then run.
         with patch(
@@ -221,7 +222,7 @@ class TestPortfolioDossiers:
         db.add(AppSetting(key="alphacrafter_min_icir", value_json="0.0"))
         db.commit()
 
-        universe = _seed_trend_bars(db, n_symbols=5, days=120)
+        universe = _seed_trend_bars(db, n_symbols=5, days=500)
         # Make 3 of the 5 symbols portfolio holdings.
         holding_symbols = universe[1:4]
         _seed_portfolio_with_holdings(db, holding_symbols)
@@ -257,7 +258,7 @@ class TestAlphacrafterJobRun:
         db.add(AppSetting(key="alphacrafter_min_icir", value_json="0.0"))
         db.commit()
 
-        universe = _seed_trend_bars(db, n_symbols=5, days=120)
+        universe = _seed_trend_bars(db, n_symbols=5, days=500)
 
         # Create a job run row (as the API endpoint does).
         job_run_id = _uuid.uuid4().hex
@@ -314,7 +315,7 @@ class TestRunPipelineSharedMemory:
         db.add(AppSetting(key="alphacrafter_min_icir", value_json="0.0"))
         db.commit()
 
-        universe = _seed_trend_bars(db, n_symbols=5, days=120)
+        universe = _seed_trend_bars(db, n_symbols=5, days=500)
 
         job_run_id = _uuid.uuid4().hex
         job_run = AlphacrafterJobRun(
@@ -357,7 +358,7 @@ class TestRunPipelineSharedMemory:
         db.add(AppSetting(key="alphacrafter_min_icir", value_json="0.0"))
         db.commit()
 
-        universe = _seed_trend_bars(db, n_symbols=5, days=120)
+        universe = _seed_trend_bars(db, n_symbols=5, days=500)
 
         job_run_id = _uuid.uuid4().hex
         job_run = AlphacrafterJobRun(
@@ -405,7 +406,7 @@ class TestRunPipelineSharedMemory:
         db.add(AppSetting(key="alphacrafter_min_icir", value_json="0.0"))
         db.commit()
 
-        universe = _seed_trend_bars(db, n_symbols=5, days=120)
+        universe = _seed_trend_bars(db, n_symbols=5, days=500)
 
         with patch(
             "app.foundation.providers.registry.build_provider_registry",

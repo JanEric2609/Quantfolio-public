@@ -27,6 +27,7 @@ from app.decision.discover.jobs import (
 )
 from app.decision.discover.orchestrator import reap_stale_discover_runs
 from app.decision.crash_guard import register_crash_guard_job
+from app.decision.graduation.jobs import register_ladder_evidence_job
 from app.decision.monthly_plan_store import register_monthly_plan_snapshot_job
 from app.decision.trade_check import register_trade_check_job
 from app.decision.verification.jobs import (
@@ -1061,6 +1062,14 @@ def build_scheduler() -> Any:
         logger.exception("Failed to reap orphaned job runs")
 
     try:
+        from app.decision.advisor.cycle import reap_stale_cycle_claims
+
+        with SessionLocal() as db:
+            reap_stale_cycle_claims(db)
+    except Exception:
+        logger.exception("Failed to reap stale advisor cycle claims")
+
+    try:
         with SessionLocal() as db:
             reap_stale_job_runs(db)
     except Exception:
@@ -1131,6 +1140,7 @@ def build_scheduler() -> Any:
     register_watchlist_price_checker_job(scheduler)
     register_daily_position_snapshot_job(scheduler)
     register_crash_guard_job(scheduler)
+    register_ladder_evidence_job(scheduler)
     register_monthly_plan_snapshot_job(scheduler)
     register_trade_check_job(scheduler)
     register_snapshot_paper_portfolios_job(scheduler)

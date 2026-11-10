@@ -8,9 +8,12 @@ split into three sleeves (docs/archive/audits/2026-09-24-why-it-does-not-work §
 * **tilt** - documented factor premia via cheap UCITS ETFs, capped by the
   tracking-error budget ("tight" = 15 %). Allowed only once a prior-informed
   backtest on the JKP panel passes (Phase 3).
-* **satellite** - single stocks, capped at 10 %. Allowed only once a strategy
-  passes the hard DSR/PBO gate; bought in lumps large enough that DKB's flat
-  order fee stays small.
+* **satellite** - single stocks. Its target is what the capital ladder allows
+  (ADR 0025): 0 % on paper, a small tuition weight, then 10 % and 15 % as a
+  candidate's paper record builds evidence, never above ``plan_satellite_max_pct``
+  (the hard ceiling, 20 % by default). The picks are the funding candidate's
+  paper holdings, scaled to that weight; bought in lumps large enough that the
+  broker's flat order fee stays small.
 
 How new money reaches the book is the owner's choice (``plan_contribution_mode``,
 ``plan_broker``): a standing savings plan, or orders placed by hand each month,
@@ -36,8 +39,10 @@ one). Existing positions in a
 locked sleeve are left alone, never sold.
 
 Only evidence sets a target (report Phase 4): the tilt from a passing
-factor-premia card, the satellite from a passing evidence-gate run. Nothing
-else, the LLM loop included, emits target weights for the real book.
+factor-premia card, the satellite from the capital ladder (ADR 0025). The lab
+evidence gate no longer unlocks the satellite; it only decides whether a lab
+strategy may become a ladder candidate. Nothing else, the LLM loop included,
+emits target weights for the real book.
 
 Advisory only. Nothing here places orders.
 """
@@ -201,7 +206,7 @@ def plan_settings(db: Session) -> dict[str, Any]:
         "emergency_reserve_eur": max(0.0, _as_float(s.get("emergency_reserve_eur"), 0.0)),
         "contribution_eur": max(0.0, _as_float(s.get("monthly_contribution_eur"), 1000.0)),
         "tilt_max_pct": min(100.0, max(0.0, _as_float(s.get("plan_tilt_max_pct"), 15.0))),
-        "satellite_max_pct": min(100.0, max(0.0, _as_float(s.get("plan_satellite_max_pct"), 10.0))),
+        "satellite_max_pct": min(100.0, max(0.0, _as_float(s.get("plan_satellite_max_pct"), 20.0))),
         "min_order_eur": max(0.0, _as_float(s.get("plan_min_order_eur"), 1000.0)),
         "drift_band_pp": min(100.0, max(0.0, _as_float(s.get("plan_drift_band_pp"), 5.0))),
         "core_ticker": str(s.get("passive_core_ticker") or "EUNL.DE").upper(),
@@ -329,24 +334,60 @@ def _satellite_evidence(db: Session, now: datetime) -> tuple[bool, str, str | No
     return True, f"Unlocked{when}: {gate['reason']}", broker, fresh
 
 
-def evidence_state(db: Session, now: datetime | None = None) -> dict[str, Any]:
+def _ladder_satellite(
+    db: Session, user_id: str | None, now: datetime, cap_pct: float
+) -> tuple[float, str, dict[str, Any] | None]:
+    """(target percent, reason, funding) from the capital ladder (ADR 0025)."""
+    if user_id is None:
+        return 0.0, "No user: the capital ladder is per owner.", None
+    try:
+        from app.foundation.capital_ladder import ladder_funding
+
+        funding = ladder_funding(db, user_id, today=now.date())
+    except Exception:  # noqa: BLE001 - no ladder state means no satellite money
+        logger.error("monthly plan: capital ladder unavailable", exc_info=True)
+        return 0.0, "The capital ladder could not be read, so the satellite stays at 0 %.", None
+    if funding is None or funding["weight_pct"] <= 0:
+        return 0.0, (
+            "No candidate is past the Paper stage of the capital ladder, so stock picks get 0 %. "
+            "A candidate needs 126 trading days of paper returns against MSCI World with no harm signal."
+        ), funding
+    target = min(float(funding["weight_pct"]), cap_pct)
+    who = "the LLM advisor" if funding["slot"] == "llm" else "the rules control (Mandate B)"
+    capped = f", capped at your {cap_pct:g} % ceiling" if target < float(funding["weight_pct"]) else ""
+    return target, (
+        f"Capital ladder: {who} is at stage {funding['stage']} ({funding['stage_name']}) as of "
+        f"{funding['as_of']}, which allows {funding['weight_pct']:.1f} % in stock picks{capped}."
+    ), funding
+
+
+def evidence_state(db: Session, now: datetime | None = None, *, user_id: str | None = None) -> dict[str, Any]:
     """Which sleeves may receive money, and why.
 
-    The tilt reads the latest factor-premia evidence cards (Phase 3), the
-    satellite the latest evidence-gate run (Phase 4). This is the single seam
-    evidence is wired into: nothing else may set a target weight for the
-    real book.
+    The tilt reads the latest factor-premia evidence cards (Phase 3); the
+    satellite reads the capital ladder (ADR 0025) and needs *user_id*. The
+    latest lab evidence-gate run is still reported, for display. This is the
+    single seam evidence is wired into: nothing else may set a target weight
+    for the real book.
     """
-    tilt_unlocked, tilt_reason, tilt_passed = _tilt_evidence(db, plan_settings(db))
-    satellite_unlocked, satellite_reason, satellite_broker, gate = _satellite_evidence(db, now or datetime.now(UTC))
+    ref = now or datetime.now(UTC)
+    cfg = plan_settings(db)
+    tilt_unlocked, tilt_reason, tilt_passed = _tilt_evidence(db, cfg)
+    _gate_unlocked, gate_reason, gate_broker, gate = _satellite_evidence(db, ref)
+    target, reason, funding = _ladder_satellite(db, user_id, ref, cfg["satellite_max_pct"])
     return {
         "tilt_unlocked": tilt_unlocked,
         "tilt_reason": tilt_reason,
         "tilt_evidence_passed": tilt_passed,
-        "satellite_unlocked": satellite_unlocked,
-        "satellite_reason": satellite_reason,
-        "satellite_broker": satellite_broker,
+        "satellite_unlocked": target > 0,
+        "satellite_reason": reason,
+        "satellite_broker": gate_broker,
         "satellite_gate": gate,
+        # The lab gate no longer unlocks the satellite (ADR 0025); its verdict
+        # is still shown: it decides who may become a ladder candidate.
+        "satellite_gate_reason": gate_reason,
+        "satellite_target_pct": target,
+        "satellite_ladder": funding,
     }
 
 
@@ -718,26 +759,69 @@ def _round_eur(x: float) -> float:
 
 
 def sleeve_targets_from(cfg: dict[str, Any], evidence: dict[str, Any]) -> tuple[dict[str, float], dict[str, bool]]:
-    """Target percent and unlocked flag per sleeve: a sleeve without passing evidence is held at 0 %."""
+    """Target percent and unlocked flag per sleeve: a sleeve without passing evidence is held at 0 %.
+
+    The satellite's target is the capital ladder's weight (``satellite_target_pct``),
+    capped by ``plan_satellite_max_pct``.
+    """
     unlocked = {
         "core": True,
         "tilt": bool(evidence["tilt_unlocked"]),
         "satellite": bool(evidence["satellite_unlocked"]),
     }
+    satellite = float(evidence.get("satellite_target_pct", 0.0) or 0.0)
     targets = {
         "tilt": cfg["tilt_max_pct"] if unlocked["tilt"] else 0.0,
-        "satellite": cfg["satellite_max_pct"] if unlocked["satellite"] else 0.0,
+        # ADR 0025: the ladder's weight, never above the owner's ceiling.
+        "satellite": min(satellite, cfg["satellite_max_pct"]) if unlocked["satellite"] else 0.0,
     }
     targets["core"] = max(0.0, 100.0 - targets["tilt"] - targets["satellite"])
     return targets, unlocked
 
 
+#: The paper sleeves' satellite budget ceiling (percent of the book).
+PAPER_SATELLITE_MAX_PCT = 10.0
+
+
+def satellite_picks(
+    db: Session, funding: dict[str, Any] | None, target_pct: float, book_eur: float, cfg: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """The funding candidate's paper holdings in the satellite sleeve, scaled to *target_pct*."""
+    if not funding or target_pct <= 0:
+        return []
+    from app.foundation.models.entities import PaperHolding
+
+    rows = (
+        db.query(PaperHolding)
+        .filter(PaperHolding.portfolio_id == funding["portfolio_id"], PaperHolding.quantity > 0)
+        .all()
+    )
+    held: list[tuple[PaperHolding, float]] = []
+    for h in rows:
+        if classify((h.isin or "").upper(), cfg) != "satellite" or h.asset_type in ("etf", "fund", "cash"):
+            continue
+        held.append((h, float(h.quantity) * float(h.avg_buy_price)))
+    total = sum(v for _, v in held)
+    if total <= 0:
+        return []
+    return [
+        {
+            "ticker": h.ticker, "isin": h.isin, "name": h.name,
+            "weight_pct": round(target_pct * v / total, 3),
+            "target_eur": _round_eur(book_eur * target_pct / 100.0 * v / total),
+        }
+        for h, v in sorted(held, key=lambda hv: -hv[1])
+    ]
+
+
 def paper_plan_targets(db: Session) -> dict[str, Any]:
     """The plan bounds the paper sleeves' optimiser works inside (plan 2026-10-12, D5).
 
-    The satellite budget is ``plan_satellite_max_pct`` even while the real
-    satellite is locked: the paper experiment exists to measure Discover's
-    picks, and it can only do that if it may hold some. The core is held at
+    The satellite budget is ``plan_satellite_max_pct`` (at most
+    :data:`PAPER_SATELLITE_MAX_PCT`) even while the real satellite is locked:
+    the paper experiment exists to measure Discover's picks, and it can only do
+    that if it may hold some. The cap keeps the paper experiment where it was
+    when ADR 0025 raised the real-book ceiling's default from 10 to 20 %. The core is held at
     its target minus the drift band at least; each satellite name at 5 % of
     the book at most. Fractions of the invested book, for
     ``foundation.quant_proposal.build_trade_proposal(config={"plan_targets": ...})``.
@@ -748,7 +832,7 @@ def paper_plan_targets(db: Session) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 - evidence lookup must not stop a cycle
         tilt_unlocked = False
     tilt = cfg["tilt_max_pct"] if tilt_unlocked else 0.0
-    satellite = cfg["satellite_max_pct"]
+    satellite = min(cfg["satellite_max_pct"], PAPER_SATELLITE_MAX_PCT)
     core_target = max(0.0, 100.0 - tilt - satellite)
     return {
         "core_min": max(0.0, core_target - cfg["drift_band_pp"]) / 100.0,
@@ -768,7 +852,7 @@ def sleeve_plan(db: Session, user_id: str) -> dict[str, Any]:
     before the core is planned, exactly as in ``build_monthly_plan``.
     """
     cfg = plan_settings(db)
-    targets, unlocked = sleeve_targets_from(cfg, evidence_state(db))
+    targets, unlocked = sleeve_targets_from(cfg, evidence_state(db, user_id=user_id))
     other_budget = 0.0
     if cfg["contribution_mode"] != "manual_orders":
         holdings, _ = _holdings(db, user_id, cfg)
@@ -817,7 +901,7 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
     """Compute this month's plan for *user_id*. Read-only."""
     now = now or datetime.now(UTC)
     cfg = plan_settings(db)
-    evidence = evidence_state(db)
+    evidence = evidence_state(db, now, user_id=user_id)
     holdings, synced = _holdings(db, user_id, cfg)
 
     current = {k: 0.0 for k in SLEEVES}
@@ -1252,6 +1336,12 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
                 "unlocked": unlocked["satellite"],
                 "reason": evidence["satellite_reason"],
                 "gate": evidence.get("satellite_gate"),
+                "gate_reason": evidence.get("satellite_gate_reason"),
+                "ladder": evidence.get("satellite_ladder"),
+                "target_pct": targets["satellite"],
+                "picks": satellite_picks(
+                    db, evidence.get("satellite_ladder"), targets["satellite"], book + contribution, cfg
+                ),
             },
         },
         "actions": [asdict(a) for a in actions],
@@ -1270,6 +1360,9 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
         "notes": notes,
         "never_sells": not sales,
         "not_investment_advice": True,
+        "estimate": True,
+        "not_tax_advice": True,
+        "not_financial_advice": True,
         "suggested_funds": suggest_all(cfg["tilt_isins"], stored_peer_td(db), trading212_fund_isins(db)),
         "acc_dist_note": ACC_DIST_NOTE,
         "mix_note": MIX_NOTE,

@@ -46,6 +46,7 @@ def store_prediction(
     price_at_prediction: float | None = None,
     portfolio_id: str | None = None,
     provenance_json: dict[str, Any] | None = None,
+    strategy_id: str | None = None,
 ) -> DiscoveryPrediction:
     """Create and persist a single forward-prediction ledger row.
 
@@ -115,6 +116,7 @@ def store_prediction(
         is_financial_advice=False,
         config_id=config_id,
         portfolio_id=portfolio_id,
+        strategy_id=strategy_id,
         provenance_json=provenance_json,
     )
     db.add(prediction)

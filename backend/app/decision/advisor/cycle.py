@@ -5,7 +5,9 @@ hard risk gate (C2) → LLM decision within the envelope (C3) → paper trades �
 prediction ledger rows → NAV snapshot → audit-trail decision record.
 
 Paper trading is fully autonomous; nothing here touches real money (DKB stays
-read-only). Idempotent per day — safe to re-run.
+read-only). One run per sleeve per day: the cycle claims its day first, with a
+``running`` row that a partial unique index allows only once (ADR 0025), so a
+second trigger on the same day returns ``already_ran_today`` or ``in_progress``.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import (
@@ -24,6 +27,7 @@ from app.foundation.models.entities import (
     PaperPortfolio,
 )
 from app.foundation.models.entities._core import now_utc
+from app.foundation.models.entities.paper_portfolio import ADVISOR_CYCLE_SLOT_STATUSES
 from app.decision.advisor.costs import affordable_notional, resolve_fee_schedule, trade_fee
 from app.decision.advisor.decision import build_trade_proposal
 from app.decision.advisor.llm_decision import (
@@ -156,6 +160,12 @@ _RAN_TODAY_STATUSES = ("completed", "idle_no_candidates", "idle_no_trades")
 _MAX_FAILED_ATTEMPTS_PER_DAY = 3
 
 
+# A ``running`` claim older than this is a cycle whose worker died; the reaper
+# marks it failed so the slot frees (a healthy cycle takes at most ~40 min).
+STALE_CLAIM_HOURS = 2
+WORKER_RESTART_ERROR = "worker restart"
+
+
 def _already_ran_today(db: Session, portfolio_id: str, mandate: str = ADVISOR_MANDATE) -> bool:
     today_start = now_utc().replace(hour=0, minute=0, second=0, microsecond=0)
     statuses = [
@@ -171,6 +181,87 @@ def _already_ran_today(db: Session, portfolio_id: str, mandate: str = ADVISOR_MA
     if any(status in _RAN_TODAY_STATUSES for status in statuses):
         return True
     return sum(1 for status in statuses if status == "failed") >= _MAX_FAILED_ATTEMPTS_PER_DAY
+
+
+def _claim_cycle(
+    db: Session, portfolio_id: str, mandate: str
+) -> tuple[LlmPortfolioDecision | None, str | None]:
+    """Claim today's cycle slot for one sleeve before any work is done.
+
+    Inserts a ``running`` row carrying today's ``cycle_date`` and commits it at
+    once. The partial unique index ``uq_llm_decision_cycle_slot`` lets only one
+    such row (running or terminal) exist per sleeve per day, so two triggers
+    racing each other cannot both run: the loser gets an ``IntegrityError``.
+
+    Returns ``(row, None)`` on success, else ``(None, status)`` with status
+    ``already_ran_today`` or ``in_progress``. The check-then-act test
+    ``_already_ran_today`` stays in front: it covers rows written before
+    ``cycle_date`` existed and keeps the failed-attempt cap.
+    """
+    if _already_ran_today(db, portfolio_id, mandate):
+        return None, "already_ran_today"
+    now = now_utc()
+    row = LlmPortfolioDecision(
+        portfolio_id=portfolio_id,
+        review_date=now,
+        mandate=mandate,
+        decision_json="{}",
+        status="running",
+        cycle_date=now.date(),
+    )
+    db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        holder = (
+            db.query(LlmPortfolioDecision.status)
+            .filter(
+                LlmPortfolioDecision.portfolio_id == portfolio_id,
+                LlmPortfolioDecision.mandate == mandate,
+                LlmPortfolioDecision.cycle_date == now.date(),
+                LlmPortfolioDecision.status.in_(ADVISOR_CYCLE_SLOT_STATUSES),
+            )
+            .first()
+        )
+        if holder is not None and holder[0] == "running":
+            return None, "in_progress"
+        return None, "already_ran_today"
+    return row, None
+
+
+def reap_stale_cycle_claims(db: Session, *, now: datetime | None = None) -> int:
+    """Mark ``running`` cycle claims left by a dead worker as ``failed``.
+
+    Called at worker start next to ``reap_orphaned_job_runs``. A claim older
+    than :data:`STALE_CLAIM_HOURS`, or from before today, cannot belong to a
+    live cycle; ``failed`` is outside the slot index, so the day frees.
+    """
+    ref = now or now_utc()
+    cutoff = ref - timedelta(hours=STALE_CLAIM_HOURS)
+    rows = (
+        db.query(LlmPortfolioDecision)
+        .filter(
+            LlmPortfolioDecision.status == "running",
+            LlmPortfolioDecision.cycle_date.isnot(None),
+        )
+        .all()
+    )
+    reaped = 0
+    for row in rows:
+        stamp = row.review_date
+        if stamp is not None and stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=UTC)
+        if (stamp is not None and stamp < cutoff) or (
+            row.cycle_date is not None and row.cycle_date < ref.date()
+        ):
+            row.status = "failed"
+            row.error = WORKER_RESTART_ERROR
+            reaped += 1
+    if reaped:
+        db.commit()
+        logger.warning("Reaped %d stale advisor cycle claim(s)", reaped)
+    return reaped
 
 
 class PlannedTrade:
@@ -597,6 +688,7 @@ def _record_cycle(
     *,
     status: str,
     error: str | None = None,
+    claim: LlmPortfolioDecision | None = None,
 ) -> LlmPortfolioDecision:
     """Persist the audit row for one cycle.
 
@@ -604,16 +696,19 @@ def _record_cycle(
     early return that wrote nothing left the UI showing the last successful
     cycle indefinitely, so a loop starved of candidates was indistinguishable
     from a loop that was working.
+
+    With *claim* (the ``running`` row from :func:`_claim_cycle`) the claim row
+    is finished in place instead of a second row being inserted. ``failed``
+    frees the day's slot, since it is outside the index predicate.
     """
-    row = LlmPortfolioDecision(
-        portfolio_id=portfolio.id,
-        review_date=now_utc(),
-        mandate=mandate,
-        decision_json=json.dumps(payload, default=str),
-        status=status,
-        error=error,
-    )
-    db.add(row)
+    row = claim
+    if row is None:
+        row = LlmPortfolioDecision(portfolio_id=portfolio.id, mandate=mandate)
+        db.add(row)
+    row.review_date = now_utc()
+    row.decision_json = json.dumps(payload, default=str)
+    row.status = status
+    row.error = error
     db.commit()
     return row
 
@@ -631,7 +726,9 @@ def run_advisor_cycle(
     Returns a CycleResult dict:
         ``{status, portfolio_id, trades, predictions, blocked, errors, snapshot}``
 
-    Idempotent per day — a completed decision record for today short-circuits.
+    One run per sleeve per day: the day is claimed first (:func:`_claim_cycle`);
+    a second call returns ``already_ran_today``, or ``in_progress`` while the
+    first is still running.
 
     When *strategy* (an ``AdvisorStrategy``) is given, the cycle drives that
     strategy's sleeve with its config (prompt framing, risk ceilings, breadth)
@@ -672,15 +769,52 @@ def run_advisor_cycle(
     }
     config = merged_config
 
-    from app.decision.advisor.reflection import get_active_lessons, track_record_stats
+    from app.decision.advisor.reflection import get_active_lessons
 
     lessons: list[str] = []
     if strategy is not None:
         lessons = get_active_lessons(db, strategy.id)
 
-    if _already_ran_today(db, portfolio.id, mandate):
-        result["status"] = "already_ran_today"
+    claim, claim_status = _claim_cycle(db, portfolio.id, mandate)
+    if claim is None:
+        result["status"] = claim_status
         return result
+
+    try:
+        return _run_claimed_cycle(
+            db, user_id, result, portfolio=portfolio, mandate=mandate, config=config,
+            strategy=strategy, lessons=lessons, llm_call=llm_call, claim=claim,
+        )
+    except Exception as exc:
+        # The claim must not stay ``running``: mark it failed (which frees the
+        # slot for a retry, within the failed-attempt cap) and re-raise.
+        db.rollback()
+        try:
+            claim.status = "failed"
+            claim.error = f"{type(exc).__name__}: {exc}"[:2000]
+            claim.review_date = now_utc()
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.error("advisor cycle: could not mark claim %s failed", claim.id, exc_info=True)
+        raise
+
+
+def _run_claimed_cycle(
+    db: Session,
+    user_id: str,
+    result: dict[str, Any],
+    *,
+    portfolio: PaperPortfolio,
+    mandate: str,
+    config: dict[str, Any],
+    strategy: Any | None,
+    lessons: list[str],
+    llm_call: Callable[[Session, list[dict[str, str]]], str] | None,
+    claim: LlmPortfolioDecision,
+) -> dict[str, Any]:
+    """The cycle body, run only after :func:`_claim_cycle` won today's slot."""
+    from app.decision.advisor.reflection import track_record_stats
 
     candidates, run_id, stale = _latest_candidates(db, user_id)
     if stale and run_id is not None:
@@ -711,6 +845,7 @@ def run_advisor_cycle(
             },
             status="idle_no_candidates",
             error=reason,
+            claim=claim,
         )
         logger.warning("advisor cycle for user %s: no candidates — nothing to trade", user_id)
         return result
@@ -1058,6 +1193,7 @@ def run_advisor_cycle(
             mc_prob_positive=mc.prob_positive if mc else None,
             price_at_prediction=price,
             portfolio_id=portfolio.id,
+            strategy_id=strategy.id if strategy is not None else None,
             provenance_json={
                 **stamp,
                 "decision_sha256": provenance.canonical_hash(asdict(decision)),
@@ -1148,6 +1284,7 @@ def run_advisor_cycle(
         },
         status=cycle_status,
         error="; ".join(result["errors"]) if result["errors"] else None,
+        claim=claim,
     )
 
     result["status"] = result_status

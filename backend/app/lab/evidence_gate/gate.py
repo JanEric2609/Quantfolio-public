@@ -39,8 +39,9 @@ from app.foundation.models.entities._core import now_utc
 from app.foundation.quant_metrics import (
     deflated_sharpe_ratio,
     newey_west_t_stat,
+    LAB_FAMILIES,
+    effective_n_trials,
     probability_of_backtest_overfitting,
-    resolve_n_trials,
     sharpe_ratio,
 )
 from app.lab import pooled_model, satellite
@@ -224,7 +225,9 @@ def run_evidence_gate(
         logger.warning("evidence_gate: no results for region %s; run pooled_model and satellite first", region)
         return None
 
-    n_trials = resolve_n_trials(db)
+    # ADR 0025: N is the sum of N_eff over the lab study families the graded
+    # strategies were selected from, not the global ledger total.
+    n_trials = effective_n_trials(db, LAB_FAMILIES)
     mined_models = set(pooled_model.MODELS)
     families: list[Family] = []
     if pooled is not None:

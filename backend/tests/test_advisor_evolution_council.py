@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from conftest import _memory_db
+from promotion_helpers import seed_paired_history
 
 from app.foundation.models.entities import CompetitionDecision, CompetitionRun, DiscoveryPrediction, PaperSnapshot, User
 from app.decision.advisor.evolution import _run_competition_council, run_evolution_round
@@ -49,7 +50,9 @@ def _user(db, name="jan") -> User:
 
 def _seed_sleeve(db, user: User, portfolio_id: str, *, good: bool, n_preds: int = 6) -> None:
     today = date.today()
-    for i in range(30):
+    # 31 snapshots (through today) = the 30 returns the ratio axes need; the
+    # evolution round no longer runs a cycle that would add today's (ADR 0025).
+    for i in range(31):
         nav = 100_000 * (1 + (0.004 if good else -0.01)) ** i
         db.add(PaperSnapshot(
             id=uuid4().hex, portfolio_id=portfolio_id,
@@ -145,8 +148,7 @@ def test_run_evolution_round_populates_council_result_json_without_changing_prom
     user = _user(db)
     champion = ensure_champion(db, user.id)
     challenger = spawn_challenger(db, user.id, seed=1)
-    _seed_sleeve(db, user, champion.portfolio_id, good=False)
-    _seed_sleeve(db, user, challenger.portfolio_id, good=True)
+    seed_paired_history(db, user.id, champion, challenger, challenger_edge=0.3)
 
     fake_result = _fake_competition_result(champion.portfolio_id, challenger.portfolio_id)
 
@@ -154,9 +156,9 @@ def test_run_evolution_round_populates_council_result_json_without_changing_prom
         "app.decision.llm_portfolio.agents.orchestrator.CompetitionOrchestrator.run_competition",
         new=AsyncMock(return_value=fake_result),
     ):
-        summary = run_evolution_round(db, user.id, min_resolved=5, reflect=False)
+        summary = run_evolution_round(db, user.id, reflect=False)
 
-    # Promotion behaviour is exactly as the pre-existing (council-less) tests expect.
+    # Promotion follows the paired test (ADR 0025), never the council.
     assert summary["verdict"] == "promote"
     assert summary["promoted_strategy_id"] == challenger.id
 

@@ -397,7 +397,7 @@ def test_a_sale_starts_at_the_depot_with_the_smallest_gain_per_euro(monkeypatch)
     ))
     _scalable(db, user_id, plans=[], positions=((MOMENTUM, "World Momentum", 10_000.0, 9_500.0),))  # 5 %
     upsert_public_settings(db, {"plan_tilt_isins": MOMENTUM})
-    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db: {
+    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db, *a, **k: {
         "tilt_unlocked": True, "tilt_reason": "", "satellite_unlocked": False, "satellite_reason": "locked",
     })
 
@@ -481,7 +481,7 @@ def test_each_one_off_order_keeps_its_own_fee_at_one_percent(monkeypatch):
     _tagesgeld(db, user_id, 1_500.0)
     upsert_public_settings(db, {"emergency_reserve_eur": 500, "plan_tilt_isins": f"{MOMENTUM},IE00BP3QZB59",
                                 "monthly_contribution_eur": 0})
-    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db: {
+    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db, *a, **k: {
         "tilt_unlocked": True, "tilt_reason": "", "satellite_unlocked": False, "satellite_reason": "locked",
     })
 
@@ -499,8 +499,8 @@ def test_a_one_off_stock_order_is_checked_at_the_satellite_broker(monkeypatch):
     _scalable(db, user_id, plans=[], overnight=2_500.0, buying_power="0")
     upsert_public_settings(db, {"emergency_reserve_eur": 500, "plan_min_order_eur": 100,
                                 "monthly_contribution_eur": 0})
-    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db: {
-        "tilt_unlocked": False, "tilt_reason": "locked", "satellite_unlocked": True, "satellite_reason": "",
+    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db, *a, **k: {
+        "tilt_unlocked": False, "tilt_reason": "locked", "satellite_unlocked": True, "satellite_reason": "", "satellite_target_pct": 10.0,
         "satellite_broker": "dkb",
     })
 
@@ -540,7 +540,7 @@ def test_a_sale_names_the_depot_when_one_broker_holds_the_fund_twice(monkeypatch
         ))
     db.commit()
     upsert_public_settings(db, {"plan_tilt_isins": MOMENTUM})
-    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db: {
+    monkeypatch.setattr(monthly_plan, "evidence_state", lambda db, *a, **k: {
         "tilt_unlocked": True, "tilt_reason": "", "satellite_unlocked": False, "satellite_reason": "locked",
     })
 
