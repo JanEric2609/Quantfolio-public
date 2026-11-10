@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.foundation.live_positions import synced_cash
 from app.foundation.models.entities import PaperPortfolio
 from app.foundation.models.entities._core import now_utc
+from app.decision.llm_portfolio.rules import RULES_CONFIG, RULES_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -20,18 +21,13 @@ _MANDATE_CONFIGS: dict[str, dict[str, Any]] = {
         "min_etf_pct": 0.40,
         "rebalance_threshold": 0.10,
     },
-    "B": {
-        "style": "momentum_tilted",
-        "max_single_position_pct": 0.20,
-        "min_etf_pct": 0.30,
-        "momentum_lookback_months": 6,
-        "rebalance_threshold": 0.15,
-    },
+    # The rules control (2026-11-09): same limits as A, chosen by fixed rules.
+    "B": RULES_CONFIG,
 }
 
 _MANDATE_NAMES: dict[str, str] = {
     "A": "Mandate A — Balanced Improver",
-    "B": "Mandate B — Momentum Tilted",
+    "B": RULES_NAME,
 }
 
 

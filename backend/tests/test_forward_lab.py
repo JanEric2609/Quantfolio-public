@@ -313,9 +313,47 @@ def test_news_night_rates_us_members_and_skips_failures(monkeypatch):
     monkeypatch.setattr(news_tone, "_rate", fake_rate)
     monkeypatch.setattr(news_tone, "FETCH_PAUSE_S", 0.0)
     out = news_tone.run_nightly(db, now=now)
-    assert out["members"] == 3  # SAP.DE is not a US listing
+    assert out["members"] == 4  # SAP.DE has no GDELT headline, so it is skipped
     assert out["rated"] == 1 and out["failed"] == 1 and out["with_news"] == 2
     row = db.query(NewsToneScore).one()
     assert row.symbol == "AAPL" and row.tone == pytest.approx(0.6) and row.events_json == {"product": 1}
+    assert row.source == "finnhub"
     # Masked before the model saw it.
     assert all("AAPL" not in h for h in calls[0])
+
+
+def test_news_night_reads_8k_items_and_gdelt_headlines(monkeypatch):
+    from app.foundation.models.entities import NewsMention, Sec8kEvent
+
+    db = _memory_db()
+    for sym, name in (("AAPL", "APPLE INC"), ("SAP.DE", "SAP SE"), ("XOM", "EXXON MOBIL CORP")):
+        db.add(IndexUniverseMember(index_key="msci_world", isin=f"XX{sym:0>10}"[:12], name=name, symbol=sym, symbol_ok=True))
+    now = datetime(2026, 11, 10, 5, tzinfo=UTC)
+    seen = now - timedelta(hours=3)
+    db.add(Sec8kEvent(accession="0000320193-26-000001", symbol="AAPL", cik="0000320193", form="8-K",
+                      filed_on=seen.date(), accepted_at=seen, items="4.02,9.01"))
+    # Routine items only: nothing for the model to read.
+    db.add(Sec8kEvent(accession="0000034088-26-000001", symbol="XOM", cik="0000034088", form="8-K",
+                      filed_on=seen.date(), accepted_at=seen, items="2.02,9.01"))
+    db.add(NewsMention(symbol="SAP.DE", day=seen.date(), seen_at=seen, source="gdelt", url="u",
+                       title="SAP hebt Prognose an", title_key="sap hebt prognose an"))
+    # Outside the window.
+    db.add(NewsMention(symbol="SAP.DE", day=(now - timedelta(days=3)).date(), seen_at=now - timedelta(days=3),
+                       source="gdelt", url="u2", title="SAP old", title_key="sap old"))
+    db.commit()
+    calls: dict[str, list[str]] = {}
+
+    async def fake_rate(_db, headlines):
+        calls[str(len(calls))] = headlines
+        return [news_tone._Rating(i=i, tone=-0.5, event="legal") for i in range(len(headlines))], "qwen"
+
+    monkeypatch.setattr(news_tone, "_finnhub", lambda _db: None)
+    monkeypatch.setattr(news_tone, "_rate", fake_rate)
+    out = news_tone.run_nightly(db, now=now)
+    assert out["rated"] == 2 and out["by_source"] == {"sec": 1, "gdelt": 1}
+    rows = {r.symbol: r for r in db.query(NewsToneScore)}
+    assert set(rows) == {"AAPL", "SAP.DE"}
+    assert rows["AAPL"].source == "sec" and rows["SAP.DE"].source == "gdelt" and rows["SAP.DE"].n_headlines == 1
+    texts = [h for hs in calls.values() for h in hs]
+    assert any("can no longer be relied on" in h for h in texts)
+    assert all("SAP" not in h for h in texts)  # masked

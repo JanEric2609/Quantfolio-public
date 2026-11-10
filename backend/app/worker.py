@@ -541,12 +541,59 @@ def register_insider_trading_refresh_job(scheduler: Any | None = None) -> str:
         from app.foundation.data_engineering.sec_edgar_insider import refresh_insider_trading
 
         with SessionLocal() as db:
-            refresh_insider_trading(db)
+            try:
+                refresh_insider_trading(db)
+            finally:
+                # Same daily index, same SEC rate limit: the 8-K item codes
+                # the 05:00 headline reading and Discover's dossiers use.
+                from app.foundation.data_engineering.sec_8k import refresh_8k_events
+
+                try:
+                    refresh_8k_events(db)
+                except Exception:  # noqa: BLE001 - logged; tomorrow's run catches up
+                    logger.exception("sec_8k refresh failed")
 
     return register_cron_job(
         "insider_trading_refresh", insider_trading_refresh_inner,
         scheduler=scheduler, hour=4, minute=15,
     )
+
+
+def register_gdelt_news_job(scheduler: Any | None = None) -> str:
+    """Register the nightly GDELT headline read for non-US members (04:00 UTC).
+
+    Reads GDELT's 15-minute files since the last run and keeps the articles
+    that name a non-US MSCI World member in the title
+    (``data_engineering.gdelt_news``); the 05:00 headline reading rates them.
+    """
+
+    def gdelt_news_inner() -> None:
+        from app.foundation.core.db import SessionLocal
+        from app.foundation.data_engineering.gdelt_news import refresh_gdelt_news
+
+        with SessionLocal() as db:
+            refresh_gdelt_news(db)
+
+    return register_cron_job("gdelt_news_refresh", gdelt_news_inner, scheduler=scheduler, hour=4, minute=0)
+
+
+def register_price_cross_check_job(scheduler: Any | None = None) -> str:
+    """Register the nightly second-source price check (04:20 UTC).
+
+    After most of the universe prefetch (01:15) has stored the previous day's
+    bars and before the forward lab (04:30) reads them: every US series
+    against Alpaca, 18 other series a night against EODHD; a confirmed split
+    or scale error triggers a re-pull (``data_backbone.cross_check``).
+    """
+
+    def price_cross_check_inner() -> None:
+        from app.foundation.core.db import SessionLocal
+        from app.foundation.data_backbone.cross_check import run_cross_check
+
+        with SessionLocal() as db:
+            run_cross_check(db)
+
+    return register_cron_job("price_cross_check", price_cross_check_inner, scheduler=scheduler, hour=4, minute=20)
 
 
 def register_index_currency_weights_job(scheduler: Any | None = None) -> str:
@@ -1070,6 +1117,8 @@ def build_scheduler() -> Any:
     register_listing_currency_audit_job(scheduler)
     register_index_currency_weights_job(scheduler)
     register_insider_trading_refresh_job(scheduler)
+    register_gdelt_news_job(scheduler)
+    register_price_cross_check_job(scheduler)
     register_price_backfill_daily_job(scheduler)
     register_bar_repull_job(scheduler)
     # Read-only and TAN-free, unlike DKB; wakes hourly, syncs per scalable_sync_hours.

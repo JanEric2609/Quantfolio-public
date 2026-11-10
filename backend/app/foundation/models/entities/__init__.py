@@ -70,6 +70,11 @@ from .dkb import (
     DkbTransaction as DkbTransaction,
     PositionSnapshot as PositionSnapshot,
 )
+from .data_quality import (
+    NewsMention as NewsMention,
+    PriceCrossCheck as PriceCrossCheck,
+    Sec8kEvent as Sec8kEvent,
+)
 from .embedding import Embedding as Embedding, FinAgentRun as FinAgentRun
 from .forward_lab import (
     ForwardLabDaily as ForwardLabDaily,

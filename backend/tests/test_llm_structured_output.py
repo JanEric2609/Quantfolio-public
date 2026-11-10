@@ -317,7 +317,7 @@ def test_lesson_schema_declares_the_tag_keys_the_parser_reads():
     """llama.cpp's schema→GBNF converter needs concrete properties, not free-form."""
     tags = LESSON_JSON_SCHEMA["properties"]["lessons"]["items"]["properties"]["tags"]
     assert set(tags["properties"]) == {"signals", "regime", "sectors"}
-    assert LESSON_JSON_SCHEMA["properties"]["lessons"]["items"]["required"] == ["lesson"]
+    assert LESSON_JSON_SCHEMA["properties"]["lessons"]["items"]["required"] == ["lesson", "stat", "verdict"]
 
 
 def test_lesson_schema_bounds_every_free_text_field():

@@ -21,10 +21,14 @@ predictability from GPT-3.5/4 ratings but none from small older models
 Qwen3 8B classify financial sentiment better than FinBERT. Whether a 9B
 model's ratings predict returns is open: the lab measures it.
 
-Source. Finnhub's company news (the key the app already uses); its free tier
-covers US listings only, so the signal is measured on the US members (about
-70 % of MSCI World). Yahoo's news endpoint refused requests at the time of
-writing (2026-11-08).
+Sources (``news_tone_scores.source``). US members: Finnhub's company news
+(the key the app already uses; its free tier refuses other listings) plus one
+line per material 8-K item the company filed in the window
+(``foundation.data_engineering.sec_8k``), read first because it is the
+company's own statement. Other members: GDELT's headlines that name the
+company in the title (``foundation.data_engineering.gdelt_news``, read at
+04:00), often in the original language, which the model reads as well. Yahoo's
+news endpoint refused requests at the time of writing (2026-11-08).
 """
 from __future__ import annotations
 
@@ -124,14 +128,21 @@ def parse_ratings(raw: str, n: int) -> list[_Rating]:
 
 def _headlines(rows: list[dict[str, Any]], start: datetime, end: datetime) -> list[str]:
     picked: list[tuple[datetime, str]] = []
-    seen: set[str] = set()
     for row in rows:
-        title = str(row.get("title") or "").strip()
         ts = row.get("published_at")
-        if not title or ts is None:
-            continue
         when = datetime.fromtimestamp(float(ts), UTC) if isinstance(ts, int | float) else None
-        if when is None or not (start <= when < end) or title.lower() in seen:
+        if when is not None:
+            picked.append((when, str(row.get("title") or "")))
+    return _newest(picked, start, end)
+
+
+def _newest(items: list[tuple[datetime, str]], start: datetime, end: datetime) -> list[str]:
+    """The newest :data:`MAX_HEADLINES` distinct titles dated in [start, end)."""
+    picked: list[tuple[datetime, str]] = []
+    seen: set[str] = set()
+    for when, raw in items:
+        title = raw.strip()
+        if not title or not (start <= when < end) or title.lower() in seen:
             continue
         seen.add(title.lower())
         picked.append((when, title[:300]))
@@ -158,21 +169,29 @@ async def _rate(db: Session, headlines: list[str]) -> tuple[list[_Rating], str |
 
 
 def run_nightly(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
-    """Read and rate the last day's headlines of every US member; one row per stock with news."""
+    """Read and rate the last day's headlines of every member; one row per stock with news."""
     return asyncio.run(_run(db, now or datetime.now(UTC)))
 
 
 async def _run(db: Session, now: datetime) -> dict[str, Any]:
     # One event loop for the whole night: the LLM router keeps its queue on it.
+    from app.foundation.data_engineering.gdelt_news import headlines_between
+    from app.foundation.data_engineering.sec_8k import events_between
+
     day: date = now.date()
     provider = _finnhub(db)
-    if provider is None:
-        return {"status": "no_finnhub_key"}
     done = {s for (s,) in db.query(NewsToneScore.symbol).filter(NewsToneScore.day == day)}
-    members = [m for m in universe_symbols(db) if m.symbol and is_us_listing(m.symbol)]
+    members = [m for m in universe_symbols(db) if m.symbol]
+    us = [m.symbol for m in members if m.symbol and is_us_listing(m.symbol)]
+    other = [m.symbol for m in members if m.symbol and not is_us_listing(m.symbol)]
     start, end = now - timedelta(hours=WINDOW_HOURS), now
+    filings = events_between(db, us, start, end)
+    gdelt = headlines_between(db, other, start, end)
     began = time.monotonic()
-    stats: dict[str, Any] = {"members": len(members), "with_news": 0, "rated": 0, "failed": 0, "stopped_early": False}
+    stats: dict[str, Any] = {
+        "members": len(members), "finnhub": provider is not None, "with_news": 0, "rated": 0, "failed": 0,
+        "stopped_early": False, "by_source": {},
+    }
     failures_in_row = 0
     for member in members:
         sym = member.symbol
@@ -181,11 +200,27 @@ async def _run(db: Session, now: datetime) -> dict[str, Any]:
         if time.monotonic() - began > MAX_RUNTIME_S or failures_in_row >= MAX_CONSECUTIVE_FAILURES:
             stats["stopped_early"] = True
             break
-        result = provider.get_news(sym, limit=50)
-        await asyncio.sleep(FETCH_PAUSE_S)
-        titles = _headlines((result.get("data") or []) if result.get("ok") else [], start, end)
+        sources: list[str] = []
+        titles: list[str] = []
+        if is_us_listing(sym):
+            if sym in filings:
+                titles.extend(filings[sym])
+                sources.append("sec")
+            if provider is not None:
+                result = provider.get_news(sym, limit=50)
+                await asyncio.sleep(FETCH_PAUSE_S)
+                news = _headlines((result.get("data") or []) if result.get("ok") else [], start, end)
+                if news:
+                    titles.extend(news)
+                    sources.append("finnhub")
+        elif sym in gdelt:
+            titles = _newest(gdelt[sym], start, end)
+            sources = ["gdelt"] if titles else []
+        titles = titles[:MAX_HEADLINES]
         if not titles:
             continue
+        source = "+".join(sorted(sources))
+        stats["by_source"][source] = stats["by_source"].get(source, 0) + 1
         stats["with_news"] += 1
         masked = [_mask(t, sym, member.name) for t in titles]
         try:
@@ -205,7 +240,7 @@ async def _run(db: Session, now: datetime) -> dict[str, Any]:
             events[r.event] = events.get(r.event, 0) + 1
         db.add(NewsToneScore(
             symbol=sym, day=day, tone=sum(r.tone for r in ratings) / len(ratings),
-            n_headlines=len(ratings), events_json=events, model=model,
+            n_headlines=len(ratings), events_json=events, model=model, source=source,
         ))
         db.commit()
         stats["rated"] += 1

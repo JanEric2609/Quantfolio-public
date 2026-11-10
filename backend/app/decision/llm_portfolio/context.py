@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app.foundation.live_positions import live_prices_by_isin
 from app.foundation.models.entities import (
-    DiscoverCandidate,
     LlmPortfolioDecision,
     PaperHolding,
     PaperPortfolio,
@@ -292,25 +291,12 @@ def _build_regime_block(db: Session, portfolio_id: str) -> dict[str, Any]:
 
 
 def _build_discover_block(db: Session) -> list[dict[str, Any]]:
-    """Latest DiscoverCandidate shortlist (stage='shortlisted', limit 10)."""
+    """The newest completed Discover run's shortlist (at most 10)."""
+    from app.decision.llm_portfolio.shortlist import shortlist_dicts
+
     try:
         with db.begin_nested():
-            rows = (
-                db.query(DiscoverCandidate)
-                .filter(DiscoverCandidate.status == "shortlisted")
-                .order_by(DiscoverCandidate.id.desc())
-                .limit(10)
-                .all()
-            )
-        return [
-            {
-                "symbol": r.symbol,
-                "name": r.name,
-                "isin": r.isin,
-                "scores_json": r.scores_json,
-            }
-            for r in rows
-        ]
+            return shortlist_dicts(db, limit=10)
     except Exception as exc:
         logger.warning("Discover block failed: %s", exc)
         return []

@@ -672,10 +672,10 @@ def run_advisor_cycle(
     }
     config = merged_config
 
+    from app.decision.advisor.reflection import get_active_lessons, track_record_stats
+
     lessons: list[str] = []
     if strategy is not None:
-        from app.decision.advisor.reflection import get_active_lessons
-
         lessons = get_active_lessons(db, strategy.id)
 
     if _already_ran_today(db, portfolio.id, mandate):
@@ -804,6 +804,7 @@ def run_advisor_cycle(
         proposal,
         gate_result,
         lessons=lessons,
+        track_record=track_record_stats(db, user_id, portfolio.id),
         llm_call=llm_call,
         system_suffix=(config or {}).get("prompt_framing"),
         cash_eur=cash_balance,

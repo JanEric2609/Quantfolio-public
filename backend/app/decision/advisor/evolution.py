@@ -69,11 +69,10 @@ def composite_score(scorecard: AdvisorScorecard | None) -> tuple[float | None, d
       excess) Sharpe, accounting for sample size/skew/kurtosis. Falls back
       to sigmoid(sharpe) only for scorecard rows computed before PSR existed
       (``scorecard.psr is None`` but ``scorecard.sharpe`` is set).
-    - calibration: 1 − bucketed RPS (F11), floored at 0. RPS checks whether
-      the predicted p5/p95 magnitude band actually captured the realised
-      outcome as often as it should — unlike Brier, which only ever checked
-      direction. Falls back to ``1 − brier/0.25`` (0.25 = coin-flip Brier)
-      only for scorecard rows computed before rps_avg existed.
+    - calibration: the mean of 1 − bucketed RPS (F11: is the p5/p95
+      magnitude band right as often as it should be?) and 1 − brier/0.25
+      (is the stated confidence that a trade beats EUNL.DE right? 0.25 =
+      coin flip), each floored at 0. Either alone when the other is missing.
     - magnitude: R² × closeness of Mincer-Zarnowitz slope to 1.
     - downside: 1 − max_drawdown/0.25, floored at 0.
     """
@@ -89,7 +88,16 @@ def composite_score(scorecard: AdvisorScorecard | None) -> tuple[float | None, d
         sharpe = max(-20.0, min(20.0, float(scorecard.sharpe)))
         parts["risk_adjusted"] = 1.0 / (1.0 + math.exp(-sharpe))
     if scorecard.rps_avg is not None:
-        parts["calibration"] = max(0.0, 1.0 - float(scorecard.rps_avg))
+        rps_part = max(0.0, 1.0 - float(scorecard.rps_avg))
+        if scorecard.brier_avg is not None:
+            # The band can be well calibrated while the model's own stated
+            # confidence is worse than a coin flip (prod 2026-11-09: Brier
+            # 0.327, RPS fine). Both are forecasts the sleeve makes, so the
+            # axis averages them instead of letting the band hide the other.
+            brier_part = max(0.0, 1.0 - float(scorecard.brier_avg) / _COINFLIP_BRIER)
+            parts["calibration"] = (rps_part + brier_part) / 2
+        else:
+            parts["calibration"] = rps_part
     elif scorecard.brier_avg is not None:
         # Transitional fallback for scorecard rows computed before rps_avg
         # existed.
@@ -184,17 +192,17 @@ def next_resolution_at(db: Session, portfolio_id: str) -> str | None:
 
 def _recent_decisions_payload(db: Session, user_id: str, portfolio_id: str) -> list[dict[str, Any]]:
     """Resolved predictions for a sleeve, shaped for reflection."""
-    rows = (
-        db.query(DiscoveryPrediction)
-        .filter(
-            DiscoveryPrediction.user_id == user_id,
-            DiscoveryPrediction.portfolio_id == portfolio_id,
-            DiscoveryPrediction.outcome_status == "resolved",
-        )
-        .order_by(DiscoveryPrediction.predicted_at.desc())
-        .limit(50)
-        .all()
+    query = db.query(DiscoveryPrediction).filter(
+        DiscoveryPrediction.user_id == user_id,
+        DiscoveryPrediction.portfolio_id == portfolio_id,
+        DiscoveryPrediction.outcome_status == "resolved",
     )
+    # Only the current paper run: trades from before a reset belong to a book
+    # that no longer exists (2026-11-09 audit: lessons drew on them).
+    portfolio = db.get(PaperPortfolio, portfolio_id)
+    if portfolio is not None and portfolio.inception_at is not None:
+        query = query.filter(DiscoveryPrediction.predicted_at >= portfolio.inception_at)
+    rows = query.order_by(DiscoveryPrediction.predicted_at.desc()).limit(50).all()
     from app.foundation.models.entities import DiscoverCandidate
     from app.foundation.instrument_taxonomy import classify_instrument
 
