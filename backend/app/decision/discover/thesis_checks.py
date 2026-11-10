@@ -160,7 +160,8 @@ _RUN_TOGETHER = re.compile(r"(\d(?:[\d.,]*\d)?(?:\s?%)?)\s+(an?\s+(?:return|trai
 def _named_example_unknown(text: str, facts_text: str) -> bool:
     for m in _NAMED_EXAMPLE.finditer(text):
         name = m.group(1).split()[0]
-        if name not in _NOT_A_HOLDING and not re.search(rf"\b{re.escape(name)}\b", facts_text):
+        singular = name[:-1] if name.endswith("s") else name  # "such as ETFs"
+        if name not in _NOT_A_HOLDING and singular not in _NOT_A_HOLDING and not re.search(rf"\b{re.escape(name)}\b", facts_text):
             return True
     return False
 
@@ -203,7 +204,8 @@ def tidy_sentence(sentence: str) -> str:
     0.96 with the portfolio (it adds little diversification)" (SPYY). Two phrases with
     no "and" between them: "a price-to-earnings ratio of 15.3 a return on equity of 9.1 %" (ABN).
     """
-    for m in list(re.finditer(r"\s*\((?:it )?([^()]{6,60})\)", sentence)):
+    # From the end backwards: cutting a later match leaves the earlier offsets valid.
+    for m in reversed(list(re.finditer(r"\s*\((?:it )?([^()]{6,60})\)", sentence))):
         inner = m.group(1).strip().lower()
         before = sentence[: m.start()].lower()
         if inner in before:

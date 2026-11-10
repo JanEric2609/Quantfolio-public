@@ -945,7 +945,8 @@ def write_dossier(
         signal_breakdown["factor_exposures"] = miner_scores.get("factors")
         signal_breakdown["ic"] = miner_scores.get("ic")
         signal_breakdown["icir"] = icir
-    if has_fundamentals_data:
+    if has_fundamentals_data and not corporate_action:
+        # After a split or spin-off the score rests on the hidden ratios.
         signal_breakdown["fundamentals"] = sf_scores.get("fundamentals_score")
     if sf_scores.get("analyst_estimate_score") is not None:
         # Same gate as composite.py: shown only when real consensus data

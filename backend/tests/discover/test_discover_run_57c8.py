@@ -114,7 +114,8 @@ def test_the_dossier_prompt_has_no_stale_ratio(monkeypatch):
     monkeypatch.setattr("app.decision.discover.dossier_writer._fetch_sentiment", lambda _symbol, _db: {})
     scores = attach_corporate_action(
         "CTVA",
-        {"composite": 0.62, "sentiment_fundamentals": {"pe": 8.17, "pb": 0.33, "sector": "Basic Materials"}},
+        {"composite": 0.62, "sentiment_fundamentals": {"pe": 8.17, "pb": 0.33, "sector": "Basic Materials",
+                                                       "market_cap": 3.1e10, "fundamentals_score": 0.81}},
         today=TODAY, fetch=_ctva,
     )
     candidate = {"symbol": "CTVA", "name": "Corteva", "isin": None, "source": "screen_index",
@@ -126,6 +127,8 @@ def test_the_dossier_prompt_has_no_stale_ratio(monkeypatch):
         assert stale not in prompt, stale
     assert "{corporate_action}: a split or spin-off on 2026-10-01" in prompt
     assert "2026-10-01" in out["dossier"]["thesis"]
+    # The fundamentals score rests on the hidden ratios, so it is not shown either.
+    assert "fundamentals" not in out["dossier"]["signal_breakdown"]
 
 
 def test_the_orchestrator_stores_the_action_on_the_shortlisted_candidate(monkeypatch):
@@ -257,3 +260,16 @@ def test_a_dangling_existing_positions_goes():
         "It shows a weekly correlation of 0.82 with the portfolio (it adds little diversification) to existing "
         "positions."
     ).endswith("(it adds little diversification).")
+
+
+def test_two_repeated_verdicts_are_both_cut_cleanly():
+    sentence = ("It adds little diversification given a correlation of 0.96 (it adds little diversification) "
+                "and a beta of 1.1 (it adds little diversification), so it tracks the market.")
+    assert tidy_sentence(sentence) == (
+        "It adds little diversification given a correlation of 0.96 and a beta of 1.1, so it tracks the market.")
+
+
+def test_a_plural_generic_word_is_not_a_company():
+    from app.decision.discover.thesis_checks import sloppy_sentence
+    assert sloppy_sentence("It complements holdings such as ETFs tracking MSCI World.") is None
+    assert sloppy_sentence("It complements holdings such as Moderna.") is not None
