@@ -421,6 +421,21 @@ def _run_discover_inner(db: Session, run_id: str) -> None:
 
         top_symbols = {r["symbol"] for r in top_shortlisted}
 
+        # Shadow: how many names could equally be on the list (WP12b), for the run's page only.
+        try:
+            from app.decision.discover.shortlist_stability import stability
+
+            report = stability([r for r in pipeline_results if r.get("reject_stage") is None], top_shortlisted)
+            if report is not None:
+                merged = json.loads(run.params_json) if run.params_json else {}
+                merged = merged if isinstance(merged, dict) else {}
+                merged["shortlist_stability"] = report
+                run.params_json = json.dumps(merged)
+                db.commit()
+        except Exception:  # noqa: BLE001 - a shadow statistic never stops a run
+            db.rollback()
+            logger.debug("shortlist stability failed for run %s", run_id, exc_info=True)
+
         # Map pipeline results back to DB rows using the generator's shortlist.
         result_by_symbol = {r["symbol"]: r for r in pipeline_results}
         for cand in candidates:

@@ -1031,7 +1031,7 @@ export interface PortfolioProjection {
     goal_eur: number | null;
   };
   fan: Array<{ year: number; p5: number; p25: number; p50: number; p75: number; p95: number; contributed: number }>;
-  terminal: { median: number; mean: number; p5: number; p95: number; contributed: number };
+  terminal: { median: number; mean: number; p5: number; p95: number; contributed: number; start_value?: number; future_contributions?: number };
   goal?: {
     goal_eur: number;
     probability: number;
@@ -1065,7 +1065,7 @@ export interface LongHistoryProjection {
     goal_eur: number | null;
   };
   fan?: PortfolioProjection["fan"];
-  terminal?: { median: number; mean: number; p5: number; p95: number; contributed: number; p_below_contributed: number };
+  terminal?: { median: number; mean: number; p5: number; p95: number; contributed: number; p_below_contributed: number; start_value?: number; future_contributions?: number };
   after_tax?: { median: number; p5: number; p95: number; median_tax: number };
   bad_start?: { first_years: number; median: number; p5: number };
   all_countries?: { homes: number; median: number; p5: number; p95: number };
@@ -2074,55 +2074,6 @@ export interface QuantSavedScenario {
   created_at: string;
 }
 
-export const listSavedScenarios = () => api<QuantSavedScenario[]>("/api/quant/portfolio/scenarios/saved");
-
-export interface LegacyScenarioParams {
-  type: "legacy";
-  name: string;
-  annual_return: number;
-  annual_volatility: number;
-  years: number;
-  simulations: number;
-  start_value: number;
-  notes?: string;
-}
-
-export interface StochasticScenarioParams {
-  type: "stochastic";
-  name: string;
-  S0: number;
-  mu: number;
-  sigma: number;
-  T: number;
-  horizon_steps: number;
-  n_paths: number;
-  strike: number;
-  nu: number;
-  notes?: string;
-}
-
-/**
- * The save endpoint (SaveScenarioRequest) only knows the GBM fan fields; a
- * stochastic run's S0/mu/sigma/T/n_paths were ignored and the scenario was
- * saved with the defaults. Map them onto the fields it reads, within its bounds.
- */
-export function toSaveScenarioBody(body: LegacyScenarioParams | StochasticScenarioParams) {
-  if (body.type === "legacy") return body;
-  return {
-    name: body.name,
-    notes: body.notes,
-    start_value: body.S0,
-    annual_return: body.mu,
-    annual_volatility: body.sigma,
-    years: Math.min(50, Math.max(1, Math.round(body.T))),
-    simulations: Math.min(10_000, Math.max(100, body.n_paths)),
-  };
-}
-
-export const saveScenario = (body: LegacyScenarioParams | StochasticScenarioParams) =>
-  api<QuantSavedScenario>("/api/quant/portfolio/scenarios/saved", { method: "POST", body: JSON.stringify(toSaveScenarioBody(body)) });
-export const deleteSavedScenario = (id: string) => api<{ deleted: string }>(`/api/quant/portfolio/scenarios/saved/${id}`, { method: "DELETE" });
-
 // Data backbone types
 export interface DataCoverage {
   symbol: string;
@@ -2603,6 +2554,8 @@ export interface MandateMissingHolding {
   ticker: string | null;
   name: string | null;
   quantity: string;
+  /** Value in EUR (the mandate's at purchase price, the real book's at market). */
+  value_eur?: number;
 }
 
 export interface MandateWeightDiff {
@@ -2611,6 +2564,18 @@ export interface MandateWeightDiff {
   paper_quantity: string;
   real_quantity: string;
   quantity_diff: number;
+  paper_value_eur?: number;
+  real_value_eur?: number;
+}
+
+export interface MandateDivergenceSummary {
+  /** Share of the mandate's value the real book also holds (the lesser side of each shared position). */
+  overlap_pct: number | null;
+  mandate_value_eur: number;
+  only_in_mandate: number;
+  only_in_book: number;
+  quantity_differs: number;
+  largest_gaps: { ticker: string | null; kind: "only_in_mandate" | "only_in_book" | "quantity_differs"; gap_eur: number }[];
 }
 
 export interface MandateAdviceCard {
@@ -2625,6 +2590,7 @@ export interface MandateDivergence {
     missing_in_real: MandateMissingHolding[];
     missing_in_paper: MandateMissingHolding[];
     weight_diffs: MandateWeightDiff[];
+    summary?: MandateDivergenceSummary | null;
   };
   performance_delta: number;
   advice_cards: MandateAdviceCard[];
@@ -2685,7 +2651,9 @@ export type AdvisorResponse = {
 
 export type StockContext = {
   ticker: string;
-  quote?: { price?: number; change_pct?: number; name?: string; [k: string]: unknown };
+  quote?: { price?: number; change_pct?: number; name?: string; as_of?: string | null; [k: string]: unknown };
+  /** The last stored daily bar; a bar dated today is a session still in progress. */
+  price_basis?: { last_bar_date: string; last_session_in_progress: boolean };
   report?: { text: string; summary: string; generated_at: string; cached: boolean } | null;
   price_history?: { date: string; open: number; high: number; low: number; close: number; volume: number }[];
   news?: { title: string; source: string; published_at: string; sentiment_label?: string; sentiment_score?: number }[];
@@ -2757,6 +2725,10 @@ export type SentimentResponse = {
   neutral_pct: number;
   unscored_pct: number;
   avg_score: number;
+  /** Articles whose label FinBERT or the provider gave (the keyword fallback does not count). */
+  scored?: number;
+  /** (positive - negative) / scored; null under three scored articles. */
+  net_tone?: number | null;
   overall: string;
   articles: SentimentArticle[];
 };
@@ -3062,6 +3034,8 @@ export interface DiscoverDossier {
   recommendation_label?: string | null;
   /** Years of live data needed to tell skill from luck at this tracking error. */
   skill_horizon?: DiscoverSkillHorizon | null;
+  /** What past Discover picks of this lane ended at against MSCI World; null under 20 issue dates. */
+  outcome_band?: { lane: string; n_dates: number; level: number; low: number; high: number; text: string } | null;
   /** Score before the repeat-suggestion penalty; the breakdown adds up to it. */
   composite_raw?: number | null;
   recency_penalty?: DiscoverRecencyPenalty | null;
@@ -3474,8 +3448,8 @@ export interface AdvisorDiagnosticsReport {
   summary: string;
   counts: Record<AdvisorDiagnosticStatus, number>;
   blocking: AdvisorDiagnosticStage[];
-  /** Stages held up only by an unelapsed prediction horizon — waiting, not broken. */
-  pending: AdvisorDiagnosticStage[];
+  /** Stages held up only by the calendar (a prediction horizon, daily returns) — waiting, not broken. */
+  pending: (AdvisorDiagnosticStage & { expected_on?: string | null })[];
   checks: AdvisorDiagnosticCheck[];
 }
 

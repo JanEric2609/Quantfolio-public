@@ -383,6 +383,18 @@ def _write(db: Session, user_id: str, account_id: str, summary: AccountSummary, 
     balance = None if free is None else free + (summary.in_pies or Decimal("0"))
     cash_account = _upsert_account(db, user_id, f"{account_id}:cash", "cash", "Trading 212 cash", balance,
                                    summary.currency, now)
+    # The overnight savings pot is in totalValue but in no cash field: its own
+    # account, so it is visible on Portfolio -> Accounts and counts in the book.
+    pot = summary.savings_pot
+    pot_account = (
+        db.query(ConnectedAccount)
+        .filter(ConnectedAccount.user_id == user_id, ConnectedAccount.source == SOURCE,
+                ConnectedAccount.external_id == f"{account_id}:pot")
+        .one_or_none()
+    )
+    if pot is not None or pot_account is not None:
+        pot_account = _upsert_account(db, user_id, f"{account_id}:pot", "cash", "Trading 212 savings pot",
+                                      pot or Decimal("0"), summary.currency, now)
 
     # Positions: upsert by ISIN, drop the ones no longer held. Prices and cost
     # are stored per unit in EUR (the account currency) from T212's own
@@ -443,7 +455,10 @@ def _write(db: Session, user_id: str, account_id: str, summary: AccountSummary, 
 
     db.flush()
     interest = _recent_interest(db, user_id, cash_account)
-    rate = (interest * Decimal(365) / Decimal(INTEREST_WINDOW_DAYS) / balance) if balance and interest else None
+    cash_raw = load_raw(cash_account)
+    earning_today = (balance or Decimal("0")) + (pot or Decimal("0")) - (summary.in_pies or Decimal("0"))
+    daily = _daily_balances(cash_raw.get("daily_balances"), today=date.today(), balance=earning_today)
+    rate, rate_basis = _measured_rate(interest, daily)
     history_complete = dict(raw.get("history_complete") or {})
     for feed, done in complete.items():
         history_complete[feed] = bool(history_complete.get(feed) or done)
@@ -459,12 +474,61 @@ def _write(db: Session, user_id: str, account_id: str, summary: AccountSummary, 
         "cash": {"buying_power": str(free) if free is not None else None},
         "interest_30d_eur": str(interest.quantize(Decimal("0.01"))),
         "interest_rate_measured": str(rate.quantize(Decimal("0.0001"))) if rate is not None else None,
+        "interest_rate_basis": rate_basis,
+        "savings_pot": str(pot.quantize(Decimal("0.01"))) if pot is not None else None,
+        "last_summary": _numeric_summary(summary),
     })
     depot.raw_json = json.dumps(raw, default=str)
     cash_account.raw_json = json.dumps({
         "interest_30d_eur": raw["interest_30d_eur"], "interest_rate_measured": raw["interest_rate_measured"],
+        "interest_rate_basis": rate_basis, "daily_balances": {d: str(v) for d, v in daily.items()},
+        "last_summary": raw["last_summary"],
     })
+    if pot_account is not None:
+        pot_account.raw_json = json.dumps({"derived": "totalValue minus investments and cash fields",
+                                           "interest_rate_measured": raw["interest_rate_measured"]})
     return {"positions": len(seen), "positions_removed": removed, **ledger}
+
+
+RATE_MIN_DAYS = 20
+RATE_MIN_AVERAGE_EUR = Decimal("50")
+
+
+def _numeric_summary(summary: AccountSummary) -> dict[str, str | None]:
+    """The summary body's numbers (no account id), kept so the page can show what Trading 212 reported."""
+    return {k: (str(v) if isinstance(v, Decimal) else None) for k, v in summary.__dict__.items()
+            if k != "account_id" and (v is None or isinstance(v, Decimal))}
+
+
+def _daily_balances(previous: Any, *, today: date, balance: Decimal) -> dict[str, Decimal]:
+    """One interest-bearing balance (free cash + pot) per day, the last 45 days, today's overwritten."""
+    kept: dict[str, Decimal] = {}
+    for key, value in (previous.items() if isinstance(previous, dict) else []):
+        try:
+            if date.fromisoformat(str(key)) > today - timedelta(days=45):
+                kept[str(key)] = Decimal(str(value))
+        except (ValueError, ArithmeticError):
+            continue
+    kept[today.isoformat()] = balance
+    return dict(sorted(kept.items()))
+
+
+def _measured_rate(interest: Decimal, daily: dict[str, Decimal]) -> tuple[Decimal | None, str | None]:
+    """Annual rate from 30 days of interest over the time-weighted balance of those days, or none.
+
+    None when fewer than :data:`RATE_MIN_DAYS` of the window have a stored balance or the
+    average is under :data:`RATE_MIN_AVERAGE_EUR`: 1.76 EUR of interest over a 4.83 EUR
+    balance read as 443 % a year.
+    """
+    window_start = date.today() - timedelta(days=INTEREST_WINDOW_DAYS)
+    values = [v for k, v in daily.items() if date.fromisoformat(k) > window_start]
+    if len(values) < RATE_MIN_DAYS or not interest:
+        return None, None
+    average = sum(values, Decimal("0")) / len(values)
+    if average < RATE_MIN_AVERAGE_EUR:
+        return None, None
+    rate = interest * Decimal(365) / Decimal(INTEREST_WINDOW_DAYS) / average
+    return rate, f"estimated from {INTEREST_WINDOW_DAYS} days of interest over {len(values)} stored daily balances"
 
 
 def _recent_interest(db: Session, user_id: str, cash_account: ConnectedAccount) -> Decimal:

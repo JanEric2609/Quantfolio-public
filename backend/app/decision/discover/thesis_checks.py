@@ -388,6 +388,13 @@ def is_data_gap_risk(risk: str) -> bool:
     return bool(_INTERNAL_CODE.search(risk) or _DATA_GAP_RISK.search(risk))
 
 
+_FUND_STYLE_CLAIM = re.compile(
+    r"\b(?:growth|value|dividend|quality|momentum) (?:exposure|tilt|bias)\b|"
+    r"\b(?:large|mid|small)[- ]cap (?:US |U\.S\. |European |global )?(?:technology|tech|growth|value)\b",
+    re.I,
+)
+
+
 def mislabel_problems(
     text: str,
     facts_text: str = "",
@@ -429,6 +436,10 @@ def mislabel_problems(
     if insider_buyers is not None and insider_buyers < MIN_CLUSTER_BUYERS and _INSIDER_CLUSTER.search(text):
         problems.append(f"{int(insider_buyers)} insider(s) bought; that is not a cluster")
     if is_fund:
+        # SPYY: "growth exposure" and "large-cap US technology" with no holdings data behind them.
+        for m in _FUND_STYLE_CLAIM.finditer(text):
+            if m.group(0).lower() not in facts_text.lower():
+                problems.append(f"'{m.group(0)}': the fund's style or sector mix is not in the data given")
         for claim in _HOLDINGS_CLAIM.findall(text):
             for token in _CAPS_TOKEN.findall(claim):
                 if token not in _NOT_A_HOLDING and not re.search(rf"\b{re.escape(token)}\b", facts_text):

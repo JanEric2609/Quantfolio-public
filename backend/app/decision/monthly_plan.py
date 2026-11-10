@@ -643,6 +643,10 @@ def cash_state(db: Session, user_id: str, cfg: dict[str, Any]) -> dict[str, Any]
     # A depot's own cash account is that depot's (its buying power already
     # covers it); the pooled fallback sums only the cash accounts no depot owns.
     owned = {f"{d.external_id}:cash" for d in depots if d.external_id}
+    # Trading 212's overnight savings pot is savings, not money waiting to be
+    # invested: it is shown separately and never counts as investable cash.
+    owned |= {f"{d.external_id}:pot" for d in depots if d.external_id}
+    pot_eur = sum(float(a.balance or 0) for a in broker_accounts if (a.external_id or "").endswith(":pot"))
     pooled_fallback: set[str] = set()
     for depot in depots:
         cash = load_raw(depot).get("cash")
@@ -669,6 +673,7 @@ def cash_state(db: Session, user_id: str, cfg: dict[str, Any]) -> dict[str, Any]
         "savings_eur": _round_eur(savings),
         "broker_cash_eur": _round_eur(sum(broker_cash.values())),
         "broker_cash_by_broker": {k: _round_eur(v) for k, v in broker_cash.items()},
+        "savings_pot_eur": _round_eur(pot_eur),
         "emergency_reserve_eur": _round_eur(reserve),
         "reserve_set": reserve > 0,
         "investable_eur": _round_eur(max(0.0, total - reserve)) if reserve > 0 else 0.0,

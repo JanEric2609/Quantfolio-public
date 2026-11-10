@@ -417,7 +417,7 @@ cd /opt/quantfolio
 runuser -u quantfolio -- git pull --ff-only
 
 cd backend
-runuser -u quantfolio -- .venv/bin/python -m pip install --disable-pip-version-check -e ".[dkb_robo]"
+runuser -u quantfolio -- .venv/bin/python -m pip install --disable-pip-version-check -e ".[dkb_robo,bert]"
 runuser -u quantfolio -- .venv/bin/alembic upgrade head
 cd ..
 
@@ -443,6 +443,17 @@ grep -q 'id="root"' /opt/quantfolio/frontend/dist/index.html
 ```
 
 **Note:** The Caddyfile in `/etc/caddy/` is **not** overwritten by the updater; it is a static configuration file set during Stage 4 deployment.
+
+## News sentiment (FinBERT)
+
+The worker scores news with `ProsusAI/finbert`, installed by the `bert` extra (`transformers`; the update and install scripts pass it). The first load downloads about 440 MB from huggingface.co into `HF_HOME` (`/opt/quantfolio/.cache/huggingface`, set in `quantfolio-worker.service`; the `quantfolio` user must be able to write there) and needs about 1 GB of worker memory. Without it the worker falls back to a keyword list; those labels are stored with `sentiment_source = 'lexicon'`, every reader ignores them, and Control Center shows "News sentiment runs on a keyword list".
+
+After the first deploy with the extra, null the old keyword labels once so the worker rescores them:
+
+```sql
+update news_items set sentiment_label = null, sentiment_score = null
+ where sentiment_source is distinct from 'finbert' and sentiment_source is distinct from 'provider';
+```
 
 ## Optional Features
 

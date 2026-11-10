@@ -1,6 +1,6 @@
 """Data ingestion orchestrator for time-series data from multiple providers."""
 
-from datetime import datetime, timedelta, UTC
+from datetime import date, datetime, timedelta, UTC
 from decimal import Decimal
 import logging
 import math
@@ -421,6 +421,7 @@ class DataIngester:
         """
         pin = self._pin(symbol)
         pinned: str | None = pin.provider if pin is not None else None
+        full_window = not start_date and bool(days) and int(days or 0) >= 365 * 4
         if pinned:
             result = self.registry.get_price_history(
                 symbol, start=start_date, end=end_date, days=days, provider=pinned,
@@ -499,8 +500,15 @@ class DataIngester:
                 self._mark_released(symbol, released)
             if not keep.empty:
                 self._upsert_bars(keep, provider)
+            short = False
             if not pinned:
-                self._set_pin(symbol, provider)
+                short = self._series_too_short(df, start_date, days)
+                if not short:
+                    self._set_pin(symbol, provider, full_repull=full_window)
+            elif full_window and not keep.empty:
+                # A stored full five-year pull counts as a full re-pull, so the
+                # next Discover run fetches only the missing days.
+                self._set_pin(symbol, pinned, full_repull=True)
             if reported:
                 # Older rows of the symbol may carry a guessed label; one
                 # series has one quote unit.
@@ -523,6 +531,19 @@ class DataIngester:
                     "symbol": symbol,
                     "message": f"All {initial_count} rows quarantined by the bar guard",
                     "quarantined": len(quarantined),
+                }
+            if short:
+                logger.warning("ingest: %s returned only %d bars; series left unpinned", symbol, len(df))
+                # Bars are stored and the call worked; only the pin is withheld. A young listing
+                # is legitimately short, so callers still succeed; Discover's pre-ingest treats
+                # `short` as a failed warm-up (a series that stays short is what hid 137 names).
+                return {
+                    "success": True,
+                    "short": True,
+                    "symbol": symbol,
+                    "message": f"short history: {len(df)} bars, series not pinned",
+                    "rows_inserted": len(keep),
+                    "provider": provider,
                 }
             return {
                 "success": True,
@@ -581,6 +602,26 @@ class DataIngester:
                 "message": str(e),
                 "error_type": "provider",
             }
+
+    @staticmethod
+    def _series_too_short(df: pd.DataFrame, start_date: str | None, days: int | None) -> bool:
+        """Whether a first fetch is too short to pin the series to its provider.
+
+        Pin when nothing was asked for by date, when the first bar lies within
+        10 trading days (14 calendar) of the requested start, or when at least
+        250 bars came back. A two-bar Alpaca answer used to pin the series.
+        """
+        if len(df) >= 250:
+            return False
+        requested: date | None = None
+        if start_date:
+            requested = date.fromisoformat(str(start_date)[:10])
+        elif days:
+            requested = datetime.now(UTC).date() - timedelta(days=int(days))
+        if requested is None:
+            return False
+        first = cast(pd.Timestamp, df["ts"].min()).date()
+        return first > requested + timedelta(days=14)
 
     def _mark_released(self, symbol: str, released: list[Any]) -> None:
         """Record that a second provider confirmed these bars. Does not commit."""

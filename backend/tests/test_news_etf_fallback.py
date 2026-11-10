@@ -106,7 +106,9 @@ def test_etf_symbol_no_keyword_match_silently_skipped():
         with patch("app.foundation.news.build_provider_registry", return_value=mock_registry):
             result = refresh_news_for_user(db, user.id, max_symbols=12, news_per_symbol=8)
 
-    assert result["created"] == 0
+    # Nothing matched the ETF; the unmatched article is kept as a macro row only.
+    from app.foundation.models.entities import NewsItem
+    assert db.query(NewsItem).filter(NewsItem.ticker.isnot(None)).count() == 0
     assert result["failed"] == []
     mock_fetch.assert_called_once_with(db)
     mock_registry.get_news.assert_not_called()
@@ -217,7 +219,8 @@ def test_multiple_etf_items_matched_all_stored():
         with patch("app.foundation.news.build_provider_registry", return_value=mock_registry):
             result = refresh_news_for_user(db, user.id, max_symbols=12, news_per_symbol=8)
 
-    assert result["created"] == 2
+    from app.foundation.models.entities import NewsItem
+    assert db.query(NewsItem).filter(NewsItem.ticker.isnot(None)).count() == 2
     assert result["failed"] == []
     mock_fetch.assert_called_once_with(db)
     mock_registry.get_news.assert_not_called()

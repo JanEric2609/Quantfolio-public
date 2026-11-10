@@ -321,6 +321,8 @@ def _prediction_type(db: Session, user_id: str, key: str, now: datetime, benchma
     query = query.filter(
         DiscoveryPrediction.portfolio_id.isnot(None) if advisor else DiscoveryPrediction.portfolio_id.is_(None)
     )
+    if not advisor:
+        query = query.filter(DiscoveryPrediction.superseded_by_run_id.is_(None))
     rows = query.all()
 
     data = _TypeData(key=key, range_level=ADVISOR_RANGE_LEVEL if advisor else IDEAS_RANGE_LEVEL)

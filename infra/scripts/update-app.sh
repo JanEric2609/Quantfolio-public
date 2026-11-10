@@ -170,7 +170,7 @@ as_app_user git -C "${APP_DIR}" pull --ff-only origin "${BRANCH}"
 
 log "Updating backend dependencies"
 cd "${APP_DIR}/backend"
-as_app_user "${APP_DIR}/backend/.venv/bin/python" -m pip install --disable-pip-version-check -e "."
+as_app_user "${APP_DIR}/backend/.venv/bin/python" -m pip install --disable-pip-version-check -e ".[bert]"
 
 log "Running database migrations"
 # DATABASE_URL is NOT inherited here: alembic/env.py resolves it via

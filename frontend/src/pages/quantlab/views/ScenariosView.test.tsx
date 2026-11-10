@@ -33,7 +33,7 @@ describe("ScenariosView", () => {
           calibration_years: 25, drift_standard_error: 0.03, paths: 10000, seed: 7, goal_eur: 250000,
         },
         fan: [0, 1, 2].map(row),
-        terminal: { median: 180000, mean: 240000, p5: 70000, p95: 520000, contributed: 82000 },
+        terminal: { median: 180000, mean: 240000, p5: 70000, p95: 520000, contributed: 82000, start_value: 10000, future_contributions: 72000 },
         goal: {
           goal_eur: 250000, probability: 0.38, mc_standard_error: 0.005, probability_low_drift: 0.2,
           probability_high_drift: 0.58, median_reaches_in_years: null,
@@ -47,6 +47,11 @@ describe("ScenariosView", () => {
     };
     render(<MemoryRouter><ScenariosView /></MemoryRouter>);
     expect(screen.getByText("Median in 30 years")).toBeInTheDocument();
+    // "Money you put in" was today's portfolio plus 30 years of contributions under one label.
+    expect(screen.getByText("Portfolio today")).toBeInTheDocument();
+    expect(screen.getByText("You add over 30 years")).toBeInTheDocument();
+    expect(screen.getByText("Total paid in by then")).toBeInTheDocument();
+    expect(screen.getByText(/72\.000/)).toBeInTheDocument();
     expect(screen.getByText(/180\.000/)).toBeInTheDocument();
     expect(screen.getByText("38 %")).toBeInTheDocument();
     expect(screen.getByText(/20 % – 58 %/)).toBeInTheDocument();

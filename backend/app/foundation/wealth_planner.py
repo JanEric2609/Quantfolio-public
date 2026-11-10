@@ -114,6 +114,9 @@ def project(p: PlanInputs) -> dict[str, Any]:
             "mean": float(np.mean(terminal)),
             "p5": float(np.percentile(terminal, 5)),
             "p95": float(np.percentile(terminal, 95)),
+            # "Money put in" was start + contributions under one label: three figures now.
+            "start_value": p.start_value,
+            "future_contributions": p.monthly_contribution * months,
             "contributed": p.start_value + p.monthly_contribution * months,
         },
         "real_terms": True,

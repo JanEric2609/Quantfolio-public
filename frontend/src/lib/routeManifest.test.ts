@@ -12,12 +12,12 @@ import {
 } from "./routeManifest";
 
 describe("route manifest", () => {
-  it("lists eleven primary sidebar items plus Control Center in the footer", () => {
+  it("lists twelve primary sidebar items plus Control Center in the footer", () => {
     const groups = sidebarGroups();
     const main = groups.filter((g) => g.id !== "admin").flatMap((g) => g.items);
 
     expect(main.map((e) => e.label)).toEqual([
-      "Home", "This month", "Portfolio", "Tax", "Budget", "Discover", "Watchlist", "News",
+      "Home", "This month", "Portfolio", "Tax", "Budget", "Learn", "Discover", "Watchlist", "News",
       "Can I trust it?", "Quant Lab", "Strategy lab",
     ]);
     expect(groups.find((g) => g.id === "admin")?.items.map((e) => e.label)).toEqual(["Control Center"]);

@@ -211,6 +211,7 @@ def skill_summary(db: Session, user_id: str) -> dict:
         .filter(
             DiscoveryPrediction.user_id == user_id,
             DiscoveryPrediction.portfolio_id.is_(None),
+            DiscoveryPrediction.superseded_by_run_id.is_(None),
             DiscoveryPrediction.outcome_status.in_(("resolved", "pending")),
         )
         .all()

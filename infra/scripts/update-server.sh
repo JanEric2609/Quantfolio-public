@@ -106,7 +106,7 @@ as_app_user git -C "${APP_DIR}" pull --ff-only origin "${BRANCH}"
 
 log "Updating backend dependencies"
 cd "${APP_DIR}/backend"
-as_app_user "${APP_DIR}/backend/.venv/bin/python" -m pip install --disable-pip-version-check -e ".[dkb_robo]"
+as_app_user "${APP_DIR}/backend/.venv/bin/python" -m pip install --disable-pip-version-check -e ".[dkb_robo,bert]"
 
 log "Running database migrations"
 as_app_user "${APP_DIR}/backend/.venv/bin/alembic" upgrade head

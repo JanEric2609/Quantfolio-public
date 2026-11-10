@@ -274,6 +274,9 @@ export function DossierDrawer({ open, onClose, dossier, symbol, concerns, name, 
             <section>
               <h4 className="text-sm font-semibold text-text-primary mb-2">Signal score</h4>
               <ScoreBar label="Score (0–1, not a probability)" value={dossier.conviction} hint="Composite ranking score from 0 to 1, built from trailing signals. Not a probability that the pick beats the market." />
+              {dossier.outcome_band && (
+                <p data-testid="outcome-band" className="mt-2 text-xs text-text-muted">{dossier.outcome_band.text}</p>
+              )}
               {dossier.skill_horizon && (
                 <p data-testid="skill-horizon" className="mt-2 text-xs text-text-muted">
                   {dossier.skill_horizon.text} (Tracking error from {dossier.skill_horizon.basis}

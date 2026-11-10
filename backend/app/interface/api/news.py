@@ -30,8 +30,9 @@ def _serialize_news_item(item: NewsItem, user_rel: UserNewsRelevance | None = No
         "url": item.url,
         "source": item.source,
         "ticker": item.ticker,
-        "sentiment_score": float(item.sentiment_score) if item.sentiment_score is not None else None,
-        "sentiment_label": item.sentiment_label,
+        # A keyword-fallback label is no score: shown as not scored.
+        "sentiment_score": float(item.sentiment_score) if item.sentiment_score is not None and item.sentiment_source != "lexicon" else None,
+        "sentiment_label": None if item.sentiment_source == "lexicon" else item.sentiment_label,
         "relevance_score": float(user_rel.relevance_score) if user_rel and user_rel.relevance_score is not None else (float(item.relevance_score) if item.relevance_score is not None else None),
         "relevance_label": user_rel.relevance_label if user_rel else item.relevance_label,
         "relevance_reason": user_rel.relevance_reason if user_rel else item.relevance_reason,
@@ -67,7 +68,7 @@ def list_news(
     if source:
         query = query.filter(NewsItem.source == source)
     if sentiment:
-        query = query.filter(NewsItem.sentiment_label == sentiment.lower())
+        query = query.filter(NewsItem.sentiment_label == sentiment.lower(), NewsItem.sentiment_source.is_distinct_from("lexicon"))
     if relevance:
         # Unscored items (both labels NULL) are excluded by the NULL
         # comparison, never error.

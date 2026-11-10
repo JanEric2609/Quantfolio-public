@@ -61,3 +61,33 @@ def test_preingest_one_passes_the_start_or_the_window(monkeypatch):
     assert pipeline._preingest_one("BBB") == ("BBB", True)
     assert calls == [{"symbol": "AAA", "start_date": "2026-10-15"},
                      {"symbol": "BBB", "days": pipeline._PREINGEST_DAYS}]
+
+
+def test_a_two_bar_fetch_does_not_pin_the_series():
+    import pandas as pd
+
+    from app.foundation.data_backbone.ingest import DataIngester
+
+    short = pd.DataFrame({"ts": pd.to_datetime(["2026-11-09", "2026-11-10"])})
+    assert DataIngester._series_too_short(short, None, 1260) is True
+    long = pd.DataFrame({"ts": pd.date_range("2025-01-01", periods=300, freq="B")})
+    assert DataIngester._series_too_short(long, None, 1260) is False
+    assert DataIngester._series_too_short(short, None, None) is False  # nothing asked for by date
+    near = pd.DataFrame({"ts": pd.to_datetime(["2026-11-05", "2026-11-10"])})
+    assert DataIngester._series_too_short(near, "2026-11-04", None) is False
+
+
+def test_a_short_series_counts_as_a_failed_warm_up(monkeypatch):
+    _, factory = _db()
+    monkeypatch.setattr(pipeline, "SessionLocal", factory)
+
+    class _Short:
+        def __init__(self, db):
+            pass
+
+        def ingest_bar_prices(self, symbol, **kw):
+            return {"success": True, "short": True, "message": "short history: 2 bars, series not pinned"}
+
+    monkeypatch.setattr(pipeline, "DataIngester", _Short)
+    monkeypatch.setattr(pipeline, "_preingest_start", lambda db, s: None)
+    assert pipeline._preingest_one("AAA") == ("AAA", False)

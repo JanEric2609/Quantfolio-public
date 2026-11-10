@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Mock } from "vitest";
-import { api, apiErrorMessage, toSaveScenarioBody } from "./api";
+import { api, apiErrorMessage } from "./api";
 
 const fetchMock = fetch as unknown as Mock;
 
@@ -53,17 +53,5 @@ describe("apiErrorMessage", () => {
   });
   it("falls back to the raw body when it is not JSON", () => {
     expect(apiErrorMessage(null, "Bad Gateway")).toBe("Bad Gateway");
-  });
-});
-
-describe("toSaveScenarioBody", () => {
-  it("maps a stochastic run onto the fields the save endpoint reads", () => {
-    const body = toSaveScenarioBody({
-      type: "stochastic", name: "Bear", S0: 50_000, mu: -0.02, sigma: 0.3, T: 2.4,
-      horizon_steps: 100, n_paths: 50_000, strike: 100, nu: 5,
-    });
-    expect(body).toMatchObject({
-      name: "Bear", start_value: 50_000, annual_return: -0.02, annual_volatility: 0.3, years: 2, simulations: 10_000,
-    });
   });
 });

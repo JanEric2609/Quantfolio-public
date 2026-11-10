@@ -216,3 +216,23 @@ def test_migration_applies_and_is_idempotent_on_fresh_sqlite():
             "outcome_status", "score_json",
         }
         assert expected <= cols
+
+
+def test_a_same_day_rerun_supersedes_the_earlier_picks():
+    """WP2d: two runs on one day count each symbol once in the hit rate."""
+    db = _memory_db()
+    user = User(id=uuid4().hex, username="u2", password_hash="x")
+    db.add(user)
+    db.commit()
+    first, second = uuid4().hex, uuid4().hex
+    write_predictions(db, run_id=first, user_id=user.id,
+                      shortlisted=[_shortlist_result("AAA", 0.8), _shortlist_result("BBB", 0.7)])
+    write_predictions(db, run_id=second, user_id=user.id,
+                      shortlisted=[_shortlist_result("AAA", 0.82), _shortlist_result("CCC", 0.6)])
+    rows = db.query(DiscoveryPrediction).all()
+    assert len(rows) == 4
+    live = [r for r in rows if r.superseded_by_run_id is None]
+    assert sorted((r.symbol, r.run_id) for r in live) == sorted(
+        [("AAA", second), ("BBB", first), ("CCC", second)])
+    old_aaa = next(r for r in rows if r.symbol == "AAA" and r.run_id == first)
+    assert old_aaa.superseded_by_run_id == second

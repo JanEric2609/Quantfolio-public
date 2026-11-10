@@ -68,16 +68,21 @@ def compute_divergence(
     real_by_isin: dict[str, dict[str, Any]] = {}
     real_by_ticker: dict[str, dict[str, Any]] = {}
 
-    def _add_real(isin: str | None, ticker: str | None, name: str | None, quantity: Decimal) -> None:
+    def _add_real(
+        isin: str | None, ticker: str | None, name: str | None, quantity: Decimal, value: Decimal | None = None,
+    ) -> None:
         if isin:
-            entry = real_by_isin.setdefault(isin, {"ticker": ticker, "name": name, "quantity": Decimal("0")})
+            entry = real_by_isin.setdefault(
+                isin, {"ticker": ticker, "name": name, "quantity": Decimal("0"), "value": Decimal("0")}
+            )
         elif ticker:
             entry = real_by_ticker.setdefault(
-                ticker.upper(), {"ticker": ticker, "name": name, "quantity": Decimal("0")}
+                ticker.upper(), {"ticker": ticker, "name": name, "quantity": Decimal("0"), "value": Decimal("0")}
             )
         else:
             return
         entry["quantity"] += quantity
+        entry["value"] += value or Decimal("0")
 
     manual = (
         db.query(Holding)
@@ -86,9 +91,13 @@ def compute_divergence(
         .all()
     )
     for h in manual:
-        _add_real(h.isin, h.ticker, h.name, h.quantity)
+        _add_real(h.isin, h.ticker, h.name, h.quantity, h.quantity * (h.avg_buy_price or Decimal("0")))
     for pos in live_positions(db, user_id):
-        _add_real(pos.isin or None, pos.ticker, pos.name, pos.quantity)
+        _add_real(pos.isin or None, pos.ticker, pos.name, pos.quantity, pos.value)
+
+    def _paper_value(h: Any) -> float:
+        # Paper portfolios run in EUR; the purchase price is the value basis the sleeve keeps.
+        return float(h.quantity) * float(h.avg_buy_price or 0)
 
     missing_in_real = []
     missing_in_paper = []
@@ -103,6 +112,7 @@ def compute_divergence(
                 "ticker": ph.ticker,
                 "name": ph.name,
                 "quantity": str(ph.quantity),
+                "value_eur": round(_paper_value(ph), 2),
                 "matched_by": "isin",
             })
         else:
@@ -115,6 +125,8 @@ def compute_divergence(
                 "paper_quantity": str(ph.quantity),
                 "real_quantity": str(rh["quantity"]),
                 "quantity_diff": qty_diff,
+                "paper_value_eur": round(_paper_value(ph), 2),
+                "real_value_eur": round(float(rh["value"]), 2),
                 "matched_by": "isin",
             })
 
@@ -125,6 +137,7 @@ def compute_divergence(
                 "ticker": ph.ticker,
                 "name": ph.name,
                 "quantity": str(ph.quantity),
+                "value_eur": round(_paper_value(ph), 2),
                 "matched_by": "ticker",
             })
         else:
@@ -137,6 +150,8 @@ def compute_divergence(
                 "paper_quantity": str(ph.quantity),
                 "real_quantity": str(rh["quantity"]),
                 "quantity_diff": qty_diff,
+                "paper_value_eur": round(_paper_value(ph), 2),
+                "real_value_eur": round(float(rh["value"]), 2),
                 "matched_by": "ticker",
             })
 
@@ -147,6 +162,7 @@ def compute_divergence(
                 "ticker": rh["ticker"],
                 "name": rh["name"],
                 "quantity": str(rh["quantity"]),
+                "value_eur": round(float(rh["value"]), 2),
                 "matched_by": "isin",
             })
 
@@ -157,8 +173,30 @@ def compute_divergence(
                 "ticker": rh["ticker"],
                 "name": rh["name"],
                 "quantity": str(rh["quantity"]),
+                "value_eur": round(float(rh["value"]), 2),
                 "matched_by": "ticker",
             })
+
+    # What the two books share, in value (the lesser side of each matched position).
+    paper_total = sum(_paper_value(h) for h in paper_holdings)
+    shared = sum(min(w["paper_value_eur"], w["real_value_eur"]) for w in weight_diffs)
+    summary = {
+        "overlap_pct": round(100.0 * shared / paper_total, 1) if paper_total > 0 else None,
+        "mandate_value_eur": round(paper_total, 2),
+        "only_in_mandate": len(missing_in_real),
+        "only_in_book": len(missing_in_paper),
+        "quantity_differs": sum(1 for w in weight_diffs if abs(w["quantity_diff"]) > 1e-9),
+        "largest_gaps": sorted(
+            [
+                *({"ticker": r["ticker"], "kind": "only_in_mandate", "gap_eur": r["value_eur"]} for r in missing_in_real),
+                *({"ticker": r["ticker"], "kind": "only_in_book", "gap_eur": r["value_eur"]} for r in missing_in_paper),
+                *({"ticker": w["ticker"], "kind": "quantity_differs",
+                   "gap_eur": round(abs(w["paper_value_eur"] - w["real_value_eur"]), 2)}
+                  for w in weight_diffs if abs(w["quantity_diff"]) > 1e-9),
+            ],
+            key=lambda g: -g["gap_eur"],
+        )[:3],
+    }
 
     # Performance delta: paper NAV growth minus real NAV growth over the SAME
     # window, computed from snapshot series. The previous implementation used
@@ -226,6 +264,7 @@ def compute_divergence(
         "missing_in_real": missing_in_real,
         "missing_in_paper": missing_in_paper,
         "weight_diffs": weight_diffs,
+        "summary": summary,
         "perf_delta": perf_delta,
         "perf_window": perf_window,
         "paper_portfolio_id": paper_portfolio_id,

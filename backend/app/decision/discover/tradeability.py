@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.foundation.broker_instruments import APP_URL, Trading212Listings
 from app.foundation.instrument_taxonomy import classify_instrument
+from app.foundation.venue_instruments import VenueListings, isin_for_symbol
 from app.foundation.recommendation_execution import dkb_search_url, scalable_security_url
 from app.foundation.providers.registry import build_provider_registry
 
@@ -31,7 +32,7 @@ _FUND_TYPES = {"etf", "fund", "bond", "money_market"}
 _EU_ISIN_PREFIXES = {"IE", "LU", "DE", "FR", "NL", "AT", "BE", "ES", "IT", "FI"}
 
 # EU venue suffixes that strongly suggest Xetra/Euronext/Borsa Italiana/etc. access
-_EU_VENUE_SUFFIXES = {".DE", ".F", ".PA", ".AS", ".MI", ".MC", ".SW", ".HE", ".L", ".BR", ".CO", ".ST", ".OL", ".VI", ".WA", ".PR", ".BD", ".BM"}
+_EU_VENUE_SUFFIXES = {".DE", ".F", ".PA", ".AS", ".MI", ".MC", ".SW", ".HE", ".L", ".BR", ".CO", ".ST", ".OL", ".VI", ".WA", ".PR", ".BD", ".BM", ".LS", ".IR"}
 
 
 def _has_eu_venue_suffix(symbol: str) -> bool:
@@ -201,10 +202,23 @@ def assess(
         reasons.append("Provider registry confirms EU exchange listing")
         dkb_confidence = scalable_confidence = "medium"
     else:
-        reasons.append("Listed outside the EU and the US — availability uncertain")
-        dkb_note = "DKB routes to many foreign exchanges directly"
-        scalable_note = "Scalable has gettex/Xetra lines for some foreign shares"
-        dkb_confidence = scalable_confidence = "low"
+        venue = VenueListings(db)
+        lookup_isin = isin or isin_for_symbol(db, sym)
+        listed = venue.listed(lookup_isin)
+        if listed:
+            reasons.append("Listed in Frankfurt; confirm at Scalable before ordering")
+            scalable_note = "Listed on Xetra/Börse Frankfurt (Deutsche Börse list); Scalable routes to gettex, EIX and Xetra"
+            dkb_note = "DKB routes to many foreign exchanges directly"
+            dkb_confidence = scalable_confidence = "medium"
+        elif listed is False:
+            reasons.append("No German listing found (Xetra and Börse Frankfurt lists checked)")
+            dkb_note = "DKB routes to many foreign exchanges directly"
+            dkb_confidence = scalable_confidence = "low"
+        else:
+            reasons.append("Listed outside the EU and the US — availability uncertain")
+            dkb_note = "DKB routes to many foreign exchanges directly"
+            scalable_note = "Scalable has gettex/Xetra lines for some foreign shares"
+            dkb_confidence = scalable_confidence = "low"
 
     reasons.append("likely — confirm at your broker")
 

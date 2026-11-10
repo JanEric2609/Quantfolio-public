@@ -8,50 +8,14 @@ import { Button } from "../../components/ui/button";
 import { Skeleton } from "../../components/ui/skeleton";
 import { EmptyState } from "../../components/composed/EmptyState";
 import { KpiTile } from "../../components/composed/KpiTile";
-import { formatPercent } from "../../lib/format";
+import { formatCurrency, formatPercent } from "../../lib/format";
+import { DiffTable } from "./DiffTable";
 import {
   api,
   type MandateDivergence,
   type MandateAdviceCardUpdateResponse,
 } from "../../lib/api";
 import { MANDATES, portfolioOf, type MandateLetter, type MandatesOutletContext } from "./mandateContext";
-
-function HoldingsDiffTable({
-  title,
-  rows,
-}: {
-  title: string;
-  rows: { isin: string; ticker: string | null; name?: string | null; quantity: string }[];
-}) {
-  if (rows.length === 0) return null;
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="p-0">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-text-muted border-b border-border">
-              <th className="py-2 pl-4 pr-3">Ticker</th>
-              <th className="py-2 pr-3">Name</th>
-              <th className="py-2 pr-4 text-right">Quantity</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.isin} className="border-b border-border/50 last:border-0">
-                <td className="py-2 pl-4 pr-3 font-mono">{r.ticker ?? "—"}</td>
-                <td className="py-2 pr-3 text-text-secondary">{r.name ?? "—"}</td>
-                <td className="py-2 pr-4 text-right tabular-nums">{r.quantity}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </CardContent>
-    </Card>
-  );
-}
 
 export function DivergenceTab() {
   const { portfolios, portfoliosLoading } = useOutletContext<MandatesOutletContext>();
@@ -111,21 +75,30 @@ function MandateDivergence({ mandate, portfolioId }: { mandate: MandateLetter; p
     return <Card className="p-6 text-sm text-text-muted">Divergence data unavailable.</Card>;
   }
 
-  const { missing_in_real, missing_in_paper, weight_diffs } = data.paper_vs_real;
+  const { missing_in_real, missing_in_paper, weight_diffs, summary } = data.paper_vs_real;
   const pendingCards = data.advice_cards.filter((c) => c.status === "new");
   const hasNothing = missing_in_real.length === 0 && missing_in_paper.length === 0 && weight_diffs.length === 0;
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="divergence-summary">
         <KpiTile
-          label="Performance Delta"
-          value={formatPercent(data.performance_delta)}
-          tone={Math.abs(data.performance_delta) > 0.05 ? "bad" : "neutral"}
+          label="Overlap with your book"
+          value={summary?.overlap_pct == null ? "–" : `${summary.overlap_pct.toLocaleString("de-DE", { maximumFractionDigits: 1 })} %`}
         />
-        <KpiTile label="Positions only in Mandate" value={missing_in_real.length} mono />
-        <KpiTile label="Positions only in Real book" value={missing_in_paper.length} mono />
+        <KpiTile label="Only in the mandate" value={summary?.only_in_mandate ?? missing_in_real.length} mono />
+        <KpiTile label="Only in your book" value={summary?.only_in_book ?? missing_in_paper.length} mono />
+        <KpiTile label="Different quantity" value={summary?.quantity_differs ?? weight_diffs.filter((w) => w.quantity_diff !== 0).length} mono />
       </div>
+      <p className="text-xs text-text-muted">
+        Performance delta {formatPercent(data.performance_delta)}
+        {summary && summary.largest_gaps.length > 0 && (
+          <>
+            {" · largest gaps: "}
+            {summary.largest_gaps.map((g) => `${g.ticker ?? "?"} ${formatCurrency(g.gap_eur, "EUR", { digits: 0 })}`).join(", ")}
+          </>
+        )}
+      </p>
 
       {pendingCards.length > 0 && (
         <div className="space-y-2">
@@ -165,44 +138,7 @@ function MandateDivergence({ mandate, portfolioId }: { mandate: MandateLetter; p
           No ISIN-matched divergence between the mandate's paper holdings and your real book right now.
         </Card>
       ) : (
-        <div className="space-y-4">
-          <HoldingsDiffTable title="Only in the mandate (not in your real book)" rows={missing_in_real} />
-          <HoldingsDiffTable title="Only in your real book (not in the mandate)" rows={missing_in_paper} />
-          {weight_diffs.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-sm">Quantity differences</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-xs text-text-muted border-b border-border">
-                      <th className="py-2 pl-4 pr-3">Ticker</th>
-                      <th className="py-2 pr-3 text-right">Mandate qty</th>
-                      <th className="py-2 pr-3 text-right">Real qty</th>
-                      <th className="py-2 pr-4 text-right">Diff</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {weight_diffs.map((w) => (
-                      <tr key={w.isin} className="border-b border-border/50 last:border-0">
-                        <td className="py-2 pl-4 pr-3 font-mono">{w.ticker ?? "—"}</td>
-                        <td className="py-2 pr-3 text-right tabular-nums">{w.paper_quantity}</td>
-                        <td className="py-2 pr-3 text-right tabular-nums">{w.real_quantity}</td>
-                        <td
-                          className={`py-2 pr-4 text-right tabular-nums font-medium ${w.quantity_diff > 0 ? "text-success" : w.quantity_diff < 0 ? "text-danger" : ""}`}
-                        >
-                          {w.quantity_diff > 0 ? "+" : ""}
-                          {w.quantity_diff}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+        <DiffTable onlyInMandate={missing_in_real} onlyInBook={missing_in_paper} quantityDiffs={weight_diffs} />
       )}
     </div>
   );

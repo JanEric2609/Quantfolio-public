@@ -305,3 +305,59 @@ def test_plan_ceiling_default_is_20_and_paper_budget_stays_10():
     db = _memory_db()
     assert monthly_plan.plan_settings(db)["satellite_max_pct"] == 20.0
     assert monthly_plan.paper_plan_targets(db)["satellite_max"] == pytest.approx(0.10)
+
+
+# --- Skew must not move the e-processes (plan 2026-11-10, WP4, ADR 0025 amendment) ---
+
+
+def _skewed_paths(rng, skew: float, n_paths: int, days: int, sd_daily: float, mean_daily: float = 0.0):
+    """Zero-mean (plus ``mean_daily``) skew-normal daily excess returns of a chosen skewness and sd."""
+    from scipy import optimize, stats
+
+    def skew_of(delta: float) -> float:
+        return (4 - math.pi) / 2 * (delta * math.sqrt(2 / math.pi)) ** 3 / (1 - 2 * delta**2 / math.pi) ** 1.5
+
+    delta = optimize.brentq(lambda d: skew_of(d) - abs(skew), 0.0, 0.999)
+    shape = delta / math.sqrt(1 - delta**2)
+    mean = delta * math.sqrt(2 / math.pi)
+    sd = math.sqrt(1 - 2 * delta**2 / math.pi)
+    raw = stats.skewnorm.rvs(shape, size=(n_paths, days), random_state=rng)
+    z = (raw - mean) / sd
+    return (np.sign(skew) * z) * sd_daily + mean_daily
+
+
+@pytest.mark.parametrize("skew", [0.0, -0.3, -0.85, 0.85])
+def test_skew_alone_does_not_reach_earned_or_fire_harm(skew):
+    """Zero alpha, 10 % tracking error, 504 days: the rates stay under the nominal bounds + 3 MC s.e."""
+    n_paths = 2000
+    rng = np.random.default_rng(20261110)
+    paths = _skewed_paths(rng, skew, n_paths, 504, 0.10 / DAILY) if skew else rng.normal(0.0, 0.10 / DAILY, (n_paths, 504))
+    earned_at, _ = lad.thresholds("llm", 1)
+    earned = harm = 0
+    for x in paths:
+        e, h = lad.e_processes(x, lad.lagged_sigma(x))
+        earned += bool(np.max(e) >= earned_at)
+        harm += bool(np.max(h) >= lad.HARM_THRESHOLD)
+    for count, bound in ((earned, 1.0 / earned_at), (harm, 1.0 / lad.HARM_THRESHOLD)):
+        rate = count / n_paths
+        assert rate <= bound + 3 * math.sqrt(bound * (1 - bound) / n_paths), (skew, rate, bound)
+
+
+def test_a_provisional_snapshot_day_is_skipped():
+    db = _memory_db()
+    pid = "p1"
+    cand = lad.LadderCandidate(id="c1", portfolio_id=pid)
+    from app.foundation.models.entities import PaperPortfolio, PaperSnapshot, User
+
+    db.add(User(id="u", username="u", password_hash="x"))
+    db.add(PaperPortfolio(id=pid, user_id="u", name="s"))
+    day = date(2026, 11, 2)
+    # created the same day = the advisor cycle's live-quote row; created next day = the 00:00 rewrite
+    for i, created_offset in enumerate([0, 1, 0]):
+        d = day + timedelta(days=i)
+        db.add(PaperSnapshot(portfolio_id=pid, date=d, total_value=Decimal("100") + i,
+                             created_at=datetime(d.year, d.month, d.day, 10, tzinfo=UTC) + timedelta(days=created_offset)))
+    db.commit()
+    days, _ = lad.paired_excess(db, cand, day, day + timedelta(days=2),
+                                bench_closes={(day + timedelta(days=i)).isoformat(): 100.0 + i for i in range(3)})
+    assert days == []  # only the middle day is final; a return needs two final days in a row

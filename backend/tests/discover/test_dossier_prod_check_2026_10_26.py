@@ -100,7 +100,7 @@ def test_slot_prompt_uses_the_checked_revenue_growth(monkeypatch):
 
     def _llm(_db, messages, timeout_s=120.0, **_kw):
         seen.append(messages[1]["content"])
-        return json.dumps({"thesis": "HSBA trades at {pe}.", "key_risks": []})
+        return json.dumps({"thesis": "HSBA trades at {pe}. It is a bank.", "key_risks": []})
 
     monkeypatch.setattr("app.decision.discover.dossier_writer._local_llm_sync", _llm)
     monkeypatch.setattr(
@@ -124,4 +124,33 @@ def test_slot_prompt_uses_the_checked_revenue_growth(monkeypatch):
     assert "Sector: Financial Services" in prompt
     assert "{pe}: a trailing price-to-earnings ratio of 13.0" in prompt
     assert "Ticker: write it exactly as HSBA." in prompt
-    assert out["dossier"]["thesis"] == "HSBA trades at a trailing price-to-earnings ratio of 13.0."
+    assert out["dossier"]["thesis"] == "HSBA trades at a trailing price-to-earnings ratio of 13.0. It is a bank."
+
+
+def _write_with(monkeypatch, llm_json):
+    db = _memory_db()
+    monkeypatch.setattr("app.decision.discover.dossier_writer._local_llm_sync",
+                        lambda _db, messages, timeout_s=120.0, **_kw: json.dumps(llm_json))
+    monkeypatch.setattr("app.decision.discover.dossier_writer._fetch_fundamentals",
+                        lambda _symbol, _db: {"pe": 13.0, "sector": None})
+    monkeypatch.setattr("app.decision.discover.dossier_writer._fetch_sentiment", lambda _symbol, _db: {})
+    scores = {"composite": 0.54, "sentiment_fundamentals": {"sector": "Financial Services"},
+              "verification_gate": {"volatility": 0.21, "max_drawdown": 0.1}}
+    candidate = {"symbol": "HSBA.L", "name": "HSBC", "isin": None, "source": "screen",
+                 "scores_json": json.dumps(scores), "tradeable_json": "{}"}
+    return write_dossier(db, candidate, {"user_id": "u1"})
+
+
+def test_a_one_sentence_thesis_on_one_fact_is_not_accepted(monkeypatch):
+    """WP8: CA.PA, XDEM and MTDR had a single reason; two grounded reasons or the code-written thesis."""
+    out = _write_with(monkeypatch, {"thesis": "HSBA trades at {pe}.", "key_risks": []})
+    assert out["dossier"]["thesis"] != "HSBA trades at a trailing price-to-earnings ratio of 13.0."
+
+
+def test_risks_citing_the_same_figure_are_one_risk(monkeypatch):
+    out = _write_with(monkeypatch, {
+        "thesis": "HSBA trades at {pe}. It is a bank.",
+        "key_risks": ["The stock has {volatility}.", "Volatility may hurt: {volatility}."],
+    })
+    volatility = [r for r in out["dossier"]["key_risks"] if "volatility" in r.lower()]
+    assert len(volatility) <= 1

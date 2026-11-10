@@ -125,6 +125,9 @@ class DiscoveryPrediction(Base):
     # prompt hashes, served model, calibrator version, degradation flags.
     # NULL on rows written before the stamp existed (the legacy cohort).
     provenance_json: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    # Set when a later run of the same day picked the same symbol (WP2d): the
+    # hit rate, the calibrator and the skill snapshot count each symbol once.
+    superseded_by_run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
 
 class DiscoverySkillSnapshot(Base):
@@ -267,3 +270,21 @@ class AcTrialLedger(Base):
         ),
         sa.Index("ix_ac_trial_lookup", "factor_name", "config_hash", "evaluated_at"),
     )
+
+
+class DiscoverStageCache(Base):
+    """One user-independent Discover stage output for one symbol on one bar date (plan 2026-11-10, WP9).
+
+    The nightly precompute fills it after the price prefetch; an on-demand run
+    loads an entry when its ``bar_date`` equals the symbol's latest stored bar
+    and computes (and stores) otherwise. The payload is the stage's
+    ``(scores, reject_reason)`` as JSON; the run always sees the JSON form, cached or not.
+    """
+
+    __tablename__ = "discover_stage_cache"
+
+    symbol: Mapped[str] = mapped_column(String(32), primary_key=True)
+    stage: Mapped[str] = mapped_column(String(96), primary_key=True)
+    bar_date: Mapped[str] = mapped_column(String(10), primary_key=True)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

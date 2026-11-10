@@ -25,6 +25,7 @@ from app.decision.discover.corporate_action import STALE_RATIO_KEYS, corporate_a
 from app.decision.discover.data_quality import BOOK_EQUITY_CONCERN, data_quality_score
 from app.foundation.fundamentals_context import growth_basis
 from app.decision.discover.dossier_facts import (
+    SLOT,
     SLOT_RULES,
     Fact,
     allowed_digit_terms,
@@ -351,31 +352,31 @@ def _fetch_sentiment(symbol: str, db: Session) -> dict[str, Any]:
             logger.debug("_fetch_sentiment: no news rows for %s", symbol)
             return neutral
 
-        scores = [float(r.sentiment_score) for r in rows if r.sentiment_score is not None]
-        if not scores:
-            return {**neutral, "social_mentions": len(rows)}
+        from app.foundation.sentiment import has_real_sentiment, tone_unit
 
-        avg = sum(scores) / len(scores)
-        # Map [-1, 1] or [0, 1] to [0, 1].
-        sentiment = avg if avg >= 0 else (avg + 1.0) / 2.0
-        sentiment = max(0.0, min(1.0, sentiment))
+        unit, scored = tone_unit(rows)
+        if unit is None:
+            # Under three FinBERT-scored articles there is no tone to report.
+            return {**neutral, "social_mentions": scored}
+        sentiment = unit
 
-        if len(scores) >= 2:
-            first_half = sum(scores[: len(scores) // 2]) / max(1, len(scores) // 2)
-            second_half = sum(scores[len(scores) // 2 :]) / max(1, len(scores) - len(scores) // 2)
-            if first_half > second_half + 0.1:
+        # Rising/falling: tone of the newer half against the older half.
+        real = [r for r in rows if has_real_sentiment(r)]
+        half = len(real) // 2
+        first_unit, _ = tone_unit(real[:half]) if half >= 3 else (None, 0)
+        second_unit, _ = tone_unit(real[half:]) if len(real) - half >= 3 else (None, 0)
+        trend = "stable"
+        if first_unit is not None and second_unit is not None:
+            # rows are newest first: real[:half] is the newer half
+            if first_unit > second_unit + 0.1:
                 trend = "rising"
-            elif second_half > first_half + 0.1:
+            elif second_unit > first_unit + 0.1:
                 trend = "falling"
-            else:
-                trend = "stable"
-        else:
-            trend = "stable"
 
         logger.debug("_fetch_sentiment: %s mentions=%d sentiment=%.2f trend=%s", symbol, len(rows), sentiment, trend)
         return {
             "news_sentiment": round(sentiment, 4),
-            "social_mentions": len(rows),
+            "social_mentions": scored,
             "sentiment_trend": trend,
         }
     except Exception as exc:
@@ -716,7 +717,7 @@ EARNINGS_IMMINENT_DAYS = 1
 #: stock reports, and 81 days away read as a warning on KMI (2026-11-07).
 EARNINGS_RISK_DAYS = 30
 #: A fall from the 3-month high from which it is worth a line.
-RECENT_FALL_LIMIT = 0.20
+RECENT_FALL_LIMIT = 0.15
 def _jump_text(mom: dict[str, Any]) -> str | None:
     """'One day gave much of the momentum', when the momentum stage says so; None otherwise."""
     share, day, gain = mom.get("largest_day_share"), mom.get("largest_day_date"), mom.get("largest_day_return")
@@ -1143,15 +1144,25 @@ def write_dossier(
                     validated = DossierOutputModel.model_validate(_coerce_dossier(parsed))
                     candidate_dossier = validated.model_dump()
                     slot_problems: list[str] = []
+                    thesis_keys: set[str] = set()
                     if slot_facts is not None:
+                        thesis_keys = set(SLOT.findall(candidate_dossier.get("thesis") or ""))
                         candidate_dossier["thesis"], slot_problems = render(
                             candidate_dossier.get("thesis") or "", slot_facts, digit_terms,
                         )
                         rendered_risks = []
+                        seen_risk_keys: list[frozenset[str]] = []
                         for risk in candidate_dossier.get("key_risks") or []:
+                            # Two risks citing the same figures say one thing (IS3N, XDEM, FIX):
+                            # de-duplicate on the keys, not on the wording.
+                            risk_keys = frozenset(SLOT.findall(str(risk)))
+                            if risk_keys and any(risk_keys <= seen for seen in seen_risk_keys):
+                                continue
                             text, risk_problems = render(str(risk), slot_facts, digit_terms)
                             if text and not risk_problems:
                                 rendered_risks.append(text)
+                                if risk_keys:
+                                    seen_risk_keys.append(risk_keys)
                         candidate_dossier["key_risks"] = rendered_risks
                         if slot_problems:
                             logger.info("Dossier for %s: sentences dropped: %s", symbol, "; ".join(slot_problems))
@@ -1174,6 +1185,14 @@ def write_dossier(
                         if check.reason == "truncated":
                             check.reason = "own_figures"
                         check.problems = [*slot_problems, *check.problems]
+                    if (
+                        check.ok and slot_facts is not None and len(thesis_keys) == 1
+                        and len([s for s in re.split(r"(?<=[.!?])\s+", check.thesis.strip()) if s]) < 2
+                    ):
+                        # One sentence resting on one fact (CA.PA, XDEM, MTDR) is a slogan, not a thesis:
+                        # two grounded reasons or retry. (No key at all is the legacy plain-text path.)
+                        check.reason = "one_reason"
+                        check.problems = [f"the thesis rests on {len(thesis_keys)} fact(s); cite at least two"]
                     if check.ok:
                         candidate_dossier["thesis"] = check.thesis
                         # The data's own risks stay in, whatever the LLM wrote
@@ -1270,6 +1289,17 @@ def write_dossier(
     final_dossier["composite_raw"] = scores.get("composite_raw")
     final_dossier["recency_penalty"] = recency_penalty or None
     final_dossier["lane"] = scores.get("lane")
+    # What past picks of this kind actually did, in place of a conviction read as a probability (WP12a).
+    try:
+        from app.decision.discover.calibrator import outcome_band
+
+        band_user = profile.get("user_id")
+        if band_user and band_user != "unknown":
+            final_dossier["outcome_band"] = outcome_band(
+                db, band_user, "fund" if instrument_type in ("etf", "fund", "bond", "money_market") else "stock",
+            )
+    except Exception:  # noqa: BLE001 - the band is context, never a reason to lose a dossier
+        logger.debug("outcome_band failed for %s", symbol, exc_info=True)
     final_dossier["lane_rank"] = scores.get("lane_rank")
     final_dossier["data_quality"] = _as_dict(scores.get("data_quality")) or None
     final_dossier["expected_return_anchor_years"] = (

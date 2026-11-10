@@ -113,13 +113,14 @@ _MIN_HIT_RATE = 0.5
 
 
 def one_sided_t_e_value(x: Sequence[float], c: float = _MIXTURE_C) -> float:
-    """E-value against "mean <= 0" that grows when the mean is positive.
+    """E-value against "mean = 0" that grows when the mean is positive.
 
     Wang & Ramdas (arXiv 2310.03722), Theorem 4.11: for i.i.d. Gaussian
     observations with unknown variance,
     ``G = 2 sqrt(c^2/(n+c^2)) [(1 - S^2/((n+c^2)V))^(-n/2)
     - (1 - min(S,0)^2/((n+c^2)V))^(-n/2)]`` with ``S = sum x`` and
-    ``V = sum x^2`` is an e-process for mean 0, so
+    ``V = sum x^2`` is an e-process for mean 0 (Theorem 4.11 is proved for
+    mean = 0 only, which is the null tested here), so
     ``P(sup_n G_n >= 1/alpha) <= alpha``. Computed in logs; 0.0 when there
     is nothing to test.
     """
@@ -278,7 +279,9 @@ def _block_mean_track_record(
     cohort = [
         # Discover's own rows: the advisor cycle's calls (portfolio_id set) carry
         # no instrument type, so they used to fall into the equity cohort.
-        r for r in db.query(DiscoveryPrediction).filter(DiscoveryPrediction.portfolio_id.is_(None)).all()
+        r for r in db.query(DiscoveryPrediction).filter(
+            DiscoveryPrediction.portfolio_id.is_(None), DiscoveryPrediction.superseded_by_run_id.is_(None),
+        ).all()
         if r.predicted_at is not None
         and _resolve_cohort_instrument_type(r.features_json) == instrument_type
     ]

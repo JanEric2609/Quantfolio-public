@@ -75,6 +75,18 @@ describe("ThisMonthPage", () => {
     loadPlan = async () => plan;
   });
 
+  it("shows a status strip of chips that link to their pages, and keeps the plan-vs-target behind details", async () => {
+    renderPage();
+    const strip = await screen.findByTestId("status-strip");
+    expect(strip.textContent).toContain("Crash guard");
+    expect(strip.textContent).toContain("Capital ladder");
+    expect(screen.getByRole("link", { name: /Capital ladder/ })).toHaveAttribute("href", "/graduation");
+    // exactly one h1, and the plan-vs-target sits inside a closed <details>
+    expect(document.querySelectorAll("h1").length).toBe(1);
+    const sleeves = screen.getByTestId("month-plan-vs-target");
+    expect(sleeves.closest("details")?.hasAttribute("open")).toBe(false);
+  });
+
   it("shows the no-change headline, the savings-plan action and all three sleeves", async () => {
     renderPage();
 

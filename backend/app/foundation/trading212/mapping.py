@@ -80,6 +80,23 @@ class AccountSummary:
             return None
         return (self.available_to_trade or Decimal("0")) + (self.reserved_for_orders or Decimal("0"))
 
+    @property
+    def savings_pot(self) -> Decimal | None:
+        """Money counted in ``totalValue`` that no other field accounts for (the overnight savings pot).
+
+        The summary has no field for it: ``totalValue`` less the investments and
+        the three cash fields. On 2026-11-10 that was 673.32 EUR of 1,741.61,
+        and 0.08 EUR of interest arrived daily (about 4.3 % a year on 675 EUR).
+        Floored at zero; a gap under 1 EUR is rounding and counts as none.
+        """
+        if self.total_value is None or self.investments_value is None:
+            return None
+        gap = (
+            self.total_value - self.investments_value - (self.available_to_trade or Decimal("0"))
+            - (self.reserved_for_orders or Decimal("0")) - (self.in_pies or Decimal("0"))
+        )
+        return gap if gap >= Decimal("1") else None
+
 
 def map_summary(body: Any) -> AccountSummary:
     body = _obj(body)

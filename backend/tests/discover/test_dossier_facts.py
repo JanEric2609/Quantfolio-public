@@ -193,3 +193,31 @@ def test_prompt_lists_every_key():
     prompt = facts_prompt([Fact("momentum", "a +29.1 % return"), Fact("beta", "a beta of 0.88")])
     assert "{momentum}: a +29.1 % return" in prompt
     assert "{beta}: a beta of 0.88" in prompt
+
+
+# --- WP8 (plan 2026-11-10): splices, duplicate risks, one-reason theses, fund style claims ------------
+
+
+def test_a_key_after_its_own_noun_is_rejected_not_spliced():
+    facts = [Fact("volatility", "an annual volatility of 21 %"), Fact("momentum", "a past return of +8.0 %")]
+    text, problems = render("It carries annual volatility at {volatility}.", facts, allowed_digit_terms("X"))
+    assert text == "" and len(problems) == 1 and "volatility" in problems[0]
+    # the model's lead-in the phrase already carries is dropped, as before
+    text, problems = render("It has an annualized {momentum}.", facts, allowed_digit_terms("X"))
+    assert problems == [] and text == "It has a past return of +8.0 %."
+    assert "annualized" not in text
+
+
+def test_two_different_figures_may_share_a_word():
+    facts = [Fact("er", "an expected return of 2.3 %"), Fact("cash", "a cash return of 2.0 %")]
+    text, problems = render("The system expects {er}, against {cash}.", facts, allowed_digit_terms("X"))
+    assert problems == [] and "2.3" in text and "2.0" in text
+
+
+def test_fund_style_claims_need_holdings_data():
+    from app.decision.discover.thesis_checks import mislabel_problems
+
+    claim = "SPYY gives growth exposure through large-cap US technology."
+    assert len(mislabel_problems(claim, "", is_fund=True)) == 2
+    assert mislabel_problems(claim, "growth exposure; large-cap US technology", is_fund=True) == []
+    assert mislabel_problems(claim, "", is_fund=False) == []

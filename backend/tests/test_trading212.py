@@ -266,8 +266,10 @@ def test_sync_writes_positions_cash_ledger_and_pies(fake):
 
     status = trading212_status.status(db, user.id)
     assert status["state"] == "ready" and status["positions"] == 2 and status["pies"] == 1
-    # 1 EUR in 30 days on 305 EUR of cash, annualised.
-    assert Decimal(status["interest_rate_measured"]) == pytest.approx(Decimal("0.0399"), abs=Decimal("0.0001"))
+    # One day of stored balances is no basis for an annual rate (WP7a): none shown until 20 days exist.
+    assert status["interest_rate_measured"] is None and status["interest_rate_basis"] is None
+    assert status["savings_pot"] is None
+    assert status["last_summary"]["total_value"] == "1475.0"
 
 
 def test_tax_lots_carry_the_fee_and_the_eur_cost(fake):
@@ -738,3 +740,56 @@ def test_a_connected_broker_has_its_home_row_before_its_first_sync():
     rows = {r["source"]: r for r in wealth_summary(db, user.id)["by_broker"]}
     assert rows["trading212"]["total"] == 0 and rows["trading212"]["last_synced"] is None
     assert "scalable" not in rows  # never set up
+
+
+# --- WP7a: the savings pot and an honest interest rate -------------------------------
+
+
+def _with_pot(api: FakeApi, total: float = 2150.0) -> None:
+    api.data["/equity/account/summary"]["totalValue"] = total  # 1475 + the 675 EUR pot
+
+
+def test_the_summary_gap_is_the_savings_pot():
+    from app.foundation.trading212.mapping import map_summary
+
+    body = {"id": 1, "currency": "EUR", "totalValue": 1741.61,
+            "cash": {"availableToTrade": 3.35, "inPies": 1.48, "reservedForOrders": 0},
+            "investments": {"currentValue": 1063.46, "totalCost": 1000}}
+    assert map_summary(body).savings_pot == Decimal("673.32")
+    body["totalValue"] = 1068.0  # 1063.46 + 4.83 = 1068.29: a gap under 1 EUR is rounding
+    assert map_summary(body).savings_pot is None
+
+
+def test_the_pot_is_its_own_account_in_the_book_but_not_investable_cash(fake):
+    from app.decision.monthly_plan import cash_state
+
+    _with_pot(fake)
+    db = _memory_db()
+    user = _setup(db)
+    t212.sync(db, user.id)
+    pot = db.query(ConnectedAccount).filter_by(source="trading212", external_id="4711:pot").one()
+    assert pot.account_type == "cash" and pot.balance == Decimal("675.00") and pot.name == "Trading 212 savings pot"
+    cash, _ = synced_cash(db, user.id)
+    assert cash == Decimal("305") + Decimal("675")  # the book counts it
+    state = cash_state(db, user.id, {"emergency_reserve_eur": 0})
+    assert state["savings_pot_eur"] == 675.0
+    assert state["broker_cash_by_broker"]["trading212"] == pytest.approx(300.0)  # free cash only
+
+
+def test_a_summary_without_a_gap_makes_no_pot_account(fake):
+    db = _memory_db()
+    user = _setup(db)
+    t212.sync(db, user.id)
+    assert db.query(ConnectedAccount).filter_by(source="trading212", external_id="4711:pot").count() == 0
+
+
+def test_the_rate_needs_twenty_days_and_an_average_balance_above_50_eur():
+    from datetime import date as _date
+
+    today = _date.today()
+    days = {(today - timedelta(days=i)).isoformat(): Decimal("675") for i in range(25)}
+    rate, basis = t212._measured_rate(Decimal("2.40"), days)  # 2.40 EUR in 30 days on 675 EUR
+    assert Decimal("0.03") <= rate <= Decimal("0.05") and "estimated" in basis
+    assert t212._measured_rate(Decimal("2.40"), dict(list(days.items())[:10])) == (None, None)  # 10 days
+    small = {k: Decimal("5") for k in days}
+    assert t212._measured_rate(Decimal("1.76"), small) == (None, None)  # the 443 % case

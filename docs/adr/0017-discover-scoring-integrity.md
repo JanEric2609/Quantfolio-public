@@ -477,3 +477,13 @@ Burns, Engle & Mezrich (1998), *Correlations and Volatilities of
 Asynchronous Data*, J. Derivatives · Wang & Ramdas (2024), *Anytime-valid
 t-tests and confidence sequences for Gaussian means with unknown variance*,
 arXiv 2310.03722 · Ville (1939) on nonnegative supermartingales.
+
+## Amendment 2026-11-10: every signal is ranked before it is weighted
+
+**Finding.** The composite multiplied raw 0-1 signals by weights, so the weights did not describe what moved the score. On the 985 scored stocks of run 31a6009a momentum (a uniform rank, standard deviation 0.29) explained 81 % of the composite's variance, portfolio fit (weight 15-20 %, band of 0.05) 1 % and fundamentals 5.5 %.
+
+**Decision (D1).** After all candidates are scored, `rank_signals_within_lanes` (`composite.py`) replaces every signal with its mid-rank percentile inside the candidate's lane (stock or fund). A signal with fewer than five distinct values in a lane is left out of that lane's composite (the existing renormalisation handles it). A lane below `MOMENTUM_RANK_MIN_CANDIDATES` keeps raw values; money-market candidates keep their neutral raw values. The old score is stored as `scores["composite_legacy"]` for eight weeks (until 2027-01-05) so the two rankings can be compared on the shadow ledger. The run log prints each signal's share of composite variance before and after (`variance_shares`).
+
+**Risk.** Ranking a signal whose differences are noise spreads that noise over the full range; the five-distinct-values rule limits it and the legacy score makes it measurable.
+
+**Related, same day.** Index constituents are always equities (a name containing "estr" is no money-market fund); fund keywords match whole words; the industry cap reads yfinance's industry when Finnhub only repeats the sector; a stock failing two quality checks (volatility and drawdown, or a negative Sharpe at high volatility) is excluded (D5); a holding company's P/E is not scored; the recent-fall risk starts at 15 % below the 3-month high.

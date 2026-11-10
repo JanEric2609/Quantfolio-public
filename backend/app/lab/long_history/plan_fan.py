@@ -202,6 +202,8 @@ def project(hist_euro: list[HomeHistory] | tuple[HomeHistory, ...],
         "terminal": {
             "median": float(np.median(terminal)), "mean": float(np.mean(terminal)),
             "p5": float(np.percentile(terminal, 5)), "p95": float(np.percentile(terminal, 95)),
+            "start_value": start_value,
+            "future_contributions": 12.0 * monthly_contribution * years,
             "contributed": contributed[-1],
             "p_below_contributed": float(np.mean(terminal < contributed[-1])),
         },

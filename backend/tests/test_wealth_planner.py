@@ -46,3 +46,11 @@ def test_goal_probability_with_its_standard_error_and_drift_sensitivity():
     assert 0 < g["probability"] < 1
     assert g["mc_standard_error"] == pytest.approx(math.sqrt(g["probability"] * (1 - g["probability"]) / 10_000))
     assert g["probability_low_drift"] < g["probability"] < g["probability_high_drift"]
+
+
+def test_paid_in_is_the_portfolio_today_plus_what_you_add():
+    out = project(PlanInputs(start_value=34_900.0, monthly_contribution=100.0, years=30, real_return=0.04,
+                             volatility=0.0, nu=5, calibration_years=0, paths=50, seed=1))
+    t = out["terminal"]
+    assert t["start_value"] == 34_900.0 and t["future_contributions"] == 36_000.0
+    assert t["start_value"] + t["future_contributions"] == t["contributed"] == 70_900.0

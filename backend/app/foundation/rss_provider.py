@@ -254,6 +254,13 @@ def fetch_all_feeds(db=None) -> dict[str, Any]:
     }
 
 
+def cached_items() -> list[dict[str, Any]]:
+    """Items of every feed already fetched in this process, newest first; never touches the network."""
+    items = [i for entry in list(_feed_cache.values()) for i in entry["items"]]
+    items.sort(key=lambda x: x.get("published", ""), reverse=True)
+    return items
+
+
 def invalidate_cache(url: str | None = None) -> None:
     """Invalidate the feed cache. If url is None, clear all cached feeds."""
     if url:

@@ -47,6 +47,7 @@ export const SMOKE_PAGES: string[] = [
   "/mandates/accuracy",
   "/mandates/divergence",
   "/graduation",
+  "/learn",
   "/portfolio/paper",
   "/money/overview",
   "/money/envelopes",

@@ -18,7 +18,8 @@ import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { InfoTooltip } from "../../components/ui/InfoTooltip";
 import { formatCompact, formatNumber, formatPercent, formatPercentPoints } from "../../lib/format";
-import { formatFundamental, formatSignalValue } from "../../lib/strengthScore";
+import { formatSignalValue } from "../../lib/strengthScore";
+import { FundamentalsGrid } from "./components/FundamentalsGrid";
 
 /* ---------- helpers ---------- */
 
@@ -263,7 +264,7 @@ export function StockDetailPage() {
       <PageHeader
         level={2}
         title={tk}
-        subtitle={quote?.name ? String(quote.name) : undefined}
+        subtitle={fundamentals?.name ? String(fundamentals.name) : quote?.name ? String(quote.name) : undefined}
         breadcrumb={[
           { label: "Watchlist", href: "/research/watchlist" },
           { label: tk },
@@ -296,6 +297,12 @@ export function StockDetailPage() {
           </div>
         )}
         {typeof quote?.currency === "string" && <span className="text-sm text-text-muted mb-1">{quote.currency}</span>}
+        {!ctx.isLoading && price != null && (
+          <span className="text-xs text-text-muted mb-1" data-testid="price-time">
+            {quote?.as_of ? `Quote ${timeAgo(String(quote.as_of))}` : "Quote"}
+            {data?.price_basis?.last_session_in_progress ? " · today's session is still in progress" : ""}
+          </span>
+        )}
         {data?.report?.generated_at && (
           <span className="text-xs text-text-muted mb-1 flex items-center gap-1">
             <Clock size={12} /> Report {timeAgo(data.report.generated_at)}
@@ -428,9 +435,9 @@ export function StockDetailPage() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-sm flex items-center gap-2">
-                    <Newspaper size={14} /> <span className="inline-flex items-center gap-1.5">Sentiment <InfoTooltip text="AI-evaluated sentiment from recent news, social media, and analyst reports over a rolling 21-day window." side="right" /></span>
+                    <Newspaper size={14} /> <span className="inline-flex items-center gap-1.5">Sentiment <InfoTooltip text="Net tone of the headlines of the last 21 days: positive minus negative articles, as a share of those FinBERT scored. It reads headlines only, not social media or analyst reports." side="right" /></span>
                     {sentData && sentData.total > 0 && (
-                      <span className="text-[10px] text-text-muted font-normal">({sentData.total} articles, 21d)</span>
+                      <span className="text-[10px] text-text-muted font-normal">({sentData.scored ?? sentData.total} scored of {sentData.total} stored articles, 21d)</span>
                     )}
                   </CardTitle>
                 </CardHeader>
@@ -450,7 +457,11 @@ export function StockDetailPage() {
                       }`}>
                         {sentData.overall === "positive" ? "▲" : sentData.overall === "negative" ? "▼" : "●"} {sentData.overall}
                       </span>
-                      <span className="text-xs text-text-muted">avg score: {formatNumber(sentData.avg_score, { digits: 3 })}</span>
+                      <span className="text-xs text-text-muted" data-testid="net-tone">
+                        {sentData.net_tone == null
+                          ? "not enough scored news (needs at least 3 articles)"
+                          : `net tone ${sentData.net_tone > 0 ? "+" : ""}${formatNumber(sentData.net_tone, { digits: 2 })} from ${sentData.scored} scored articles`}
+                      </span>
                     </div>
                     {/* Stacked bar */}
                     <div className="h-3 rounded-full overflow-hidden flex bg-surface-2">
@@ -575,16 +586,7 @@ export function StockDetailPage() {
             <Card>
               <CardContent className="pt-6">
                 {fundamentals && Object.keys(fundamentals).length > 0 ? (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {Object.entries(fundamentals)
-                      .filter(([, v]) => v != null && v !== "")
-                      .map(([k, v]) => (
-                      <div key={k} className="rounded-md border border-border bg-surface-2 p-3">
-                        <div className="text-[11px] uppercase tracking-wider text-text-muted">{k.replace(/_/g, " ")}</div>
-                        <div className="text-sm font-semibold mt-1">{formatFundamental(k, v)}</div>
-                      </div>
-                    ))}
-                  </div>
+                  <FundamentalsGrid fundamentals={fundamentals} />
                 ) : (
                   <p className="text-sm text-text-muted text-center py-8">No fundamental data available.</p>
                 )}

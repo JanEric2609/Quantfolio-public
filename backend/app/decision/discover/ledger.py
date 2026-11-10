@@ -32,6 +32,34 @@ logger = logging.getLogger(__name__)
 DEFAULT_HORIZON_DAYS = int(os.getenv("DISCOVER_PREDICTION_HORIZON_TRADING_DAYS") or "21")
 
 
+def supersede_same_day(db: Session, prediction: DiscoveryPrediction) -> int:
+    """Mark earlier same-day picks of the same user and symbol as superseded by *prediction*'s run.
+
+    Only Discover's own rows (no paper sleeve, no advisor strategy) take part.
+    Returns the number of rows marked. Does not commit.
+    """
+    if prediction.portfolio_id is not None or prediction.strategy_id is not None or not prediction.predicted_at:
+        return 0
+    day_start = prediction.predicted_at.replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = (
+        db.query(DiscoveryPrediction)
+        .filter(
+            DiscoveryPrediction.user_id == prediction.user_id,
+            DiscoveryPrediction.symbol == prediction.symbol,
+            DiscoveryPrediction.portfolio_id.is_(None),
+            DiscoveryPrediction.strategy_id.is_(None),
+            DiscoveryPrediction.run_id != prediction.run_id,
+            DiscoveryPrediction.superseded_by_run_id.is_(None),
+            DiscoveryPrediction.predicted_at >= day_start,
+            DiscoveryPrediction.predicted_at < prediction.predicted_at,
+        )
+        .all()
+    )
+    for row in rows:
+        row.superseded_by_run_id = prediction.run_id
+    return len(rows)
+
+
 def add_trading_days(start: datetime, trading_days: int) -> datetime:
     """Return *start* advanced by *trading_days* week-days (Sat/Sun skipped).
 
@@ -109,6 +137,8 @@ def write_predictions(
         )
         db.add(pred)
         created.append(pred)
+        db.flush()
+        supersede_same_day(db, pred)
 
     if created:
         try:

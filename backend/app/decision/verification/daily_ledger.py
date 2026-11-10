@@ -124,6 +124,8 @@ def prediction_members(db: Session, user_id: str, series: str) -> list[Member]:
     query = query.filter(
         DiscoveryPrediction.portfolio_id.isnot(None) if advisor else DiscoveryPrediction.portfolio_id.is_(None)
     )
+    if not advisor:
+        query = query.filter(DiscoveryPrediction.superseded_by_run_id.is_(None))
     members = []
     for row in query.all():
         direction = (row.direction or "buy").lower()

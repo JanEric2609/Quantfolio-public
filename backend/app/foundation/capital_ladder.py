@@ -21,6 +21,12 @@ SLOT_LLM = "llm"
 SLOT_RULES = "rules"
 SLOT_PI = {SLOT_LLM: 0.5, SLOT_RULES: 0.5}
 LAMBDAS = (0.025, 0.05, 0.10, 0.20, 0.35)
+#: Clip of x / sigma (plan 2026-11-10, WP4, ADR 0025 amendment). A clip at 1 sigma
+#: makes the bets test the *median* of the excess return, so skew alone moved the
+#: e-processes (skew -0.85 at zero alpha reached Earned in 59 % of paths). At 3
+#: sigma the bets are divided by 3 to stay inside [-1, 1], so ``1 + lambda * y``
+#: stays positive and the LAMBDAS need no change.
+CLIP_SIGMAS = 3.0
 EWMA_HALFLIFE_DAYS = 126
 #: Days of x before sigma is trusted; until then the e-processes do not bet.
 SIGMA_BURN_IN = 20
