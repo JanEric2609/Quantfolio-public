@@ -10,6 +10,7 @@ import {
   ScatterChart,
 } from "echarts/charts";
 import {
+  DataZoomComponent,
   GridComponent,
   LegendComponent,
   TooltipComponent,
@@ -20,6 +21,7 @@ import { CanvasRenderer } from "echarts/renderers";
 echarts.use([
   BarChart,
   CandlestickChart,
+  DataZoomComponent,
   GaugeChart,
   GridComponent,
   HeatmapChart,

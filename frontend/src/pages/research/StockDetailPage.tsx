@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { api, type StockContext, type MultiHorizonVerdict, type ResearchReportResponse, type VerdictsResponse, type PiotroskiResponse, type SentimentResponse, type EtfProfile, type TrackingStats } from "../../lib/api";
 import { useState } from "react";
+import { CHART_RANGES, sliceChartRange, type ChartRangeKey } from "./chartRange";
 import { PageHeader } from "../../components/composed/PageHeader";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
@@ -68,8 +69,13 @@ function buildCandlestickOption(
       axisPointer: { type: "cross" },
     },
     grid: [
-      { left: 60, right: 24, top: 16, height: "58%" },
-      { left: 60, right: 24, top: "76%", height: "16%" },
+      { left: 60, right: 24, top: 16, height: "52%" },
+      { left: 60, right: 24, top: "70%", height: "14%" },
+    ],
+    // Wheel/drag zoom inside the plot plus a slider under the volume bars.
+    dataZoom: [
+      { type: "inside", xAxisIndex: [0, 1] },
+      { type: "slider", xAxisIndex: [0, 1], bottom: 4, height: 18 },
     ],
     // Axis colours come from the registered light/dark theme (EChart picks it).
     xAxis: [
@@ -161,11 +167,12 @@ export function StockDetailPage() {
   const navigate = useNavigate();
   const tk = ticker?.toUpperCase() ?? "";
   const [indexTicker, setIndexTicker] = useState("");
+  const [chartRange, setChartRange] = useState<ChartRangeKey>("1Y");
 
   // Fetch stock context
   const ctx = useQuery<StockContext>({
     queryKey: ["stock-context", tk],
-    queryFn: () => api<StockContext>(`/api/research/stock/${encodeURIComponent(tk)}?include=report,chart,news,fundamentals`),
+    queryFn: () => api<StockContext>(`/api/research/stock/${encodeURIComponent(tk)}?include=report,chart,news,fundamentals&chart_days=1830`),
     enabled: !!tk,
     staleTime: 5 * 60_000,
   });
@@ -223,7 +230,7 @@ export function StockDetailPage() {
   const newsItems = data?.news ?? [];
   const fundamentals = data?.fundamentals as Record<string, unknown> | undefined;
   const report = data?.report;
-  const chartData = data?.price_history ?? [];
+  const chartData = sliceChartRange(data?.price_history ?? [], chartRange);
   const verdicts = verdictsQ.data?.verdicts ?? [];
 
   const riskProfileVal = riskProfile.data?.risk_profile ?? "moderate";
@@ -335,7 +342,7 @@ export function StockDetailPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-sm flex items-center gap-2">
-              <Target size={14} /> <span className="inline-flex items-center gap-1.5">Multi-Horizon Verdicts <InfoTooltip text="AI-generated price direction forecasts across multiple time horizons. Not financial advice." side="right" /></span>
+              <Target size={14} /> <span className="inline-flex items-center gap-1.5">Multi-Horizon Verdicts <InfoTooltip text="Language-model opinions on price direction across six horizons. Not backtested, not calibrated, not financial advice." side="right" /></span>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -349,6 +356,11 @@ export function StockDetailPage() {
                   </div>
                 ))}
               </div>
+            ) : verdicts.length === 0 ? (
+              <div className="text-sm text-text-muted flex items-center gap-3">
+                <span>{verdictsQ.data?.error ?? "No verdicts available."}</span>
+                <Button size="sm" variant="outline" onClick={() => verdictsQ.refetch()}>Try again</Button>
+              </div>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                 {verdicts.map((v) => (
@@ -358,8 +370,8 @@ export function StockDetailPage() {
                       {verdictIcon(v.verdict)} {v.verdict}
                     </div>
                     <span className="inline-flex items-center gap-1 text-[11px] text-text-muted">
-                      {Math.round(v.confidence * 100)}%
-                      <InfoTooltip text="Confidence score 0-100% indicating the AI's conviction in this forecast." side="right" />
+                      model confidence {Math.round(v.confidence * 100)}%
+                      <InfoTooltip text="The language model's own stated confidence, not a calibrated probability and not backtested. Treat it as a tone, not a hit rate." side="right" />
                     </span>
                   </div>
                 ))}
@@ -383,6 +395,19 @@ export function StockDetailPage() {
         <TabsContent value="chart">
           <Card>
             <CardContent className="pt-6">
+              <div className="flex flex-wrap gap-1 mb-3" role="group" aria-label="Chart range">
+                {CHART_RANGES.map((r) => (
+                  <Button
+                    key={r.key}
+                    size="sm"
+                    variant={chartRange === r.key ? "default" : "outline"}
+                    aria-pressed={chartRange === r.key}
+                    onClick={() => setChartRange(r.key)}
+                  >
+                    {r.label}
+                  </Button>
+                ))}
+              </div>
               {chartData.length > 0 ? (
                 <EChart
                   option={buildCandlestickOption(chartData)}

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -377,7 +378,13 @@ Rules:
 - Say "not given" rather than supply a date, a cause, a size or a history
   that is not in the data.
 - With no news given, say sentiment cannot be judged from the data. Do not
-  infer what investors think from volume or price.
+  infer what investors think from volume or price. An empty news list means
+  the feed stored nothing, not that nothing happened: never call it a quiet
+  period, a lack of catalysts or a "value trap" risk, and never name results,
+  buybacks or trading updates the data does not give.
+- Name the period of any growth figure as given, and the basis of the
+  free-cash-flow yield and net debt / EBITDA; they follow the provider's
+  definitions, which differ from a company's own adjusted figures.
 
 Adapt tone to the user's risk profile (conservative → cautious, aggressive → opportunity-focused).
 Include brief explanations for technical terms.
@@ -439,6 +446,8 @@ def _fundamentals_lines(fund: dict[str, Any] | None) -> list[str]:
     unreliable = book_ratios_unreliable_in(fund)
     basis_text = growth_basis_text(growth_basis(fund))
     nd = net_debt_to_ebitda(fund)
+    end = fund.get("latest_period_end")
+    period_end = f" (reporting period ending {end}; a half-year reporter's latest period is six months)" if end else ""
     rows: list[tuple[str, str | None]] = [
         ("Sector / industry", " / ".join(str(x) for x in (fund.get("sector"), fund.get("industry")) if x) or None),
         ("Market cap", _market_cap(fund.get("market_cap"), fund.get("currency"))),
@@ -446,17 +455,17 @@ def _fundamentals_lines(fund: dict[str, Any] | None) -> list[str]:
         ("Forward P/E", _fmt(fund.get("forward_pe"))),
         ("EV / EBITDA", _fmt(fund.get("ev_ebitda"))),
         ("Price / book", _fmt(fund.get("pb_ratio"))),
-        ("Free-cash-flow yield", _pct(fund.get("fcf_yield"))),
+        ("Free-cash-flow yield (provider cash flow before lease payments and minority interests, over market cap; not the company's own FCF)", _pct(fund.get("fcf_yield"))),
         ("Dividend yield", _pct(fund.get("dividend_yield"))),
         ("Gross margin", _pct(fund.get("gross_margin"))),
         ("Profit margin", _pct(fund.get("profit_margin"))),
         ("Return on equity", None if unreliable else _pct(fund.get("roe"))),
         ("Debt / equity", None if unreliable else (
             f"{float(fund['debt_equity']):.0f} %" if _fmt(fund.get("debt_equity")) else None)),
-        ("Net debt / EBITDA", None if nd is None else f"{nd:.1f}x"
+        ("Net debt / EBITDA", None if nd is None else f"{nd:.1f}x (provider debt incl. leases over unadjusted EBITDA)"
          + (" (manageable)" if nd <= NET_DEBT_EBITDA_OK else " (high)")),
-        (f"Revenue growth {basis_text}, reported currency", _pct(fund.get("revenue_growth"))),
-        (f"Earnings growth {basis_text}", _pct(fund.get("earnings_growth"))),
+        (f"Revenue growth {basis_text}{period_end}, reported currency", _pct(fund.get("revenue_growth"))),
+        (f"Earnings growth {basis_text}{period_end}", _pct(fund.get("earnings_growth"))),
         ("Beta (provider, against its home index)", _fmt(fund.get("beta"))),
     ]
     lines = ["\n**Fundamentals** (provider data):"]
@@ -715,6 +724,36 @@ async def generate_report(db: Session, ticker: str, user_id: str, *,
     }
 
 
+VERDICT_HORIZONS = ("1m", "1-6m", "6m-1y", "1-3y", "3-5y", "5y+")
+
+
+def normalise_verdicts(raw: Any) -> list[dict[str, Any]]:
+    """Valid verdicts only, one per known horizon, in horizon order.
+
+    The model's confidence is its own statement, not a calibrated probability:
+    clamped to 0-1 and tagged ``source: "llm_uncalibrated"``. Unknown horizons,
+    verdicts other than BUY/HOLD/SELL and non-numeric confidences are dropped.
+    """
+    if not isinstance(raw, list):
+        return []
+    found: dict[str, dict[str, Any]] = {}
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        horizon = str(item.get("horizon", "")).strip().lower().replace(" ", "")
+        verdict = str(item.get("verdict", "")).strip().upper()
+        try:
+            confidence = float(item.get("confidence"))
+        except (TypeError, ValueError):
+            continue
+        if horizon not in VERDICT_HORIZONS or verdict not in ("BUY", "HOLD", "SELL") or math.isnan(confidence):
+            continue
+        found.setdefault(horizon, {"horizon": horizon, "verdict": verdict,
+                                   "confidence": round(min(1.0, max(0.0, confidence)), 2),
+                                   "source": "llm_uncalibrated"})
+    return [found[h] for h in VERDICT_HORIZONS if h in found]
+
+
 async def generate_multi_horizon_verdicts(db: Session, ticker: str, user_id: str) -> dict[str, Any]:
     """Ask the LLM for multi-horizon BUY/HOLD/SELL verdicts and persist them."""
     # Return recent verdicts if they exist (avoid unbounded growth + redundant LLM calls)
@@ -728,8 +767,9 @@ async def generate_multi_horizon_verdicts(db: Session, ticker: str, user_id: str
         .order_by(MultiHorizonVerdict.generated_at.desc())
         .first()
     )
-    if recent:
-        horizons = json.loads(recent.horizons_json)
+    # Rows stored before validation may hold a made-up "unknown" HOLD: ignore them.
+    horizons = normalise_verdicts(json.loads(recent.horizons_json)) if recent else []
+    if horizons and recent:
         return {"ticker": ticker, "verdicts": horizons, "generated_at": recent.generated_at.isoformat(), "cached": True}
 
     context = build_context(db, ticker, user_id)
@@ -753,9 +793,14 @@ async def generate_multi_horizon_verdicts(db: Session, ticker: str, user_id: str
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
     try:
-        horizons = json.loads(raw)
+        horizons = normalise_verdicts(json.loads(raw))
     except json.JSONDecodeError:
-        horizons = [{"horizon": "unknown", "verdict": "HOLD", "confidence": 0.5, "source": "llm"}]
+        horizons = []
+    if not horizons:
+        # Nothing usable: say so, store nothing, so the page shows a retry state
+        # instead of a made-up HOLD at 50 %.
+        return {"ticker": ticker, "verdicts": [], "generated_at": datetime.now(UTC).isoformat(),
+                "error": "The model's answer could not be read as verdicts."}
 
     # Persist
     verdict = MultiHorizonVerdict(
