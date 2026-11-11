@@ -29,7 +29,12 @@ logger = logging.getLogger(__name__)
 #: written by the old code are no longer read (and are pruned after a week).
 STAGE_CACHE_VERSION = 1
 
-CACHEABLE_STAGES = frozenset({"momentum_quality", "backtest_vs_benchmark", "verification_gate", "quant_signals"})
+CACHEABLE_STAGES = frozenset({
+    "momentum_quality", "backtest_vs_benchmark", "verification_gate", "quant_signals",
+    # Factor exposure: bars of the symbol and the miner universe, plus the factor
+    # library; its variant carries the library's signature and the day.
+    "alpha_miner",
+})
 
 
 def _default(value: Any) -> Any:
@@ -54,12 +59,14 @@ def latest_bar_date(db: Session, symbol: str) -> str | None:
 
 
 def cached_stage(
-    db: Session, symbol: str, stage: str, fn: Callable[..., Any], *args: Any, variant: str = "", **kwargs: Any,
+    db: Session, symbol: str, stage: str, fn: Callable[..., Any], *args: Any, variant: str = "",
+    store_if: Callable[[Any], bool] | None = None, **kwargs: Any,
 ) -> Any:
     """``fn(*args, **kwargs)`` through the cache when *stage* is cacheable and the symbol has a bar date.
 
     *variant* distinguishes arguments the symbol fixes (``is_etf``, ``asset_class``).
-    Only a computed result is stored; a failing stage raises as before.
+    Only a computed result is stored; a failing stage raises as before. *store_if*,
+    when given, must accept the result for it to be stored (an error result is not).
     """
     from app.foundation.models.entities import DiscoverStageCache
 
@@ -78,6 +85,8 @@ def cached_stage(
             logger.debug("stage cache entry for %s/%s unreadable; recomputing", symbol, key)
     result = fn(*args, **kwargs)
     payload = canonical([result[0], result[1]])
+    if store_if is not None and not store_if(result):
+        return payload[0], payload[1]
     try:
         db.merge(DiscoverStageCache(symbol=symbol, stage=key, bar_date=bar_date,
                                     payload_json=json.dumps(payload), computed_at=datetime.now(UTC)))
@@ -123,6 +132,14 @@ def warm_symbol(db: Session, symbol: str, stage_functions: dict[str, Callable[..
         except Exception:  # noqa: BLE001 - one stage failing never stops the others
             db.rollback()
             logger.debug("warm_symbol: %s/%s failed", symbol, stage, exc_info=True)
+    cached_alpha = stage_functions.get("alpha_miner_cached")
+    if cached_alpha is not None:
+        try:
+            cached_alpha(db, symbol)
+            stored += 1
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            logger.debug("warm_symbol: %s/alpha_miner failed", symbol, exc_info=True)
     return stored
 
 

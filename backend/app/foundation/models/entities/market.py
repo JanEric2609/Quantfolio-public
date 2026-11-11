@@ -67,6 +67,28 @@ class IndexCurrencyWeights(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
+class FundamentalsSnapshot(Base):
+    """One dated copy of a symbol's cached fundamentals.
+
+    ``fundamentals`` keeps only the latest values per ticker. This table is
+    written once per (symbol, fetch day) and never updated, so a later model
+    can join what was known on a date (plan 2026-11-11, ML spec v2).
+    """
+
+    __tablename__ = "fundamentals_snapshots"
+    __table_args__ = (
+        UniqueConstraint("symbol", "snapshot_date", name="uq_fundamentals_snapshot"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    #: UTC day the values were fetched, not the day they were copied.
+    snapshot_date: Mapped[date] = mapped_column(Date, index=True)
+    data_json: Mapped[str] = mapped_column(Text, default="{}")
+    source: Mapped[str] = mapped_column(String(40), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
 class AnalystEstimateSnapshot(Base):
     """One day's analyst consensus EPS for a symbol's current fiscal year.
 

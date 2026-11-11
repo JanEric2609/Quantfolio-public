@@ -244,3 +244,14 @@ def _fresh_settings_cache():
     invalidate_settings_cache()
     yield
     invalidate_settings_cache()
+
+
+@pytest.fixture(autouse=True)
+def _reset_fetch_memos():
+    """Per-process "already asked the providers" memos must not leak between tests."""
+    from app.decision.discover import pipeline
+    from app.foundation import market
+
+    for memo in (market._live_history_misses, market._bar_refresh_attempts, pipeline._RECENT_FETCH):
+        memo.clear()
+    yield

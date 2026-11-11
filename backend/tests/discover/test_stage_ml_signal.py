@@ -166,6 +166,24 @@ class TestStageMlSignal:
                 stage_ml_signal(db, sym)
         assert load.call_count == 1
 
+    def test_cached_model_survives_the_session_that_loaded_it(self, tmp_path):
+        """11-11 regression: the day cache outlived the run's session (a commit expires the loaded
+        row, closing detaches it), and every later symbol's ML stage failed with
+        "not bound to a Session"."""
+        from sqlalchemy.orm import sessionmaker
+
+        first = _memory_db()
+        model_id = _trained(first, tmp_path).id
+        scores, _ = stage_ml_signal(first, "U01")
+        assert scores["signal_kind"] == "ml_pooled"
+        first.commit()  # a stage-cache write does this: it expires everything loaded in the session
+        second = sessionmaker(bind=first.get_bind(), autoflush=False, autocommit=False)()
+        first.close()   # the run is over; its session is gone, the module cache is not
+        scores, _ = stage_ml_signal(second, "U02")
+        assert scores["signal_kind"] == "ml_pooled"
+        assert scores["model_id"] == model_id
+        assert not any("ml_signal_error" in c for c in scores["concerns"])
+
 
 def scores_for(db, symbol: str) -> float:
     scores, _ = stage_ml_signal(db, symbol)
