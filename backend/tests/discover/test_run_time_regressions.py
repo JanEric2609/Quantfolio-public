@@ -129,3 +129,30 @@ def test_alpha_variant_is_read_once_not_per_symbol(monkeypatch):
     monkeypatch.setattr(pipeline, "_library_factors", lambda _db: n.__setitem__("calls", n["calls"] + 1) or [])
     assert pipeline._alpha_variant(db) == pipeline._alpha_variant(db)
     assert n["calls"] == 1
+
+
+def test_precompute_warms_the_etfs_of_a_cancelled_run(monkeypatch):
+    """The run that needs the ETF entries is the one that was cancelled for lacking them."""
+    from app.decision.discover import jobs
+    from app.foundation.models.entities import DiscoverCandidate, DiscoverRun, User
+
+    db = _memory_db()
+    user = User(username="warm-etf", password_hash="x")
+    db.add(user)
+    db.flush()
+    run = DiscoverRun(user_id=user.id, status="cancelled")
+    db.add(run)
+    db.flush()
+    db.add(DiscoverCandidate(run_id=run.id, symbol="ZZETF.DE", name="Test UCITS ETF", source="screen_etf"))
+    db.commit()
+    warmed: list[tuple[str, bool]] = []
+
+    def fake_warm(_db, symbol, _fns, *, is_etf=False, asset_class="equity"):
+        warmed.append((symbol, is_etf))
+        return 1
+
+    monkeypatch.setattr(stage_cache, "warm_symbol", fake_warm)
+    monkeypatch.setattr(stage_cache, "prune", lambda _db: 0)
+    report = jobs.discover_stage_precompute_inner(db)
+    assert ("ZZETF.DE", True) in warmed
+    assert report["etfs"] >= 1

@@ -475,24 +475,27 @@ def discover_stage_precompute_inner(db: Any, *, max_seconds: float = STAGE_PRECO
             "alpha_miner_cached": pipeline.stage_alpha_miner_cached,
         })
         report["symbols"] += 1
-    # The ETFs the latest completed run evaluated: they use the ETF variants of
-    # the stages, which the stock pass above does not warm.
+    # The ETFs the last few runs evaluated (a cancelled run counts: it is the one
+    # that got far enough to need them): they use the ETF variants of the stages,
+    # which the stock pass above does not warm.
     report["etfs"] = 0
     from app.foundation.models.entities import DiscoverCandidate, DiscoverRun
 
-    last = (
-        db.query(DiscoverRun).filter(DiscoverRun.status == "completed")
-        .order_by(DiscoverRun.created_at.desc()).first()
-    )
-    if last is not None:
+    recent = [
+        r.id for r in db.query(DiscoverRun).filter(DiscoverRun.status.in_(("completed", "cancelled")))
+        .order_by(DiscoverRun.created_at.desc()).limit(3).all()
+    ]
+    if recent:
         seen: set[str] = set(stocks)
-        for cand in db.query(DiscoverCandidate).filter(DiscoverCandidate.run_id == last.id).all():
+        for cand in db.query(DiscoverCandidate).filter(DiscoverCandidate.run_id.in_(recent)).all():
             if time.monotonic() - started > max_seconds:
                 report["stopped_early"] = True
                 break
             sym = cand.symbol.upper()
+            if sym in seen:
+                continue
             is_etf, asset_class = pipeline.candidate_kind(cand.name or sym, sym, cand.source, cand.isin)
-            if not is_etf or sym in seen or asset_class == "leveraged_inverse":
+            if not is_etf or asset_class == "leveraged_inverse":
                 continue
             seen.add(sym)
             report["stages"] += stage_cache.warm_symbol(db, sym, {
