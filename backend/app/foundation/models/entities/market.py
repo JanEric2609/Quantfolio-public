@@ -89,6 +89,22 @@ class FundamentalsSnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
+class FetchMiss(Base):
+    """A symbol the providers could not serve, remembered across restarts.
+
+    A German ETF no provider has cost 3 s per try and was retried on every
+    Discover run (624 s of the 2026-11-11 run). ``misses`` counts the distinct
+    days it failed, which sets how long the next try waits.
+    """
+
+    __tablename__ = "fetch_misses"
+
+    symbol: Mapped[str] = mapped_column(String(32), primary_key=True)
+    misses: Mapped[int] = mapped_column(default=1)
+    last_miss: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    message: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+
 class AnalystEstimateSnapshot(Base):
     """One day's analyst consensus EPS for a symbol's current fiscal year.
 

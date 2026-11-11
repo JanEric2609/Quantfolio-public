@@ -475,6 +475,33 @@ def discover_stage_precompute_inner(db: Any, *, max_seconds: float = STAGE_PRECO
             "alpha_miner_cached": pipeline.stage_alpha_miner_cached,
         })
         report["symbols"] += 1
+    # The ETFs the latest completed run evaluated: they use the ETF variants of
+    # the stages, which the stock pass above does not warm.
+    report["etfs"] = 0
+    from app.foundation.models.entities import DiscoverCandidate, DiscoverRun
+
+    last = (
+        db.query(DiscoverRun).filter(DiscoverRun.status == "completed")
+        .order_by(DiscoverRun.created_at.desc()).first()
+    )
+    if last is not None:
+        seen: set[str] = set(stocks)
+        for cand in db.query(DiscoverCandidate).filter(DiscoverCandidate.run_id == last.id).all():
+            if time.monotonic() - started > max_seconds:
+                report["stopped_early"] = True
+                break
+            sym = cand.symbol.upper()
+            is_etf, asset_class = pipeline.candidate_kind(cand.name or sym, sym, cand.source, cand.isin)
+            if not is_etf or sym in seen or asset_class == "leveraged_inverse":
+                continue
+            seen.add(sym)
+            report["stages"] += stage_cache.warm_symbol(db, sym, {
+                "momentum_quality": pipeline.stage_momentum_quality,
+                "backtest_vs_benchmark": pipeline.stage_backtest_vs_benchmark,
+                "verification_gate": pipeline.stage_verification_gate,
+                "quant_signals": pipeline.stage_quant_signals,
+            }, is_etf=True, asset_class=asset_class)
+            report["etfs"] += 1
     report["pruned"] = stage_cache.prune(db)
     logger.info("discover_stage_precompute: %s at %s", report, datetime.now(UTC).isoformat())
     return report

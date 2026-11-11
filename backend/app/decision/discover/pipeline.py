@@ -485,6 +485,10 @@ def _preingest_one(symbol: str) -> tuple[str, bool]:
             logger.debug("pre-ingest: incremental check failed for %s", symbol, exc_info=True)
             db.rollback()
             start = None
+        from app.foundation.data_backbone.fetch_misses import clear_miss, recently_missed, record_miss
+
+        if recently_missed(db, symbol)[0]:
+            return symbol, False
         if start is not None and _bars_current(start):
             # The nightly universe prefetch already stored the last completed
             # weekday's bar: a 1,500-name run would otherwise ask Yahoo for
@@ -495,6 +499,10 @@ def _preingest_one(symbol: str) -> tuple[str, bool]:
         else:
             result = ingester.ingest_bar_prices(symbol, days=_PREINGEST_DAYS)
         _note_fetch(symbol, None if result.get("success") else str(result.get("message") or "no data"))
+        if result.get("success") and not result.get("short"):
+            clear_miss(db, symbol)
+        else:
+            record_miss(db, symbol, str(result.get("message") or "no data"))
         if result.get("short"):
             logger.warning("pre-ingest: %s is short: %s", symbol, result.get("message"))
             return symbol, False
@@ -771,7 +779,11 @@ def stage_history_ingest(
             )
             return cached_scores, None
 
+    from app.foundation.data_backbone.fetch_misses import clear_miss, recently_missed, record_miss
+
     fetched, last_message = _fetched_recently(symbol)
+    if not fetched:
+        fetched, last_message = recently_missed(db, symbol)
     if fetched:
         # The warm-up (or an earlier run) already asked the providers for this
         # name and the stored bars still fail the gate (or there are none):
@@ -785,6 +797,10 @@ def stage_history_ingest(
     ingester = DataIngester(db)
     result = ingester.ingest_bar_prices(symbol, days=_HISTORY_REQUEST_DAYS)
     _note_fetch(symbol, None if result.get("success") else str(result.get("message") or "no data"))
+    if result.get("success") and not result.get("short"):
+        clear_miss(db, symbol)
+    else:
+        record_miss(db, symbol, str(result.get("message") or "no data"))
     # The run memo holds the rows read before the ingest; read what it wrote.
     _forget_history(symbol)
 
@@ -1030,12 +1046,27 @@ def stage_alpha_miner(
         return {**neutral, "concerns": [f"alphacrafter_miner_error: {exc}"]}, None
 
 
+_ALPHA_VARIANT_MEMO: dict[str, Any] = {"at": 0.0, "value": ""}
+_ALPHA_VARIANT_TTL_S = 300.0
+
+
 def _alpha_variant(db: Session) -> str:
-    """Cache variant of the miner stage: the factor library's signature and the day (the panel is daily)."""
+    """Cache variant of the miner stage: the factor library's signature and the day (the panel is daily).
+
+    Read once per five minutes, not once per symbol: a cache hit used to pay a
+    library query per name (276 s of a 1,620-name run, with every entry warm).
+    """
     import hashlib
 
+    now = time.monotonic()
+    if _ALPHA_VARIANT_MEMO["value"] and now - _ALPHA_VARIANT_MEMO["at"] < _ALPHA_VARIANT_TTL_S \
+            and _ALPHA_VARIANT_MEMO["value"].endswith(datetime.now(UTC).date().isoformat()):
+        return str(_ALPHA_VARIANT_MEMO["value"])
+
     sig = json.dumps(sorted((f["name"], f["dsl"], f["ic"], f["icir"]) for f in _library_factors(db)), default=str)
-    return f"lib={hashlib.sha1(sig.encode()).hexdigest()[:10]},day={datetime.now(UTC).date().isoformat()}"
+    value = f"lib={hashlib.sha1(sig.encode()).hexdigest()[:10]},day={datetime.now(UTC).date().isoformat()}"
+    _ALPHA_VARIANT_MEMO.update(at=now, value=value)
+    return value
 
 
 def stage_alpha_miner_cached(
@@ -2649,6 +2680,16 @@ def stage_insider_signal(
 # ---------------------------------------------------------------------------
 
 
+def candidate_kind(name: str, symbol: str, source: str, isin: str | None) -> tuple[bool, str]:
+    """``(is_etf, asset_class)`` as the candidate loop derives it; the precompute warms the same keys."""
+    instrument_type = classify_instrument(symbol, source, name)
+    is_etf = instrument_type in ("etf", "money_market", "bond")
+    asset_class = classify_etf(name, isin=isin) if is_etf else "equity"
+    if is_etf and asset_class == "other":
+        asset_class = {"money_market": "money_market", "bond": "bond_other"}.get(instrument_type, "equity_broad")
+    return is_etf, asset_class
+
+
 def run_candidate_pipeline(
     db: Session,
     user_id: str,
@@ -2761,13 +2802,10 @@ def _candidate_pipeline(
         isin = cand.get("isin")
         source = cand.get("source", "unknown")
         name = cand.get("name", symbol)
-        instrument_type = classify_instrument(symbol, source, name)
-        is_etf = instrument_type in ("etf", "money_market", "bond")
         # The D3 benchmark class: an ETF's own taxonomy (gold is not an
         # equity fund), a stock's region.
-        asset_class = classify_etf(name, isin=isin) if is_etf else "equity"
-        if is_etf and asset_class == "other":
-            asset_class = {"money_market": "money_market", "bond": "bond_other"}.get(instrument_type, "equity_broad")
+        instrument_type = classify_instrument(symbol, source, name)
+        is_etf, asset_class = candidate_kind(name, symbol, source, isin)
 
         scores: dict[str, Any] = {}
         reject_stage: str | None = None
