@@ -118,12 +118,13 @@ def warm_symbol(db: Session, symbol: str, stage_functions: dict[str, Callable[..
     passes them in so this module never imports the pipeline.
     """
     stored = 0
-    for stage, kwargs in (
+    stages: tuple[tuple[str, dict[str, Any]], ...] = (
         ("momentum_quality", {"is_etf": False}),
         ("backtest_vs_benchmark", {"is_etf": False, "asset_class": "equity"}),
         ("verification_gate", {"is_etf": False}),
         ("quant_signals", {"is_etf": False, "asset_class": "equity"}),
-    ):
+    )
+    for stage, kwargs in stages:
         fn = stage_functions[stage]
         asset_class = "equity" if "asset_class" in kwargs else None
         try:

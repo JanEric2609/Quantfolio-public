@@ -252,6 +252,6 @@ def _reset_fetch_memos():
     from app.decision.discover import pipeline
     from app.foundation import market
 
-    for memo in (market._live_history_misses, market._bar_refresh_attempts, pipeline._RECENT_FETCH):
+    for memo in (market._live_history_misses, market._bar_refresh_attempts, pipeline._RECENT_FETCH, pipeline._ML_CACHE):
         memo.clear()
     yield
