@@ -25,20 +25,20 @@ def test_ml_cache_holds_plain_values_not_an_orm_row(monkeypatch):
     assert state["model_id"] == "m1"
 
 
-def test_a_symbol_without_bars_is_fetched_once_per_window(monkeypatch):
+def test_a_symbol_without_bars_is_asked_of_the_providers_once(monkeypatch):
+    """The first read asks the provider chain, finds nothing, and every later read (and the ingest) skips it."""
     db = _memory_db()
-    calls: list[str] = []
-
-    def fail(self, symbol, **kwargs):
-        calls.append(symbol)
-        return {"success": False, "message": "no data from any provider"}
-
-    monkeypatch.setattr(DataIngester, "ingest_bar_prices", fail)
+    registry = MagicMock()
+    registry.get_history.return_value = {"ok": False}
+    monkeypatch.setattr(market, "build_provider_registry", lambda _db: registry)
+    ingests: list[str] = []
+    monkeypatch.setattr(DataIngester, "ingest_bar_prices", lambda self, s, **k: ingests.append(s) or {"success": False})
     first = pipeline.stage_history_ingest(db, "NODATA.DE")
     second = pipeline.stage_history_ingest(db, "NODATA.DE")
-    assert calls == ["NODATA.DE"]
-    assert first[1] == second[1]
-    assert second[0] is None and second[1].startswith("history_ingest: ")
+    assert registry.get_history.call_count == 1
+    assert ingests == []
+    assert first[0] is None and second[0] is None
+    assert second[1].startswith("history_ingest: ")
 
 
 def test_live_history_miss_is_remembered(monkeypatch):
@@ -79,3 +79,53 @@ def test_alpha_miner_stage_is_cached_and_errors_are_not(monkeypatch):
     pipeline.stage_alpha_miner_cached(db, "AAA")
     assert n["calls"] == before + 2
     assert "alpha_miner" in stage_cache.CACHEABLE_STAGES
+
+
+def test_a_miss_survives_a_restart_and_waits_longer_after_repeats():
+    from datetime import UTC, datetime, timedelta
+
+    from app.foundation.data_backbone import fetch_misses as fm
+
+    db = _memory_db()
+    t0 = datetime(2026, 11, 11, 12, 0, tzinfo=UTC)
+    assert fm.recently_missed(db, "DEAD.DE", now=t0) == (False, None)
+    fm.record_miss(db, "DEAD.DE", "no data", now=t0)
+    assert fm.recently_missed(db, "dead.de", now=t0 + timedelta(hours=23)) == (True, "no data")
+    assert fm.recently_missed(db, "DEAD.DE", now=t0 + timedelta(hours=25))[0] is False
+    # the same day does not count twice; three different days do
+    fm.record_miss(db, "DEAD.DE", "no data", now=t0 + timedelta(hours=2))
+    fm.record_miss(db, "DEAD.DE", "no data", now=t0 + timedelta(days=1))
+    fm.record_miss(db, "DEAD.DE", "no data", now=t0 + timedelta(days=2))
+    assert fm.recently_missed(db, "DEAD.DE", now=t0 + timedelta(days=6))[0] is True
+    assert fm.recently_missed(db, "DEAD.DE", now=t0 + timedelta(days=10))[0] is False
+    fm.clear_miss(db, "DEAD.DE")
+    assert fm.recently_missed(db, "DEAD.DE", now=t0 + timedelta(days=2))[0] is False
+
+
+def test_history_ingest_skips_a_symbol_remembered_from_an_earlier_process(monkeypatch):
+    from app.foundation.data_backbone.fetch_misses import record_miss
+
+    db = _memory_db()
+    record_miss(db, "OLD.DE", "possibly delisted")
+    calls: list[str] = []
+    monkeypatch.setattr(DataIngester, "ingest_bar_prices", lambda self, s, **k: calls.append(s) or {"success": False})
+    scores, err = pipeline.stage_history_ingest(db, "OLD.DE")
+    assert calls == [] and scores is None and "possibly delisted" in err
+
+
+def test_warm_symbol_uses_the_etf_variant_the_pipeline_asks_for(monkeypatch):
+    db = _memory_db()
+    seen: list[str] = []
+    monkeypatch.setattr(stage_cache, "cached_stage", lambda db, sym, stage, fn, *a, variant="", **k: seen.append(f"{stage}:{variant}"))
+    fns = {s: (lambda *a, **k: (None, None)) for s in ("momentum_quality", "backtest_vs_benchmark", "verification_gate", "quant_signals")}
+    stage_cache.warm_symbol(db, "IWDA.AS", fns, is_etf=True, asset_class="equity_broad")
+    assert "quant_signals:etf=1,class=equity_broad" in seen and "momentum_quality:etf=1,class=-" in seen
+
+
+def test_alpha_variant_is_read_once_not_per_symbol(monkeypatch):
+    db = _memory_db()
+    pipeline._ALPHA_VARIANT_MEMO.update(at=0.0, value="")
+    n = {"calls": 0}
+    monkeypatch.setattr(pipeline, "_library_factors", lambda _db: n.__setitem__("calls", n["calls"] + 1) or [])
+    assert pipeline._alpha_variant(db) == pipeline._alpha_variant(db)
+    assert n["calls"] == 1

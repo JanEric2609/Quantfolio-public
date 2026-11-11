@@ -109,26 +109,29 @@ def prune(db: Session, keep_days: int = 7) -> int:
     return int(deleted)
 
 
-def warm_symbol(db: Session, symbol: str, stage_functions: dict[str, Callable[..., Any]]) -> int:
+def warm_symbol(
+    db: Session, symbol: str, stage_functions: dict[str, Callable[..., Any]],
+    *, is_etf: bool = False, asset_class: str = "equity",
+) -> int:
     """Compute and store the cacheable stages of one universe stock; returns the stages stored.
 
-    The same calls and arguments as a stock in the pipeline loop (``is_etf`` False,
-    ``asset_class`` "equity"), so a morning run finds exactly these keys.
+    The same calls and arguments as a stock in the pipeline loop (an ETF's ``is_etf`` and
+    ``asset_class`` as ``pipeline.candidate_kind`` derives them; a stock's are False and "equity"), so a morning run finds exactly these keys.
     ``stage_functions`` maps a stage name to the pipeline's function; the caller
     passes them in so this module never imports the pipeline.
     """
     stored = 0
     stages: tuple[tuple[str, dict[str, Any]], ...] = (
-        ("momentum_quality", {"is_etf": False}),
-        ("backtest_vs_benchmark", {"is_etf": False, "asset_class": "equity"}),
-        ("verification_gate", {"is_etf": False}),
-        ("quant_signals", {"is_etf": False, "asset_class": "equity"}),
+        ("momentum_quality", {"is_etf": is_etf}),
+        ("backtest_vs_benchmark", {"is_etf": is_etf, "asset_class": asset_class}),
+        ("verification_gate", {"is_etf": is_etf}),
+        ("quant_signals", {"is_etf": is_etf, "asset_class": asset_class}),
     )
     for stage, kwargs in stages:
         fn = stage_functions[stage]
-        asset_class = "equity" if "asset_class" in kwargs else None
         try:
-            cached_stage(db, symbol, stage, fn, db, symbol, variant=stage_variant(is_etf=False, asset_class=asset_class), **kwargs)
+            cached_stage(db, symbol, stage, fn, db, symbol,
+                         variant=stage_variant(is_etf=is_etf, asset_class=kwargs.get("asset_class")), **kwargs)
             stored += 1
         except Exception:  # noqa: BLE001 - one stage failing never stops the others
             db.rollback()

@@ -68,6 +68,13 @@ def _test_db():
 def _full_window(monkeypatch):
     """These tests are about which symbols are warmed, not the window: no DB lookup (E2 has its own tests)."""
     monkeypatch.setattr(pipeline, "_preingest_start", lambda db, symbol: None)
+    # The shared single connection of these engines would let the miss store's
+    # commits land inside other threads' writes; the store has its own tests.
+    from app.foundation.data_backbone import fetch_misses
+
+    monkeypatch.setattr(fetch_misses, "recently_missed", lambda db, symbol, **k: (False, None))
+    monkeypatch.setattr(fetch_misses, "record_miss", lambda *a, **k: None)
+    monkeypatch.setattr(fetch_misses, "clear_miss", lambda *a, **k: None)
 
 
 def _recorder(requested: list[str], fail_symbols: set[str] | None = None) -> type:

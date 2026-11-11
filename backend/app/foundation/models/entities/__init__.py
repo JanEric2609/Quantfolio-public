@@ -90,6 +90,7 @@ from .jobs import AppError as AppError, JobRun as JobRun
 from .market import (
     AnalystEstimateSnapshot as AnalystEstimateSnapshot,
     FundamentalsSnapshot as FundamentalsSnapshot,
+    FetchMiss as FetchMiss,
     BarQuarantine as BarQuarantine,
     BarSeriesMeta as BarSeriesMeta,
     DataQualityEvent as DataQualityEvent,
