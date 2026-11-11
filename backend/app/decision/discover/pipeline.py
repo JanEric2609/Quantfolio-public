@@ -446,6 +446,29 @@ def _bars_current(start: str, today: date | None = None) -> bool:
     return last_bar >= day
 
 
+#: symbol -> monotonic time of the last live provider fetch (pre-ingest or stage).
+#: A series whose stored bars fail the history gate is fetched once per window,
+#: not once by the warm-up and again by the stage loop (11-11: ~65 such names took
+#: 858 s of a 30-minute run). Process-local; the nightly prefetch retries them daily.
+_RECENT_FETCH: dict[str, tuple[float, str | None]] = {}
+_RECENT_FETCH_LOCK = threading.Lock()
+_RECENT_FETCH_TTL_S = 6 * 3600.0
+
+
+def _note_fetch(symbol: str, message: str | None = None) -> None:
+    with _RECENT_FETCH_LOCK:
+        _RECENT_FETCH[symbol.upper()] = (time.monotonic(), message)
+
+
+def _fetched_recently(symbol: str) -> tuple[bool, str | None]:
+    """``(fetched within the window, the fetch's failure message)``."""
+    with _RECENT_FETCH_LOCK:
+        entry = _RECENT_FETCH.get(symbol.upper())
+    if entry is None or time.monotonic() - entry[0] >= _RECENT_FETCH_TTL_S:
+        return False, None
+    return True, entry[1]
+
+
 def _preingest_one(symbol: str) -> tuple[str, bool]:
     """Ingest bar prices for *symbol* using a private DB session: the missing days
     when :func:`_preingest_start` allows it, else 5 years.
@@ -471,6 +494,7 @@ def _preingest_one(symbol: str) -> tuple[str, bool]:
             result = ingester.ingest_bar_prices(symbol, start_date=start)
         else:
             result = ingester.ingest_bar_prices(symbol, days=_PREINGEST_DAYS)
+        _note_fetch(symbol, None if result.get("success") else str(result.get("message") or "no data"))
         if result.get("short"):
             logger.warning("pre-ingest: %s is short: %s", symbol, result.get("message"))
             return symbol, False
@@ -747,9 +771,20 @@ def stage_history_ingest(
             )
             return cached_scores, None
 
+    fetched, last_message = _fetched_recently(symbol)
+    if fetched:
+        # The warm-up (or an earlier run) already asked the providers for this
+        # name and the stored bars still fail the gate (or there are none):
+        # asking again returns the same. Keep the gate's own reason.
+        if rows:
+            _scores, cache_err = _evaluate_history_rows(rows, _HISTORY_REQUEST_DAYS)
+            return None, cache_err or "history_ingest: gate failed on stored bars"
+        return None, f"history_ingest: {last_message or 'no data from the providers'}"
+
     # Fall through: call provider chain via ingester
     ingester = DataIngester(db)
     result = ingester.ingest_bar_prices(symbol, days=_HISTORY_REQUEST_DAYS)
+    _note_fetch(symbol, None if result.get("success") else str(result.get("message") or "no data"))
     # The run memo holds the rows read before the ingest; read what it wrote.
     _forget_history(symbol)
 
@@ -993,6 +1028,32 @@ def stage_alpha_miner(
     except Exception as exc:
         logger.info("stage_alpha_miner: failed for %s: %s", symbol, exc)
         return {**neutral, "concerns": [f"alphacrafter_miner_error: {exc}"]}, None
+
+
+def _alpha_variant(db: Session) -> str:
+    """Cache variant of the miner stage: the factor library's signature and the day (the panel is daily)."""
+    import hashlib
+
+    sig = json.dumps(sorted((f["name"], f["dsl"], f["ic"], f["icir"]) for f in _library_factors(db)), default=str)
+    return f"lib={hashlib.sha1(sig.encode()).hexdigest()[:10]},day={datetime.now(UTC).date().isoformat()}"
+
+
+def stage_alpha_miner_cached(
+    db: Session, symbol: str, *, run_id: str | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """:func:`stage_alpha_miner` through the nightly stage cache (it cost 376 s of a 11-11 run, uncached).
+
+    An error result is never stored. ``run_id`` is unused by the stage, so it is not part of the key.
+    """
+    from app.decision.discover import stage_cache
+
+    def _ok(result: Any) -> bool:
+        concerns = (result[0] or {}).get("concerns") or []
+        return not any(str(c).startswith("alphacrafter_miner_error") for c in concerns)
+
+    return stage_cache.cached_stage(
+        db, symbol, "alpha_miner", stage_alpha_miner, db, symbol, variant=_alpha_variant(db), store_if=_ok,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2375,7 +2436,7 @@ _ML_MAX_AGE_DAYS = 7
 def _pooled_serving(db: Session) -> dict[str, Any]:
     """Today's pooled model row, fitted pipeline and universe features.
 
-    ``{"row": None}`` when no pooled model was ever trained; ``model`` is
+    ``{"model_id": None}`` when no pooled model was ever trained; ``model`` is
     None unless the newest row passed its gate (``status="completed"``).
     """
     from app.lab.quant_lab import pooled_ml as pooled
@@ -2386,8 +2447,11 @@ def _pooled_serving(db: Session) -> dict[str, Any]:
         if _ML_CACHE.get("day") == today:
             return _ML_CACHE
     row = pooled.latest_pooled_row(db)
+    # Plain values only: the cache outlives the session that loaded the row, and
+    # a detached ORM row raises on attribute access (11-11: every symbol's ML
+    # signal failed with "not bound to a Session").
     state: dict[str, Any] = {
-        "day": today, "row": row, "model": None, "universe": None,
+        "day": today, "model_id": row.id if row is not None else None, "model": None, "universe": None,
         "status": row.status if row is not None else "no_model",
     }
     if row is not None and row.status == "completed" and row.artefact_path:
@@ -2435,11 +2499,11 @@ def stage_ml_signal(db: Session, symbol: str) -> tuple[dict[str, Any] | None, st
         from app.lab.quant_lab import pooled_ml as pooled
 
         serving = _pooled_serving(db)
-        row = serving["row"]
-        if row is None:
+        model_id = serving["model_id"]
+        if model_id is None:
             return neutral, None
         if serving["model"] is None or serving["universe"] is None or serving["universe"].empty:
-            return {**neutral, "ml_status": str(serving["status"]), "model_id": row.id}, None
+            return {**neutral, "ml_status": str(serving["status"]), "model_id": model_id}, None
 
         universe: pd.DataFrame = serving["universe"]
         if symbol in universe.index:
@@ -2450,20 +2514,20 @@ def stage_ml_signal(db: Session, symbol: str) -> tuple[dict[str, Any] | None, st
                 include_fundamentals=False,
             ) if alpha_build_panel is not None else None
             if not own or "close" not in own or symbol not in own["close"].columns:
-                return {**neutral, "ml_status": "no_bars", "model_id": row.id}, None
+                return {**neutral, "ml_status": "no_bars", "model_id": model_id}, None
             mine = pooled.latest_raw_features(own["close"])
             if symbol not in mine.index:
-                return {**neutral, "ml_status": "short_history", "model_id": row.id}, None
+                return {**neutral, "ml_status": "short_history", "model_id": model_id}, None
             raw = pd.concat([universe, mine])
         as_of = pd.to_datetime(raw["as_of"])
         fresh = cast(pd.DataFrame, raw.loc[as_of >= as_of.max() - pd.Timedelta(days=_ML_MAX_AGE_DAYS)])
         if symbol not in fresh.index or len(fresh) < pooled.MIN_CROSS_SECTION:
-            return {**neutral, "ml_status": "stale_or_small_cross_section", "model_id": row.id}, None
+            return {**neutral, "ml_status": "stale_or_small_cross_section", "model_id": model_id}, None
 
         percentile = pooled.score_cross_section(serving["model"], fresh)
         return {
             "prediction": round(float(percentile[symbol]), 4),
-            "model_id": row.id,
+            "model_id": model_id,
             "signal_kind": "ml_pooled",
             "cross_section": len(fresh),
             "ml_status": "completed",
@@ -2734,7 +2798,7 @@ def _candidate_pipeline(
         if reject_stage is None:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
-            s, r = _timed("alpha_miner", stage_alpha_miner, db, symbol, run_id=run_id)
+            s, r = _timed("alpha_miner", stage_alpha_miner_cached, db, symbol, run_id=run_id)
             if r:
                 reject_stage = "alpha_miner"
                 reject_reason = r

@@ -89,6 +89,7 @@ from .goal import Goal as Goal
 from .jobs import AppError as AppError, JobRun as JobRun
 from .market import (
     AnalystEstimateSnapshot as AnalystEstimateSnapshot,
+    FundamentalsSnapshot as FundamentalsSnapshot,
     BarQuarantine as BarQuarantine,
     BarSeriesMeta as BarSeriesMeta,
     DataQualityEvent as DataQualityEvent,

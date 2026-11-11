@@ -19,6 +19,7 @@ from app.lab.alphacrafter.orchestrator import reap_stale_job_runs
 from app.lab.forward_lab.jobs import register_forward_lab_job, register_news_tone_job
 from app.decision.discover.jobs import (
     register_analyst_estimates_snapshot_job,
+    register_fundamentals_snapshot_job,
     register_discover_ml_training_job,
     register_discover_refresh_job,
     register_discover_stage_precompute_job,
@@ -1179,6 +1180,7 @@ def build_scheduler() -> Any:
     register_discovery_review_job(scheduler)
     register_discover_ml_training_job(scheduler)
     register_analyst_estimates_snapshot_job(scheduler)
+    register_fundamentals_snapshot_job(scheduler)
     register_discover_universe_prefetch_job(scheduler)
     register_discover_stage_precompute_job(scheduler)
     register_forward_lab_job(scheduler)

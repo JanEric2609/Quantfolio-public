@@ -225,6 +225,28 @@ def register_analyst_estimates_snapshot_job(scheduler: Any | None = None) -> str
         minute=45,
     )
 
+def register_fundamentals_snapshot_job(scheduler: Any | None = None) -> str:
+    """Register the nightly dated copy of the cached fundamentals (04:50 UTC).
+
+    The cache keeps only the latest values; the copies build the point-in-time
+    history the ML spec v2 needs (plan 2026-11-11).
+    """
+    from app.foundation.core.db import SessionLocal
+    from app.foundation.data_backbone.fundamentals_snapshots import snapshot_fundamentals
+
+    def _inner() -> None:
+        db = SessionLocal()
+        try:
+            snapshot_fundamentals(db)
+        except Exception:
+            logger.exception("fundamentals_snapshot job failed")
+            db.rollback()
+        finally:
+            db.close()
+
+    return register_cron_job("fundamentals_snapshot", _inner, scheduler=scheduler, hour=4, minute=50)
+
+
 def register_discover_ml_training_job(scheduler: Any | None = None) -> str:
     """Register the weekly pooled ML-model training job.
 
@@ -450,6 +472,7 @@ def discover_stage_precompute_inner(db: Any, *, max_seconds: float = STAGE_PRECO
             "backtest_vs_benchmark": pipeline.stage_backtest_vs_benchmark,
             "verification_gate": pipeline.stage_verification_gate,
             "quant_signals": pipeline.stage_quant_signals,
+            "alpha_miner_cached": pipeline.stage_alpha_miner_cached,
         })
         report["symbols"] += 1
     report["pruned"] = stage_cache.prune(db)

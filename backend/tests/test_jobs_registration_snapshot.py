@@ -36,6 +36,7 @@ from app.decision.monthly_plan_store import register_monthly_plan_snapshot_job
 from app.decision.trade_check import register_trade_check_job
 from app.decision.discover.jobs import (
     register_analyst_estimates_snapshot_job,
+    register_fundamentals_snapshot_job,
     register_discover_ml_training_job,
     register_discover_refresh_job,
     register_discover_stage_precompute_job,
@@ -146,6 +147,7 @@ EXPECTED_REGISTRATIONS = {
     "gdelt_news_refresh": {"trigger": "cron", "hour": 4, "minute": 0},
     "price_cross_check": {"trigger": "cron", "hour": 4, "minute": 20},
     "analyst_estimates_snapshot": {"trigger": "cron", "hour": 4, "minute": 45},
+    "fundamentals_snapshot": {"trigger": "cron", "hour": 4, "minute": 50},
     "discover_universe_prefetch": {"trigger": "cron", "hour": 1, "minute": 15},
     "discover_stage_precompute": {"trigger": "cron", "hour": 3, "minute": 0},
     "forward_lab_nightly": {"trigger": "cron", "hour": 4, "minute": 30},
@@ -263,6 +265,7 @@ def _drive_all_registrations(sched):
     returns["discovery_config_review"] = register_discovery_review_job(sched)
     returns["discover_ml_training"] = register_discover_ml_training_job(sched)
     returns["analyst_estimates_snapshot"] = register_analyst_estimates_snapshot_job(sched)
+    returns["fundamentals_snapshot"] = register_fundamentals_snapshot_job(sched)
     returns["discover_universe_prefetch"] = register_discover_universe_prefetch_job(sched)
     returns["discover_stage_precompute"] = register_discover_stage_precompute_job(sched)
     returns["forward_lab_nightly"] = register_forward_lab_job(sched)
