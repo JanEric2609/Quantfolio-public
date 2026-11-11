@@ -450,6 +450,7 @@ def discover_stage_precompute_inner(db: Any, *, max_seconds: float = STAGE_PRECO
             "backtest_vs_benchmark": pipeline.stage_backtest_vs_benchmark,
             "verification_gate": pipeline.stage_verification_gate,
             "quant_signals": pipeline.stage_quant_signals,
+            "alpha_miner_cached": pipeline.stage_alpha_miner_cached,
         })
         report["symbols"] += 1
     report["pruned"] = stage_cache.prune(db)

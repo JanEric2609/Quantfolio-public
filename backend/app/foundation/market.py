@@ -167,8 +167,16 @@ def history(
         # Cache-only path: never trigger a synchronous provider fetch.
         return [_price_to_dict(row, stale=True) for row in cached]
 
+    missed_at = _live_history_misses.get(ticker)
+    if missed_at is not None and datetime.now(UTC) - missed_at < _LIVE_MISS_RETRY:
+        return [_price_to_dict(row, stale=True) for row in cached]
+
     live_result = build_provider_registry(db).get_history(ticker, days=days)
     live = live_result.get("data") if live_result.get("ok") else None
+    if not live:
+        _live_history_misses[ticker] = datetime.now(UTC)
+    else:
+        _live_history_misses.pop(ticker, None)
     if live:
         reported = next((i.get("currency") for i in reversed(live) if i.get("currency")), None)
         if reported:
@@ -191,6 +199,13 @@ def history(
 # serve (delisted, renamed) costs one live call per window, not one per read.
 _BAR_REFRESH_RETRY = timedelta(hours=6)
 _bar_refresh_attempts: dict[str, datetime] = {}
+
+
+# Per-process memo of live history fetches that returned nothing: a symbol no
+# provider serves (11-11: ~190 German ETFs) cost one 1-2 s provider chain per
+# *read*, four or more times per Discover run. One miss per window instead.
+_LIVE_MISS_RETRY = timedelta(hours=6)
+_live_history_misses: dict[str, datetime] = {}
 
 
 def refresh_stale_bars(db: Session, ticker: str, max_age_days: float = 3.0) -> bool:
