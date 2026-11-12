@@ -407,6 +407,10 @@ def fundamentals(db: Session, ticker: str) -> dict[str, Any]:
     if live_data and not has_fundamentals_content(live_data):
         live_data = None  # an unknown ticker: store nothing
     if live_data:
+        from app.foundation.fundamentals_context import apply_range_checks
+
+        live_data = apply_range_checks(dict(live_data))
+    if live_data:
         if cached is None:
             cached = Fundamental(ticker=ticker)
             db.add(cached)

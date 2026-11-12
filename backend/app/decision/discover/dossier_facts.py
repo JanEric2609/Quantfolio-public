@@ -182,7 +182,7 @@ def build_facts(
             add("debt_equity", f"debt at {de:.0f} % of equity ({level})")
         if (rg := _num(fundamentals.get("revenue_growth"))) is not None:
             # "On the year" read as annual growth; yfinance's figure is one quarter.
-            basis = growth_basis_text(fundamentals.get("growth_basis"))
+            basis = growth_basis_text(fundamentals.get("growth_basis"), fundamentals.get("period_months"))
             add("revenue_growth", f"revenue growth of {_pct(rg * 100)} {basis}")
 
     buyers = _num(insider.get("cluster_buy_score"))

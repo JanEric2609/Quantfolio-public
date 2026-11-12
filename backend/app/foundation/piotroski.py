@@ -82,7 +82,7 @@ def _score(data: dict[str, Any], source: str | None = None) -> dict[str, Any]:
     """
     signals: list[dict[str, Any]] = []
     small_book = book_ratios_unreliable_in(data)
-    period = growth_basis_text(growth_basis(data, source))
+    period = growth_basis_text(growth_basis(data, source), data.get("period_months"))
     period = period[:1].upper() + period[1:]
     book_note = "Book equity is too small to divide by (price/book far above norms, typically after buybacks)."
 
