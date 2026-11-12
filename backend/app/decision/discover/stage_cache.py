@@ -50,12 +50,29 @@ def canonical(value: Any) -> Any:
     return json.loads(json.dumps(value, default=_default))
 
 
+_BAR_DATE_MEMO: dict[str, tuple[float, str | None]] = {}
+_BAR_DATE_TTL_S = 45.0
+
+
 def latest_bar_date(db: Session, symbol: str) -> str | None:
-    """The date of the symbol's latest stored daily bar, or None."""
+    """The date of the symbol's latest stored daily bar, or None.
+
+    Remembered for 45 s per symbol: the cached stages of one candidate run back to
+    back, and each used to query the bar table on its own (about 45 ms per stage,
+    ~70 s per stage over a 1,620-name run, even with every entry warm).
+    """
+    import time
+
+    now = time.monotonic()
+    hit = _BAR_DATE_MEMO.get(symbol)
+    if hit is not None and now - hit[0] < _BAR_DATE_TTL_S:
+        return hit[1]
     row = db.execute(text("SELECT max(ts) FROM bar_prices WHERE symbol = :s"), {"s": symbol}).scalar()
-    if row is None:
-        return None
-    return str(row)[:10]
+    value = None if row is None else str(row)[:10]
+    if len(_BAR_DATE_MEMO) > 5000:
+        _BAR_DATE_MEMO.clear()
+    _BAR_DATE_MEMO[symbol] = (now, value)
+    return value
 
 
 def cached_stage(

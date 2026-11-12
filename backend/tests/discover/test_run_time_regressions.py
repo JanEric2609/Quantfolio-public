@@ -147,8 +147,10 @@ def test_precompute_warms_the_etfs_of_a_cancelled_run(monkeypatch):
     db.commit()
     warmed: list[tuple[str, bool]] = []
 
-    def fake_warm(_db, symbol, _fns, *, is_etf=False, asset_class="equity"):
+    def fake_warm(_db, symbol, fns, *, is_etf=False, asset_class="equity"):
         warmed.append((symbol, is_etf))
+        if is_etf:
+            assert "alpha_miner_cached" in fns  # the pipeline runs the miner for ETFs too
         return 1
 
     monkeypatch.setattr(stage_cache, "warm_symbol", fake_warm)
@@ -156,3 +158,14 @@ def test_precompute_warms_the_etfs_of_a_cancelled_run(monkeypatch):
     report = jobs.discover_stage_precompute_inner(db)
     assert ("ZZETF.DE", True) in warmed
     assert report["etfs"] >= 1
+
+
+def test_latest_bar_date_is_read_once_for_the_stages_of_one_symbol():
+    from sqlalchemy import event
+
+    db = _memory_db()
+    queries: list[str] = []
+    event.listen(db.get_bind(), "before_cursor_execute", lambda *a: queries.append(a[2]))
+    for _ in range(5):
+        assert stage_cache.latest_bar_date(db, "AAA.DE") is None
+    assert sum("bar_prices" in q for q in queries) == 1
