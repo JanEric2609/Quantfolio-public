@@ -171,7 +171,7 @@ def history(
         # Cache-only path: never trigger a synchronous provider fetch.
         return [_price_to_dict(row, stale=True) for row in cached]
 
-    from app.foundation.data_backbone.fetch_misses import clear_miss, recently_missed, record_miss
+    from app.foundation.data_backbone.fetch_misses import clear_miss, is_definitive_miss, recently_missed, record_miss
 
     missed_at = _live_history_misses.get(ticker)
     if missed_at is not None and datetime.now(UTC) - missed_at < _LIVE_MISS_RETRY:
@@ -183,7 +183,9 @@ def history(
     live = live_result.get("data") if live_result.get("ok") else None
     if not live:
         _live_history_misses[ticker] = datetime.now(UTC)
-        record_miss(db, ticker, "no history from the providers")
+        error = str(live_result.get("error") or "")
+        if is_definitive_miss(error):
+            record_miss(db, ticker, "no history from the providers")
     else:
         _live_history_misses.pop(ticker, None)
         clear_miss(db, ticker)

@@ -114,7 +114,12 @@ def calendar_code(symbol: str) -> str | None:
 def _calendar(code: str) -> Any:
     import exchange_calendars as xc
 
-    return xc.get_calendar(code, start="1995-01-01")
+    try:
+        return xc.get_calendar(code, start="1995-01-01")
+    except ValueError:
+        # XTKS (and some others) start later than 1995: the guard silently
+        # skipped Tokyo until 2026-11-12. Use the calendar's own earliest date.
+        return xc.get_calendar(code, start="2000-01-01")
 
 
 def is_session(symbol: str, day: pd.Timestamp) -> bool:
@@ -131,6 +136,35 @@ def is_session(symbol: str, day: pd.Timestamp) -> bool:
     if day < cal.first_session or day > cal.last_session:
         return True
     return bool(cal.is_session(day))
+
+
+SETTLE_BUFFER = pd.Timedelta(minutes=30)
+
+
+def session_incomplete(symbol: str, day: pd.Timestamp, now: pd.Timestamp | None = None) -> bool:
+    """True when ``day`` is a session of the symbol's exchange that has not closed yet.
+
+    A provider returns the running session as a daily bar: Tokyo's bars of
+    2026-11-12 averaged 3.9 M shares against about 11 M (audit WP6). Unknown
+    calendars answer False, so ingestion is never blocked by a missing calendar.
+    """
+    code = calendar_code(symbol)
+    if code is None:
+        return False
+    now_utc = pd.Timestamp.now(tz="UTC") if now is None else (now.tz_localize("UTC") if now.tzinfo is None else now)
+    d = _day(day)
+    if d > now_utc.tz_localize(None).normalize() + pd.Timedelta(days=1):
+        return True
+    if d < now_utc.tz_localize(None).normalize() - pd.Timedelta(days=1):
+        return False
+    try:
+        cal = _calendar(code)
+        if d < cal.first_session or d > cal.last_session or not cal.is_session(d):
+            return False
+        close = cal.session_close(d)
+    except Exception:  # noqa: BLE001
+        return False
+    return bool(now_utc < close + SETTLE_BUFFER)
 
 
 def _day(value: Any) -> pd.Timestamp:

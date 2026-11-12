@@ -239,6 +239,17 @@ class DataIngester:
                 )
                 df = cast(pd.DataFrame, df[~nan_mask])
 
+        # Drop the running session: a provider sends it as a daily bar with a
+        # fraction of the day's volume. It is re-pulled after the close.
+        if not df.empty:
+            from app.foundation.data_backbone.bar_guard import session_incomplete
+
+            partial = df["ts"].map(lambda t: session_incomplete(symbol, t))
+            if bool(partial.any()):
+                logger.info("Symbol %s: dropping %d bar(s) of a session still open", symbol, int(partial.sum()))
+                df = cast(pd.DataFrame, df[~partial])
+                df.attrs["partial_only"] = df.empty
+
         # Reject negative prices (invalid data)
         for price_col in ("open", "high", "low", "close"):
             if price_col in df.columns:
@@ -453,6 +464,9 @@ class DataIngester:
                 "symbol": symbol,
                 "message": "No data returned",
             }
+
+        if df.empty and df.attrs.get("partial_only"):
+            return {"success": False, "symbol": symbol, "message": "only a session still open; retry after the close"}
 
         if df.empty:
             logger.warning("Symbol %s: all %d rows rejected by validation", symbol, initial_count)

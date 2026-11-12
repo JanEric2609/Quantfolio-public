@@ -485,7 +485,12 @@ def _preingest_one(symbol: str) -> tuple[str, bool]:
             logger.debug("pre-ingest: incremental check failed for %s", symbol, exc_info=True)
             db.rollback()
             start = None
-        from app.foundation.data_backbone.fetch_misses import clear_miss, recently_missed, record_miss
+        from app.foundation.data_backbone.fetch_misses import (
+            clear_miss,
+            is_definitive_miss,
+            recently_missed,
+            record_miss,
+        )
 
         if recently_missed(db, symbol)[0]:
             return symbol, False
@@ -501,7 +506,7 @@ def _preingest_one(symbol: str) -> tuple[str, bool]:
         _note_fetch(symbol, None if result.get("success") else str(result.get("message") or "no data"))
         if result.get("success") and not result.get("short"):
             clear_miss(db, symbol)
-        else:
+        elif is_definitive_miss(str(result.get("message") or ""), short=bool(result.get("short"))):
             record_miss(db, symbol, str(result.get("message") or "no data"))
         if result.get("short"):
             logger.warning("pre-ingest: %s is short: %s", symbol, result.get("message"))
@@ -779,7 +784,12 @@ def stage_history_ingest(
             )
             return cached_scores, None
 
-    from app.foundation.data_backbone.fetch_misses import clear_miss, recently_missed, record_miss
+    from app.foundation.data_backbone.fetch_misses import (
+            clear_miss,
+            is_definitive_miss,
+            recently_missed,
+            record_miss,
+        )
 
     fetched, last_message = _fetched_recently(symbol)
     if not fetched:
@@ -799,7 +809,7 @@ def stage_history_ingest(
     _note_fetch(symbol, None if result.get("success") else str(result.get("message") or "no data"))
     if result.get("success") and not result.get("short"):
         clear_miss(db, symbol)
-    else:
+    elif is_definitive_miss(str(result.get("message") or ""), short=bool(result.get("short"))):
         record_miss(db, symbol, str(result.get("message") or "no data"))
     # The run memo holds the rows read before the ingest; read what it wrote.
     _forget_history(symbol)
