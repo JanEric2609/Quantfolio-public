@@ -3,8 +3,10 @@ export const CHART_RANGES = [
   { key: "1M", label: "1M", days: 31 },
   { key: "3M", label: "3M", days: 92 },
   { key: "6M", label: "6M", days: 183 },
+  { key: "YTD", label: "YTD", days: 0 },
   { key: "1Y", label: "1Y", days: 366 },
   { key: "5Y", label: "5Y", days: 1830 },
+  { key: "MAX", label: "Max", days: Infinity },
 ] as const;
 export type ChartRangeKey = (typeof CHART_RANGES)[number]["key"];
 
@@ -12,7 +14,10 @@ export type ChartRangeKey = (typeof CHART_RANGES)[number]["key"];
 export function sliceChartRange<T extends { date: string }>(rows: T[], key: ChartRangeKey): T[] {
   if (rows.length === 0) return rows;
   const days = CHART_RANGES.find((r) => r.key === key)?.days ?? 366;
-  const last = new Date(String(rows[rows.length - 1].date).slice(0, 10) + "T00:00:00Z").getTime();
-  const from = last - days * 86_400_000;
+  if (!Number.isFinite(days)) return rows;
+  const lastDate = String(rows[rows.length - 1].date).slice(0, 10);
+  const last = new Date(lastDate + "T00:00:00Z").getTime();
+  // Year to date: from 1 January of the last bar's year.
+  const from = key === "YTD" ? new Date(`${lastDate.slice(0, 4)}-01-01T00:00:00Z`).getTime() : last - days * 86_400_000;
   return rows.filter((r) => new Date(String(r.date).slice(0, 10) + "T00:00:00Z").getTime() >= from);
 }

@@ -128,8 +128,14 @@ def price_technicals(history_rows: list[dict[str, Any]], today: date | None = No
     for c in year:
         peak = max(peak, c)
         max_dd = min(max_dd, c / peak - 1)
-    hi_i = max(range(len(year)), key=year.__getitem__)
-    lo_i = min(range(len(year)), key=year.__getitem__)
+    # The 52-week range uses each day's high and low, not adjusted closes: DTE.DE
+    # showed 33.02 against a real 34.36 (audit 2026-11-12, WP3). Returns and the
+    # drawdown above stay on closes.
+    highs = [float(r.get("high") or r["close"]) for r in year_rows]
+    lows = [float(r.get("low") or r["close"]) for r in year_rows]
+    hi_i = max(range(len(highs)), key=highs.__getitem__)
+    lo_i = min(range(len(lows)), key=lows.__getitem__)
+    high_52w, low_52w = highs[hi_i], lows[lo_i]
     sma50, sma200 = _sma(50), _sma(200)
     return {
         "sessions": len(closes),
@@ -141,11 +147,11 @@ def price_technicals(history_rows: list[dict[str, Any]], today: date | None = No
         "return_3m_pct": _ret(63),
         "return_6m_pct": _ret(126),
         "return_12m_pct": _ret(252),
-        "high_52w": round(max(year), 4),
+        "high_52w": round(high_52w, 4),
         "high_52w_date": str(year_rows[hi_i]["date"])[:10],
-        "low_52w": round(min(year), 4),
+        "low_52w": round(low_52w, 4),
         "low_52w_date": str(year_rows[lo_i]["date"])[:10],
-        "pct_below_52w_high": round((1 - last_close / max(year)) * 100, 1) if max(year) > 0 else None,
+        "pct_below_52w_high": round((1 - last_close / high_52w) * 100, 1) if high_52w > 0 else None,
         "sma_50": sma50,
         "sma_200": sma200,
         "above_sma_50": None if sma50 is None else last_close > sma50,
