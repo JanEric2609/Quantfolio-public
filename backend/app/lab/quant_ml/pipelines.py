@@ -8,7 +8,11 @@ sizes this app's tickers actually produce.
 """
 from __future__ import annotations
 
+import logging
+
 from typing import Any, Literal
+
+logger = logging.getLogger(__name__)
 
 ModelKind = Literal["lgbm", "xgb", "mlp"]
 
@@ -274,6 +278,7 @@ def write_signal_rows(
         try:
             as_of = date.fromisoformat(str(dt_str)[:10])
         except Exception:
+            logger.debug("prediction date unparseable", exc_info=True)
             continue
         row = QuantSignal(
             run_id=run_id,

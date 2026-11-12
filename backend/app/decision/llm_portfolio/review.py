@@ -481,6 +481,7 @@ def _yfinance_isin(ticker: str) -> str | None:
 
         value = yf.Ticker(ticker).isin
     except Exception:  # noqa: BLE001 - network / provider failure: no ISIN
+        logger.debug("yfinance isin lookup failed", exc_info=True)
         return None
     return value if valid_isin(value) else None
 

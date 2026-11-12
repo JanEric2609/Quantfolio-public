@@ -1270,6 +1270,7 @@ def _yfinance_revenue_growth(symbol: str) -> float | None:
 
         return _safe_float((yf.Ticker(symbol).info or {}).get("revenueGrowth"))
     except Exception:  # noqa: BLE001 - network / provider failure: no confirmation
+        logger.debug("yfinance revenue growth lookup failed", exc_info=True)
         return None
 
 
@@ -1834,6 +1835,7 @@ def _weekly_tracking_error(merged: pd.DataFrame, years: float = 2.0) -> float | 
         closes = cast(pd.DataFrame, frame.loc[index >= cutoff, ["close_c", "close_b"]]).astype(float)
         weekly = closes.resample("W-FRI").last().pct_change().dropna()
     except Exception:  # noqa: BLE001
+        logger.debug("weekly benchmark returns failed", exc_info=True)
         return None
     if len(weekly) < 26:
         return None

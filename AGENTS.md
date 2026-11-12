@@ -253,6 +253,7 @@ cd backend
 PYRIGHT_PYTHON_FORCE_VERSION=1.1.414 .venv/bin/pyright app/   # type-check (CI's type-check-backend; pin = the version CI resolved, bump it with CI)
 .venv/bin/lint-imports                    # 10 import-linter architecture contracts
 .venv/bin/python scripts/check_no_new_cycles.py   # import-cycle golden ledger
+.venv/bin/python scripts/check_broad_excepts.py   # broad `except Exception` ledger (decision, lab, worker): may only shrink, no silent ones
 DATABASE_URL="sqlite:////tmp/mig.db" .venv/bin/alembic upgrade head   # migration dry-run
 DATABASE_URL="sqlite:///:memory:" .venv/bin/python scripts/export_openapi.py   && git diff --exit-code docs/api/openapi.json                       # API contract gate
 .venv/bin/pytest -n 6                     # ~4000 tests, ~10 min

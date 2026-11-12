@@ -159,7 +159,7 @@ def build_features(
             bb_obj = BollingerBands(close, window=bb_w)
             df["bb_pct"] = bb_obj.bollinger_pband()
         except Exception:
-            pass
+            logger.debug("bollinger bands failed", exc_info=True)
 
     if regime_snapshot is not None:
         try:

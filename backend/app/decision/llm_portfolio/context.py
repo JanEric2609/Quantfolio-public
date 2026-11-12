@@ -203,7 +203,7 @@ def _build_perf_block(db: Session, portfolio_id: str) -> dict[str, Any]:
                     payload = json.loads(real.payload_json)
                     real_return_pct = payload.get("total_return_pct")
                 except Exception:
-                    pass
+                    logger.debug("real-book payload unreadable", exc_info=True)
         comparisons.append({
             "date": str(p.date),
             "paper_return_pct": str(p.total_return_pct),

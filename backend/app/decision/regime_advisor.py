@@ -26,6 +26,8 @@ estimate of every action's loss unbiased):
 """
 from __future__ import annotations
 
+import logging
+
 import json
 import math
 from datetime import UTC, datetime
@@ -39,6 +41,8 @@ from app.foundation.models.entities import (
     RecommendationOutcome,
     RegimeRecommendationWeight,
 )
+
+logger = logging.getLogger(__name__)
 
 # Actions tracked by the MWU system
 MWU_ACTIONS = [
@@ -121,7 +125,7 @@ def _infer_action_from_rec(rec: Recommendation) -> str:
             if "equity" in msg or "stock" in msg:
                 return "buy_equity"
     except Exception:
-        pass
+        logger.debug("regime action parse failed", exc_info=True)
 
     return "buy_equity"  # safest default
 
@@ -286,6 +290,7 @@ def outcomes_already_applied(outcome: RecommendationOutcome) -> bool:
         notes = json.loads(outcome.notes_json or "{}")
         return "mwu_applied_at" in notes
     except Exception:
+        logger.debug("outcome notes unreadable", exc_info=True)
         return False
 
 
@@ -346,7 +351,7 @@ def compute_factor_ic(
                     factor_alignment = 0.3
             pred_score = min(1.0, pred_score + factor_alignment)
         except Exception:
-            pass
+            logger.debug("factor alignment failed", exc_info=True)
         pairs.append((pred_score, outcome.benchmark_excess_return))
 
     if len(pairs) < 5:

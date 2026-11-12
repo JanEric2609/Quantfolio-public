@@ -18,23 +18,23 @@
           },
           {
             "type": "command",
-            "command": "FILE=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; PROJ=$(git -C \"$(dirname \"$FILE\")\" rev-parse --show-toplevel 2>/dev/null); if echo \"$FILE\" | grep -qE '\\.(tsx?|ts)$' && [ -n \"$PROJ\" ]; then cd \"$PROJ/frontend\" && npx tsc --noEmit 2>&1 | tail -20 || true; fi"
+            "command": "FILE=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; PROJ=$(git -C \"$(dirname \"$FILE\")\" rev-parse --show-toplevel 2>/dev/null); if echo \"$FILE\" | grep -qE '\\.(tsx?|ts)$' && [ -n \"$PROJ\" ]; then cd \"$PROJ/frontend\" && OUT=$(npx tsc --noEmit 2>&1); RC=$?; echo \"$OUT\" | tail -20; [ \"$RC\" -eq 0 ] || exit 2; fi"
           },
           {
             "type": "command",
-            "command": "FILE=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; PROJ=$(git -C \"$(dirname \"$FILE\")\" rev-parse --show-toplevel 2>/dev/null); if echo \"$FILE\" | grep -qE 'alembic/versions/.*\\.py$' && [ -n \"$PROJ\" ]; then cd \"$PROJ/backend\" && TMPDB=$(mktemp /tmp/quantfolio_hook_XXXXXX.db) && DATABASE_URL=\"sqlite:///$TMPDB\" .venv/bin/alembic upgrade head 2>&1 | tail -15; rm -f \"$TMPDB\"; fi"
+            "command": "FILE=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; PROJ=$(git -C \"$(dirname \"$FILE\")\" rev-parse --show-toplevel 2>/dev/null); if echo \"$FILE\" | grep -qE 'alembic/versions/.*\\.py$' && [ -n \"$PROJ\" ]; then cd \"$PROJ/backend\" && TMPDB=$(mktemp /tmp/quantfolio_hook_XXXXXX.db); OUT=$(DATABASE_URL=\"sqlite:///$TMPDB\" .venv/bin/alembic upgrade head 2>&1); RC=$?; echo \"$OUT\" | tail -15; rm -f \"$TMPDB\"; [ \"$RC\" -eq 0 ] || exit 2; fi"
           },
           {
             "type": "command",
-            "command": "FILE=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; PROJ=$(git -C \"$(dirname \"$FILE\")\" rev-parse --show-toplevel 2>/dev/null); BASE=$(echo \"$FILE\" | sed -n 's#.*/backend/app/\\(foundation\\|lab\\|decision\\|interface\\)/\\(.*\\)\\.py#\\2#p'); if [ -n \"$BASE\" ] && [ -n \"$PROJ\" ] && [ -f \"$PROJ/backend/tests/test_${BASE}.py\" ]; then cd \"$PROJ/backend\" && .venv/bin/pytest \"tests/test_${BASE}.py\" -x -q 2>&1 | tail -10; fi"
+            "command": "FILE=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; PROJ=$(git -C \"$(dirname \"$FILE\")\" rev-parse --show-toplevel 2>/dev/null); BASE=$(echo \"$FILE\" | sed -n 's#.*/backend/app/\\(foundation\\|lab\\|decision\\|interface\\)/\\(.*\\)\\.py#\\2#p'); if [ -n \"$BASE\" ] && [ -n \"$PROJ\" ] && [ -f \"$PROJ/backend/tests/test_${BASE}.py\" ]; then cd \"$PROJ/backend\" && OUT=$(.venv/bin/pytest \"tests/test_${BASE}.py\" -x -q 2>&1); RC=$?; echo \"$OUT\" | tail -10; [ \"$RC\" -eq 0 ] || exit 2; fi"
           },
           {
             "type": "command",
-            "command": "FILE=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; PROJ=$(git -C \"$(dirname \"$FILE\")\" rev-parse --show-toplevel 2>/dev/null); BASE=$(echo \"$FILE\" | sed -n 's|.*/backend/tests/test_\\(.*\\)\\.py|\\1|p'); if [ -n \"$BASE\" ] && [ -n \"$PROJ\" ]; then cd \"$PROJ/backend\" && .venv/bin/pytest \"tests/test_${BASE}.py\" -x -q 2>&1 | tail -10; fi"
+            "command": "FILE=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; PROJ=$(git -C \"$(dirname \"$FILE\")\" rev-parse --show-toplevel 2>/dev/null); BASE=$(echo \"$FILE\" | sed -n 's|.*/backend/tests/test_\\(.*\\)\\.py|\\1|p'); if [ -n \"$BASE\" ] && [ -n \"$PROJ\" ]; then cd \"$PROJ/backend\" && OUT=$(.venv/bin/pytest \"tests/test_${BASE}.py\" -x -q 2>&1); RC=$?; echo \"$OUT\" | tail -10; [ \"$RC\" -eq 0 ] || exit 2; fi"
           },
           {
             "type": "command",
-            "command": "FILE=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; PROJ=$(git -C \"$(dirname \"$FILE\")\" rev-parse --show-toplevel 2>/dev/null); if echo \"$FILE\" | grep -qE '\\.(tsx?)$' && [ -n \"$PROJ\" ]; then cd \"$PROJ/frontend\" && npx vitest run --reporter=verbose --related \"$FILE\" 2>&1 | tail -15; fi"
+            "command": "FILE=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; PROJ=$(git -C \"$(dirname \"$FILE\")\" rev-parse --show-toplevel 2>/dev/null); if echo \"$FILE\" | grep -qE '\\.(tsx?)$' && [ -n \"$PROJ\" ]; then cd \"$PROJ/frontend\" && OUT=$(npx vitest run --reporter=verbose --related \"$FILE\" 2>&1); RC=$?; echo \"$OUT\" | tail -15; [ \"$RC\" -eq 0 ] || exit 2; fi"
           }
         ]
       }
@@ -45,7 +45,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "FILE=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; if echo \"$FILE\" | grep -qE '\\.env$|\\.env\\..*|secrets|credentials'; then echo 'BLOCK: editing a secrets/env file — confirm this is intentional' && exit 2; fi"
+            "command": "FILE=\"$CLAUDE_TOOL_INPUT_FILE_PATH\"; if echo \"$FILE\" | grep -qE '\\.env$|\\.env\\..*|secrets|credentials'; then echo 'BLOCK: editing a secrets/env file \u2014 confirm this is intentional' && exit 2; fi"
           }
         ]
       }

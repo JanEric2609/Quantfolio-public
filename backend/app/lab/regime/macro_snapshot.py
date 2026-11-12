@@ -51,6 +51,7 @@ def _state_since(db: Any, label: str, latest_ts: datetime) -> str | None:
     try:
         hist = RegimeStore(db).get_history(start=latest_ts - timedelta(days=730))
     except Exception:  # noqa: BLE001 - history is a nicety
+        logger.debug("regime history unavailable", exc_info=True)
         return None
     if hist is None or hist.empty or "source" not in hist:
         return None

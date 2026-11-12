@@ -60,7 +60,7 @@ def get_signal_batch_dir() -> Path:
             if db_val:
                 return Path(db_val)
     except Exception:
-        pass
+        logger.debug("signal batch dir setting unreadable", exc_info=True)
     return Path(_DEFAULT_SIGNAL_BATCH_DIR)
 
 

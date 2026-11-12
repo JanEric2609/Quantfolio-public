@@ -233,6 +233,7 @@ def estr_over_horizon_pct(db: Session | None, horizon_months: int) -> float | No
 
         fixings = stored_fixings(db, start=datetime.now(UTC).date() - timedelta(days=20))
     except Exception:  # noqa: BLE001
+        logger.debug("stored estr fixings unavailable", exc_info=True)
         return None
     if not fixings:
         return None

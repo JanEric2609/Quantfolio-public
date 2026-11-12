@@ -375,6 +375,7 @@ def _batch_load_fundamental_cache(db: Session, tickers: list[str]) -> dict[str, 
         try:
             data = json.loads(row.data_json or "{}")
         except Exception:
+            logger.debug("universe row has unreadable data_json", exc_info=True)
             continue
         mcap = _safe_float(data.get("market_cap"), 0.0)
         vol = _safe_float(data.get("average_volume") or data.get("volume"), 0.0)
