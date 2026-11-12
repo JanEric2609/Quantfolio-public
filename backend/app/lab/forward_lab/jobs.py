@@ -27,8 +27,8 @@ def register_news_tone_job(scheduler: Any | None = None) -> str:
     from app.foundation.core.db import SessionLocal
     from app.lab.forward_lab.news_tone import run_nightly
 
-    def news_tone_inner() -> None:
+    def news_tone_inner() -> dict[str, Any]:
         with SessionLocal() as db:
-            run_nightly(db)
+            return run_nightly(db)
 
     return register_cron_job("news_tone_nightly", news_tone_inner, scheduler=scheduler, hour=5, minute=0)

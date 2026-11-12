@@ -32,6 +32,7 @@ class LLMBackend(Protocol):
         *,
         structured_output: type[BaseModel] | None = None,
         timeout_s: float = 60.0,
+        max_tokens: int | None = None,
     ) -> Completion:
         """Complete a chat request.
 
@@ -39,6 +40,7 @@ class LLMBackend(Protocol):
             messages: List of {"role": "user"/"assistant", "content": "..."} dicts
             structured_output: Optional Pydantic model for JSON schema validation
             timeout_s: Request timeout in seconds
+            max_tokens: Completion budget for this call (local backend; the cloud backends keep their own)
 
         Returns:
             Completion with content, model, token counts, and backend name

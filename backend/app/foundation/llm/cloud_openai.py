@@ -34,6 +34,7 @@ class OpenAIBackend:
         *,
         structured_output: type[BaseModel] | None = None,
         timeout_s: float = 60.0,
+        max_tokens: int | None = None,
     ) -> Completion:
         """Complete a chat request using OpenAI."""
         try:

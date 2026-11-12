@@ -10,7 +10,7 @@ import json
 import logging
 import threading
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
 
 from sqlalchemy.engine import Engine
@@ -93,6 +93,13 @@ def _release_advisory_lock(lock_conn: Any, job_name: str) -> None:
         lock_conn.close()
 
 
+def _outcome_text(outcome: dict[str, Any]) -> str:
+    """``reason`` plus the counts of a degraded or failed result, for the run's message."""
+    counts = {k: v for k, v in outcome.items() if k not in ("status", "reason") and isinstance(v, int | float | str | bool)}
+    text = str(outcome.get("reason") or outcome.get("status") or "")
+    return (text + (" " + json.dumps(counts, default=str) if counts else ""))[:1000]
+
+
 def _track_job(job_name: str, job_fn: Callable, triggered_by: str = "scheduler") -> None:
     """Wrap a job function with JobRun tracking (start, success/fail, duration).
 
@@ -136,6 +143,12 @@ def _track_job(job_name: str, job_fn: Callable, triggered_by: str = "scheduler")
         db.commit()
     except Exception as exc:
         logger.error("Failed to create JobRun for %s: %s", job_name, exc)
+        # The job is skipped, which is a failure: say so (best effort; the database may be the problem).
+        try:
+            db.rollback()
+            _alert_job_failure(db, job_name, f"The run was skipped: its job record could not be written ({exc})"[:1000])
+        except Exception:  # noqa: BLE001
+            logger.error("Could not alert the skipped run of %s", job_name, exc_info=True)
         # The advisory lock is already held at this point. Returning without
         # releasing it strands a session-level lock on a connection that is
         # never reused, permanently blocking every later run of this job name.
@@ -143,6 +156,7 @@ def _track_job(job_name: str, job_fn: Callable, triggered_by: str = "scheduler")
         db.close()
         return
 
+    failed_reason: str | None = None
     try:
         outcome = job_fn()
         finished = datetime.now(UTC)
@@ -151,9 +165,16 @@ def _track_job(job_name: str, job_fn: Callable, triggered_by: str = "scheduler")
         # do its job for a documented, non-exceptional reason (e.g. not
         # enough data yet). Every job function today returns None, so this
         # is backward compatible everywhere except call sites that opt in.
-        if isinstance(outcome, dict) and outcome.get("status") == "warning":
+        status = outcome.get("status") if isinstance(outcome, dict) else None
+        if status == "warning":
             run.status = "warning"
             run.error_message = str(outcome.get("reason") or "")[:1000]
+        elif status in ("degraded", "failed"):
+            # Job result contract (plan 2026-11-12, WP8): ``ok`` | ``degraded`` | ``failed`` plus counts. A
+            # degraded run did part of its job; a failed one none of it. The reason and counts are kept.
+            run.status = "degraded" if status == "degraded" else "error"
+            run.error_message = _outcome_text(outcome)
+            failed_reason = run.error_message if status == "failed" else None
         else:
             run.status = "success"
         run.finished_at = finished
@@ -165,7 +186,7 @@ def _track_job(job_name: str, job_fn: Callable, triggered_by: str = "scheduler")
         run.finished_at = finished
         run.duration_ms = int((finished - started).total_seconds() * 1000)
         logger.error("Job %s failed: %s", job_name, exc, exc_info=True)
-        _alert_job_failure(db, job_name, str(exc)[:1000])
+        failed_reason = str(exc)[:1000]
     finally:
         try:
             db.commit()
@@ -182,6 +203,9 @@ def _track_job(job_name: str, job_fn: Callable, triggered_by: str = "scheduler")
                 logger.error("Failed to update JobRun status after commit failure for %s", job_name)
         finally:
             _release_advisory_lock(lock_conn, job_name)
+            if failed_reason is not None:
+                # After the run's status is committed: a database error while alerting must not rewrite it.
+                _alert_job_failure(db, job_name, failed_reason)
             db.close()
 
 
@@ -364,6 +388,38 @@ def register_cron_job(
     return str(job.id)
 
 
+#: A job whose last run is older than its interval starts this long after the worker does.
+CATCH_UP_DELAY = timedelta(seconds=45)
+
+
+def _anchored_first_run(job_name: str, interval: timedelta) -> datetime | None:
+    """When an interval job should next run, counted from its last run instead of from this start.
+
+    APScheduler runs an interval job one full interval after registration, so a worker restarted every few
+    hours never reached a four-hourly job (the news refresh skipped a run after two restarts, 2026-11-12). The
+    next run is the last run's start plus the interval, or soon after start when that is already past.
+    ``None`` (keep APScheduler's own timing) when the job never ran or the history cannot be read.
+    """
+    if interval <= timedelta(0):
+        return None
+    try:
+        from sqlalchemy import func
+
+        from app.foundation.core.db import SessionLocal
+        from app.foundation.models.entities import JobRun
+
+        with SessionLocal() as db:
+            last = db.query(func.max(JobRun.started_at)).filter(JobRun.job_name == job_name).scalar()
+    except Exception:  # noqa: BLE001 - registration never fails on the history
+        logger.debug("no run history for %s; default interval timing", job_name, exc_info=True)
+        return None
+    if last is None:
+        return None
+    last = last if last.tzinfo else last.replace(tzinfo=UTC)
+    now = datetime.now(UTC)
+    return max(last + interval, now + CATCH_UP_DELAY)
+
+
 def register_interval_job(
     job_id: str,
     job_fn: Callable[[], Any],
@@ -406,6 +462,10 @@ def register_interval_job(
     extra: dict[str, Any] = {}
     if run_immediately:
         extra["next_run_time"] = datetime.now(UTC)
+    elif track:
+        anchored = _anchored_first_run(job_id, timedelta(minutes=minutes or 0, hours=hours or 0))
+        if anchored is not None:
+            extra["next_run_time"] = anchored
 
     job = sched.add_job(
         target,
