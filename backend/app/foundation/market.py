@@ -9,6 +9,10 @@ from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import Fundamental, MacroIndicator, PriceCache
 from app.foundation.data_backbone.bars import BarStore
+from app.foundation.fundamentals_context import (  # noqa: F401 - has_fundamentals_content is re-exported
+    _FUNDAMENTALS_LABEL_KEYS,
+    has_fundamentals_content,
+)
 from app.foundation.providers.registry import build_provider_registry
 from app.foundation.settings import get_public_settings
 
@@ -400,6 +404,8 @@ def fundamentals(db: Session, ticker: str) -> dict[str, Any]:
         }
     live_result = build_provider_registry(db).get_fundamentals(ticker)
     live_data = live_result.get("data") if live_result.get("ok") else None
+    if live_data and not has_fundamentals_content(live_data):
+        live_data = None  # an unknown ticker: store nothing
     if live_data:
         if cached is None:
             cached = Fundamental(ticker=ticker)

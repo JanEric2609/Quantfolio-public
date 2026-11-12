@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
@@ -31,7 +30,7 @@ from app.foundation.fundamentals_context import (
     growth_basis_text,
     net_debt_to_ebitda,
 )
-from app.foundation.market import fundamentals, history, quote
+from app.foundation.market import fundamentals, has_fundamentals_content, history, quote
 from app.foundation.text_safety import ascii_safe
 
 logger = logging.getLogger(__name__)
@@ -280,6 +279,17 @@ def _company(db: Session, ticker: str, fund: dict[str, Any] | None) -> dict[str,
         "sector": (fund or {}).get("sector"),
         "industry": (fund or {}).get("industry"),
     }
+
+
+MIN_BARS_FOR_RESEARCH = 250
+
+
+def has_research_data(context: dict[str, Any]) -> bool:
+    """Fundamentals with a real metric, or at least a year of daily bars."""
+    if has_fundamentals_content(context.get("fundamentals")):
+        return True
+    history_rows = context.get("price_history") or []
+    return len(history_rows) >= MIN_BARS_FOR_RESEARCH
 
 
 def build_context(db: Session, ticker: str, user_id: str) -> dict[str, Any]:
@@ -724,15 +734,19 @@ async def generate_report(db: Session, ticker: str, user_id: str, *,
     }
 
 
-VERDICT_HORIZONS = ("1m", "1-6m", "6m-1y", "1-3y", "3-5y", "5y+")
+# Up to one year (audit 2026-11-12, D2): nothing here can say anything about
+# three to five years, and the stored verdicts from longer horizons are dropped
+# when read.
+VERDICT_HORIZONS = ("1m", "1-6m", "6m-1y")
 
 
 def normalise_verdicts(raw: Any) -> list[dict[str, Any]]:
     """Valid verdicts only, one per known horizon, in horizon order.
 
-    The model's confidence is its own statement, not a calibrated probability:
-    clamped to 0-1 and tagged ``source: "llm_uncalibrated"``. Unknown horizons,
-    verdicts other than BUY/HOLD/SELL and non-numeric confidences are dropped.
+    No confidence is kept (WP4): the number was whatever the model typed, and
+    two unrelated tickers got the same 0.65 / 0.72 / 0.58. ``confidence`` stays
+    in the response as ``None`` so the API contract does not change. Unknown
+    horizons and verdicts other than BUY/HOLD/SELL are dropped.
     """
     if not isinstance(raw, list):
         return []
@@ -742,15 +756,10 @@ def normalise_verdicts(raw: Any) -> list[dict[str, Any]]:
             continue
         horizon = str(item.get("horizon", "")).strip().lower().replace(" ", "")
         verdict = str(item.get("verdict", "")).strip().upper()
-        try:
-            confidence = float(item.get("confidence") or 0.0) if item.get("confidence") is not None else math.nan
-        except (TypeError, ValueError):
-            continue
-        if horizon not in VERDICT_HORIZONS or verdict not in ("BUY", "HOLD", "SELL") or math.isnan(confidence):
+        if horizon not in VERDICT_HORIZONS or verdict not in ("BUY", "HOLD", "SELL"):
             continue
         found.setdefault(horizon, {"horizon": horizon, "verdict": verdict,
-                                   "confidence": round(min(1.0, max(0.0, confidence)), 2),
-                                   "source": "llm_uncalibrated"})
+                                   "confidence": None, "source": "llm_uncalibrated"})
     return [found[h] for h in VERDICT_HORIZONS if h in found]
 
 
@@ -773,11 +782,15 @@ async def generate_multi_horizon_verdicts(db: Session, ticker: str, user_id: str
         return {"ticker": ticker, "verdicts": horizons, "generated_at": recent.generated_at.isoformat(), "cached": True}
 
     context = build_context(db, ticker, user_id)
+    if not has_research_data(context):
+        # An unknown ticker: no verdict call (audit 2026-11-12, WP1).
+        return {"ticker": ticker, "verdicts": [], "generated_at": datetime.now(UTC).isoformat(),
+                "error": "not_found"}
     horizon_prompt = (
         f"You are a quantitative analyst.  Given the research context for {ticker}, "
         "produce a JSON array of verdicts for these horizons:\n"
-        '1m, 1-6m, 6m-1y, 1-3y, 3-5y, 5y+\n'
-        'Each item: {"horizon": "...", "verdict": "BUY|HOLD|SELL", "confidence": 0.0-1.0, "source": "llm"}\n'
+        '1m, 1-6m, 6m-1y\n'
+        'Each item: {"horizon": "...", "verdict": "BUY|HOLD|SELL"}\n'
         "Return ONLY the JSON array, no commentary."
     )
     messages = [

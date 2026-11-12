@@ -2663,7 +2663,8 @@ export type StockContext = {
 export type MultiHorizonVerdict = {
   horizon: string;
   verdict: "BUY" | "HOLD" | "SELL";
-  confidence: number;
+  /** Always null since 2026-11-12: the model's own number carried no information. */
+  confidence: number | null;
   source: string;
 };
 
@@ -2701,6 +2702,10 @@ export type PiotroskiResponse = {
   max: number;
   /** The score restated on 0-9 when a criterion was left out. */
   score_9?: number | null;
+  passed?: number;
+  available?: number;
+  /** All checks, including those without data. */
+  total: number;
   signals: PiotroskiSignal[];
   source: string;
   message?: string;

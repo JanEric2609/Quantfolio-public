@@ -49,6 +49,9 @@ from app.foundation.fundamentals_context import (
 from app.foundation.models.entities import Fundamental
 
 
+MIN_AVAILABLE_CHECKS = 5
+
+
 def _f(data: dict[str, Any], key: str) -> float | None:
     """Safely extract a numeric value."""
     val = data.get(key)
@@ -128,19 +131,34 @@ def _score(data: dict[str, Any], source: str | None = None) -> dict[str, Any]:
     gm = _f(data, "gross_margin")
     signals.append(_signal("Gross margin > 20%", gm, gm is not None and gm > 0.20, "pct"))
 
+    # A missing input is "not available", not a failed check (audit
+    # 2026-11-12, WP1: an unknown ticker scored 0 of 9 as if all nine failed).
+    not_meaningful = sum(1 for sig in signals if sig["pass"] is None)  # before missing data is marked
+    for sig in signals:
+        if sig["value"] is None and sig["pass"] is not None:
+            sig["pass"] = None
+            sig["note"] = "Not available: the provider returned no value."
+            sig["available"] = False
     # "score", matching the no-data branch below and every reader (the
     # StockDetail card, the recommendation engine's fundamentals context).
     applicable = [s for s in signals if s["pass"] is not None]
-    score = sum(1 for s in applicable if s["pass"])
+    passed = sum(1 for s in applicable if s["pass"])
     maximum = len(applicable)
+    # With too few checks available the count says nothing: no score.
+    score = passed if maximum >= MIN_AVAILABLE_CHECKS else None
     details = {"roe": None if small_book else roe, "pe_ratio": pe,
                "debt_equity": None if small_book else de, "profit_margin": pm, "net_debt_ebitda": nd}
     return {
         "score": score,
         "max": maximum,
+        "passed": passed,
+        "available": maximum,
+        "total": len(signals),
         # The same score on 0-9 when a criterion was not meaningful, for
         # readers that compare against 9 (the recommendation engine).
-        "score_9": round(score * 9 / maximum) if maximum else None,
+        # Missing data still counts against it here (the engine's old
+        # behaviour); only criteria that are not meaningful scale it.
+        "score_9": round(passed * 9 / (len(signals) - not_meaningful)) if score is not None else None,
         "signals": signals,
         "details": details,
         "book_equity_unreliable": small_book,
@@ -186,7 +204,9 @@ def compute_piotroski(db: Session, ticker: str, *, refresh: bool = False) -> dic
                 loaded = {}
             if isinstance(loaded, dict):
                 data, source = loaded, row.source
-    if not data:
+    from app.foundation.fundamentals_context import has_fundamentals_content
+
+    if not data or not has_fundamentals_content(data):
         return {
             "ticker": ticker,
             "score": None,
