@@ -8,6 +8,7 @@ import json
 
 from conftest import _memory_db
 
+import pytest
 from app.foundation.core.security import SecretBox
 from app.foundation.models.entities import ApiKey
 from app.foundation.settings import get_secret, set_secret, update_secret_meta
@@ -115,10 +116,8 @@ def test_undecryptable_row_is_not_rewritten():
     db.add(ApiKey(service="dkb", key_encrypted="not-a-fernet-token", meta_json=json.dumps({"username": "jan"})))
     db.commit()
 
-    try:
+    with pytest.raises(ValueError):
         get_secret(db, "dkb")
-    except ValueError:
-        pass
 
     assert json.loads(_row(db, "dkb").meta_json) == {"username": "jan"}
 

@@ -52,12 +52,12 @@ def test_performance_endpoints_exist(client):
     # Actual testing requires database + auth setup
 
     # Expected endpoints:
-    # POST /api/performance/composites
-    # GET /api/performance/composites
-    # POST /api/performance/ledger/snapshot
-    # GET /api/performance/ledger
-
-    assert True
+    routes = {(m, r.path) for r in app.routes for m in getattr(r, "methods", ()) or ()}
+    for expected in (
+        ("POST", "/api/performance/composites"), ("GET", "/api/performance/composites"),
+        ("POST", "/api/performance/ledger/snapshot"), ("GET", "/api/performance/ledger"),
+    ):
+        assert expected in routes
 
 
 def test_ledger_snapshot_computes_ex_post_risk_from_snapshot_series(client, db):

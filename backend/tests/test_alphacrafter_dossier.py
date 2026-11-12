@@ -3,7 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import MagicMock
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.foundation.core.db import Base
+
+
+def _memory_db():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
 
 import pytest
 
@@ -140,20 +150,20 @@ class TestDossierBuilderReadsFromH:
 
     def test_build_returns_shared_memory_h(self, H_with_trader_outputs):
         builder = DossierBuilder()
-        db = MagicMock()
+        db = _memory_db()
         result = asyncio.run(builder.build(H_with_trader_outputs, db))
         assert isinstance(result, SharedMemoryH)
 
     def test_build_writes_evaluation_to_h(self, H_with_trader_outputs):
         builder = DossierBuilder()
-        db = MagicMock()
+        db = _memory_db()
         result = asyncio.run(builder.build(H_with_trader_outputs, db))
         assert result.evaluation != {}
         assert "dossiers_created" in result.evaluation
 
     def test_build_appends_to_agent_history(self, H_with_trader_outputs):
         builder = DossierBuilder()
-        db = MagicMock()
+        db = _memory_db()
         initial_history_len = len(H_with_trader_outputs.agent_history)
         result = asyncio.run(builder.build(H_with_trader_outputs, db))
         assert len(result.agent_history) > initial_history_len
@@ -163,19 +173,19 @@ class TestDossierBuilderReadsFromH:
 
     def test_build_reads_trader_outputs(self, H_with_trader_outputs):
         builder = DossierBuilder()
-        db = MagicMock()
+        db = _memory_db()
         result = asyncio.run(builder.build(H_with_trader_outputs, db))
         assert "conviction_scores" in result.evaluation
 
     def test_build_reads_screener_outputs(self, H_with_trader_outputs):
         builder = DossierBuilder()
-        db = MagicMock()
+        db = _memory_db()
         result = asyncio.run(builder.build(H_with_trader_outputs, db))
         assert result.evaluation.get("regime_label") == "bull"
 
     def test_build_reads_factor_states(self, H_with_trader_outputs):
         builder = DossierBuilder()
-        db = MagicMock()
+        db = _memory_db()
         result = asyncio.run(builder.build(H_with_trader_outputs, db))
         assert "factor_names" in result.evaluation
         assert "momentum_12_1" in result.evaluation["factor_names"]
@@ -187,14 +197,14 @@ class TestDossierBuilderConviction:
 
     def test_conviction_computed_from_sharpe(self, H_with_trader_outputs):
         builder = DossierBuilder()
-        db = MagicMock()
+        db = _memory_db()
         result = asyncio.run(builder.build(H_with_trader_outputs, db))
         expected = compute_conviction(sharpe=1.45, mean_ic=0.045, regime_score=0.10)
         assert abs(result.evaluation["conviction_scores"]["SPY"] - expected) < 1e-6
 
     def test_conviction_uses_regime_score(self, H_with_trader_outputs):
         builder = DossierBuilder()
-        db = MagicMock()
+        db = _memory_db()
         result = asyncio.run(builder.build(H_with_trader_outputs, db))
         expected = compute_conviction(
             sharpe=1.45, mean_ic=0.045, regime_score=0.10
@@ -203,7 +213,7 @@ class TestDossierBuilderConviction:
 
     def test_crisis_haircut_applied(self, H_with_crisis):
         builder = DossierBuilder()
-        db = MagicMock()
+        db = _memory_db()
         result = asyncio.run(builder.build(H_with_crisis, db))
         expected = compute_conviction(
             sharpe=2.0, mean_ic=0.06, regime_score=0.08, crisis=True
@@ -212,7 +222,7 @@ class TestDossierBuilderConviction:
 
     def test_conviction_capped_at_0_95(self, H_with_trader_outputs):
         builder = DossierBuilder()
-        db = MagicMock()
+        db = _memory_db()
         result = asyncio.run(builder.build(H_with_trader_outputs, db))
         for symbol, score in result.evaluation["conviction_scores"].items():
             assert score <= 0.95, f"Conviction {score} for {symbol} exceeds 0.95"
@@ -223,13 +233,13 @@ class TestDossierBuilderEmpty:
 
     def test_empty_trader_outputs_no_dossiers(self, H_empty):
         builder = DossierBuilder()
-        db = MagicMock()
+        db = _memory_db()
         result = asyncio.run(builder.build(H_empty, db))
         assert result.evaluation.get("dossiers_created", 0) == 0
 
     def test_empty_trader_outputs_appends_history(self, H_empty):
         builder = DossierBuilder()
-        db = MagicMock()
+        db = _memory_db()
         result = asyncio.run(builder.build(H_empty, db))
         assert len(result.agent_history) > 0
         last_entry = result.agent_history[-1]
@@ -241,15 +251,20 @@ class TestDossierBuilderPersistence:
 
     def test_persists_one_dossier_per_target(self, H_with_trader_outputs):
         builder = DossierBuilder()
-        db = MagicMock()
+        db = _memory_db()
         asyncio.run(builder.build(H_with_trader_outputs, db))
-        assert db.add.call_count == len(H_with_trader_outputs.market_state.universe)
+        from app.foundation.models.entities import RecommendationDossier
+
+        assert db.query(RecommendationDossier).count() == len(H_with_trader_outputs.market_state.universe)
 
     def test_persists_commit_called(self, H_with_trader_outputs):
         builder = DossierBuilder()
-        db = MagicMock()
+        db = _memory_db()
         asyncio.run(builder.build(H_with_trader_outputs, db))
-        db.commit.assert_called()
+        from app.foundation.models.entities import RecommendationDossier
+
+        db.rollback()                       # only what was committed survives
+        assert db.query(RecommendationDossier).count() > 0
 
 
 class TestDossierBuilderPreservesConvictionFormula:

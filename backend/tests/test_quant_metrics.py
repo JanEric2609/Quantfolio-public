@@ -2,6 +2,8 @@
 import math
 import random
 
+import pytest
+
 from app.foundation import quant_metrics
 
 
@@ -11,7 +13,13 @@ def test_sharpe_zero_volatility_returns_zero():
 
 def test_sharpe_positive_for_consistently_positive_returns():
     returns = [0.001] * 200 + [0.002] * 200
-    assert quant_metrics.sharpe_ratio(returns) > 0
+    # The value, not the sign: 200 days at 0.1 % and 200 at 0.2 % (hand-computed): mean 0.0015 over a sample
+    # standard deviation of 0.0005 * sqrt(400/399), times sqrt(252).
+    mean = (200 * 0.001 + 200 * 0.002) / 400
+    var = (200 * (0.001 - mean) ** 2 + 200 * (0.002 - mean) ** 2) / 399
+    expected = mean / math.sqrt(var) * math.sqrt(252)
+    assert quant_metrics.sharpe_ratio(returns) == pytest.approx(expected, rel=1e-9)
+    assert expected == pytest.approx(47.56, abs=0.01)
 
 
 def test_sortino_only_penalises_downside():

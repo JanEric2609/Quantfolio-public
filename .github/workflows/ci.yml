@@ -6,6 +6,8 @@ on:
     branches: [main, master]
     paths-ignore:
       - 'docs/**'
+      # The API contract snapshot is code: a change to it alone must still run the contract gate.
+      - '!docs/api/**'
       - 'infra/**'
       - '*.md'
       - '.github/dependabot.yml'
@@ -14,6 +16,8 @@ on:
     branches: [main, master]
     paths-ignore:
       - 'docs/**'
+      # The API contract snapshot is code: a change to it alone must still run the contract gate.
+      - '!docs/api/**'
       - 'infra/**'
       - '*.md'
       - '.github/dependabot.yml'
@@ -42,6 +46,7 @@ jobs:
           filters: |
             backend:
               - 'backend/**'
+              - 'docs/api/**'
               - '.github/workflows/ci.yml'
             frontend:
               - 'frontend/**'
@@ -71,6 +76,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # diff-cover compares against the base branch
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -99,17 +106,39 @@ jobs:
         working-directory: backend
         run: .venv/bin/python scripts/check_no_new_cycles.py
 
+      - name: Every test asserts something
+        working-directory: backend
+        run: .venv/bin/python scripts/check_tests_assert.py
+
       - name: Run migrations (SQLite)
         working-directory: backend
         run: |
           DATABASE_URL="sqlite:///ci_test.db" .venv/bin/alembic upgrade head
           rm -f ci_test.db
 
+      - name: Migration downgrade path (up, back to the base of the recent chain, up again)
+        working-directory: backend
+        run: |
+          export DATABASE_URL="sqlite:///ci_downgrade.db"
+          .venv/bin/alembic upgrade head
+          .venv/bin/alembic downgrade 0105_add_fk_indexes
+          .venv/bin/alembic upgrade head
+          rm -f ci_downgrade.db
+
       - name: Run backend tests with coverage
         working-directory: backend
         env:
           DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/quantfolio"
-        run: .venv/bin/pytest -n auto --cov=app --cov-report=term-missing --cov-report=html --timeout=120 -q
+        run: .venv/bin/pytest -n auto --cov=app --cov-report=term-missing --cov-report=html --cov-report=xml --timeout=120 -q -rs --junitxml=junit.xml
+
+      - name: Skips are the expected ones
+        working-directory: backend
+        run: .venv/bin/python scripts/check_skips.py junit.xml
+
+      - name: Coverage of the changed lines (diff-cover, 80 %)
+        if: ${{ github.event_name == 'pull_request' }}
+        working-directory: backend
+        run: .venv/bin/diff-cover coverage.xml --compare-branch=origin/${{ github.base_ref }} --fail-under=80
 
       - name: Upload backend coverage report
         uses: actions/upload-artifact@v4
