@@ -3757,6 +3757,43 @@ export async function getLadderState(): Promise<LadderState> {
   return api<LadderState>("/api/graduation/ladder");
 }
 
+export interface LearningPurchase {
+  id: string;
+  month: string;
+  ticker: string;
+  name: string | null;
+  amount_eur: number;
+  status: "planned" | "filled" | "skipped";
+  paper_price: number | null;
+  fill_quantity: number | null;
+  fill_price_eur: number | null;
+  fill_price_is_implied: boolean;
+  fill_vs_paper_pct?: number;
+  value_now_eur?: number;
+  shadow_value_now_eur?: number;
+}
+
+export interface LearningSleeve {
+  purchases: LearningPurchase[];
+  count_filled: number;
+  count_planned: number;
+  invested_eur: number;
+  real_value_eur: number;
+  shadow_value_eur: number;
+  note: string;
+}
+
+export async function getLearningSleeve(): Promise<LearningSleeve> {
+  return api<LearningSleeve>("/api/graduation/learning-sleeve");
+}
+
+export async function setLearningFillPrice(id: string, priceEur: number): Promise<LearningSleeve> {
+  return api<LearningSleeve>(`/api/graduation/learning-sleeve/${id}/fill-price`, {
+    method: "PUT",
+    body: JSON.stringify({ price_eur: priceEur }),
+  });
+}
+
 export async function getGraduationStatus(): Promise<GraduationStatus> {
   return api<GraduationStatus>("/api/graduation/status");
 }

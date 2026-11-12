@@ -4267,6 +4267,21 @@
         "title": "FeedTestRequest",
         "type": "object"
       },
+      "FillPrice": {
+        "properties": {
+          "price_eur": {
+            "exclusiveMaximum": 1000000.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Price Eur",
+            "type": "number"
+          }
+        },
+        "required": [
+          "price_eur"
+        ],
+        "title": "FillPrice",
+        "type": "object"
+      },
       "ForecastGridOut": {
         "properties": {
           "assumption": {
@@ -25660,6 +25675,85 @@
           }
         },
         "summary": "Ladder",
+        "tags": [
+          "graduation"
+        ]
+      }
+    },
+    "/api/graduation/learning-sleeve": {
+      "get": {
+        "description": "The learning sleeve's purchases, the same amounts in the benchmark ETF, and the fills against paper prices.\n\nDetects a filled order from the synced Trading 212 holdings first. A learning expense the owner\nchose, not evidence about the picks. Nothing here places an order.",
+        "operationId": "learning_sleeve_api_graduation_learning_sleeve_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Learning Sleeve Api Graduation Learning Sleeve Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Learning Sleeve",
+        "tags": [
+          "graduation"
+        ]
+      }
+    },
+    "/api/graduation/learning-sleeve/{purchase_id}/fill-price": {
+      "put": {
+        "description": "The owner types the real fill price (EUR per unit) from the broker app.",
+        "operationId": "learning_sleeve_fill_price_api_graduation_learning_sleeve__purchase_id__fill_price_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "purchase_id",
+            "required": true,
+            "schema": {
+              "title": "Purchase Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FillPrice"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Learning Sleeve Fill Price Api Graduation Learning Sleeve  Purchase Id  Fill Price Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Learning Sleeve Fill Price",
         "tags": [
           "graduation"
         ]

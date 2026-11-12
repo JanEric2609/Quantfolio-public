@@ -15,6 +15,7 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Progress } from "../components/ui/progress";
 import { LadderCards } from "../components/graduation/LadderCards";
+import { LearningSleeveCard } from "../components/graduation/LearningSleeveCard";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
 import {
@@ -145,6 +146,8 @@ export function GraduationPage() {
       ) : (
         <Card className="p-5 text-sm text-text-muted">Capital ladder unavailable.</Card>
       )}
+
+      <LearningSleeveCard />
 
       {/* Passive core (ADR 0015 silent-period default) */}
       {!status.graduated && status.passive_core && (

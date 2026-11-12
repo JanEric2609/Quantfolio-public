@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.foundation.core.db import get_db
@@ -144,6 +145,35 @@ def ladder(
     candidate funds the satellite this month. Advisory only.
     """
     return ladder_state(db, user.id)
+
+
+class FillPrice(BaseModel):
+    price_eur: float = Field(gt=0, lt=1_000_000)
+
+
+@router.get("/learning-sleeve")
+def learning_sleeve(db: Session = Depends(get_db), user: User = Depends(current_user)) -> dict[str, Any]:
+    """The learning sleeve's purchases, the same amounts in the benchmark ETF, and the fills against paper prices.
+
+    Detects a filled order from the synced Trading 212 holdings first. A learning expense the owner
+    chose, not evidence about the picks. Nothing here places an order.
+    """
+    from app.decision.learning_ledger import detect_fills, results
+
+    detect_fills(db, user.id)
+    return results(db, user.id)
+
+
+@router.put("/learning-sleeve/{purchase_id}/fill-price")
+def learning_sleeve_fill_price(
+    purchase_id: str, body: FillPrice, db: Session = Depends(get_db), user: User = Depends(current_user)
+) -> dict[str, Any]:
+    """The owner types the real fill price (EUR per unit) from the broker app."""
+    from app.decision.learning_ledger import record_fill_price, results
+
+    if record_fill_price(db, user.id, purchase_id, body.price_eur) is None:
+        raise HTTPException(status_code=404, detail="Unknown purchase")
+    return results(db, user.id)
 
 
 @router.get("/transitions")
