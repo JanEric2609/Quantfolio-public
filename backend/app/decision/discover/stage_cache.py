@@ -55,7 +55,12 @@ _BAR_DATE_TTL_S = 45.0
 
 
 def latest_bar_date(db: Session, symbol: str) -> str | None:
-    """The date of the symbol's latest stored daily bar, or None.
+    """The date of the symbol's latest *completed* stored daily bar (before today, UTC), or None.
+
+    Today's bar is left out: a run after the European open ingests a partial bar
+    for several hundred names, which moved their key off the nightly entries and
+    sent every stage back to computing (500 of 1,620 symbols on 11-12). A hit is
+    therefore as of the nightly run; a miss computes on whatever is stored.
 
     Remembered for 45 s per symbol: the cached stages of one candidate run back to
     back, and each used to query the bar table on its own (about 45 ms per stage,
@@ -67,7 +72,10 @@ def latest_bar_date(db: Session, symbol: str) -> str | None:
     hit = _BAR_DATE_MEMO.get(symbol)
     if hit is not None and now - hit[0] < _BAR_DATE_TTL_S:
         return hit[1]
-    row = db.execute(text("SELECT max(ts) FROM bar_prices WHERE symbol = :s"), {"s": symbol}).scalar()
+    today = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+    row = db.execute(
+        text("SELECT max(ts) FROM bar_prices WHERE symbol = :s AND ts < :today"), {"s": symbol, "today": today},
+    ).scalar()
     value = None if row is None else str(row)[:10]
     if len(_BAR_DATE_MEMO) > 5000:
         _BAR_DATE_MEMO.clear()
