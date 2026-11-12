@@ -230,3 +230,31 @@ A negatively skewed sleeve with no edge (the usual shape of a strategy that sell
 **Residual limit.** A 3-sigma clip still trims extreme days; the guarantee is approximate for very heavy tails. `ladder_evidence_daily` is deterministic from the paper snapshots: rows written before this change are recomputed by the next ladder run for the owner's candidates once `ladder_evidence_daily` is cleared (no rows existed on 2026-11-10).
 
 **Also.** The ladder skips a paper snapshot day that is still the advisor cycle's provisional live-quote row (the rule the trust ledger already has). The Diebold-Mariano test in the paired promotion drops autocovariance pairs more than five trading days apart (matched forecasts are not contiguous). `candidate_gate.one_sided_t_e_value` documents that Wang and Ramdas, Theorem 4.11, is proved for mean = 0.
+
+## Amendment 2026-11-12: a learning sleeve in euros, paid as tuition, not earned by evidence
+
+**Status.** Decided by the owner on 2026-11-12. Not implemented; the work package is WP11 of `docs/plan-audit-fixes-2026-11-12.md`.
+
+**Why.** The ladder is slow by construction. By the approximation in `docs/audit-2026-11-12-supplement.md` §3.2 (not a simulation of this setup), a candidate with a yearly information ratio of 0.5 needs about 18 years to reach Earned. The owner will not wait that long and accepts a small, fixed amount of real money as a learning expense.
+
+The money buys three things: the gap between a paper fill and a real fill (spread, FX fee, fractional rounding, tax); an end-to-end run of plan → order → sync → tax ledger → performance on real positions; and the owner's own practice. It does **not** buy evidence of skill. Twelve purchases a year cannot separate a real edge from luck, and a return is the same number whether money was behind it or not. The paper record stays the only evidence.
+
+**Decision.**
+
+1. **Amount.** A new setting `ladder_learning_eur_per_month`, default `0` (off). The code caps it at `LEARNING_SLEEVE_MAX_EUR = 20`; a higher stored value is read as 20. Money not spent in a month does not carry over. There is no top-up after a loss.
+2. **When it applies.** From the first monthly plan after the owner sets it, while the funding candidate is at stage 0 (Paper) or stage 1 (Tuition). It does not wait for the 126 trading days. At stage 1 the satellite gets the **smaller** of this amount and `w₁`. With the setting at 0, stage 1 behaves as before. Stages 2 and 3 are unchanged.
+3. **Whose picks.** The `llm` slot (the advisor champion lineage) only. One purchase a month: the largest holding of that candidate's paper satellite sleeve on the plan day that Trading 212 lists by ISIN (`foundation/broker_instruments.py`) and that can be bought as a fraction. If there is none, nothing is bought that month.
+4. **Sales.** The plan proposes a sale only when the paper sleeve no longer holds the name, and only in a monthly plan. Each proposal goes through the trade check (ADR 0021).
+5. **Who trades.** The owner places every order by hand. Quantfolio stays read-only at every broker: no order endpoint, no pie write, no change to `ALLOWED_PATHS`. The plan shows the line; the next sync marks it executed (`foundation/recommendation_execution.py`).
+6. **Stop.** The amount falls to 0 from the next monthly plan when the candidate's harm e-value reaches 10, its relative drawdown leaves the band, or `ladder_owner_veto` is set: the stage-1 exits, read from the paper record. Positions already bought are kept; nothing forces a sale. The authorisation ends after 12 monthly plans and the owner renews it by saving the setting again.
+7. **Benchmark.** For every purchase the app records a shadow purchase of the same euro amount in `EUNL.DE` at that day's close. The page shows both money-weighted results, their difference, the number of purchases and, per purchase, the real fill against the paper engine's price in basis points.
+8. **No feedback.** Results of the learning sleeve are never written to the lessons, a prompt, a training set, the trial ledger or `ladder_evidence_daily`. The ladder keeps measuring the paper sleeve. Changing the setting does not start a new epoch: it is not part of the candidate's hash.
+9. **Wording.** Wherever the stage or the sleeve is shown: "A learning expense you chose. It is not evidence that the picks work." Every payload carries `estimate`, `not_tax_advice` and `not_financial_advice`.
+
+**Cost.** At most 240 EUR a year is invested, not lost. If the picks keep trailing the index by the 4.7 % measured on the resolved paper BUY picks (2026-11-12, overlapping picks, not a forecast), the expected shortfall against the shadow is about 10 EUR a year.
+
+**Tax.** Trading 212 holds the owner's Freistellungsauftrag and its sells and dividends already reach the tax cockpit through the sync (`docs/trading212.md`). Dividend rows there still carry `withholding_unverified`; that applies to this sleeve too.
+
+**Supersedes.** In *Consequences*, "The satellite target is 0 % until a candidate has 126 trading days of evidence" now holds only while `ladder_learning_eur_per_month` is 0.
+
+**Open for the implementer to confirm in code, not decided here.** How the real positions of the sleeve are told apart from the rest of the Trading 212 depot (preferred: one dedicated pie that the owner confirms, the mechanism of #374); whether a 20 EUR fractional order is possible for every listed instrument; how the euro amount is expressed in a plan that otherwise works in percent of the book.
