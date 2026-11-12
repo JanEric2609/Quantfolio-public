@@ -86,7 +86,7 @@ def build_fact_table(context: dict[str, Any]) -> list[Fact]:
             _bin(v, VOL_LOW, VOL_HIGH, ("low", "moderate", "high")))
     if _num(t.get("max_drawdown_12m_pct")) is not None:
         v = abs(float(t["max_drawdown_12m_pct"]))
-        add("drawdown", v, f"{v:.1f} %", "%", "12 months", "daily closes", "deep" if v >= DRAWDOWN_DEEP else "moderate")
+        add("drawdown", v, f"{v:.1f} %", "%", "12 months", "daily closes including dividends", "deep" if v >= DRAWDOWN_DEEP else "moderate")
     for key, name in (("sma_50", "50-day"), ("sma_200", "200-day")):
         if t.get(key) is not None and t.get("above_" + key) is not None:
             facts.append(Fact(f"trend_{key}", _num(t[key]), f"{'above' if t['above_' + key] else 'below'} its {name} average",
@@ -141,7 +141,7 @@ def technical_text(facts: list[Fact]) -> str | None:
     if "volatility" in k:
         parts.append(f"Volatility over the last 3 months is {k['volatility'].text} annualised ({k['volatility'].label}).")
     if "drawdown" in k:
-        parts.append(f"The largest fall from a peak in 12 months was {k['drawdown'].text} ({k['drawdown'].label}).")
+        parts.append(f"The largest fall from a peak in 12 months, counting dividends, was {k['drawdown'].text} ({k['drawdown'].label}).")
     return " ".join(parts) or None
 
 
@@ -170,7 +170,7 @@ def qualitative_input(context: dict[str, Any], facts: list[Fact]) -> str:
     """Judgement labels in words and headlines: no figure the model could repeat or misread."""
     lines = [f"Company: {(context.get('company') or {}).get('name') or context['ticker']} ({context['ticker']})"]
     for x in facts:
-        if x.label and x.key != "fcf_yield":
+        if x.label and x.key not in WITHHELD_KEYS:
             lines.append(f"- {x.key.replace('_', ' ')} ({x.period}): {x.label}")
     news = context.get("recent_news") or []
     if news:
@@ -199,6 +199,8 @@ SECTION_SYSTEM = (
 )
 
 _DIGIT = re.compile(r"\d")
+#: Facts kept out of the model's input (``qualitative_input``): a proxy it must not repeat or judge.
+WITHHELD_KEYS = frozenset({"fcf_yield"})
 _PERIOD_WORDS = {
     "quarter": ("quarter", "quarterly"),
     "half-year": ("half-year", "half year", "semi-annual"),
@@ -210,22 +212,61 @@ JUDGEMENT_WORDS = ("exceptional", "outstanding", "strong", "weak", "cheap", "exp
                    "excellent", "poor", "high", "low", "attractive")
 
 
+#: Words that name a fact in a sentence; a number in that sentence must be that fact's.
+_FACT_WORDS: dict[str, tuple[str, ...]] = {
+    "volatility": ("volatil",),
+    "drawdown": ("drawdown", "fall from a peak", "fell from its peak", "from its high"),
+    "return_1m": ("return", "gain", "rose", "fell", "up ", "down "),
+    "return_3m": ("return", "gain", "rose", "fell", "up ", "down "),
+    "return_6m": ("return", "gain", "rose", "fell", "up ", "down "),
+    "return_12m": ("return", "gain", "rose", "fell", "up ", "down "),
+    "revenue_growth": ("revenue", "sales"),
+    "earnings_growth": ("earnings growth", "profit growth"),
+    "net_debt_ebitda": ("debt",),
+    "fcf_yield": ("cash flow",),
+    "rsi_14": ("rsi", "relative strength"),
+    "pe": ("p/e", "price/earnings", "price-to-earnings", "earnings multiple"),
+    "roe": ("return on equity", "roe"),
+}
+
+
+def _sentence_at(text: str, pos: int) -> str:
+    start = max(text.rfind(". ", 0, pos), text.rfind("\n", 0, pos)) + 1
+    ends = [e for e in (text.find(". ", pos), text.find("\n", pos)) if e != -1]
+    return text[start:min(ends) if ends else len(text)].lower()
+
+
+def _named_fact_keys(sentence: str) -> set[str]:
+    named = {key for key, words in _FACT_WORDS.items() if any(w in sentence for w in words)}
+    # "return on equity" names ROE, not the price returns.
+    if "roe" in named:
+        named -= {"return_1m", "return_3m", "return_6m", "return_12m"}
+    return named
+
+
 def check_prose(section: str, text: str, facts: list[Fact], *, has_news: bool) -> list[str]:
     """Problems with the model's text for one section; empty when it may be used."""
     problems: list[str] = []
     low = text.lower()
     if _DIGIT.search(text):
-        # A digit is tolerated only where code wrote the same number within 1 %.
+        # A digit is tolerated only where code wrote the same number within 1 %, for the measure the sentence names:
+        # "volatility 43.0 %" beside a drawdown of 43.1 % is a wrong volatility, not the drawdown (golden set).
         for m in re.finditer(r"(\d+(?:[.,]\d+)?)\s*(%|percent|x\b|times)?", text):
             v = float(m.group(1).replace(",", "."))
             tail = (m.group(2) or "").lower()
             unit = "%" if tail in ("%", "percent") else "x" if tail in ("x", "times") else None
-            if not any(
-                x.value is not None and abs(v - abs(x.value)) <= 0.01 * max(abs(x.value), 1e-9)
+            named = _named_fact_keys(_sentence_at(text, m.start()))
+            matches = [
+                x for x in facts
+                if x.value is not None and abs(v - abs(x.value)) <= 0.01 * max(abs(x.value), 1e-9)
                 and (unit is None or x.unit == unit)
-                for x in facts
-            ):
+                and (not named or x.key in named)
+            ]
+            if not matches:
                 problems.append(f"number {m.group(0).strip()} is not in the fact table with that unit")
+            elif all(x.key in WITHHELD_KEYS for x in matches):
+                # The model never sees these figures (the FCF yield is a provider proxy): repeating one is an error.
+                problems.append(f"number {m.group(0).strip()} is a figure withheld from the model")
     allowed_periods = " ".join(x.period.lower() for x in facts)
     for name, words in _PERIOD_WORDS.items():
         if any(w in low for w in words) and not any(w in allowed_periods for w in words):

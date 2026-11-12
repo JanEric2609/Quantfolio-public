@@ -2674,6 +2674,8 @@ export type ResearchReportResponse = {
   context?: Record<string, unknown>;
   cached: boolean;
   generated_at: string;
+  /** "not_found" for a ticker no provider knows; otherwise the reason generation failed. */
+  error?: string | null;
 };
 
 export type VerdictsResponse = {

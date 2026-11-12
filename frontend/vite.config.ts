@@ -69,6 +69,8 @@ export default defineConfig({
     },
   },
   build: {
+    // Fonts are never inlined as data: URIs: the CSP's default-src 'self' (no font-src) would block them (KaTeX).
+    assetsInlineLimit: (file: string) => (/\.(woff2?|ttf|otf|eot)$/.test(file) ? false : undefined),
     rolldownOptions: {
       output: {
         codeSplitting: {

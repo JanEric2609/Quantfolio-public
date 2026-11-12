@@ -4,7 +4,7 @@
 the model endpoint of the app host, which this checkout cannot reach, and the second and third arms need models to be
 loaded there. Nothing below has a result yet.
 
-**Set.** `report-build` writes 40 seeded fact tables (growth basis, period, drawdown, volatility, news or none). Each
+**Set.** `report-build` writes the 40 seeded fact tables of the WP9 golden set (`scripts/report_golden_set.py`, committed as `backend/tests/fixtures/report_golden_set.json`; growth basis, period, drawdown, volatility, FCF proxy, news or none). The same tables carry 313 planted-error and clean variants that the prose check judges correctly (`tests/test_report_golden_set.py`). Each
 asks for the four prose sections of the report with the production prompt. No network, no database.
 
 **Score.** Each section goes through the production checks (`check_prose`: figures, periods, judgement words, news

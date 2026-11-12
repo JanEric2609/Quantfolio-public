@@ -209,7 +209,11 @@ export function StockDetailPage() {
   const reportMut = useMutation<ResearchReportResponse>({
     mutationFn: () =>
       api<ResearchReportResponse>(`/api/research/stock/${encodeURIComponent(tk)}/report`, { method: "POST" }),
-    onSuccess: () => ctx.refetch(),
+    onSuccess: (r) => {
+      if (r.error === "not_found") toast.error("Not found: no provider has data for this ticker.");
+      else if (r.error) toast.error(r.summary || "The report could not be written.");
+      ctx.refetch();
+    },
   });
 
   // Risk profile

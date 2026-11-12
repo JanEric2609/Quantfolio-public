@@ -1,18 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type PortfolioSnapshot } from "../lib/api";
+import { type ChartRangeKey, daysForRange } from "../lib/chartRange";
 
-export type PortfolioRange = "1W" | "1M" | "3M" | "YTD" | "1Y" | "All";
-
-function daysForRange(range: PortfolioRange) {
-  if (range === "1W") return 7;
-  if (range === "1M") return 31;
-  if (range === "3M") return 92;
-  if (range === "1Y") return 366;
-  if (range === "All") return 3650;
-  const now = new Date();
-  const yearStart = new Date(now.getFullYear(), 0, 1);
-  return Math.max(1, Math.ceil((now.getTime() - yearStart.getTime()) / 86400000) + 1);
-}
+/** The Dashboard's ranges are the stock chart's (one shared list, lib/chartRange.ts). */
+export type PortfolioRange = ChartRangeKey;
 
 export function usePortfolioHistory(range: PortfolioRange) {
   const days = daysForRange(range);

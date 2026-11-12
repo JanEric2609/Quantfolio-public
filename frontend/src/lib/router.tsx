@@ -136,12 +136,13 @@ export const appChildren: RouteObject[] = [
       { path: "accuracy", ...lazyNamed(() => import("../pages/mandates/AccuracyTab"), "AccuracyTab"), handle: { title: "Mandates — Accuracy" } },
       { path: "divergence", ...lazyNamed(() => import("../pages/mandates/DivergenceTab"), "DivergenceTab"), handle: { title: "Mandates — Divergence" } },
     ] },
-    { path: "learn", ...lazyNamed(() => import("../pages/learn/LearnPage"), "LearnPage"), handle: { title: "Learn" } },
     { path: "graduation", ...lazyNamed(() => import("../pages/GraduationPage"), "GraduationPage"), handle: { title: "Strategy lab — Capital ladder" } },
     // The paper book used to be a Portfolio tab; the URL is unchanged.
     { path: "portfolio/paper", ...lazyNamed(() => import("../pages/portfolio/PaperPortfolioTab"), "PaperPortfolioTab"), handle: { title: "Strategy lab — Paper portfolio", noPageHeader: true } },
   ] },
   { path: "competition", element: <Navigate to="/advisor/evolution" replace /> },
+  // Learn is a page of its own under Trust in the menu, not a Strategy-lab tab (plan 2026-11-12, WP13).
+  { path: "learn", ...lazyNamed(() => import("../pages/learn/LearnPage"), "LearnPage"), handle: { title: "Learn" } },
   { path: "plan", ...lazyNamed(() => import("../pages/ThisMonthPage"), "ThisMonthPage"), handle: { title: "This month" } },
   { path: "money", ...lazyNamed(() => import("../pages/money/MoneyLayout"), "MoneyLayout"), handle: { title: "Budget" }, children: [
     { index: true, element: <Navigate to="overview" replace /> },

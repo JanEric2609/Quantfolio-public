@@ -32,6 +32,8 @@ class StockReportResponse(OrmModel):
     context: dict[str, Any] | None = None
     cached: bool
     generated_at: str
+    #: ``not_found`` for a ticker no provider knows (no model call), or the model's failure.
+    error: str | None = None
 
 
 class VerdictResponse(OrmModel):

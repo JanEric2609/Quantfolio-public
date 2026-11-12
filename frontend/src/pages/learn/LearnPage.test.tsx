@@ -28,6 +28,18 @@ function renderPage() {
 describe("LearnPage", () => {
   beforeEach(() => window.localStorage.clear());
 
+  it("typesets every lesson's formula and links one checked reading per lesson", async () => {
+    renderPage();
+    const ids = ["returns", "vol", "beta", "tstat", "nw", "multi", "wf", "eproc", "shrink", "mc", "tax"];
+    for (const id of ids) {
+      const lesson = await screen.findByTestId(`lesson-${id}`);
+      expect(lesson.querySelector(".katex")).not.toBeNull();
+      const link = screen.getByTestId(`lesson-reading-${id}`).querySelector("a");
+      expect(link?.getAttribute("href")).toMatch(/^https:\/\//);
+      expect(link?.getAttribute("rel")).toBe("noopener noreferrer");
+    }
+  });
+
   it("shows eight stations and skips the ones whose data is empty, with the reason", async () => {
     renderPage();
     expect(await screen.findByTestId("station-where")).toBeInTheDocument();

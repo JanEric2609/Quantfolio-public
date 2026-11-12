@@ -413,37 +413,13 @@ def lap_prompt(item: dict[str, Any]) -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 def report_build(out: Path, n: int = 40, seed: int = 20261112) -> None:
-    """Seeded fact tables for the research report. Needs no network and no database."""
-    import app.foundation.research_facts as rf
+    """The report golden set's fact tables (scripts/report_golden_set.py). Needs no network and no database."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from report_golden_set import build
 
-    rng = random.Random(seed)
-    items = []
-    for i in range(n):
-        bases = ("quarter_yoy", "half_year_yoy", "annual")
-        context = {
-            "ticker": f"T{i:02d}.AS", "company": {"name": f"Company {chr(65 + i % 26)}{i}"}, "regime": rng.choice(["bull", "bear", "neutral"]),
-            "risk_profile": "moderate",
-            "technicals": {"sessions": 250, "last_close": round(rng.uniform(20, 300), 2), "last_close_date": "2026-11-11",
-                           "return_12m_pct": round(rng.uniform(-40, 60), 1), "return_3m_pct": round(rng.uniform(-15, 20), 1),
-                           "rsi_14": round(rng.uniform(25, 75), 1), "volatility_3m_annual_pct": round(rng.uniform(10, 55), 1),
-                           "max_drawdown_12m_pct": round(-rng.uniform(5, 50), 1), "sma_50": 100.0, "above_sma_50": rng.random() < 0.5,
-                           "sma_200": 100.0, "above_sma_200": rng.random() < 0.5},
-            "fundamentals": {"revenue_growth": round(rng.uniform(-0.1, 0.3), 3), "growth_basis": rng.choice(bases),
-                             "period_months": rng.choice([3, 6, 12]), "fcf_yield": round(rng.uniform(-0.02, 0.12), 3),
-                             "pe_ratio": round(rng.uniform(6, 45), 1), "debt_equity": round(rng.uniform(10, 250)),
-                             "total_debt": 5e9, "ebitda": 1e9, "cash": 3e8},
-            "recent_news": [] if rng.random() < 0.3 else [
-                {"title": f"Company {i} announces update", "source": "x", "published_at": "2026-11-10", "sentiment_label": None}],
-            "recommendations": [],
-        }
-        facts = rf.build_fact_table(context)
-        items.append({"ticker": context["ticker"], "context": context, "has_news": bool(context["recent_news"]),
-                      "messages_by_section": {
-                          sec: [{"role": "system", "content": rf.SECTION_SYSTEM},
-                                {"role": "user", "content": f"{rf.qualitative_input(context, facts)}\n\nSection: {sec}. {rf.SECTION_TASKS[sec]}"}]
-                          for sec in rf.MODEL_SECTIONS if not (sec == "Sentiment" and not context["recent_news"])}})
-    out.write_text(json.dumps({"seed": seed, "items": items}, indent=1))
-    print(f"wrote {len(items)} fact tables to {out}")
+    data = build(n, seed)
+    out.write_text(json.dumps(data, indent=1))
+    print(f"wrote {len(data['items'])} fact tables to {out}")
 
 
 def report_score(item: dict[str, Any], section: str, raw: str) -> dict[str, Any]:

@@ -124,6 +124,52 @@ def test_52_week_range_uses_daily_highs_and_lows_not_closes():
     assert out["low_52w"] == 7.5 and out["low_52w_date"] == "2026-01-04"
 
 
+def test_52_week_range_as_traded_replaces_the_dividend_adjusted_bars():
+    from datetime import date
+
+    from app.foundation.research import price_action_text, price_technicals
+
+    rows = [{"date": f"2026-01-{d:02d}", "open": 10, "high": 10 + d, "low": 9, "close": 10.0, "volume": 1} for d in range(1, 11)]
+    adjusted = price_technicals(rows, today=date(2026, 6, 1))
+    assert adjusted["range_52w_basis"] == "adjusted for dividends"
+    assert "(prices adjusted for dividends)" in price_action_text(adjusted)
+    # DTE.DE on 2026-11-12: stored adjusted high 33.28, traded 34.36.
+    traded = price_technicals(rows, today=date(2026, 6, 1),
+                              range_52w={"high": 34.36, "high_date": "2026-01-09", "low": 8.0, "low_date": "2026-01-02"})
+    assert traded["high_52w"] == 34.36 and traded["high_52w_date"] == "2026-01-09"
+    assert traded["low_52w"] == 8.0 and traded["range_52w_basis"] == "as traded"
+    assert traded["pct_below_52w_high"] == round((1 - 10.0 / 34.36) * 100, 1)
+    assert "adjusted for dividends" not in price_action_text(traded)
+    assert "including dividends" in price_action_text(traded)
+
+
+def test_unadjusted_range_reads_yahoo_without_dividend_adjustment():
+    import sys
+    import types
+    from unittest.mock import patch
+
+    import pandas as pd
+
+    from app.foundation.providers.yfinance_provider import unadjusted_52w_range
+
+    seen = {}
+
+    def history(period, auto_adjust):
+        seen.update(period=period, auto_adjust=auto_adjust)
+        idx = pd.to_datetime(["2026-03-02", "2026-06-01", "2026-09-01"])
+        return pd.DataFrame({"High": [30.0, 34.36, 31.0], "Low": [23.53, 25.0, 26.0]}, index=idx)
+
+    fake = types.SimpleNamespace(Ticker=lambda sym: types.SimpleNamespace(history=history))
+    with patch.dict(sys.modules, {"yfinance": fake}):
+        out = unadjusted_52w_range("DTE.DE")
+    assert seen == {"period": "1y", "auto_adjust": False}
+    assert out == {"high": 34.36, "high_date": "2026-06-01", "low": 23.53, "low_date": "2026-03-02"}
+
+    empty = types.SimpleNamespace(Ticker=lambda sym: types.SimpleNamespace(history=lambda **_: pd.DataFrame()))
+    with patch.dict(sys.modules, {"yfinance": empty}):
+        assert unadjusted_52w_range("NOPE") is None
+
+
 def test_report_news_falls_back_to_gdelt_then_on_demand_then_none():
     from datetime import UTC, date, datetime
     from unittest.mock import patch
@@ -149,3 +195,22 @@ def test_no_news_prompt_says_no_source_covers_the_company():
     ctx = {"ticker": "X", "recent_news": [], "fundamentals": None, "technicals": None, "quote": {}, "recommendations": []}
     text = research._build_user_message(ctx)
     assert "no news source covers this company" in text
+
+
+def test_unknown_ticker_report_makes_no_model_call_and_stores_nothing():
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from app.foundation import research
+    from app.foundation.models.entities import StockResearchReport
+
+    db = _memory_db()
+    empty = {"ticker": "ANDG.US", "fundamentals": None, "price_history": [], "technicals": None}
+    llm = AsyncMock()
+    with patch.object(research, "build_context", return_value=empty), \
+            patch("app.foundation.llm.router.call", llm), \
+            patch.object(research, "_sectioned_report", llm):
+        out = asyncio.run(research.generate_report(db, "ANDG.US", "u1", force_refresh=True))
+    assert out["error"] == "not_found" and out["report"] == ""
+    llm.assert_not_called()
+    assert db.query(StockResearchReport).count() == 0

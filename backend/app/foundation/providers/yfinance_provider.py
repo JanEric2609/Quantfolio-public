@@ -155,12 +155,16 @@ class YFinanceProvider(MarketDataProvider):
 
             ticker_obj = yf.Ticker(symbol)
             info = ticker_obj.info or {}
+            listing_ccy, reporting_ccy = _currencies(info)
+            fx_rate = (_fx_rate(reporting_ccy, listing_ccy)
+                       if listing_ccy and reporting_ccy and listing_ccy != reporting_ccy and info.get("freeCashflow")
+                       else None)
             data = {
                 "pe_ratio": info.get("trailingPE"),
                 "forward_pe": info.get("forwardPE"),
                 "pb_ratio": info.get("priceToBook"),
                 "ev_ebitda": info.get("enterpriseToEbitda"),
-                "fcf_yield": _fcf_yield(info),
+                "fcf_yield": _fcf_yield(info, fx_rate),
                 "roe": info.get("returnOnEquity"),
                 "roic": info.get("returnOnCapital"),
                 "profit_margin": info.get("profitMargins"),
@@ -198,7 +202,12 @@ class YFinanceProvider(MarketDataProvider):
             from app.foundation.fundamentals_context import apply_range_checks
             from app.foundation.fundamentals_context import has_fundamentals_content
 
-            if data["fcf_yield"] is None and (reason := _fcf_yield_reason(info)):
+            if data["fcf_yield"] is not None and _large_minorities(_minority_share(ticker_obj)):
+                # DTE.DE: about a third of group equity belongs to T-Mobile US's other owners, so group free cash
+                # flow over the parent's market cap read 23 % (audit 2026-11-12, WP2).
+                data["fcf_yield"] = None
+                data["fcf_yield_reason"] = "large_minorities"
+            elif data["fcf_yield"] is None and (reason := _fcf_yield_reason(info, fx_rate)):
                 data["fcf_yield_reason"] = reason
             apply_range_checks(data)
             if not info.get("quoteType") and not has_fundamentals_content(data):
@@ -402,16 +411,27 @@ def _epoch_date(value: Any) -> str | None:
         return None
 
 
-def _fcf_yield_reason(info: dict[str, Any]) -> str | None:
+#: Quotes in a currency's minor unit. Yahoo states their market cap in the major unit (TSCO.L at 552p: the market
+#: cap is price x shares / 100), so only the label differs.
+_MINOR_UNITS = {"GBp": "GBP", "GBX": "GBP", "ZAc": "ZAR", "ZAC": "ZAR", "ILA": "ILS"}
+
+
+def _currencies(info: dict[str, Any]) -> tuple[str | None, str | None]:
+    """(market-cap currency, reporting currency) as major-unit codes."""
+    listing, reporting = info.get("currency"), info.get("financialCurrency")
+    listing = _MINOR_UNITS.get(listing, listing) if listing else None
+    return listing, reporting or listing
+
+
+def _fcf_yield_reason(info: dict[str, Any], fx_rate: float | None = None) -> str | None:
     """Why a free-cash-flow yield cannot be computed cleanly, else None (D10).
 
-    HBR.L read 120 %, CO.PA 374 % and DTE.DE 23 % (audit 2026-11-12): the cash
-    flow is in the reporting currency and the market cap in the listing
-    currency, pence quotes are 100x, and for banks and insurers the cash flow
-    is not free cash flow at all.
+    HBR.L read 120 % and CO.PA 374 % (audit 2026-11-12): the cash flow is in the reporting currency and the market
+    cap in the listing currency. With ``fx_rate`` (reporting -> listing) the cash flow is converted; without one a
+    mismatch is ``currency_mismatch``. For banks and insurers the cash flow is not free cash flow at all.
     """
-    listing, reporting = info.get("currency"), info.get("financialCurrency")
-    if listing in ("GBp", "GBX", "ZAc") or (listing and reporting and listing != reporting):
+    listing, reporting = _currencies(info)
+    if listing and reporting and listing != reporting and not fx_rate:
         return "currency_mismatch"
     text = f"{info.get('sector') or ''} {info.get('industry') or ''}".lower()
     if any(w in text for w in ("bank", "insurance", "capital markets", "asset management")):
@@ -419,26 +439,79 @@ def _fcf_yield_reason(info: dict[str, Any]) -> str | None:
     return None
 
 
-def _fcf_yield(info: dict[str, Any]) -> float | None:
+def _fcf_yield(info: dict[str, Any], fx_rate: float | None = None) -> float | None:
     free_cashflow = info.get("freeCashflow")
     market_cap = info.get("marketCap")
-    if not free_cashflow or not market_cap or _fcf_yield_reason(info):
+    if not free_cashflow or not market_cap or _fcf_yield_reason(info, fx_rate):
         return None
+    listing, reporting = _currencies(info)
+    rate = fx_rate if listing and reporting and listing != reporting else 1.0
     try:
-        return float(free_cashflow) / float(market_cap)
+        return float(free_cashflow) * float(rate or 1.0) / float(market_cap)
     except (TypeError, ValueError, ZeroDivisionError):
         return None
 
 
-def _statement_period_months(ticker: Any) -> int | None:
-    """Length of the latest reporting period from the quarterly income statement's dates."""
-    from app.foundation.fundamentals_context import period_months_from_dates
+def _fx_rate(from_ccy: str, to_ccy: str, timeout_s: float = 5.0) -> float | None:
+    """Yahoo's rate for one ``from_ccy`` in ``to_ccy`` (``EURGBP=X``), else None."""
+    def _fetch() -> float | None:
+        import yfinance as yf
+
+        frame = yf.Ticker(f"{from_ccy}{to_ccy}=X").history(period="5d")
+        if frame is None or "Close" not in frame:
+            return None
+        closes = frame["Close"].dropna()
+        return float(closes.iloc[-1]) if len(closes) else None
 
     try:
-        frame = ticker.quarterly_income_stmt
-        return period_months_from_dates(list(frame.columns))
+        out = _call_with_timeout(_fetch, timeout_s, "fx timed out")
+    except Exception:  # noqa: BLE001 - optional; the yield is then n/a
+        return None
+    return out if isinstance(out, float) and out > 0 else None
+
+
+#: Minority interest above this share of total equity (including minorities) makes group free cash flow over the
+#: parent's market cap meaningless: the cash flow is the group's, the market cap only the parent's.
+MINORITY_SHARE_MAX = 0.25
+
+
+def _minority_share(ticker: Any) -> float | None:
+    """Minority interest over total equity including it, from the latest annual balance sheet, else None."""
+    try:
+        sheet = ticker.balance_sheet
+        if sheet is None or sheet.empty or "Minority Interest" not in sheet.index:
+            return 0.0 if sheet is not None and not sheet.empty else None
+        col = sheet.columns[0]
+        minority = float(sheet.loc["Minority Interest", col])
+        total = sheet.loc["Total Equity Gross Minority Interest", col] if "Total Equity Gross Minority Interest" in sheet.index else None
+        total = float(total) if total is not None else float(sheet.loc["Stockholders Equity", col]) + minority
     except Exception:  # noqa: BLE001 - optional enrichment
         return None
+    if not total or total != total or minority != minority:  # zero or NaN
+        return None
+    return minority / total
+
+
+def _large_minorities(share: float | None) -> bool:
+    return share is not None and share > MINORITY_SHARE_MAX
+
+
+def _statement_period_months(ticker: Any) -> int | None:
+    """Length of the latest reporting period from the dates of the quarterly statements.
+
+    The income statement first, then the balance sheet and the cash-flow statement: Yahoo's quarterly income
+    statement for WKL.AS is empty while its quarterly balance sheet carries the half-year dates (2026-11-12).
+    """
+    from app.foundation.fundamentals_context import period_months_from_dates
+
+    for name in ("quarterly_income_stmt", "quarterly_balance_sheet", "quarterly_cashflow"):
+        try:
+            months = period_months_from_dates(list(getattr(ticker, name).columns))
+        except Exception:  # noqa: BLE001 - optional enrichment
+            continue
+        if months is not None:
+            return months
+    return None
 
 
 def _dividend_yield_fraction(info: dict[str, Any]) -> float | None:
@@ -463,3 +536,33 @@ def _dividend_yield_fraction(info: dict[str, Any]) -> float | None:
     except (TypeError, ValueError):
         return None
     return value if math.isfinite(value) and value >= 0 else None
+
+
+def unadjusted_52w_range(symbol: str, timeout_s: float = 8.0) -> dict[str, Any] | None:
+    """The 52-week high and low as traded: split-adjusted, not dividend-adjusted, else None.
+
+    Stored bars are fully adjusted (``auto_adjust=True``), which lowers every past price by the dividends paid since:
+    DTE.DE's stored high read 33.28 against a traded 34.36 (audit 2026-11-12, WP3). Yahoo's unadjusted series is
+    already split-adjusted (NVDA before its 10:1 split of June 2024 reads about 86, not 860).
+    """
+    if symbol.upper().endswith(".US"):
+        symbol = symbol[:-3]
+
+    def _fetch() -> dict[str, Any] | None:
+        import yfinance as yf
+
+        frame = yf.Ticker(symbol).history(period="1y", auto_adjust=False)
+        if frame is None or frame.empty or "High" not in frame or "Low" not in frame:
+            return None
+        highs, lows = frame["High"].dropna(), frame["Low"].dropna()
+        if highs.empty or lows.empty:
+            return None
+        hi_at, lo_at = highs.idxmax(), lows.idxmin()
+        return {"high": float(highs.max()), "high_date": str(hi_at)[:10],
+                "low": float(lows.min()), "low_date": str(lo_at)[:10]}
+
+    try:
+        out = _call_with_timeout(_fetch, timeout_s, "unadjusted range timed out")
+    except Exception:  # noqa: BLE001 - optional enrichment; the stored bars stand in
+        return None
+    return out if isinstance(out, dict) and "high" in out else None

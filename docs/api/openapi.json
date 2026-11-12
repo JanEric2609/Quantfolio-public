@@ -13309,6 +13309,17 @@
             ],
             "title": "Context"
           },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
           "generated_at": {
             "title": "Generated At",
             "type": "string"
