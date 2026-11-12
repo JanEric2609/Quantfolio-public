@@ -8,6 +8,7 @@ import { hitRateSample, TOO_EARLY } from "../../lib/sampleSize";
 import { formatPercent } from "../../lib/format";
 import { api, type MandateAccuracy } from "../../lib/api";
 import { MANDATES, portfolioOf, type MandatesOutletContext } from "./mandateContext";
+import { Table } from "../../components/ui/table";
 
 type Row = { label: string; value: (a: MandateAccuracy) => string; tone?: (a: MandateAccuracy) => string };
 
@@ -58,7 +59,7 @@ export function AccuracyTab() {
   return (
     <div className="space-y-3">
       <Card className="overflow-x-auto p-0">
-        <table className="w-full text-sm" data-testid="mandate-accuracy">
+        <Table className="w-full text-sm" data-testid="mandate-accuracy">
           <thead>
             <tr className="border-b border-border text-left text-xs text-text-muted">
               <th className="py-2 pl-4 pr-3 font-normal">Decisions</th>
@@ -81,7 +82,7 @@ export function AccuracyTab() {
               </tr>
             ))}
           </tbody>
-        </table>
+        </Table>
       </Card>
       {notes.length > 0 && <p className="text-xs text-text-secondary">Hit rate: {notes.join(" · ")}.</p>}
       <p className="text-[11px] text-text-muted">Estimate · not financial advice.</p>

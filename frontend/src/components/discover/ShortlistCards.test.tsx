@@ -97,7 +97,7 @@ describe("ShortlistCards pool rank (ADR 0018 §6)", () => {
       <ShortlistCards candidates={[{ ...base, pool_rank: 3, pool_size: 187 }]} onOpenDossier={() => {}} tiers={tiers(0.48)} />,
     );
     expect(screen.getByTestId("worth-acting")).toHaveTextContent("Not yet: no edge is shown for this tier");
-    expect(screen.getByTestId("shortlist-cost-note")).toHaveTextContent("about €2.98 (0.6 %)");
+    expect(screen.getByTestId("shortlist-cost-note")).toHaveTextContent("about €2,98 (0,6 %)");
     rerender(
       <ShortlistCards candidates={[{ ...base, pool_rank: 3, pool_size: 187 }]} onOpenDossier={() => {}} tiers={tiers(0.53)} />,
     );

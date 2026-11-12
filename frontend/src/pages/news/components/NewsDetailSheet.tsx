@@ -59,7 +59,7 @@ export function NewsDetailSheet({ item, open, onOpenChange }: NewsDetailSheetPro
               href={item.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+              className="inline-flex items-center gap-1.5 text-sm text-info hover:text-info/80 transition-colors"
             >
               <ExternalLink className="w-3.5 h-3.5" />
               Read full article

@@ -13,6 +13,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { cn } from "../../lib/utils";
 import { useIsPhone } from "../../hooks/useMediaQuery";
+import { Table } from "../ui/table";
 
 export interface DataTableProps<T> {
   data: T[];
@@ -174,7 +175,7 @@ export function DataTable<T>({
         )
       ) : (
       <div className="overflow-x-auto rounded-md border border-border">
-        <table className={cn("w-full text-sm", stickyHeader && "[&_thead]:sticky [&_thead]:top-0 [&_thead]:bg-surface")}>
+        <Table className={cn("w-full text-sm", stickyHeader && "[&_thead]:sticky [&_thead]:top-0 [&_thead]:bg-surface")}>
           <thead className="border-b border-border">
             {table.getHeaderGroups().map((hg) => (
               <tr key={hg.id}>
@@ -216,7 +217,7 @@ export function DataTable<T>({
               ))
             )}
           </tbody>
-        </table>
+        </Table>
       </div>
       )}
       {(table.getCanPreviousPage() || table.getCanNextPage()) && (

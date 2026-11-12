@@ -26,7 +26,7 @@ export function HoldingsNewsTab({ symbols, onSelect, refreshResult }: Props) {
       )}
 
       {refreshResult && refreshResult.symbols_detail.length > 0 && (
-        <div className="rounded-md border border-slate-800 bg-slate-900/50 p-4">
+        <div className="rounded-md border border-border bg-surface p-4">
           <button
             className="flex w-full items-center justify-between"
             onClick={() => setExpanded((v) => !v)}
@@ -48,9 +48,9 @@ export function HoldingsNewsTab({ symbols, onSelect, refreshResult }: Props) {
               )}
             </div>
             {expanded ? (
-              <ChevronUp className="h-4 w-4 text-slate-400" />
+              <ChevronUp className="h-4 w-4 text-text-secondary" />
             ) : (
-              <ChevronDown className="h-4 w-4 text-slate-400" />
+              <ChevronDown className="h-4 w-4 text-text-secondary" />
             )}
           </button>
 
@@ -59,18 +59,18 @@ export function HoldingsNewsTab({ symbols, onSelect, refreshResult }: Props) {
               {refreshResult.symbols_detail.map((detail) => (
                 <li
                   key={detail.symbol}
-                  className="flex items-center justify-between rounded-sm px-2 py-1 text-sm hover:bg-slate-800/50"
+                  className="flex items-center justify-between rounded-sm px-2 py-1 text-sm hover:bg-surface-2"
                 >
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{detail.symbol}</span>
                     <StatusBadge status={detail.status} />
                     {detail.provider && detail.provider !== "unknown" && (
-                      <span className="text-xs text-slate-500">{detail.provider}</span>
+                      <span className="text-xs text-text-muted">{detail.provider}</span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <div className="flex items-center gap-2 text-xs text-text-secondary">
                     {detail.items > 0 && <span>{detail.items} items</span>}
-                    {detail.message && <span className="text-slate-500">{detail.message}</span>}
+                    {detail.message && <span className="text-text-muted">{detail.message}</span>}
                   </div>
                 </li>
               ))}
@@ -141,14 +141,14 @@ function HoldingNewsSection({
         <h3 className="text-sm font-semibold">{ticker}</h3>
         {detail && <StatusBadge status={detail.status} />}
         {detail && detail.provider !== "unknown" && detail.provider !== "rss" && (
-          <span className="text-xs text-slate-500">{detail.provider}</span>
+          <span className="text-xs text-text-muted">{detail.provider}</span>
         )}
         {detail?.provider === "rss" && (
-          <span className="text-xs text-slate-500">RSS</span>
+          <span className="text-xs text-text-muted">RSS</span>
         )}
       </div>
       {data.length === 0 && hasFailed && (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-text-muted">
           {detail?.message || "No news available for this symbol."}
         </p>
       )}

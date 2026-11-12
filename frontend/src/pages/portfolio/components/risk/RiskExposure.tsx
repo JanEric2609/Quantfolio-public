@@ -4,8 +4,9 @@ import { BarChart } from "../../../../components/charts/BarChart";
 import { DonutChart } from "../../../../components/charts/DonutChart";
 import { Skeleton } from "../../../../components/ui/skeleton";
 import type { RiskAssessment, VerificationStressResult } from "../../../../lib/api";
+import { formatNumber } from "../../../../lib/format";
 
-const pct = (v: number, digits = 1) => `${(v * 100).toFixed(digits)} %`;
+const pct = (v: number, digits = 1) => `${formatNumber((v * 100), { digits: digits })} %`;
 
 // The two bars measure different things: the holding list (a single index ETF is one
 // holding) and what is inside it. The words say which, so "Extreme" above "Well
@@ -25,12 +26,12 @@ function ConcentrationBar({ hhi, label, byHolding = false }: { hhi: number; labe
         <span className="text-text-secondary">{label}</span>
         <Badge variant={meta.variant}>{meta.label}</Badge>
       </div>
-      <div className="h-2.5 overflow-hidden rounded-full bg-surface-2" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={1} aria-valuenow={Number(hhi.toFixed(3))}>
+      <div className="h-2.5 overflow-hidden rounded-full bg-surface-2" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={1} aria-valuenow={Number(formatNumber(hhi, { digits: 3 }))}>
         <div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(hhi * 100, 100)}%` }} />
       </div>
       <div className="flex justify-between font-mono text-[11px] text-text-muted">
         <span>0 diversified</span>
-        <span className="tabular-nums">{hhi.toFixed(3)}</span>
+        <span className="tabular-nums">{formatNumber(hhi, { digits: 3 })}</span>
         <span>1 single asset</span>
       </div>
     </div>
@@ -163,7 +164,7 @@ export function StressCard({ stress, loading }: { stress: VerificationStressResu
                       <span className="text-sm font-medium text-text-primary">{s.scenario_name}</span>
                       <span className={`font-mono text-sm font-semibold tabular-nums ${down ? "text-danger" : "text-success"}`}>
                         {s.portfolio_impact_pct > 0 ? "+" : ""}
-                        {s.portfolio_impact_pct.toFixed(1)} %
+                        {formatNumber(s.portfolio_impact_pct, { digits: 1 })} %
                       </span>
                     </div>
                     <p className="text-xs text-text-secondary">{s.description}</p>

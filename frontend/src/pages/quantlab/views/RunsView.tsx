@@ -15,6 +15,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "../../../components/ui/sheet";
+import { Table } from "../../../components/ui/table";
 
 const TYPE_META: Record<
   RecentRun["type"],
@@ -76,7 +77,7 @@ export function RunsView() {
   return (
     <div className="space-y-3 pt-2">
       <div className="overflow-x-auto rounded-md border border-line">
-        <table className="w-full text-sm">
+        <Table className="w-full text-sm">
           <thead>
             <tr className="border-b border-line bg-surface text-[10px] uppercase tracking-wider text-text-muted">
               <th className="px-3 py-2 text-left">Type</th>
@@ -119,7 +120,7 @@ export function RunsView() {
               );
             })}
           </tbody>
-        </table>
+        </Table>
       </div>
 
       <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>

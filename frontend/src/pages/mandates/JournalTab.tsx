@@ -10,6 +10,7 @@ import { EmptyState } from "../../components/composed/EmptyState";
 import { formatDateTime, formatPercent } from "../../lib/format";
 import { api, type MandateDecision, type MandateJournalEntry } from "../../lib/api";
 import { MANDATES, portfolioOf, type MandateLetter, type MandatesOutletContext } from "./mandateContext";
+import { Table } from "../../components/ui/table";
 
 const STATUS_VARIANT: Record<string, "success" | "warning" | "danger" | "secondary"> = {
   completed: "success",
@@ -103,7 +104,7 @@ export function JournalTab() {
 function JournalTable({ entries }: { entries: { entry: MandateJournalEntry; mandate: MandateLetter }[] }) {
   return (
     <Card className="p-0 overflow-x-auto">
-      <table className="w-full text-sm">
+      <Table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-text-muted border-b border-border">
             <th className="py-2 pl-4 pr-3">Date</th>
@@ -156,7 +157,7 @@ function JournalTable({ entries }: { entries: { entry: MandateJournalEntry; mand
             );
           })}
         </tbody>
-      </table>
+      </Table>
     </Card>
   );
 }

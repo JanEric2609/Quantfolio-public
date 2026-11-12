@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { formatCurrency, formatPercent } from "../../../lib/format";
 import { api, type RealRebalanceResponse, type RebalanceDepot } from "../../../lib/api";
+import { formatNumber } from "../../../lib/format";
+import { Table } from "../../../components/ui/table";
 
 const pct = (v?: number | null) => formatPercent(v, { digits: 1 });
 const eur = (v?: number | null) => (v == null ? "—" : formatCurrency(v, "EUR"));
@@ -139,7 +141,7 @@ export function RebalanceCard({
           </p>
           {(data.sleeves?.length ?? 0) > 0 && (
             <div className="mb-3 overflow-x-auto">
-              <table className="w-full min-w-[480px] text-xs" aria-label="Sleeves">
+              <Table className="w-full min-w-[480px] text-xs" aria-label="Sleeves">
                 <thead className="text-left text-text-muted">
                   <tr>
                     <th className="py-1 font-normal">Sleeve</th>
@@ -157,19 +159,19 @@ export function RebalanceCard({
                         <span className="font-medium">{sl.label}</span>
                         {!sl.unlocked && <span className="ml-1 text-text-muted">(locked: held, never bought or sold here)</span>}
                       </td>
-                      <td className="py-1 text-right font-mono tabular-nums">{sl.current_pct.toFixed(1)} %</td>
-                      <td className="py-1 text-right font-mono tabular-nums">{sl.target_pct.toFixed(1)} %</td>
-                      <td className="py-1 text-right font-mono tabular-nums">{sl.after_pct == null ? "—" : `${sl.after_pct.toFixed(1)} %`}</td>
+                      <td className="py-1 text-right font-mono tabular-nums">{formatNumber(sl.current_pct, { digits: 1 })} %</td>
+                      <td className="py-1 text-right font-mono tabular-nums">{formatNumber(sl.target_pct, { digits: 1 })} %</td>
+                      <td className="py-1 text-right font-mono tabular-nums">{sl.after_pct == null ? "—" : `${formatNumber(sl.after_pct, { digits: 1 })} %`}</td>
                       <td className="py-1 text-right font-mono tabular-nums text-success">{sl.buy_eur > 0.5 ? eur(sl.buy_eur) : "—"}</td>
                       <td className="py-1 text-right font-mono tabular-nums text-danger">{sl.sell_eur > 0.5 ? eur(sl.sell_eur) : "—"}</td>
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </Table>
             </div>
           )}
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] text-xs">
+            <Table className="w-full min-w-[560px] text-xs">
               <thead className="text-left text-text-muted">
                 <tr>
                   <th className="py-1 font-normal">Line</th>
@@ -194,7 +196,7 @@ export function RebalanceCard({
                     <td className="py-1 text-right font-mono tabular-nums">{pct(r.current_weight)}</td>
                     <td className="py-1 text-right font-mono tabular-nums">{pct(r.target_weight)}</td>
                     <td className={`py-1 text-right font-mono tabular-nums ${r.in_band ? "text-text-muted" : "text-warn"}`}>
-                      {r.drift_pp > 0 ? "+" : ""}{r.drift_pp.toFixed(1)} pp
+                      {r.drift_pp > 0 ? "+" : ""}{formatNumber(r.drift_pp, { digits: 1 })} pp
                     </td>
                     <td className="py-1 text-right font-mono tabular-nums text-success">{r.buy_eur > 0.5 ? eur(r.buy_eur) : "—"}</td>
                     <td className="py-1 text-right font-mono tabular-nums text-danger">{r.sell_eur > 0.5 ? eur(r.sell_eur) : "—"}</td>
@@ -204,7 +206,7 @@ export function RebalanceCard({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </div>
           {unheldBuys.length > 0 && (
             <ul className="mt-2 space-y-0.5 text-xs text-text-secondary">

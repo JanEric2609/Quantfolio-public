@@ -59,8 +59,8 @@ describe("ForwardLabPanel", () => {
     const row = await screen.findByTestId("forward-lab-momentum_12_1");
     expect(row).toHaveTextContent("Collecting");
     expect(row).toHaveTextContent("120 days on 1210 stocks");
-    expect(row).toHaveTextContent("works 3.20");
-    expect(row).toHaveTextContent("1.2 %");
+    expect(row).toHaveTextContent("works 3,20");
+    expect(row).toHaveTextContent("1,2 %");
     expect(screen.getByTestId("forward-lab-news_tone")).toHaveTextContent("No day scored yet.");
     expect(screen.getByText(/passes 200 for the strongest of the 2/)).toBeInTheDocument();
     expect(apiMock).toHaveBeenCalledWith("/api/trust/forward-lab");

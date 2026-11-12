@@ -5,11 +5,12 @@ import { Card } from "../../components/ui/card";
 import { Skeleton } from "../../components/ui/skeleton";
 import { fmtDay, fmtPct } from "./trustFormat";
 import { useTrustHistory } from "./useTrust";
+import { formatNumber } from "../../lib/format";
 
 function pctYear(v: number | null | undefined): string {
   if (v == null || Number.isNaN(v)) return "—";
   const sign = v > 0 ? "+" : v < 0 ? "−" : "";
-  return `${sign}${Math.abs(v * 100).toFixed(1)} % a year`;
+  return `${sign}${formatNumber(Math.abs(v * 100), { digits: 1 })} % a year`;
 }
 
 function StatusChip({ passed, label }: { passed: boolean | null; label: string }) {
@@ -61,7 +62,7 @@ function TiltCard({ card }: { card: TrustTiltCard }) {
         </div>
         <StatusChip
           passed={card.passed}
-          label={`${card.passed ? "Passed our tests" : "Did not pass"}${card.long_short_t != null ? ` · t = ${card.long_short_t.toFixed(2)} vs bar ${card.t_bar.toFixed(1)}` : ""}`}
+          label={`${card.passed ? "Passed our tests" : "Did not pass"}${card.long_short_t != null ? ` · t = ${formatNumber(card.long_short_t, { digits: 2 })} vs bar ${formatNumber(card.t_bar, { digits: 1 })}` : ""}`}
         />
       </div>
       <DecayBars card={card} />
@@ -95,7 +96,7 @@ function Panel({ data }: { data: TrustHistory }) {
         What decades of past data say about the factor tilt and the stock-ranking research, after costs, tax and a haircut
         for overfitting. We plan on {Math.round((1 - data.haircut.publication_decay) * 100)} % of the historical edge:
         published effects lost about {Math.round(data.haircut.publication_decay * 100)} % after publication (McLean and
-        Pontiff 2016). {data.n_trials != null ? `${data.n_trials.toLocaleString("en-US")} ideas have been tried and recorded; results are judged against that many. ` : ""}
+        Pontiff 2016). {data.n_trials != null ? `${formatNumber(data.n_trials, { digits: 0 })} ideas have been tried and recorded; results are judged against that many. ` : ""}
         It says nothing about the live tests above.
       </p>
 
@@ -123,10 +124,10 @@ function Panel({ data }: { data: TrustHistory }) {
             <>
               <p className="text-sm text-text-secondary">
                 Across {best.months} out-of-sample months it ranked stocks better than chance (rank IC{" "}
-                {best.ic_mean?.toFixed(3) ?? "—"}
-                {best.ic_t != null ? `, t ≈ ${best.ic_t.toFixed(0)}` : ""}). Long-only it earned {pctYear(best.long_only_annual)} over
+                {formatNumber(best.ic_mean, { digits: 3 })}
+                {best.ic_t != null ? `, t ≈ ${formatNumber(best.ic_t, { digits: 0 })}` : ""}). Long-only it earned {pctYear(best.long_only_annual)} over
                 the market before costs; in the last {Math.round((best.recent_months ?? 120) / 12)} years the rank IC was{" "}
-                {best.recent_ic_mean?.toFixed(3) ?? "—"}.
+                {formatNumber(best.recent_ic_mean, { digits: 3 })}.
               </p>
               <p className="text-[11px] text-text-muted">
                 Data to {fmtDay(rm.data_to)}{rm.stale ? " (older than 12 months)" : ""}. Pseudo out-of-sample: walk-forward
@@ -149,7 +150,7 @@ function Panel({ data }: { data: TrustHistory }) {
           <p className="text-sm text-text-secondary">
             Turning those rankings into a handful of stocks you can actually hold, after fees and German tax.
             {sat.best?.dsr != null
-              ? ` Best mined score: Deflated Sharpe ${sat.best.dsr.toFixed(2)} against a bar of ${sat.dsr_bar}.`
+              ? ` Best mined score: Deflated Sharpe ${formatNumber(sat.best.dsr, { digits: 2 })} against a bar of ${sat.dsr_bar}.`
               : ""}
             {" "}How much your book holds in stock picks is set by the capital ladder from paper records; this check only decides whether a backtest-picked strategy may become a ladder candidate.
           </p>

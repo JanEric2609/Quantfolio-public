@@ -2693,6 +2693,8 @@ export type PiotroskiSignal = {
   pass: boolean | null;
   /** How to show value: a fraction shown as %, a multiple, or percentage points (590 = 590 %). */
   unit?: "pct" | "times" | "pct_points";
+  /** Quality of the business, or the price paid for it. */
+  group?: "quality" | "valuation";
   note?: string;
 };
 

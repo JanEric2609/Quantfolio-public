@@ -3,6 +3,8 @@ import { Card } from "../../components/ui/card";
 import { Skeleton } from "../../components/ui/skeleton";
 import { fmtDay, fmtPct, fmtPp } from "./trustFormat";
 import { useTrustRanking } from "./useTrust";
+import { formatNumber } from "../../lib/format";
+import { Table } from "../../components/ui/table";
 
 const TIER_LABEL = { top: "Top third", middle: "Middle third", bottom: "Bottom third" } as const;
 
@@ -24,7 +26,7 @@ function stageLabel(stage: string): string {
 }
 
 function fmtIc(v: number | null | undefined): string {
-  return v == null ? "—" : v.toFixed(3);
+  return v == null ? "—" : formatNumber(v, { digits: 3 });
 }
 
 function interval(ci: [number, number] | null | undefined, digits = 1): string {
@@ -37,8 +39,8 @@ function Section({ data, exploratory = false }: { data: TrustRankingSection; exp
   return (
     <div className={exploratory ? "space-y-3 opacity-75" : "space-y-3"} data-testid={exploratory ? "ranking-exploratory" : "ranking-live"}>
       <p className="text-xs text-text-muted">
-        {data.n_runs} runs ({data.n_cohort_runs} with at least 30 scored stocks), {data.n_snapshots.toLocaleString("en-US")} scored
-        names, {data.n_outcomes.toLocaleString("en-US")} measured outcomes
+        {data.n_runs} runs ({data.n_cohort_runs} with at least 30 scored stocks), {formatNumber(data.n_snapshots, { digits: 0 })} scored
+        names, {formatNumber(data.n_outcomes, { digits: 0 })} measured outcomes
         {data.first_issue ? `, ${fmtDay(data.first_issue)} to ${fmtDay(data.last_issue)}` : ""}.
       </p>
       {ic.n_runs === 0 ? (
@@ -52,13 +54,13 @@ function Section({ data, exploratory = false }: { data: TrustRankingSection; exp
             <dt className="text-xs text-text-muted">Rank IC (21 days)</dt>
             <dd className="font-mono text-sm font-semibold tabular-nums">{fmtIc(ic.mean)}</dd>
             <dd className="text-[11px] text-text-muted">
-              {ic.n_runs} runs{ic.t_nw != null ? ` · Newey-West t ${ic.t_nw.toFixed(1)}` : ""}
+              {ic.n_runs} runs{ic.t_nw != null ? ` · Newey-West t ${formatNumber(ic.t_nw, { digits: 1 })}` : ""}
             </dd>
           </div>
           <div>
             <dt className="text-xs text-text-muted">Runs with IC above 0</dt>
             <dd className="font-mono text-sm font-semibold tabular-nums">{fmtPct(ic.share_positive)}</dd>
-            <dd className="text-[11px] text-text-muted">{ic.icir != null ? `ICIR ${ic.icir.toFixed(2)}` : ""}</dd>
+            <dd className="text-[11px] text-text-muted">{ic.icir != null ? `ICIR ${formatNumber(ic.icir, { digits: 2 })}` : ""}</dd>
           </div>
           <div>
             <dt className="text-xs text-text-muted">Within sectors</dt>
@@ -75,7 +77,7 @@ function Section({ data, exploratory = false }: { data: TrustRankingSection; exp
 
       {ic.n_runs > 0 ? (
         <div className="grid gap-3 md:grid-cols-2">
-          <div className="overflow-x-auto"><table className="w-full text-xs">
+          <div className="overflow-x-auto"><Table className="w-full text-xs">
             <caption className="mb-1 text-left text-xs font-medium text-text-primary">Does the signal fade? IC by horizon</caption>
             <thead>
               <tr className="border-b border-border text-left text-text-muted">
@@ -93,8 +95,8 @@ function Section({ data, exploratory = false }: { data: TrustRankingSection; exp
                 </tr>
               ))}
             </tbody>
-          </table></div>
-          <div className="overflow-x-auto"><table className="w-full text-xs">
+          </Table></div>
+          <div className="overflow-x-auto"><Table className="w-full text-xs">
             <caption className="mb-1 text-left text-xs font-medium text-text-primary">
               Mean excess vs your ETF by score fifth (21 days)
             </caption>
@@ -112,7 +114,7 @@ function Section({ data, exploratory = false }: { data: TrustRankingSection; exp
                 </tr>
               ))}
             </tbody>
-          </table></div>
+          </Table></div>
         </div>
       ) : null}
 
@@ -138,7 +140,7 @@ function Section({ data, exploratory = false }: { data: TrustRankingSection; exp
       ) : null}
 
       {data.gate_check.length > 0 ? (
-        <div className="overflow-x-auto"><table className="w-full text-xs" data-testid="ranking-gates">
+        <div className="overflow-x-auto"><Table className="w-full text-xs" data-testid="ranking-gates">
           <caption className="mb-1 text-left text-xs font-medium text-text-primary">
             Do the filters remove losers? Rejected names minus scored ones, same run, 21 days
           </caption>
@@ -163,7 +165,7 @@ function Section({ data, exploratory = false }: { data: TrustRankingSection; exp
               </tr>
             ))}
           </tbody>
-        </table></div>
+        </Table></div>
       ) : null}
 
       {data.etf_ic.n_runs > 0 ? (

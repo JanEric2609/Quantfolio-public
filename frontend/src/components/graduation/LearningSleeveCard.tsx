@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { formatCurrency, formatNumber } from "../../lib/format";
 import { getLearningSleeve, setLearningFillPrice, type LearningSleeve } from "../../lib/api";
+import { Table } from "../ui/table";
 
 /** The learning sleeve: what you bought, the same amounts in the world ETF, and the fills against paper prices. */
 export function LearningSleeveCard() {
@@ -28,7 +29,7 @@ export function LearningSleeveCard() {
           {formatCurrency(data.shadow_value_eur)}.
         </p>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <Table className="w-full text-left text-xs">
             <thead className="text-text-muted">
               <tr><th className="py-1 pr-3">Month</th><th className="pr-3">Pick</th><th className="pr-3">Amount</th>
                 <th className="pr-3">Status</th><th className="pr-3">Fill vs paper</th><th>Real fill price</th></tr>
@@ -55,7 +56,7 @@ export function LearningSleeveCard() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </div>
       </CardContent>
     </Card>

@@ -136,6 +136,7 @@ class AlpacaProvider(MarketDataProvider):
                         "source": self.name,
                     }
                 )
+            rows, cut = cut_at_listing_gap(rows)
             if days and len(rows) > days:
                 rows = rows[-days:]
             if not rows:
@@ -146,7 +147,10 @@ class AlpacaProvider(MarketDataProvider):
                 data=rows,
                 as_of=datetime.now(UTC),
                 confidence=0.75 if len(rows) >= 252 else 0.55,
-                warnings=[] if len(rows) >= 252 else ["Less than one year of Alpaca history is available."],
+                warnings=[
+                    *([] if len(rows) >= 252 else ["Less than one year of Alpaca history is available."]),
+                    *([f"Alpaca history cut at a gap of {cut} days: an earlier company may have used this ticker."] if cut else []),
+                ],
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("Alpaca get_history failed for %s: %s", symbol, exc)
@@ -212,6 +216,21 @@ class AlpacaProvider(MarketDataProvider):
                 # safe if the auth mechanism ever changes.
                 raise ValueError(f"Alpaca HTTP {response.status_code} for {path}")
             return response.json()
+
+
+#: Alpaca keys bars by ticker, so a reused ticker joins two companies (docs/research/2026-11-12-alpaca-reused-tickers.md).
+LISTING_GAP_DAYS = 60
+
+
+def cut_at_listing_gap(rows: list[dict[str, Any]], gap_days: int = LISTING_GAP_DAYS) -> tuple[list[dict[str, Any]], int]:
+    """Keep only the segment after the last gap of ``gap_days`` or more calendar days. Returns (rows, gap found or 0)."""
+    dated = [r for r in rows if r.get("date") is not None]
+    cut_at, found = 0, 0
+    for i in range(1, len(dated)):
+        gap = (dated[i]["date"] - dated[i - 1]["date"]).days
+        if gap >= gap_days:
+            cut_at, found = i, gap
+    return (dated[cut_at:] if found else rows), found
 
 
 def _float(value: Any) -> float | None:

@@ -15,6 +15,8 @@ import {
 } from "../../lib/api";
 import { formatCurrency, formatDateTime } from "../../lib/format";
 import { BrokerReview } from "./BrokerReview";
+import { formatNumber } from "../../lib/format";
+import { Table } from "../ui/table";
 
 const STATE_BADGE: Record<Trading212State, { variant: "success" | "warning" | "danger" | "secondary"; label: string }> = {
   ready: { variant: "success", label: "synced" },
@@ -32,7 +34,7 @@ export function useTrading212Status() {
 }
 
 const pct = (fraction: string | number | null | undefined, digits = 1) =>
-  fraction == null || fraction === "" ? "—" : `${(Number(fraction) * 100).toFixed(digits)} %`;
+  fraction == null || fraction === "" ? "—" : `${formatNumber((Number(fraction) * 100), { digits: digits })} %`;
 
 /** Status badge + "Sync Trading 212". Renders nothing while the connection is off. */
 export function Trading212SyncButton() {
@@ -170,7 +172,7 @@ export function Trading212Pies() {
             </div>
             {pie.instruments.length > 0 && (
               <div className="mt-2 overflow-x-auto">
-                <table className="w-full text-sm">
+                <Table className="w-full text-sm">
                   <thead className="text-left text-xs text-text-secondary">
                     <tr className="border-b border-border">
                       <th className="py-1 pr-3 font-medium">Holding</th>
@@ -194,7 +196,7 @@ export function Trading212Pies() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </Table>
               </div>
             )}
           </section>

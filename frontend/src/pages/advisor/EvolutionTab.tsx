@@ -17,7 +17,7 @@ const MINIMUM_LABELS: Record<string, string> = {
 
 function PairedTestCard({ test }: { test: EvolutionPairedTest }) {
   const { rule, last } = test;
-  const fmtPct = (v: number | null | undefined) => (v == null ? "—" : `${(v * 100).toFixed(1)} %`);
+  const fmtPct = (v: number | null | undefined) => (v == null ? "—" : `${formatNumber((v * 100), { digits: 1 })} %`);
   return (
     <Card className="p-5 space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -85,7 +85,7 @@ function PairedTestCard({ test }: { test: EvolutionPairedTest }) {
           <p className="sm:col-span-2 text-xs text-text-muted">
             {last.reason}
             {last.mcnemar &&
-              ` · Where they disagree on direction, the challenger was right ${last.mcnemar.challenger_right} times and the champion ${last.mcnemar.champion_right} (McNemar p ${last.mcnemar.p_value.toFixed(3)}, display only).`}
+              ` · Where they disagree on direction, the challenger was right ${last.mcnemar.challenger_right} times and the champion ${last.mcnemar.champion_right} (McNemar p ${formatNumber(last.mcnemar.p_value, { digits: 3 })}, display only).`}
           </p>
         </div>
       )}

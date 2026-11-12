@@ -7,6 +7,7 @@ import { SummaryStrip } from "../components/SummaryStrip";
 import type { MetricItem } from "../components/SummaryStrip";
 import { formatMetricNumber, formatMetricPercent } from "../../../components/composed/MetricTile";
 import type { QuantRiskMetrics, QuantRiskSeries } from "../../../lib/api";
+import { formatNumber } from "../../../lib/format";
 
 const num = (value: number | null | undefined) => formatMetricNumber(value, 2, "-");
 const pct = (value: number | null | undefined) => formatMetricPercent(value, 2, "-");
@@ -55,11 +56,11 @@ export function RiskView() {
     { label: "Sortino", value: short ? "—" : num(risk.sortino), metricKey: "sortino", metricValue: short ? undefined : risk.sortino, hint: shortHint },
     {
       label: "Beta", value: num(risk.beta), metricKey: "beta", metricValue: risk.beta ?? undefined,
-      hint: risk.beta_dimson != null ? `lead/lag-adjusted ${risk.beta_dimson.toFixed(2)}` : undefined,
+      hint: risk.beta_dimson != null ? `lead/lag-adjusted ${formatNumber(risk.beta_dimson, { digits: 2 })}` : undefined,
     },
     {
       label: "Alpha (yearly)", value: pct(risk.alpha), metricKey: "alpha", metricValue: risk.alpha ?? undefined,
-      hint: alphaT != null ? `t = ${alphaT.toFixed(2)}${Math.abs(alphaT) < 2 ? ", not significant" : ""}` : undefined,
+      hint: alphaT != null ? `t = ${formatNumber(alphaT, { digits: 2 })}${Math.abs(alphaT) < 2 ? ", not significant" : ""}` : undefined,
     },
     { label: "R²", value: num(risk.r_squared), metricKey: "r_squared", metricValue: risk.r_squared ?? undefined },
     { label: "Tracking error", value: pct(risk.tracking_error), metricKey: "tracking_error", metricValue: risk.tracking_error ?? undefined },
@@ -73,7 +74,7 @@ export function RiskView() {
       <div className="space-y-4 pt-4">
         {overlapCaveat && (
           <div className="rounded-md border border-warn/30 bg-warn/10 p-3 text-xs text-warn" data-testid="benchmark-caveat">
-            {overlapPct != null ? `${overlapPct.toFixed(0)} %` : "Most"} of your book is the benchmark fund itself, so beta ≈ 1,
+            {overlapPct != null ? `${formatNumber(overlapPct, { digits: 0 })} %` : "Most"} of your book is the benchmark fund itself, so beta ≈ 1,
             R² ≈ 1 and tracking error ≈ 0 by construction; they say nothing about skill. The useful numbers here are
             volatility, drawdown and VaR.
           </div>
@@ -122,7 +123,7 @@ export function RiskView() {
             <input
               value={riskFree}
               inputMode="decimal"
-              placeholder={risk.risk_free != null ? (risk.risk_free * 100).toFixed(2) : "ECB"}
+              placeholder={risk.risk_free != null ? formatNumber((risk.risk_free * 100), { digits: 2 }) : "ECB"}
               onChange={(e) => set("riskFree", e.target.value)}
               className="w-16 rounded border border-line bg-surface px-2 py-1"
             />

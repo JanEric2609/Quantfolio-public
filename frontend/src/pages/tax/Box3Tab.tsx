@@ -11,6 +11,7 @@ import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { MetricGroup } from "../../components/composed/MetricGroup";
 import { KpiTile } from "../../components/composed/KpiTile";
+import { Table } from "../../components/ui/table";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -262,7 +263,7 @@ export function Box3Tab() {
               </CardTitle>
             </CardHeader>
             <CardContent className="overflow-x-auto p-0">
-              <table className="w-full text-sm">
+              <Table className="w-full text-sm">
                 <thead className="border-b border-border bg-surface-2 text-left text-text-secondary">
                   <tr>
                     <th className="px-4 py-2 font-medium">Bucket</th>
@@ -330,7 +331,7 @@ export function Box3Tab() {
                     </td>
                   </tr>
                 </tfoot>
-              </table>
+              </Table>
             </CardContent>
           </Card>
 

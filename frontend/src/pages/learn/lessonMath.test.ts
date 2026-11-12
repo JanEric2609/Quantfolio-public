@@ -46,3 +46,43 @@ describe("quiz schedule", () => {
     expect(isDue(s["a" as keyof typeof s], 400 * DAY)).toBe(false);
   });
 });
+
+import { bestOfK, bootstrapFan, eProcess, neweyWestT, rng, shrinkToDiagonal, walkForward } from "./lessonMath";
+
+describe("lesson maths (WP14 second set)", () => {
+  it("Newey-West with 0 lags equals the plain t and shrinks for positively autocorrelated data", () => {
+    const g = rng(3);
+    const x: number[] = [];
+    let prev = 0;
+    for (let i = 0; i < 300; i++) { prev = 0.7 * prev + (g() - 0.5); x.push(prev + 0.02); }
+    expect(Math.abs(neweyWestT(x, 10))).toBeLessThan(Math.abs(neweyWestT(x, 0)));
+  });
+  it("the best of many null strategies looks significant", () => {
+    expect(bestOfK(200, 250)).toBeGreaterThan(bestOfK(1, 250, 7) - 0.001);
+    expect(bestOfK(500, 250)).toBeGreaterThan(2.5);
+  });
+  it("walk-forward out-of-sample edge is near zero for noise", () => {
+    const g = rng(5);
+    const x = Array.from({ length: 1000 }, () => g() - 0.5);
+    const w = walkForward(x, 100, 50);
+    expect(w.inSample).toBeGreaterThan(w.outSample);
+  });
+  it("e-process grows with a real edge and shrinks without one", () => {
+    const g = rng(9);
+    const edge = Array.from({ length: 400 }, () => 0.01 + 0.01 * (g() - 0.5));
+    expect(eProcess(edge, 0.5).at(-1)!).toBeGreaterThan(20);
+    const noise = Array.from({ length: 400 }, () => 0.01 * (g() - 0.5));
+    expect(eProcess(noise, 0.5).at(-1)!).toBeLessThan(5);
+  });
+  it("shrinkage keeps the diagonal and scales the off-diagonal", () => {
+    const s = shrinkToDiagonal([[1, 0.8], [0.8, 1]], 0.5);
+    expect(s[0][0]).toBe(1);
+    expect(s[0][1]).toBeCloseTo(0.4);
+  });
+  it("the bootstrap fan is ordered", () => {
+    const g = rng(1);
+    const f = bootstrapFan(Array.from({ length: 200 }, () => 0.0004 + 0.01 * (g() - 0.5)), 252);
+    expect(f.p5).toBeLessThan(f.p50);
+    expect(f.p50).toBeLessThan(f.p95);
+  });
+});

@@ -60,9 +60,9 @@ describe("CallsTab", () => {
     expect(row).toHaveTextContent("BUY · 21 days");
     expect(row).toHaveTextContent("70 %");
     expect(row).toHaveTextContent("−5 pp to +5 pp");
-    expect(row).toHaveTextContent("+3.0 pp");
-    expect(row).toHaveTextContent("+1.0 pp");
-    expect(row).toHaveTextContent("+2.0 pp");
+    expect(row).toHaveTextContent("+3,0 pp");
+    expect(row).toHaveTextContent("+1,0 pp");
+    expect(row).toHaveTextContent("+2,0 pp");
     expect(row).toHaveTextContent("Hit");
     expect(screen.getByText("Frozen at issue time")).toBeInTheDocument();
     expect(apiMock).toHaveBeenCalledWith("/api/trust/calls?limit=25&offset=0");
@@ -87,7 +87,7 @@ describe("CallsTab", () => {
     const heading = await screen.findByRole("heading", { name: "Worst misses" });
     const section = heading.closest("section") as HTMLElement;
     expect(section).toHaveTextContent("BAD.DE");
-    expect(section).toHaveTextContent("−12.0 pp");
+    expect(section).toHaveTextContent("−12,0 pp");
     // Worst misses come before the table.
     const all = screen.getByRole("heading", { name: /Resolved calls \(2\)/ });
     expect(heading.compareDocumentPosition(all) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

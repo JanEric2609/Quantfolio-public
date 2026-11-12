@@ -18,6 +18,7 @@ import { TypeSummary } from "./TypeSummary";
 import { STATE_META, assumptionLabel, firstResolutionDue, fmtDay, fmtE, fmtPct, fmtPp, timeToKnowText } from "./trustFormat";
 import { useTrustVerdict } from "./useTrust";
 import type { TrustVerdict } from "../../lib/api";
+import { formatNumber } from "../../lib/format";
 
 function BigNumber({ label, children, sub }: { label: string; children: ReactNode; sub?: ReactNode }) {
   return (
@@ -59,7 +60,7 @@ function ThreeNumbers({ data }: { data: TrustVerdict }) {
           </>
         }
       >
-        <span data-testid="trust-units">{f1.n_days.toLocaleString("en-US")}</span>
+        <span data-testid="trust-units">{formatNumber(f1.n_days, { digits: 0 })}</span>
       </BigNumber>
       <BigNumber
         label="Picks vs your ETF"

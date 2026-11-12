@@ -22,6 +22,7 @@ import { DkbSyncLogsTable } from "./components/DkbSyncLogsTable";
 import { BrokerSyncLogsTable } from "./components/BrokerSyncLogsTable";
 import { ResearchExtractsPanel } from "./components/ResearchExtractsPanel";
 import { useAttention, useSettingsModel } from "./lib/schema";
+import { Table } from "../../components/ui/table";
 
 // Provider probes older than this are history, not current state.
 const OLD_RESULT_DAYS = 7;
@@ -155,7 +156,7 @@ function ErrorsSection() {
       {errors.data && errors.data.length === 0 ? <p className="text-sm text-text-secondary">No errors in the last 7 days.</p> : null}
       {errors.data && errors.data.length ? (
         <div className="overflow-x-auto rounded-lg border border-border bg-surface">
-          <table className="w-full text-sm">
+          <Table className="w-full text-sm">
             <thead className="border-b border-border text-left text-xs text-text-muted">
               <tr>
                 <th className="px-4 py-2 font-medium">Error</th>
@@ -181,7 +182,7 @@ function ErrorsSection() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </div>
       ) : null}
     </Section>
@@ -207,7 +208,7 @@ function ResultBadge({ status }: { status: string | null }) {
 function JobsTable({ jobs, retired }: { jobs: ScheduledJob[]; retired?: boolean }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-surface">
-      <table className="w-full text-sm">
+      <Table className="w-full text-sm">
         <thead className="border-b border-border text-left text-xs text-text-muted">
           <tr>
             <th className="px-4 py-2 font-medium">Job</th>
@@ -242,7 +243,7 @@ function JobsTable({ jobs, retired }: { jobs: ScheduledJob[]; retired?: boolean 
             </tr>
           ))}
         </tbody>
-      </table>
+      </Table>
     </div>
   );
 }

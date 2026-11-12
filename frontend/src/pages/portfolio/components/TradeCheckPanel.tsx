@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, type TradeCheckSummary } from "../../../lib/api";
 import { formatCurrency, formatDate } from "../../../lib/format";
+import { Table } from "../../../components/ui/table";
 
 const eur = (v?: number | null, digits = 0) => formatCurrency(v, "EUR", { digits });
 
@@ -59,7 +60,7 @@ export function TradeCheckPanel({ portfolioId }: { portfolioId: string }) {
           {d.open === 1 ? " is" : "s are"} still inside the 21 trading days they are measured over.
         </p>
         <div className="overflow-x-auto">
-          <table className="w-full text-left tabular-nums">
+          <Table className="w-full text-left tabular-nums">
             <thead className="text-text-muted">
               <tr>
                 <th className="pr-2 font-normal">Day</th>
@@ -89,7 +90,7 @@ export function TradeCheckPanel({ portfolioId }: { portfolioId: string }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </div>
         <p className="text-text-muted">Shadow mode: the run trades as before. Estimates, not tax advice.</p>
       </div>

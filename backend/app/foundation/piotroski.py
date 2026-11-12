@@ -65,7 +65,9 @@ def _f(data: dict[str, Any], key: str) -> float | None:
 
 def _signal(name: str, value: float | None, passed: bool | None, unit: str, note: str | None = None) -> dict[str, Any]:
     """One criterion. ``pass`` None means "not meaningful": it is left out of the score and the maximum."""
-    out: dict[str, Any] = {"name": name, "value": value, "pass": passed, "unit": unit}
+    # Two of the nine are valuation levels, not company quality; the card shows them apart.
+    group = "valuation" if name.startswith(("EV/EBITDA", "P/E")) else "quality"
+    out: dict[str, Any] = {"name": name, "value": value, "pass": passed, "unit": unit, "group": group}
     if note:
         out["note"] = note
     return out

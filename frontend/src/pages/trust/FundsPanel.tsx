@@ -4,10 +4,11 @@ import { Badge } from "../../components/ui/badge";
 import { Skeleton } from "../../components/ui/skeleton";
 import { fmtDay } from "./trustFormat";
 import { useTrustFunds } from "./useTrust";
+import { formatNumber } from "../../lib/format";
 
 /** Signed % a year with two decimals: tracking differences are a few hundredths of a percent. */
 function fmtTd(v: number): string {
-  return `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(2)} % a year`;
+  return `${v > 0 ? "+" : v < 0 ? "−" : ""}${formatNumber(Math.abs(v), { digits: 2 })} % a year`;
 }
 
 function FundRow({ f }: { f: TrustHeldFund }) {
@@ -20,7 +21,7 @@ function FundRow({ f }: { f: TrustHeldFund }) {
             ? `${f.index}: no measured peer on the same index.`
             : `${f.index}: ${fmtTd(f.td_pct)} against the median of its peers.`}
           {f.best_peer && f.gap_pct != null
-            ? ` ${f.best_peer.name} tracked ${f.gap_pct.toFixed(2)} % a year better.`
+            ? ` ${f.best_peer.name} tracked ${formatNumber(f.gap_pct, { digits: 2 })} % a year better.`
             : ""}
         </p>
       </div>

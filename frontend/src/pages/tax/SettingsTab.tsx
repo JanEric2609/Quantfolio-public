@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/ca
 import { useSettingsModel, useSettingsValues } from "../settings/lib/schema";
 import { formatValue } from "../settings/lib/values";
 import { TaxStatusCard } from "./components/TaxStatusCard";
+import { Table } from "../../components/ui/table";
 
 type BasiszinsRate = {
   year: number;
@@ -34,7 +35,7 @@ export function SettingsTab() {
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto rounded-md border border-border">
-            <table className="w-full text-sm">
+            <Table className="w-full text-sm">
               <thead className="border-b border-border bg-surface-2 text-left text-text-secondary">
                 <tr>
                   <th className="px-4 py-2 font-medium">Tax year</th>
@@ -63,7 +64,7 @@ export function SettingsTab() {
                   </tr>
                 )}
               </tbody>
-            </table>
+            </Table>
           </div>
         </CardContent>
       </Card>

@@ -3,6 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { Card, CardContent } from "../../components/ui/card";
 import { formatCurrency, formatNumber } from "../../lib/format";
 import type { MandateMissingHolding, MandateWeightDiff } from "../../lib/api";
+import { Table } from "../../components/ui/table";
 
 type Kind = "only_in_mandate" | "only_in_book" | "quantity_differs";
 type Filter = "all" | Kind;
@@ -81,7 +82,7 @@ export function DiffTable({
             ))}
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <Table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-text-muted">
                   <th className="py-2 pl-4 pr-3">Ticker</th>
@@ -102,7 +103,7 @@ export function DiffTable({
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </div>
         </CardContent>
       </Card>

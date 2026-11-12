@@ -8,6 +8,7 @@ import {
 import { formatCurrency, formatDate, formatPercent } from "../../../lib/format";
 import { Badge } from "../../../components/ui/badge";
 import { cn } from "../../../lib/utils";
+import { Table } from "../../../components/ui/table";
 
 const SEVERITY_STYLE: Record<TaxAllowanceAction["severity"], string> = {
   action: "border-warn/40 bg-warn/10",
@@ -61,7 +62,7 @@ function BanksTable({ banks }: { banks: TaxAllowanceBank[] }) {
   const num = "px-3 py-2 text-right tabular-nums";
   return (
     <div className="overflow-x-auto rounded-md border border-border">
-      <table className="w-full min-w-[44rem] text-xs">
+      <Table className="w-full min-w-[44rem] text-xs">
         <thead className="border-b border-border bg-surface-2 text-left text-text-secondary">
           <tr>
             <th scope="col" className="px-3 py-2 font-medium">Bank</th>
@@ -98,7 +99,7 @@ function BanksTable({ banks }: { banks: TaxAllowanceBank[] }) {
             </tr>
           ))}
         </tbody>
-      </table>
+      </Table>
     </div>
   );
 }

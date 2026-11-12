@@ -1,6 +1,7 @@
 import { ScatterChart } from "../../../components/charts/ScatterChart";
+import { formatNumber } from "../../../lib/format";
 
-const pct = (v: number) => `${(v * 100).toFixed(1)} %`;
+const pct = (v: number) => `${formatNumber((v * 100), { digits: 1 })} %`;
 
 /** Least-squares line through the plotted [benchmark, portfolio] daily returns. */
 export function fitLine(points: [number, number][]): { slope: number; intercept: number } | undefined {
@@ -26,7 +27,7 @@ export function RegressionScatter({ data = [], benchmark }: { data?: [number, nu
       ariaLabel="Daily returns of the portfolio against the benchmark"
       className="h-72"
       series={[{ name: "Trading days", data }]}
-      regression={line ? { ...line, name: `Fit: slope ${line.slope.toFixed(2)} (beta)` } : undefined}
+      regression={line ? { ...line, name: `Fit: slope ${formatNumber(line.slope, { digits: 2 })} (beta)` } : undefined}
       xName={`${benchmark ?? "Benchmark"} daily return (EUR)`}
       yName="Portfolio daily return (EUR)"
       xFormat={pct}

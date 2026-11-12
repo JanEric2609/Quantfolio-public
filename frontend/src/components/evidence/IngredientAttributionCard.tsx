@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui
 import { Skeleton } from "../ui/skeleton";
 import { getIngredientAttribution } from "../../lib/api";
 import { formatNumber } from "../../lib/format";
+import { Table } from "../ui/table";
 
 function cell(value: number | null, digits = 2): string {
   return value == null ? "—" : formatNumber(value, { digits });
@@ -43,7 +44,7 @@ export function IngredientAttributionCard() {
               {data.rho_bar != null && <> · mean pairwise correlation {formatNumber(data.rho_bar, { digits: 2 })}</>}
               .
             </p>
-            <div className="overflow-x-auto"><table className="w-full text-sm">
+            <div className="overflow-x-auto"><Table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-text-secondary">
                   <th className="py-1 pr-3 font-medium">Ingredient</th>
@@ -64,7 +65,7 @@ export function IngredientAttributionCard() {
                   </tr>
                 ))}
               </tbody>
-            </table></div>
+            </Table></div>
           </div>
         )}
       </CardContent>

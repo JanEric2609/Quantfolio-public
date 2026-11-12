@@ -87,7 +87,7 @@ export function PasskeyList() {
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
                   <AlertDialogAction
                     onClick={() => deletePasskey.mutate(key.id)}
-                    className="bg-danger hover:bg-red-600"
+                    className="bg-danger hover:bg-danger/80"
                   >
                     Delete
                   </AlertDialogAction>

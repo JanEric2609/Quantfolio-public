@@ -83,6 +83,22 @@ def latest_bar_date(db: Session, symbol: str) -> str | None:
     return value
 
 
+_GAP_MARKERS = ("no price data", "no close prices", "insufficient", "unavailable", "only ")
+
+
+def is_degraded(result: Any) -> bool:
+    """A stage result that reports missing or too little data: it describes a gap, not the symbol, so it is not kept."""
+    try:
+        data, err = result[0], result[1]
+    except (TypeError, IndexError):
+        return False
+    if err and "volatility" not in str(err) and "fails two quality checks" not in str(err):
+        if any(m in str(err) for m in _GAP_MARKERS):
+            return True
+    note = str((data or {}).get("note") or "") if isinstance(data, dict) else ""
+    return any(m in note for m in ("unavailable", "insufficient"))
+
+
 def cached_stage(
     db: Session, symbol: str, stage: str, fn: Callable[..., Any], *args: Any, variant: str = "",
     store_if: Callable[[Any], bool] | None = None, **kwargs: Any,
@@ -108,9 +124,15 @@ def cached_stage(
             return cached[0], cached[1]
         except (ValueError, IndexError, TypeError):
             logger.debug("stage cache entry for %s/%s unreadable; recomputing", symbol, key)
-    result = fn(*args, **kwargs)
+    from app.foundation.market import history_as_of
+
+    token = history_as_of.set(bar_date)
+    try:
+        result = fn(*args, **kwargs)
+    finally:
+        history_as_of.reset(token)
     payload = canonical([result[0], result[1]])
-    if store_if is not None and not store_if(result):
+    if is_degraded(result) or (store_if is not None and not store_if(result)):
         return payload[0], payload[1]
     try:
         db.merge(DiscoverStageCache(symbol=symbol, stage=key, bar_date=bar_date,

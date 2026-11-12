@@ -7,6 +7,8 @@ import { AreaChart } from "../../components/charts/AreaChart";
 import { formatCurrency, formatNumber, formatPercent } from "../../lib/format";
 import { useBookPerformance } from "../quantlab/hooks/useBookPerformance";
 import { drawdownSeries, monthlyReturns, periodReturn, sliceSeries, type Period } from "./performanceMath";
+import { token } from "../../lib/theme/tokens";
+import { Table } from "../../components/ui/table";
 
 const PERIODS: { key: Period; label: string }[] = [
   { key: "all", label: "Since start" },
@@ -134,14 +136,14 @@ export function PerformanceTab() {
             ...(series[0]?.benchmark
               ? [{
                   name: benchName,
-                  color: "#94a3b8",
+                  color: token("text-muted"),
                   data: series
                     .filter((p) => p.benchmark != null)
                     .map((p) => [p.date, (p.benchmark as number) / (series[0].benchmark as number)] as [string, number]),
                 }]
               : []),
           ]}
-          yFormat={(v) => v.toFixed(2)}
+          yFormat={(v) => formatNumber(v, { digits: 2 })}
         />
       </section>
 
@@ -160,7 +162,7 @@ export function PerformanceTab() {
         <section className="rounded-md bg-surface p-3">
           <h2 className="mb-2 text-sm font-semibold text-text-primary">Month by month</h2>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm" data-testid="performance-months">
+            <Table className="w-full text-sm" data-testid="performance-months">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-text-muted">
                   <th className="py-2 pr-3 font-normal">Month</th>
@@ -191,7 +193,7 @@ export function PerformanceTab() {
                   );
                 })}
               </tbody>
-            </table>
+            </Table>
           </div>
         </section>
       )}

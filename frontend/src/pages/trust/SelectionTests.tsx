@@ -2,6 +2,7 @@ import type { TrustFamilyTest, TrustMandateTest, TrustNoiseCheck, TrustSelection
 import { Badge } from "../../components/ui/badge";
 import { Card } from "../../components/ui/card";
 import { fmtDay, fmtE, fmtPct, fmtPp, fmtYears } from "./trustFormat";
+import { formatNumber } from "../../lib/format";
 
 const SELECTION_STATE: Record<TrustSelectionTest["state"], { label: string; meaning: string }> = {
   too_early: { label: "Too early", meaning: "Fewer than three months of trading days: read the numbers as noise." },
@@ -36,7 +37,7 @@ export function noiseText(nc: TrustNoiseCheck): string {
   const done = nc.looks.filter(
     (l) => l.vr != null && (nc.status !== "failed" || nc.failed_at_day == null || l.day <= nc.failed_at_day),
   );
-  const measured = done.map((l) => `day ${l.day}: ${l.vr!.toFixed(2)} (limit ${l.cutoff})`).join(" · ");
+  const measured = done.map((l) => `day ${l.day}: ${formatNumber(l.vr, { digits: 2 })} (limit ${l.cutoff})`).join(" · ");
   const next = nc.looks.find((l) => l.vr == null);
   if (nc.status === "failed") return `Noise check failed at day ${nc.failed_at_day}: ${measured}.`;
   if (nc.status === "passed") return `Noise check passed: ${measured}.`;
@@ -59,7 +60,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
 export function gridText(t: TrustTimeGrid): string {
   return t.grid
     .map((g) => {
-      const edge = `${(g.edge_21d * 100).toLocaleString("en-US")} %`;
+      const edge = `${formatNumber(g.edge_21d * 100, { digits: 2, minDigits: 0 })} %`;
       const years = g.beyond_40y || g.q50_years == null ? "> 40 years" : `about ${fmtYears(g.q50_years)} years`;
       return `${edge}: ${years}`;
     })
@@ -100,7 +101,7 @@ export function SelectionCard({ sel, f1 }: { sel: TrustSelectionTest; f1?: Trust
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
         <Stat
           label="Trading days tested"
-          value={sel.n_days.toLocaleString("en-US")}
+          value={formatNumber(sel.n_days, { digits: 0 })}
           sub={sel.n_days ? `since ${fmtDay(sel.first_day ?? sel.start)}` : `starts ${fmtDay(sel.start)}`}
         />
         <Stat
@@ -129,7 +130,7 @@ export function SelectionCard({ sel, f1 }: { sel: TrustSelectionTest; f1?: Trust
         <p className="text-[11px] text-text-muted" data-testid="selection-robustness">
           Stress checks (shown, not part of the rule): on resamples of this series with its mean removed, noise alone
           reached {sel.threshold} in{" "}
-          {sel.robustness.false_alarm == null ? "—" : `${(sel.robustness.false_alarm * 100).toFixed(1)} %`} of cases;
+          {sel.robustness.false_alarm == null ? "—" : `${formatNumber((sel.robustness.false_alarm * 100), { digits: 1 })} %`} of cases;
           without its 5 best days the evidence is {fmtE(sel.robustness.without_best_days)}; first half{" "}
           {fmtE(sel.robustness.first_half)}, second half {fmtE(sel.robustness.second_half)}.
         </p>
@@ -147,7 +148,7 @@ export function SelectionCard({ sel, f1 }: { sel: TrustSelectionTest; f1?: Trust
         {weighted ? "." : ")."}
         {!primary ? " Kept for the record: the primary test above asks the same question with less noise." : ""}
         {sel.rho1 != null
-          ? ` Day-to-day correlation of the first three months: ${sel.rho1.toFixed(2)}${sel.rho1_flag ? " (above 0.15: noted, the test stays valid)" : ""}.`
+          ? ` Day-to-day correlation of the first three months: ${formatNumber(sel.rho1, { digits: 2 })}${sel.rho1_flag ? " (above 0.15: noted, the test stays valid)" : ""}.`
           : ""}
         {te != null
           ? ` Risk budget: the basket moves ${fmtPct(te, 0)} a year apart from MSCI World (tracking error), mostly from its sector, style and currency tilt. That is reported, not tested.`

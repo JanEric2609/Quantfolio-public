@@ -3,6 +3,7 @@ import { Badge } from "../../components/ui/badge";
 import { formatCurrency, formatDate } from "../../lib/format";
 import type { MonthlyPlan, PlanEtfSuggestions } from "../../lib/api";
 import { pct } from "./shared";
+import { formatNumber } from "../../lib/format";
 
 /** Bond, cash and gold lines from the owner's targets (rule-based, not a forecast). */
 export function EtfLines({ suggestions }: { suggestions: PlanEtfSuggestions }) {
@@ -47,7 +48,7 @@ export function EvidenceBlock({ evidence }: { evidence: NonNullable<MonthlyPlan[
         <span className="font-medium text-text-primary">Stock picks:</span>{" "}
         {ladder ? (
           <>
-            {ladder.weight_pct.toFixed(1)} % of the book, funded by the{" "}
+            {formatNumber(ladder.weight_pct, { digits: 1 })} % of the book, funded by the{" "}
             {ladder.slot === "llm" ? "LLM advisor" : "rules control (Mandate B)"} at stage {ladder.stage} (
             {ladder.stage_name}) on the <Link to="/graduation" className="text-accent underline-offset-2 hover:underline">capital ladder</Link>.
           </>
@@ -63,7 +64,7 @@ export function EvidenceBlock({ evidence }: { evidence: NonNullable<MonthlyPlan[
           {picks.map((p) => (
             <li key={p.isin ?? p.ticker ?? p.name}>
               {p.name}
-              {p.ticker ? ` (${p.ticker})` : ""}: {p.weight_pct.toFixed(2)} % of the book
+              {p.ticker ? ` (${p.ticker})` : ""}: {formatNumber(p.weight_pct, { digits: 2 })} % of the book
             </li>
           ))}
         </ul>

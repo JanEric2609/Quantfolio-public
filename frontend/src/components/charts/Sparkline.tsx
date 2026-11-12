@@ -1,5 +1,6 @@
 import type { EChartsOption } from "echarts";
 import { EChart, type EChartProps } from "./EChart";
+import { token } from "../../lib/theme/tokens";
 
 export interface SparklineProps extends Omit<EChartProps, "option" | "height"> {
   data: number[];
@@ -7,7 +8,7 @@ export interface SparklineProps extends Omit<EChartProps, "option" | "height"> {
 }
 
 export function Sparkline({ data, tone = "neutral", ...rest }: SparklineProps) {
-  const color = tone === "up" ? "#22c55e" : tone === "down" ? "#ef4444" : "rgb(var(--c-text-muted))";
+  const color = tone === "up" ? token("success") : tone === "down" ? token("danger") : "rgb(var(--c-text-muted))";
   const option: EChartsOption = {
     grid: { left: 0, right: 0, top: 4, bottom: 4 },
     xAxis: { type: "category" as const, show: false, data: data.map((_, i) => i) },

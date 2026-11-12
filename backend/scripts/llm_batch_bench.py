@@ -15,6 +15,10 @@ past Discover runs. It writes nothing to the database.
     python scripts/llm_batch_bench.py run --task dossier --set dossier_set.json --temps 0.7,0.3,0.0 --label 9b --out r.json
     python scripts/llm_batch_bench.py run --task lap     --set lap_set.json     --temps 0.0         --label 9b --out r.json
 
+    # WP15.3 (plan 2026-11-12): the stock report's four prose sections on 40 seeded fact tables, scored by code
+    python scripts/llm_batch_bench.py report-build --out report_set.json
+    python scripts/llm_batch_bench.py run --task report --set report_set.json --temps 0.7 --label q4-8k --out r.json
+
     python scripts/llm_batch_bench.py summarize r1.json r2.json ...
 
 The EDGAR set compares numbers read from the filing text with the filer's own
@@ -408,6 +412,52 @@ def lap_prompt(item: dict[str, Any]) -> list[dict[str, str]]:
 # Runner
 # ---------------------------------------------------------------------------
 
+def report_build(out: Path, n: int = 40, seed: int = 20261112) -> None:
+    """Seeded fact tables for the research report. Needs no network and no database."""
+    import app.foundation.research_facts as rf
+
+    rng = random.Random(seed)
+    items = []
+    for i in range(n):
+        bases = ("quarter_yoy", "half_year_yoy", "annual")
+        context = {
+            "ticker": f"T{i:02d}.AS", "company": {"name": f"Company {chr(65 + i % 26)}{i}"}, "regime": rng.choice(["bull", "bear", "neutral"]),
+            "risk_profile": "moderate",
+            "technicals": {"sessions": 250, "last_close": round(rng.uniform(20, 300), 2), "last_close_date": "2026-11-11",
+                           "return_12m_pct": round(rng.uniform(-40, 60), 1), "return_3m_pct": round(rng.uniform(-15, 20), 1),
+                           "rsi_14": round(rng.uniform(25, 75), 1), "volatility_3m_annual_pct": round(rng.uniform(10, 55), 1),
+                           "max_drawdown_12m_pct": round(-rng.uniform(5, 50), 1), "sma_50": 100.0, "above_sma_50": rng.random() < 0.5,
+                           "sma_200": 100.0, "above_sma_200": rng.random() < 0.5},
+            "fundamentals": {"revenue_growth": round(rng.uniform(-0.1, 0.3), 3), "growth_basis": rng.choice(bases),
+                             "period_months": rng.choice([3, 6, 12]), "fcf_yield": round(rng.uniform(-0.02, 0.12), 3),
+                             "pe_ratio": round(rng.uniform(6, 45), 1), "debt_equity": round(rng.uniform(10, 250)),
+                             "total_debt": 5e9, "ebitda": 1e9, "cash": 3e8},
+            "recent_news": [] if rng.random() < 0.3 else [
+                {"title": f"Company {i} announces update", "source": "x", "published_at": "2026-11-10", "sentiment_label": None}],
+            "recommendations": [],
+        }
+        facts = rf.build_fact_table(context)
+        items.append({"ticker": context["ticker"], "context": context, "has_news": bool(context["recent_news"]),
+                      "messages_by_section": {
+                          sec: [{"role": "system", "content": rf.SECTION_SYSTEM},
+                                {"role": "user", "content": f"{rf.qualitative_input(context, facts)}\n\nSection: {sec}. {rf.SECTION_TASKS[sec]}"}]
+                          for sec in rf.MODEL_SECTIONS if not (sec == "Sentiment" and not context["recent_news"])}})
+    out.write_text(json.dumps({"seed": seed, "items": items}, indent=1))
+    print(f"wrote {len(items)} fact tables to {out}")
+
+
+def report_score(item: dict[str, Any], section: str, raw: str) -> dict[str, Any]:
+    import app.foundation.research_facts as rf
+    from app.foundation.research import foreign_companies
+
+    facts = rf.build_fact_table(item["context"])
+    text = raw.strip()
+    problems = rf.check_prose(section, text, facts, has_news=item["has_news"]) if text else ["empty"]
+    if text and foreign_companies(text, item["context"]):
+        problems.append("foreign company")
+    return {"section": section, "outcome": "ok" if not problems else "rejected", "problems": problems}
+
+
 BASE_SAMPLING = {"top_p": 0.8, "top_k": 20, "presence_penalty": 1.5}
 
 
@@ -443,6 +493,22 @@ def run(task: str, set_path: Path, temps: list[float], label: str, out: Path, li
     try:
         for temp in temps:
             for i, item in enumerate(items):
+                if task == "report":
+                    for section, msgs in item["messages_by_section"].items():
+                        telemetry = {}
+                        t0 = time.time()
+                        try:
+                            raw = _local_llm_sync(db, msgs, timeout_s=600.0, sampling={**BASE_SAMPLING, "temperature": temp},
+                                                  max_tokens=700, telemetry=telemetry)
+                            error = None
+                        except Exception as exc:  # noqa: BLE001
+                            raw, error = "", f"{type(exc).__name__}: {str(exc)[:200]}"
+                        results.append({"i": i, "temp": temp, "latency_s": round(time.time() - t0, 3), "error": error,
+                                        "prompt_tokens": telemetry.get("prompt_tokens"),
+                                        "completion_tokens": telemetry.get("completion_tokens"),
+                                        "truncated": telemetry.get("truncated"), "ticker": item["ticker"],
+                                        **report_score(item, section, raw)})
+                    continue
                 if task == "edgar":
                     if not item.get("text"):
                         continue
@@ -553,6 +619,13 @@ def summarize(paths: list[Path], cutoff: str | None) -> None:
                 print(f"    fields {counts}; accuracy on answered numbers "  # truth_error rows are left out
                       f"{counts.get('correct', 0)}/{answered} = {counts.get('correct', 0) / max(answered, 1):.1%} "
                       f"(95 % {lo:.1%}-{hi:.1%})")
+            elif task == "report":
+                counts = {}
+                for r in rs:
+                    counts[r.get("outcome") or "error"] = counts.get(r.get("outcome") or "error", 0) + 1
+                bad = len(rs) - counts.get("ok", 0)
+                lo, hi = _wilson(bad, len(rs))
+                print(f"    sections {counts}; rejection rate {bad / max(len(rs), 1):.1%} (95 % {lo:.1%}-{hi:.1%})")
             elif task == "dossier":
                 counts = {}
                 for r in rs:
@@ -583,14 +656,14 @@ def summarize(paths: list[Path], cutoff: str | None) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
-    for name in ("edgar-build", "lap-build"):
+    for name in ("edgar-build", "lap-build", "report-build"):
         s = sub.add_parser(name)
         s.add_argument("--out", type=Path, required=True)
     s = sub.add_parser("dossier-capture")
     s.add_argument("--n", type=int, default=40)
     s.add_argument("--out", type=Path, required=True)
     s = sub.add_parser("run")
-    s.add_argument("--task", choices=("edgar", "dossier", "lap"), required=True)
+    s.add_argument("--task", choices=("edgar", "dossier", "lap", "report"), required=True)
     s.add_argument("--set", type=Path, required=True)
     s.add_argument("--temps", default="0.7")
     s.add_argument("--label", required=True)
@@ -604,6 +677,8 @@ def main() -> None:
         edgar_build(a.out)
     elif a.cmd == "lap-build":
         lap_build(a.out)
+    elif a.cmd == "report-build":
+        report_build(a.out)
     elif a.cmd == "dossier-capture":
         dossier_capture(a.n, a.out)
     elif a.cmd == "run":

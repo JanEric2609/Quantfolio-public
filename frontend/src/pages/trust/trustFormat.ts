@@ -1,4 +1,5 @@
 import type { TrustCall, TrustState, TrustTypeVerdict } from "../../lib/api";
+import { formatNumber } from "../../lib/format";
 
 export type ChipTone = "neutral" | "good" | "warn" | "bad";
 
@@ -59,7 +60,7 @@ export function aboutHundreds(n: number): number {
 
 /** "~9,800" (or ">15,000" when the simulation only gave a lower bound): the dates needed, from the API. */
 export function fmtNeeded(n: number, lowerBound?: boolean): string {
-  return `${lowerBound ? ">" : "~"}${aboutHundreds(n).toLocaleString("en-US")}`;
+  return `${lowerBound ? ">" : "~"}${formatNumber(aboutHundreds(n), { digits: 0 })}`;
 }
 
 /** "an edge of +1 % per 21 days with 5 % noise": the assumption behind the dates-needed number, from the API. */
@@ -79,12 +80,12 @@ export function cadenceText(v: {
   if (v.n_needed == null) return null;
   const gap = v.cadence_days ?? 1;
   const every = gap <= 1 ? "one date per trading day" : Math.abs(gap - 5) < 0.5 ? "one date per week" : `one date per ${gap} trading days`;
-  const years = v.years_needed != null ? ` ≈ ${v.years_needed < 10 ? v.years_needed.toFixed(1) : Math.round(v.years_needed)} years` : "";
-  return `at ${every}, ${v.n_needed_is_lower_bound ? "more than" : "about"} ${aboutHundreds(v.n_needed).toLocaleString("en-US")} dates${years}`;
+  const years = v.years_needed != null ? ` ≈ ${v.years_needed < 10 ? formatNumber(v.years_needed, { digits: 1 }) : Math.round(v.years_needed)} years` : "";
+  return `at ${every}, ${v.n_needed_is_lower_bound ? "more than" : "about"} ${formatNumber(aboutHundreds(v.n_needed), { digits: 0 })} dates${years}`;
 }
 
 export function fmtPct(value: number | null | undefined, digits = 0): string {
-  return value == null || Number.isNaN(value) ? "—" : `${(value * 100).toFixed(digits)} %`;
+  return value == null || Number.isNaN(value) ? "—" : `${formatNumber((value * 100), { digits: digits })} %`;
 }
 
 /** A fraction as signed percentage points, e.g. 0.0123 -> "+1.2 pp". */
@@ -92,7 +93,7 @@ export function fmtPp(value: number | null | undefined, digits = 1): string {
   if (value == null || Number.isNaN(value)) return "—";
   const pp = value * 100;
   const sign = pp > 0 ? "+" : pp < 0 ? "−" : "±";
-  return `${sign}${Math.abs(pp).toFixed(digits)} pp`;
+  return `${sign}${formatNumber(Math.abs(pp), { digits })} pp`;
 }
 
 export function fmtInterval(pair: [number, number] | null | undefined, kind: "pct" | "pp"): string | null {
@@ -124,7 +125,7 @@ export function outcomeText(call: TrustCall): string {
 /** "4.2" below ten years, "19" above: a planning number, not a measurement. */
 export function fmtYears(years: number | null | undefined): string {
   if (years == null || Number.isNaN(years)) return "—";
-  return years < 10 ? years.toFixed(1) : `${Math.round(years)}`;
+  return years < 10 ? formatNumber(years, { digits: 1 }) : `${Math.round(years)}`;
 }
 
 /** "about 19 years (10–90 %: 6 to 42)" from the simulated time to know. */
@@ -143,12 +144,12 @@ export function timeToKnowText(t: {
 
 /** "+1 % per 21 days" or "rank IC 0.07": the assumption behind a time-to-know number. */
 export function assumptionLabel(unit: "excess_per_21d" | "rank_ic", value: number): string {
-  return unit === "rank_ic" ? `rank IC ${value.toFixed(2)}` : `+${Math.round(value * 1000) / 10} % per 21 days`;
+  return unit === "rank_ic" ? `rank IC ${formatNumber(value, { digits: 2 })}` : `+${Math.round(value * 1000) / 10} % per 21 days`;
 }
 
 /** e-values span orders of magnitude: "0.42", "3.1", "1,250". */
 export function fmtE(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return "—";
-  if (value >= 100) return Math.round(value).toLocaleString("en-US");
-  return value >= 10 ? value.toFixed(1) : value.toFixed(2);
+  if (value >= 100) return formatNumber(Math.round(value), { digits: 0 });
+  return value >= 10 ? formatNumber(value, { digits: 1 }) : formatNumber(value, { digits: 2 });
 }

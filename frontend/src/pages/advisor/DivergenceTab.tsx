@@ -7,6 +7,7 @@ import { Badge } from "../../components/ui/badge";
 import { EmptyState } from "../../components/composed/EmptyState";
 import { cn } from "../../lib/utils";
 import { api, type WhatWouldChangeResponse, type WhatWouldChangeRow } from "../../lib/api";
+import { Table } from "../../components/ui/table";
 
 const pct = (v: number | null | undefined, digits = 1) =>
   formatPercent(v, { digits });
@@ -63,7 +64,7 @@ export function DivergenceTab() {
         </Card>
       ) : (
         <Card className="p-0 overflow-x-auto">
-          <table className="w-full text-sm">
+          <Table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-text-muted border-b border-border">
                 <th className="py-2 pl-4 pr-3">Position</th>
@@ -124,7 +125,7 @@ export function DivergenceTab() {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </Card>
       )}
 

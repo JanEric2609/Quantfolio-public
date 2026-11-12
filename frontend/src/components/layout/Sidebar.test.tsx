@@ -9,7 +9,7 @@ import { useUiStore } from "../../lib/store";
 
 const TOOLS = ["Quant Lab", "Strategy lab"];
 const ALWAYS = [
-  "Home", "This month", "Portfolio", "Tax", "Budget", "Learn", "Discover", "Watchlist", "News", "Can I trust it?",
+  "Home", "This month", "Portfolio", "Tax", "Budget", "Discover", "Watchlist", "News", "Can I trust it?", "Learn",
 ];
 
 function renderSidebar(path = "/plan") {

@@ -73,7 +73,7 @@ const REGIME_TEXT: Record<string, string> = {
   bull: "text-success",
   bear: "text-danger",
   high_vol: "text-warn",
-  low_vol: "text-sky-400",
+  low_vol: "text-info",
   sideways: "text-text-secondary",
   transition: "text-text-secondary",
 };

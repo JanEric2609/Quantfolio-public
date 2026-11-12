@@ -1,5 +1,6 @@
 import type { EChartsOption } from "echarts";
 import { EChart, type EChartProps } from "./EChart";
+import { formatNumber } from "../../lib/format";
 
 export interface DonutSlice { name: string; value: number; }
 
@@ -22,7 +23,7 @@ export function groupSlices(slices: DonutSlice[], maxSlices: number): DonutSlice
 export function DonutChart({ slices, innerRadius = 50, maxSlices = 8, ...rest }: DonutChartProps) {
   const data = groupSlices(slices, maxSlices);
   const total = data.reduce((sum, s) => sum + s.value, 0) || 1;
-  const pct = (v: number) => `${((v / total) * 100).toFixed(v / total < 0.01 ? 1 : 0)} %`;
+  const pct = (v: number) => `${formatNumber((v / total) * 100, { digits: v / total < 0.01 ? 1 : 0 })} %`;
   const byName = new Map(data.map((s) => [s.name, s.value]));
   const option: EChartsOption = {
     tooltip: { trigger: "item" as const, formatter: (p: unknown) => {

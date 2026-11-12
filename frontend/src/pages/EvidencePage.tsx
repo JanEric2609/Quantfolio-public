@@ -16,6 +16,7 @@ import {
   type NTrialsSummaryResponse,
   type TrialLedgerEntryDto,
 } from "../lib/api";
+import { formatNumber } from "../lib/format";
 
 /**
  * Evidence dashboard (ADR 0015): the global trial ledger and n_trials
@@ -148,7 +149,7 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-semibold">
-              {hurdleAt(summary.resolved) != null ? hurdleAt(summary.resolved)!.toFixed(2) : "—"}
+              {hurdleAt(summary.resolved) != null ? formatNumber(hurdleAt(summary.resolved), { digits: 2 }) : "—"}
             </div>
             <p className="mt-1 text-xs text-text-muted">
               Yearly Sharpe the best of {summary.resolved} skill-less strategies reaches by chance over {years} years
@@ -206,7 +207,7 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
               series={[{ name: "Sharpe hurdle", data: curve.map((p) => [String(p.n_trials), p.sharpe_hurdle]) }]}
               xName="Number of trials (N)"
               yName="Yearly Sharpe hurdle"
-              yFormat={(v) => v.toFixed(2)}
+              yFormat={(v) => formatNumber(v, { digits: 2 })}
             />
           </CardContent>
         </Card>

@@ -414,7 +414,7 @@ function PerturbDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900 p-3 rounded border border-gray-200 dark:border-gray-800">
+          <div className="text-sm text-text-secondary bg-surface-2 p-3 rounded border border-border">
             <p className="font-medium mb-1">What are perturbations?</p>
             <p>
               Perturbations auto-generate challenger config variants to test against the active one in the self-improvement loop.
