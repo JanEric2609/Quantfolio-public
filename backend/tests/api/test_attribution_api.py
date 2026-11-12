@@ -12,7 +12,9 @@ def client():
 
 
 def _routes() -> set[tuple[str, str]]:
-    return {(m, r.path) for r in app.routes for m in getattr(r, "methods", ()) or ()}
+    # The OpenAPI map, not app.routes: FastAPI >= 0.141 keeps included routers
+    # behind wrappers, so app.routes no longer lists their paths.
+    return {(m.upper(), path) for path, ops in app.openapi()["paths"].items() for m in ops}
 
 
 def test_brinson_endpoint_structure(client):
