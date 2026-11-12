@@ -33,7 +33,7 @@ from app.foundation.models.entities import (
     AdvisorStrategy,
     PaperSnapshot,
 )
-from app.foundation.quant_metrics import diebold_mariano_hln
+from app.foundation.quant_metrics import diebold_mariano_nonoverlapping
 
 HORIZON_DAYS = 21
 NW_LAG = HORIZON_DAYS - 1
@@ -282,7 +282,7 @@ def evaluate_paired_promotion(
     state["looks"] = looks
     result.look, result.looks_done = look, len(looks)
     positions = [int(np.busday_count(days[0], day)) for day in days] if days else None
-    dm = diebold_mariano_hln(d_t, h=HORIZON_DAYS, lag=NW_LAG, positions=positions)
+    dm = diebold_mariano_nonoverlapping(d_t, h=HORIZON_DAYS, positions=positions)
     result.dm_stat, result.p_value = dm["stat"], dm["p_value"]
     better = dm["p_value"] is not None and dm["p_value"] < POCOCK_NOMINAL_ALPHA
     if better and return_ok and mdd_ok:

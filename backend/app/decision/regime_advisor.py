@@ -95,7 +95,9 @@ def _infer_action_from_rec(rec: Recommendation) -> str:
         return "reduce_holding"
     if verdict in ("HOLD", "NEUTRAL", "MARKET_WEIGHT", "WATCH"):
         return "hold_position"
-    if verdict in ("CASH", "RAISE_CASH", "DEFENSIVE", "RISK_OFF"):
+    # AVOID and REJECTED_BY_RISK say "do not buy": the money stays in cash. They used to fall through to the
+    # buy_equity default, crediting a correct AVOID to the buy weight (57 rows on prod, plan 2026-11-12, WP10).
+    if verdict in ("CASH", "RAISE_CASH", "DEFENSIVE", "RISK_OFF", "AVOID", "REJECTED_BY_RISK"):
         return "hold_cash"
     if is_bond:
         return "buy_bond"

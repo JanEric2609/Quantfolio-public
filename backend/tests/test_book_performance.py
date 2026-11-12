@@ -161,3 +161,44 @@ def test_end_cuts_the_series_and_ignores_a_fund_bought_later():
     assert whole["unpriced"] == ["IE0000000001"]
     assert cut["unpriced"] == [] and cut["end"] == _day(3)
     assert cut["twr"] == pytest.approx(103.0 / 100.0 - 1.0)
+
+
+def test_dividend_counts_what_reached_the_account_not_the_gross():
+    from app.foundation.models.entities import TaxLedgerEvent
+
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    _snap(db, user, 0, 10)
+    d = D0 + timedelta(days=1)
+    db.add(TaxLedgerEvent(user_id=user.id, tax_year=d.year, event_date=d, event_type="dividend",
+                          isin="IE00B4L5Y983", gross_eur=Decimal("100"), withheld_eur=Decimal("26.375"),
+                          foreign_wht_eur=Decimal("15")))
+    db.commit()
+    perf = _run(db, user, {_day(0): 100.0, _day(1): 100.0}, bench={})
+    assert perf["twr"] == pytest.approx(0.05862, abs=1e-4)      # 58.625 on 1,000, not 100
+
+
+def test_one_missing_price_costs_one_day_not_two(monkeypatch):
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    for i in (0, 1, 2, 3):
+        _snap(db, user, i, 10)
+        db.add(BookPositionSnapshot(
+            user_id=user.id, snapshot_date=D0 + timedelta(days=i), source="dkb", account_id="a2",
+            isin="IE00BK5BQT80", ticker="VWCE.DE", name="FTSE All-World", quantity=Decimal("10"), currency="EUR"))
+    db.commit()
+    monkeypatch.setattr(book_performance, "MAX_PRICE_CARRY_DAYS", 0)
+    a = {_day(0): 100.0, _day(1): 100.0, _day(2): 100.0, _day(3): 110.0}
+    b = {_day(0): 100.0, _day(1): 100.0, _day(3): 100.0}          # no price on day 2
+
+    def closes(_db, symbol, days=730, **kw):
+        return {} if symbol == "BENCH" else (a if symbol == "EUNL.DE" else b)
+
+    with patch("app.foundation.eur_prices.eur_closes", side_effect=closes):
+        perf = book_performance.compute_book_performance(db, user.id, benchmark="BENCH")
+    assert perf["twr"] == pytest.approx(0.05)       # 2,000 on day 1 -> 2,100 on day 3
+    assert perf["days_without_full_prices"] == 1

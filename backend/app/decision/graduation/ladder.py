@@ -440,7 +440,7 @@ def paired_excess(
     *,
     bench_closes: dict[str, float] | None = None,
 ) -> tuple[list[date], list[float]]:
-    """(days, x) with x = sleeve return - benchmark EUR return on identical dates."""
+    """(days, x) with x = sleeve return - lagged beta * benchmark EUR return on identical dates (ADR 0025 amendment)."""
     closed = _snapshot_job_days(db)
     nav = {
         d: float(v)
@@ -459,10 +459,44 @@ def paired_excess(
     bench = {date.fromisoformat(k): float(v) for k, v in bench_closes.items() if v and float(v) > 0}
     days = sorted(d for d in nav if d in bench and start <= d <= end)
     out_days, xs = [], []
+    sleeve_r, bench_r = [], []
     for prev, cur in zip(days, days[1:]):
-        xs.append((nav[cur] / nav[prev] - 1.0) - (bench[cur] / bench[prev] - 1.0))
+        sleeve_r.append(nav[cur] / nav[prev] - 1.0)
+        bench_r.append(bench[cur] / bench[prev] - 1.0)
         out_days.append(cur)
+    xs = beta_adjusted(sleeve_r, bench_r)
     return out_days, xs
+
+
+BETA_PRIOR_DAYS = 20  # weight of the prior beta of 1 (the old plain-excess rule) in days
+BETA_BOUNDS = (0.0, 2.0)
+
+
+def lagged_beta(sleeve: Sequence[float], bench: Sequence[float]) -> list[float]:
+    """Beta of the sleeve on the benchmark for each day, from the days before it only.
+
+    Expanding OLS shrunk toward 1 with ``BETA_PRIOR_DAYS`` pseudo-days, so the first
+    days behave like plain excess return; clipped to ``BETA_BOUNDS``.
+    """
+    out: list[float] = []
+    sxy = sxx = 0.0
+    n = 0
+    for r, b in zip(sleeve, bench):
+        if n >= 2 and sxx > 0:
+            ols = sxy / sxx
+            beta = (n * ols + BETA_PRIOR_DAYS * 1.0) / (n + BETA_PRIOR_DAYS)
+        else:
+            beta = 1.0
+        out.append(min(max(beta, BETA_BOUNDS[0]), BETA_BOUNDS[1]))
+        sxy += r * b
+        sxx += b * b
+        n += 1
+    return out
+
+
+def beta_adjusted(sleeve: Sequence[float], bench: Sequence[float]) -> list[float]:
+    """x_t = r_sleeve - beta_(t-1) * r_bench: a sleeve is credited for skill, not for exposure."""
+    return [r - bt * b for r, b, bt in zip(sleeve, bench, lagged_beta(sleeve, bench))]
 
 
 def _brier(db: Session, candidate: LadderCandidate) -> float | None:

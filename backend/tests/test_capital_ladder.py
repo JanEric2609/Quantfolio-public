@@ -361,3 +361,37 @@ def test_a_provisional_snapshot_day_is_skipped():
     days, _ = lad.paired_excess(db, cand, day, day + timedelta(days=2),
                                 bench_closes={(day + timedelta(days=i)).isoformat(): 100.0 + i for i in range(3)})
     assert days == []  # only the middle day is final; a return needs two final days in a row
+
+
+# --- Beta adjustment (WP10 item 2, ADR 0025 amendment) ---
+
+
+@pytest.mark.parametrize("beta", [0.3, 0.5, 1.0, 1.3])
+def test_a_beta_sleeve_with_zero_alpha_rarely_reaches_earned(beta):
+    """Bull market drift 10 %/yr: plain excess return would credit beta 1.3 with skill."""
+    rng = np.random.default_rng(20261110)
+    reached = 0
+    for _ in range(300):
+        bench = rng.normal(0.10 / 252, 0.15 / DAILY, 1260)
+        sleeve = beta * bench + rng.normal(0.0, 0.04 / DAILY, 1260)
+        x = np.array(lad.beta_adjusted(sleeve.tolist(), bench.tolist()))
+        reached += _step_path(x)[0] >= 2
+    rate = reached / 300
+    assert rate <= 0.05 + 3 * math.sqrt(0.05 * 0.95 / 300), (beta, rate)
+
+
+def test_plain_excess_would_have_credited_beta_above_one():
+    rng = np.random.default_rng(20261110)
+    bench = rng.normal(0.10 / 252, 0.15 / DAILY, 1260)
+    sleeve = 1.3 * bench + rng.normal(0.0, 0.04 / DAILY, 1260)
+    plain = (sleeve - bench).mean() * 252
+    adjusted = np.mean(lad.beta_adjusted(sleeve.tolist(), bench.tolist())) * 252
+    assert plain > 0.02 > abs(adjusted)
+
+
+def test_lagged_beta_uses_only_earlier_days():
+    bench = [0.01, -0.02, 0.015, 0.0, 0.01]
+    sleeve = [0.02, -0.04, 0.03, 0.0, 5.0]
+    b = lad.lagged_beta(sleeve, bench)
+    assert b[0] == 1.0
+    assert lad.lagged_beta(sleeve[:4] + [-5.0], bench) == b  # the last return cannot move its own beta
