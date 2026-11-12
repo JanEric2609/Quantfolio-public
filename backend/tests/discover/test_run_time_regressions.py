@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 from conftest import _memory_db
@@ -169,3 +170,18 @@ def test_latest_bar_date_is_read_once_for_the_stages_of_one_symbol():
     for _ in range(5):
         assert stage_cache.latest_bar_date(db, "AAA.DE") is None
     assert sum("bar_prices" in q for q in queries) == 1
+
+
+def test_todays_partial_bar_does_not_move_the_cache_key():
+    from datetime import timedelta
+
+    from sqlalchemy import text
+
+    db = _memory_db()
+    now = datetime.now(UTC).replace(tzinfo=None)
+    yesterday = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    for ts in (yesterday, now.replace(hour=0, minute=0, second=0, microsecond=0)):
+        db.execute(text("INSERT INTO bar_prices (symbol, ts, open, high, low, close, volume, provider) "
+                        "VALUES ('AAA.DE', :ts, 1, 1, 1, 1, 1, 't')"), {"ts": ts})
+    db.commit()
+    assert stage_cache.latest_bar_date(db, "AAA.DE") == str(yesterday)[:10]
