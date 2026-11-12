@@ -193,8 +193,14 @@ def collect_reviewable_configs(db: Session) -> tuple[dict[str, DiscoveryConfig],
 
 
 def _resolved_predictions_for_champion(db: Session, champion: DiscoveryConfig) -> list[DiscoveryPrediction]:
-    """Resolved predictions produced by the champion config."""
-    return (
+    """Resolved predictions produced by the champion config, one per non-overlapping holding period.
+
+    The same name picked on several days of one month is one outcome, so counting every row overstated
+    the sample behind the Sharpe and the deflated-Sharpe gate (plan 2026-11-12, WP7).
+    """
+    from app.decision.discover.ledger import non_overlapping
+
+    return non_overlapping(
         db.query(DiscoveryPrediction)
         .filter(
             DiscoveryPrediction.config_id == champion.id,

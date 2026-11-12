@@ -1073,7 +1073,10 @@ def _alpha_variant(db: Session) -> str:
             and _ALPHA_VARIANT_MEMO["value"].endswith(datetime.now(UTC).date().isoformat()):
         return str(_ALPHA_VARIANT_MEMO["value"])
 
-    sig = json.dumps(sorted((f["name"], f["dsl"], f["ic"], f["icir"]) for f in _library_factors(db)), default=str)
+    # Name and expression only: alphacrafter_daily rewrites every factor's IC and ICIR at 08:00 UTC, and keying on
+    # them threw away what the 03:00 precompute had warmed (first run of 11-12: 1,492 s of a 1,800 s limit). A
+    # cached exposure therefore weighs the factors by the scores as of its computation, at most one day old.
+    sig = json.dumps(sorted((f["name"], f["dsl"]) for f in _library_factors(db)), default=str)
     value = f"lib={hashlib.sha1(sig.encode()).hexdigest()[:10]},day={datetime.now(UTC).date().isoformat()}"
     _ALPHA_VARIANT_MEMO.update(at=now, value=value)
     return value
@@ -2426,28 +2429,34 @@ def stage_portfolio_fit(
         corr = 0.0
     risk = _marginal_risk(cand_rets.loc[common], port_weighted.loc[common], corr)  # type: ignore[union-attr]
 
-    # ETF overlap check
+    # ETF overlap check. An exception leaves the overlap unknown, not zero: a duplicate of held ETFs must not pass
+    # as a diversifier because a lookup failed (it scores the worst overlap and carries ``overlap_unknown``).
     overlap = 0.0
+    overlap_unknown = False
     if is_etf:
-        from app.foundation.etf_lookup import get_etf_composition
-        comp = get_etf_composition(symbol)
-        if comp and comp.holdings:
-            cand_holdings = [{"ticker": hh.ticker, "weight": hh.weight} for hh in comp.holdings]
-            # Held ETFs: every synced broker depot (Scalable's VWRA too) plus
-            # holdings entered by hand, through live_positions (AGENTS.md).
-            held_lists = _run_cached(("held_etf_holdings", user_id), lambda: _held_etf_holdings(db, user_id))
-            max_overlap = 0.0
-            for held_list in held_lists:
-                try:
-                    ov = pairwise_overlap(cand_holdings, held_list)
-                    max_overlap = max(max_overlap, ov.get("overlap", 0.0))
-                except Exception:
-                    continue
-            overlap = max_overlap
+        try:
+            from app.foundation.etf_lookup import get_etf_composition
+            comp = get_etf_composition(symbol)
+            if comp and comp.holdings:
+                cand_holdings = [{"ticker": hh.ticker, "weight": hh.weight} for hh in comp.holdings]
+                # Held ETFs: every synced broker depot (Scalable's VWRA too) plus
+                # holdings entered by hand, through live_positions (AGENTS.md).
+                held_lists = _run_cached(("held_etf_holdings", user_id), lambda: _held_etf_holdings(db, user_id))
+                max_overlap = 0.0
+                for held_list in held_lists:
+                    try:
+                        ov = pairwise_overlap(cand_holdings, held_list)
+                        max_overlap = max(max_overlap, ov.get("overlap", 0.0))
+                    except Exception:
+                        overlap_unknown = True
+                overlap = max_overlap
+        except Exception as exc:  # noqa: BLE001
+            logger.info("stage_portfolio_fit: overlap check failed for %s: %s", symbol, exc)
+            overlap_unknown = True
 
     # Fit score: 0-1, higher for low correlation and low overlap
     corr_penalty = max(0.0, min(1.0, (corr + 1.0) / 2.0))  # map [-1,1] -> [0,1]
-    overlap_penalty = overlap
+    overlap_penalty = 1.0 if overlap_unknown else overlap
     fit_score = 1.0 - (0.6 * corr_penalty + 0.4 * overlap_penalty)
     fit_score = max(0.0, min(1.0, fit_score))
 
@@ -2458,6 +2467,7 @@ def stage_portfolio_fit(
         "fx_basis": fx_basis,
         "weight_basis": weight_basis,
         "overlap": round(overlap, 4) if is_etf else None,
+        **({"overlap_unknown": True} if overlap_unknown else {}),
         "fit_score": round(fit_score, 4),
         # Shadow signals (WP3): recorded, not in fit_score.
         **risk,
@@ -2484,16 +2494,19 @@ def _pooled_serving(db: Session) -> dict[str, Any]:
     from app.lab.quant_ml.registry import load_model
 
     today = datetime.now(UTC).date()
-    with _ML_LOCK:
-        if _ML_CACHE.get("day") == today:
-            return _ML_CACHE
     row = pooled.latest_pooled_row(db)
+    # Day and model id: a model trained after the cache was filled (or one that just passed its gate) is served at once.
+    with _ML_LOCK:
+        if _ML_CACHE.get("day") == today and _ML_CACHE.get("model_id") == (row.id if row is not None else None) \
+                and _ML_CACHE.get("row_status") == (row.status if row is not None else "no_model"):
+            return _ML_CACHE
     # Plain values only: the cache outlives the session that loaded the row, and
     # a detached ORM row raises on attribute access (11-11: every symbol's ML
     # signal failed with "not bound to a Session").
     state: dict[str, Any] = {
         "day": today, "model_id": row.id if row is not None else None, "model": None, "universe": None,
         "status": row.status if row is not None else "no_model",
+        "row_status": row.status if row is not None else "no_model",
     }
     if row is not None and row.status == "completed" and row.artefact_path:
         base = _exposure_base(db)
@@ -2951,15 +2964,17 @@ def _candidate_pipeline(
                 scores["ml_signal"] = s
 
         # Stage 5c/5d — IBES estimate-revision / insider-trading signals,
-        # advisory-only, ticker-matched, never reject.
-        if reject_stage is None:
+        # advisory-only, ticker-matched, never reject. A fund has no insiders and no analyst
+        # estimates (about 1,100 ETFs paid for both), so neither runs for one; its score keys stay
+        # absent, which the composite reads as a dropped signal, not a neutral one.
+        if reject_stage is None and not is_etf:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
             s, r = _timed("estimate_revision_signal", stage_estimate_revision_signal, db, symbol)
             if r is None:
                 scores["estimate_revision_signal"] = s
 
-        if reject_stage is None:
+        if reject_stage is None and not is_etf:
             if cancel_token is not None:
                 cancel_token.raise_if_cancelled()
             s, r = _timed("insider_signal", stage_insider_signal, db, symbol)
@@ -3004,6 +3019,7 @@ def _candidate_pipeline(
             "reject_reason": reject_reason,
             "composite_score": round(composite, 4),
             "lane": LANE_FUND if is_etf else LANE_STOCK,
+            "asset_class": asset_class if is_etf else None,
         }
 
         if results_out is not None:
@@ -3295,7 +3311,7 @@ def select_shortlist(
     Funds take at most :func:`fund_slots_for`, stocks the rest; slots a lane
     cannot fill go to the other.
     """
-    funds = [r for r in ranked if r.get("lane") == LANE_FUND]
+    funds, class_capped = apply_fund_class_cap([r for r in ranked if r.get("lane") == LANE_FUND], limit)
     stocks = [r for r in ranked if r.get("lane") != LANE_FUND]
     picked_funds = funds[: fund_slots_for(limit)]
     picked_stocks, capped = apply_sector_cap(stocks, limit, already_selected=picked_funds)
@@ -3303,11 +3319,35 @@ def select_shortlist(
     extra_funds = funds[len(picked_funds):][: max(0, spare)]
     for result in capped:
         result["sector_capped"] = True
+    for result in class_capped:
+        result["class_capped"] = True
     for result in funds[len(picked_funds) + len(extra_funds):]:
         result["fund_slots_full"] = True
     selected = [*picked_funds, *extra_funds, *picked_stocks]
     selected.sort(key=shortlist_order, reverse=True)
     return selected, capped
+
+
+def apply_fund_class_cap(funds: list[dict[str, Any]], limit: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Keep at most ``sector_cap_for(limit)`` funds per asset class (best first); returns (kept, capped).
+
+    Funds had no cap at all: three Chinese government-bond ETFs shared one shortlist of eleven (UI review,
+    plan 2026-11-12, WP7). The limit is the stocks' sector cap, so a third of the slots can never be one class.
+    A fund without a recorded class is never capped.
+    """
+    cap = sector_cap_for(limit)
+    counts: dict[str, int] = {}
+    kept: list[dict[str, Any]] = []
+    capped: list[dict[str, Any]] = []
+    for fund in funds:
+        klass = fund.get("asset_class")
+        if isinstance(klass, str) and klass:
+            if counts.get(klass, 0) >= cap:
+                capped.append(fund)
+                continue
+            counts[klass] = counts.get(klass, 0) + 1
+        kept.append(fund)
+    return kept, capped
 
 
 def apply_sector_cap(

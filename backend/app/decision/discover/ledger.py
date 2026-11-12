@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -58,6 +58,29 @@ def supersede_same_day(db: Session, prediction: DiscoveryPrediction) -> int:
     for row in rows:
         row.superseded_by_run_id = prediction.run_id
     return len(rows)
+
+
+def non_overlapping(picks: list[DiscoveryPrediction]) -> list[DiscoveryPrediction]:
+    """One pick per symbol and horizon for each non-overlapping holding period (the earliest first).
+
+    A name picked on several days of one month is one observation of one outcome, not several: 125 open
+    picks were 46 symbol-horizon groups (plan 2026-11-12, WP7). Counting them all makes a hit rate or a
+    t-statistic look more certain than the data allow. A pick is kept when it starts at or after the
+    previous kept pick's ``resolve_at``; the ledger itself keeps every row (``supersede_same_day`` is unchanged).
+    """
+    def _utc(moment: datetime) -> datetime:
+        return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+    kept: list[DiscoveryPrediction] = []
+    ends: dict[tuple[str, int], datetime] = {}
+    for pick in sorted(picks, key=lambda r: _utc(r.predicted_at)):
+        group = (pick.symbol, int(pick.horizon_days or 0))
+        end = ends.get(group)
+        if end is not None and _utc(pick.predicted_at) < end:
+            continue
+        kept.append(pick)
+        ends[group] = _utc(pick.resolve_at) if pick.resolve_at is not None else _utc(pick.predicted_at)
+    return kept
 
 
 def add_trading_days(start: datetime, trading_days: int) -> datetime:

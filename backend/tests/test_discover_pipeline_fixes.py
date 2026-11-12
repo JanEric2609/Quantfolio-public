@@ -285,3 +285,36 @@ def test_portfolio_fit_sees_through_asynchronous_closes():
     assert scores["correlation_basis"] == "weekly"
     assert scores["correlation_weeks"] >= 100
     assert scores["correlation"] > 0.6
+
+
+def test_portfolio_fit_etf_overlap_failure_is_unknown_and_scores_worst(monkeypatch):
+    """WP7: an exception in the overlap check leaves it unknown (worst penalty), not zero."""
+    import app.foundation.etf_lookup as etf_lookup
+
+    def run(raises: bool):
+        db = _memory_db()
+        user = User(id=uuid4().hex, username="u", password_hash="x")
+        db.add(user)
+        db.commit()
+        _seed_prices(db, "CAND", [100.0 + i * 0.1 for i in range(260)])
+        _seed_prices(db, "PORT", [50.0 + (i % 7) * 0.2 for i in range(260)])
+        account = DkbAccount(id=uuid4().hex, user_id=user.id, type="depot",
+                             iban="DE" + uuid4().hex[:20], balance=Decimal("0"), currency="EUR")
+        db.add(account)
+        db.commit()
+        db.add(DkbPosition(id=uuid4().hex, account_id=account.id, isin="X", ticker="PORT", name="Port",
+                           quantity=Decimal("1"), avg_buy_price=Decimal("50"), current_price=Decimal("60"),
+                           current_value=Decimal("60")))
+        db.commit()
+
+        def boom(_symbol):
+            raise RuntimeError("lookup down")
+
+        monkeypatch.setattr(etf_lookup, "get_etf_composition", boom if raises else lambda _s: None)
+        scores, _ = stage_portfolio_fit(db, user.id, "CAND", is_etf=True)
+        return scores
+
+    ok, failed = run(False), run(True)
+    assert "overlap_unknown" not in ok
+    assert failed["overlap_unknown"] is True
+    assert failed["fit_score"] < ok["fit_score"]
