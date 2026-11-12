@@ -46,6 +46,7 @@ def test_a_new_bar_date_or_variant_computes_again():
     assert len(calls) == 2
     db.execute(text("INSERT INTO bar_prices (symbol, ts, close) VALUES ('AAA', :a, 3)"), {"a": datetime(2026, 11, 10)})
     db.commit()
+    stage_cache._BAR_DATE_MEMO.clear()          # the next night: the 45 s memory has long expired
     stage_cache.cached_stage(db, "AAA", "quant_signals", stage, db, "AAA", variant="etf=0")
     assert len(calls) == 3                      # a new latest bar is a new key
 
