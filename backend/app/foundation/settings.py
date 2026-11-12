@@ -254,6 +254,7 @@ DEFAULT_PUBLIC_SETTINGS: dict[str, Any] = {
     "ladder_bad_alpha_pct": -3.0,
     "ladder_proven_weight_pct": 15.0,
     "ladder_owner_veto": False,
+    "ladder_learning_eur_per_month": 0.0,
     "plan_min_order_eur": 1000,
     # Sell only when an unlocked sleeve sits this many percentage points above
     # its target and a year of contributions cannot bring it back (Phase 4).

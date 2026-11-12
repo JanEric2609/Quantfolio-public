@@ -301,6 +301,12 @@ _reg(CatalogEntry("ladder_proven_weight_pct", "profile", "Ladder: Proven weight"
 _reg(CatalogEntry("ladder_owner_veto", "profile", "Ladder: owner veto",
     "Keep every candidate at the Paper stage (0 % stock picks), whatever the evidence says.",
     input_type="boolean", section="Monthly plan"))
+_reg(CatalogEntry("ladder_learning_eur_per_month", "profile", "Learning sleeve (EUR per month)",
+    "A small fixed amount for one stock pick a month, chosen by you. 0 is off; at most 20. "
+    "A learning expense you chose. It is not evidence that the picks work.",
+    input_type="number", unit="eur", min=0, max=20, section="Monthly plan",
+    extended_help="Applies while the LLM advisor is at the Paper or Tuition stage, for 12 monthly plans; save the "
+                  "setting again to renew. You place the order yourself; Quantfolio never trades."))
 _reg(CatalogEntry("plan_drift_band_pp", "profile", "Drift band",
     "A sleeve is only sold down once it sits this far above target and a year of contributions can't fix it.",
     input_type="number", unit="pp", min=0, section="Monthly plan",
