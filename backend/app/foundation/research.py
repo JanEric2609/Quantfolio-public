@@ -196,7 +196,7 @@ def _latest_fundamentals(db: Session, ticker: str) -> dict[str, Any] | None:
     return out
 
 
-def _recent_news(db: Session, ticker: str, limit: int = 10) -> list[dict[str, Any]]:
+def _stored_news(db: Session, ticker: str, limit: int) -> list[dict[str, Any]]:
     rows = (
         db.query(NewsItem)
         .filter(NewsItem.ticker == ticker)
@@ -209,6 +209,73 @@ def _recent_news(db: Session, ticker: str, limit: int = 10) -> list[dict[str, An
     return [{"title": r.title, "source": r.source, "published_at": str(r.published_at),
              "sentiment_label": r.sentiment_label if has_real_sentiment(r) else None,
              "sentiment_score": float(r.sentiment_score or 0) if has_real_sentiment(r) else None} for r in rows]
+
+
+def _gdelt_news(db: Session, ticker: str, limit: int) -> list[dict[str, Any]]:
+    """Headlines GDELT mentioned for the ticker (the nightly forward-lab fetch), newest first."""
+    from app.foundation.models.entities import NewsMention
+
+    rows = (
+        db.query(NewsMention)
+        .filter(NewsMention.symbol == ticker)
+        .order_by(NewsMention.seen_at.desc())
+        .limit(limit * 3)
+        .all()
+    )
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        if r.title_key in seen:
+            continue
+        seen.add(r.title_key)
+        out.append({"title": r.title, "source": r.outlet or "gdelt", "published_at": str(r.seen_at),
+                    "sentiment_label": None, "sentiment_score": None})
+        if len(out) >= limit:
+            break
+    return out
+
+
+ON_DEMAND_NEWS_TIMEOUT_S = 8.0
+
+
+def _on_demand_news(db: Session, ticker: str, limit: int) -> list[dict[str, Any]]:
+    """One company-news fetch through the provider chain, short timeout, nothing stored."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.foundation.providers.registry import build_provider_registry
+
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        result = pool.submit(build_provider_registry(db).get_news, ticker, limit).result(timeout=ON_DEMAND_NEWS_TIMEOUT_S)
+    except Exception:  # noqa: BLE001 - a slow or failing feed is "no news found"
+        logger.info("research: on-demand news failed for %s", ticker, exc_info=True)
+        return []
+    finally:
+        pool.shutdown(wait=False)
+    out = []
+    for item in (result.get("data") or []) if result.get("ok") else []:
+        title = item.get("title")
+        if not title:
+            continue
+        published = item.get("published_at")
+        if isinstance(published, (int, float)):
+            published = datetime.fromtimestamp(published, UTC).isoformat()
+        out.append({"title": str(title), "source": item.get("source") or "provider",
+                    "published_at": str(published or ""), "sentiment_label": None, "sentiment_score": None})
+    return out[:limit]
+
+
+def _recent_news(db: Session, ticker: str, limit: int = 10) -> list[dict[str, Any]]:
+    """Stored news first, then GDELT mentions, then one on-demand fetch (WP5)."""
+    return _news_with_coverage(db, ticker, limit)[0]
+
+
+def _news_with_coverage(db: Session, ticker: str, limit: int = 10) -> tuple[list[dict[str, Any]], str]:
+    for name, fetch in (("stored", _stored_news), ("gdelt", _gdelt_news), ("on_demand", _on_demand_news)):
+        rows = fetch(db, ticker, limit)
+        if rows:
+            return rows, name
+    return [], "none"
 
 
 def _existing_recommendations(db: Session, ticker: str) -> list[dict[str, Any]]:
@@ -303,6 +370,7 @@ def build_context(db: Session, ticker: str, user_id: str) -> dict[str, Any]:
     q = quote(db, ticker)
     price_history = _price_history(db, ticker)
     fund = _latest_fundamentals(db, ticker)
+    news, news_coverage = _news_with_coverage(db, ticker)
     return {
         "ticker": ticker,
         "company": _company(db, ticker, fund),
@@ -310,7 +378,8 @@ def build_context(db: Session, ticker: str, user_id: str) -> dict[str, Any]:
         "price_history": price_history,
         "technicals": price_technicals(price_history),
         "fundamentals": fund,
-        "recent_news": _recent_news(db, ticker),
+        "recent_news": news,
+        "news_coverage": news_coverage,
         "recommendations": _existing_recommendations(db, ticker),
         "portfolio_context": _portfolio_context(db, user_id),
         "regime": _current_regime(db),
@@ -523,7 +592,8 @@ def _build_user_message(context: dict[str, Any]) -> str:
             tag = n.get("sentiment_label") or "not scored"
             parts.append(f"- [{tag}] {n['title']} ({n['source']}, {n['published_at'][:10]})")
     else:
-        parts.append("\n**Recent News:** none stored for this stock.")
+        # Not "no recent news": nothing we can read covers this company (WP5).
+        parts.append("\n**Recent News:** no news source covers this company, so sentiment cannot be judged.")
 
     # Existing recommendations
     recs = context.get("recommendations", [])

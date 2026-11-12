@@ -113,7 +113,7 @@ def test_the_prompt_judges_leverage_by_net_debt_and_labels_the_figures():
     assert "Return 1 month %" in msg and "RSI 14 days" in msg
     assert "the last session still in progress" in msg
     assert "143542" not in msg and "143,542" not in msg  # midday volume is gone
-    assert "none stored for this stock" in msg
+    assert "no news source covers this company" in msg
     assert "infer what investors think" in research._SYSTEM_PROMPT
 
 
