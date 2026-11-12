@@ -75,7 +75,7 @@ function Section({ data, exploratory = false }: { data: TrustRankingSection; exp
 
       {ic.n_runs > 0 ? (
         <div className="grid gap-3 md:grid-cols-2">
-          <table className="w-full text-xs">
+          <div className="overflow-x-auto"><table className="w-full text-xs">
             <caption className="mb-1 text-left text-xs font-medium text-text-primary">Does the signal fade? IC by horizon</caption>
             <thead>
               <tr className="border-b border-border text-left text-text-muted">
@@ -93,8 +93,8 @@ function Section({ data, exploratory = false }: { data: TrustRankingSection; exp
                 </tr>
               ))}
             </tbody>
-          </table>
-          <table className="w-full text-xs">
+          </table></div>
+          <div className="overflow-x-auto"><table className="w-full text-xs">
             <caption className="mb-1 text-left text-xs font-medium text-text-primary">
               Mean excess vs your ETF by score fifth (21 days)
             </caption>
@@ -112,7 +112,7 @@ function Section({ data, exploratory = false }: { data: TrustRankingSection; exp
                 </tr>
               ))}
             </tbody>
-          </table>
+          </table></div>
         </div>
       ) : null}
 
@@ -138,7 +138,7 @@ function Section({ data, exploratory = false }: { data: TrustRankingSection; exp
       ) : null}
 
       {data.gate_check.length > 0 ? (
-        <table className="w-full text-xs" data-testid="ranking-gates">
+        <div className="overflow-x-auto"><table className="w-full text-xs" data-testid="ranking-gates">
           <caption className="mb-1 text-left text-xs font-medium text-text-primary">
             Do the filters remove losers? Rejected names minus scored ones, same run, 21 days
           </caption>
@@ -163,7 +163,7 @@ function Section({ data, exploratory = false }: { data: TrustRankingSection; exp
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       ) : null}
 
       {data.etf_ic.n_runs > 0 ? (

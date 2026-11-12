@@ -14,8 +14,8 @@ const WATCHLIST_TABS = [
 export function ResearchLayout() {
   return (
     <div className="space-y-6">
-      <PageHeader title="Watchlist" />
-      <TabNav tabs={WATCHLIST_TABS} ariaLabel="Watchlist sections" />
+      <PageHeader title="Research" />
+      <TabNav tabs={WATCHLIST_TABS} ariaLabel="Research sections" />
       <Outlet />
     </div>
   );

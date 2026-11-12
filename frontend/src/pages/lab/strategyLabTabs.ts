@@ -13,7 +13,7 @@ export interface StrategyLabTab {
 export const STRATEGY_LAB_TABS: StrategyLabTab[] = [
   {
     to: "/evidence",
-    label: "Evidence",
+    label: "Gate record",
     consequence: "A passing check here is the only thing that changes This month's plan.",
   },
   {

@@ -17,6 +17,13 @@ export function TradeCheckPanel({ portfolioId }: { portfolioId: string }) {
     queryFn: () => api<TradeCheckSummary>(`/api/paper-portfolio/${portfolioId}/trade-check`),
   });
   const d = q.data;
+  if (q.isError) {
+    return (
+      <p role="alert" className="text-xs text-text-muted">
+        The trade check could not be loaded. Reload to try again.
+      </p>
+    );
+  }
   if (!d || typeof d.trades_checked !== "number" || d.trades_checked === 0 || !Array.isArray(d.recent)) return null;
 
   // What the blocked trades added against the index; turning the check on gives it up.

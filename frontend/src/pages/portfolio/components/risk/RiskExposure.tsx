@@ -7,15 +7,18 @@ import type { RiskAssessment, VerificationStressResult } from "../../../../lib/a
 
 const pct = (v: number, digits = 1) => `${(v * 100).toFixed(digits)} %`;
 
-function concentrationLabel(hhi: number): { label: string; variant: "success" | "info" | "warning" | "danger" } {
-  if (hhi < 0.15) return { label: "Well diversified", variant: "success" };
+// The two bars measure different things: the holding list (a single index ETF is one
+// holding) and what is inside it. The words say which, so "Extreme" above "Well
+// diversified" reads as the one-fund list over a broad look-through, not a contradiction.
+function concentrationLabel(hhi: number, byHolding: boolean): { label: string; variant: "success" | "info" | "warning" | "danger" } {
+  if (hhi < 0.15) return { label: byHolding ? "Spread over many holdings" : "Well diversified", variant: "success" };
   if (hhi < 0.25) return { label: "Moderate", variant: "info" };
-  if (hhi < 0.5) return { label: "Concentrated", variant: "warning" };
-  return { label: "Extreme", variant: "danger" };
+  if (hhi < 0.5) return { label: byHolding ? "Few large holdings" : "Concentrated", variant: "warning" };
+  return { label: byHolding ? "One holding dominates" : "Extreme", variant: "danger" };
 }
 
-function ConcentrationBar({ hhi, label }: { hhi: number; label: string }) {
-  const meta = concentrationLabel(hhi);
+function ConcentrationBar({ hhi, label, byHolding = false }: { hhi: number; label: string; byHolding?: boolean }) {
+  const meta = concentrationLabel(hhi, byHolding);
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between text-xs">
@@ -42,7 +45,7 @@ export function ConcentrationCard({ risk }: { risk: RiskAssessment }) {
         <CardTitle className="text-sm font-medium text-text-secondary">Concentration</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <ConcentrationBar hhi={risk.concentration_index} label="By holding (HHI)" />
+        <ConcentrationBar hhi={risk.concentration_index} label="By holding (HHI)" byHolding />
         {risk.lookthrough_count > 0 ? (
           <>
             <ConcentrationBar hhi={risk.lookthrough_hhi} label="Look-through (ETFs opened up)" />
@@ -61,9 +64,13 @@ export function ConcentrationCard({ risk }: { risk: RiskAssessment }) {
 
 /** Currency the value really moves with: index ETFs are looked through to the currencies their index trades in. */
 export function CurrencyCard({ risk }: { risk: RiskAssessment }) {
-  const slices = Object.entries(risk.currency_exposure)
+  // About 25 currencies sit at 0.0 %: show those under half a percent as one "Other" row.
+  const all = Object.entries(risk.currency_exposure);
+  const shown = all.filter(([, value]) => value >= 0.005);
+  const otherShare = all.filter(([, value]) => value < 0.005).reduce((sum, [, value]) => sum + value, 0);
+  const slices = [...shown, ...(otherShare > 0 ? ([["Other", otherShare]] as [string, number][]) : [])]
     .map(([name, value]) => ({ name, value: Math.round(value * 1000) / 10 }))
-    .sort((a, b) => b.value - a.value);
+    .sort((a, b) => (a.name === "Other" ? 1 : b.name === "Other" ? -1 : b.value - a.value));
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -112,7 +119,7 @@ export function AssetTypeCard({ risk }: { risk: RiskAssessment }) {
       <CardContent>
         {slices.length > 0 ? (
           <div className="flex flex-col items-center">
-            <DonutChart slices={slices} height={200} innerRadius={50} ariaLabel="Asset type shares" />
+            <DonutChart slices={slices} height={260} innerRadius={60} ariaLabel="Asset type shares" />
             <ul className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1 text-xs" aria-label="Asset type shares">
               {slices.map((s) => (
                 <li key={s.name} className="flex justify-between gap-3">

@@ -97,10 +97,16 @@ describe("ShortlistCards pool rank (ADR 0018 §6)", () => {
       <ShortlistCards candidates={[{ ...base, pool_rank: 3, pool_size: 187 }]} onOpenDossier={() => {}} tiers={tiers(0.48)} />,
     );
     expect(screen.getByTestId("worth-acting")).toHaveTextContent("Not yet: no edge is shown for this tier");
-    expect(screen.getByTestId("worth-acting")).toHaveTextContent("about €2.98 (0.6 %)");
+    expect(screen.getByTestId("shortlist-cost-note")).toHaveTextContent("about €2.98 (0.6 %)");
     rerender(
       <ShortlistCards candidates={[{ ...base, pool_rank: 3, pool_size: 187 }]} onOpenDossier={() => {}} tiers={tiers(0.53)} />,
     );
     expect(screen.getByTestId("worth-acting")).toHaveTextContent("Possibly");
+  });
+  it("does not colour the return chip green when no edge is shown", () => {
+    render(<ShortlistCards candidates={[{ ...base, expected_return: 4.2 }]} onOpenDossier={() => {}} />);
+    const chip = screen.getByText(/Ret\. est\./);
+    expect(chip).toHaveTextContent("no edge shown");
+    expect(chip.className).not.toContain("text-success");
   });
 });

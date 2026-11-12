@@ -43,7 +43,7 @@ export function IngredientAttributionCard() {
               {data.rho_bar != null && <> · mean pairwise correlation {formatNumber(data.rho_bar, { digits: 2 })}</>}
               .
             </p>
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto"><table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-text-secondary">
                   <th className="py-1 pr-3 font-medium">Ingredient</th>
@@ -64,7 +64,7 @@ export function IngredientAttributionCard() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           </div>
         )}
       </CardContent>
