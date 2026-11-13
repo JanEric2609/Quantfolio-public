@@ -314,9 +314,12 @@ def _block_mean_track_record(
             observations.append(sum(returns) / len(returns))
             used.extend(r for r in members if r.outcome_status == "resolved" and r.realised_return is not None)
 
+    from app.decision.discover.ledger import non_overlapping
+
+    # One pick per symbol and holding period: repeated picks of one name are one outcome (plan 2026-11-12, WP7).
     hits = [
         1.0 if (r.score_json or {}).get("hit") else 0.0
-        for r in used
+        for r in non_overlapping(used)
         if (r.score_json or {}).get("hit") is not None
     ]
     hit_rate = (sum(hits) / len(hits)) if hits else None
