@@ -81,6 +81,7 @@ dev = [
   "pytest>=8.0",
   "pytest-asyncio>=0.23",
   "pytest-cov>=5.0",
+  "diff-cover>=9.0",
   "pytest-timeout>=2.1",
   "pytest-xdist>=3.8",
   "ruff>=0.5,<0.16",  # 0.16.0 has a rule-resolution regression: extend-select=[BLE001,S608] pulls in whole unrelated categories (B, S, ASYNC, YTT), producing 1500+ false positives

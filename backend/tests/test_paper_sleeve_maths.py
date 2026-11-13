@@ -8,6 +8,7 @@ from uuid import uuid4
 import pandas as pd
 from conftest import _memory_db
 
+import pytest
 from app.decision.advisor import cycle as cycle_mod
 from app.decision.advisor.cycle import (
     _record_sale,
@@ -385,10 +386,8 @@ def test_a_failed_reset_changes_nothing():
     db.commit()
     with patch("app.decision.paper_portfolio.paper_quote_eur", return_value={"price": 77.0}), \
             patch("app.decision.paper_portfolio.recompute_baseline_value", side_effect=RuntimeError("boom")):
-        try:
+        with pytest.raises(RuntimeError, match="boom"):
             reset_portfolio(db, p.id, reason="test")
-        except RuntimeError:
-            pass
     assert db.query(PaperHolding).filter_by(portfolio_id=p.id).count() == 1
     assert db.query(PaperPortfolioArchive).count() == 0
 

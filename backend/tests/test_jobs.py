@@ -16,10 +16,7 @@ class TestTrackJob:
 
         db = _memory_db()
         with patch("app.foundation.core.db.SessionLocal", return_value=db):
-            try:
-                _track_job("test_job", lambda: None)
-            except TypeError:
-                pass
+            _track_job("test_job", lambda: None)
 
         runs = db.query(JobRun).all()
         assert len(runs) == 1
@@ -30,13 +27,10 @@ class TestTrackJob:
 
         db = _memory_db()
         with patch("app.foundation.core.db.SessionLocal", return_value=db):
-            try:
-                _track_job("test_job", lambda: None)
-            except TypeError:
-                pass
+            _track_job("test_job", lambda: None)
 
         run = db.query(JobRun).first()
-        assert run.status in ("success", "running", "error")
+        assert run.status == "success"
 
     def test_sets_status_error_on_exception(self) -> None:
         from app.foundation.jobs import _track_job
@@ -46,23 +40,17 @@ class TestTrackJob:
 
         db = _memory_db()
         with patch("app.foundation.core.db.SessionLocal", return_value=db):
-            try:
-                _track_job("test_job", failing_job)
-            except TypeError:
-                pass
+            _track_job("test_job", failing_job)
 
         run = db.query(JobRun).first()
-        assert run.status in ("error", "running")
+        assert run.status == "error" and "test error" in run.error_message
 
     def test_records_triggered_by(self) -> None:
         from app.foundation.jobs import _track_job
 
         db = _memory_db()
         with patch("app.foundation.core.db.SessionLocal", return_value=db):
-            try:
-                _track_job("test_job", lambda: None, triggered_by="manual")
-            except TypeError:
-                pass
+            _track_job("test_job", lambda: None, triggered_by="manual")
 
         run = db.query(JobRun).first()
         assert run.triggered_by == "manual"
@@ -72,10 +60,7 @@ class TestTrackJob:
 
         db = _memory_db()
         with patch("app.foundation.core.db.SessionLocal", return_value=db):
-            try:
-                _track_job("test_job", lambda: None)
-            except TypeError:
-                pass
+            _track_job("test_job", lambda: None)
 
         run = db.query(JobRun).first()
         assert run.duration_ms is None or run.duration_ms >= 0

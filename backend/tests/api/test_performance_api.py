@@ -52,12 +52,14 @@ def test_performance_endpoints_exist(client):
     # Actual testing requires database + auth setup
 
     # Expected endpoints:
-    # POST /api/performance/composites
-    # GET /api/performance/composites
-    # POST /api/performance/ledger/snapshot
-    # GET /api/performance/ledger
-
-    assert True
+    # The OpenAPI map, not app.routes: FastAPI >= 0.141 keeps included routers
+    # behind wrappers, so app.routes no longer lists their paths.
+    routes = {(m.upper(), path) for path, ops in app.openapi()["paths"].items() for m in ops}
+    for expected in (
+        ("POST", "/api/performance/composites"), ("GET", "/api/performance/composites"),
+        ("POST", "/api/performance/ledger/snapshot"), ("GET", "/api/performance/ledger"),
+    ):
+        assert expected in routes
 
 
 def test_ledger_snapshot_computes_ex_post_risk_from_snapshot_series(client, db):

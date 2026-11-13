@@ -11,6 +11,12 @@ def client():
     return TestClient(app)
 
 
+def _routes() -> set[tuple[str, str]]:
+    # The OpenAPI map, not app.routes: FastAPI >= 0.141 keeps included routers
+    # behind wrappers, so app.routes no longer lists their paths.
+    return {(m.upper(), path) for path, ops in app.openapi()["paths"].items() for m in ops}
+
+
 def test_brinson_endpoint_structure(client):
     """Brinson endpoint should return three-artifact envelope."""
     # Note: This is a structural test; actual execution requires auth + DB
@@ -23,11 +29,9 @@ def test_brinson_endpoint_structure(client):
     #   "ledger_ref": "..."
     # }
 
-    # Placeholder: verify endpoint exists
-    assert True
+    assert ("POST", "/api/attribution/brinson") in _routes()
 
 
 def test_factor_endpoint_structure(client):
     """Factor attribution endpoint should return three-artifact envelope."""
-    # Placeholder: verify endpoint exists
-    assert True
+    assert ("POST", "/api/attribution/factor") in _routes()

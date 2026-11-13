@@ -1,0 +1,13 @@
+[
+ "tests/test_auth_rate_limit.py::test_clear_nonexistent_user_is_safe",
+ "tests/test_factor_dsl.py::test_validate_accepts_all_functions",
+ "tests/test_integration_probe.py::test_service_literal_accepts_new",
+ "tests/test_jobs.py::test_release_is_a_noop_without_a_lock",
+ "tests/test_models_entities_regression.py::test_all_symbols_importable_directly",
+ "tests/test_quant_mc_api_validation.py::test_the_documented_example_is_valid",
+ "tests/test_quant_rl.py::test_train_missing_policy_id_is_noop",
+ "tests/test_security_failclosed.py::test_startup_allows_local_sqlite_with_defaults",
+ "tests/test_settings.py::test_integration_test_request_accepts_every_sensitive_integration",
+ "tests/test_setup_token.py::test_discard_is_safe_without_a_token_file",
+ "tests/test_text_safety.py::test_result_always_utf8_encodable"
+]
