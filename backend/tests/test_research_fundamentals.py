@@ -122,3 +122,30 @@ def test_52_week_range_uses_daily_highs_and_lows_not_closes():
     out = price_technicals(rows, today=__import__("datetime").date(2026, 6, 1))
     assert out["high_52w"] == 20.0 and out["high_52w_date"] == "2026-01-10"
     assert out["low_52w"] == 7.5 and out["low_52w_date"] == "2026-01-04"
+
+
+def test_report_news_falls_back_to_gdelt_then_on_demand_then_none():
+    from datetime import UTC, date, datetime
+    from unittest.mock import patch
+
+    from app.foundation import research
+    from app.foundation.models.entities import NewsMention
+
+    db = _memory_db()
+    with patch.object(research, "_on_demand_news", return_value=[]):
+        assert research._news_with_coverage(db, "WKL.AS") == ([], "none")
+    with patch.object(research, "_on_demand_news", return_value=[{"title": "Live headline"}]):
+        assert research._news_with_coverage(db, "WKL.AS") == ([{"title": "Live headline"}], "on_demand")
+    db.add(NewsMention(symbol="WKL.AS", day=date(2026, 11, 10), seen_at=datetime(2026, 11, 10, tzinfo=UTC),
+                       url="http://x", title="GDELT headline", title_key="gdelt headline"))
+    db.commit()
+    rows, how = research._news_with_coverage(db, "WKL.AS")
+    assert how == "gdelt" and rows[0]["title"] == "GDELT headline" and rows[0]["sentiment_label"] is None
+
+
+def test_no_news_prompt_says_no_source_covers_the_company():
+    from app.foundation import research
+
+    ctx = {"ticker": "X", "recent_news": [], "fundamentals": None, "technicals": None, "quote": {}, "recommendations": []}
+    text = research._build_user_message(ctx)
+    assert "no news source covers this company" in text
