@@ -91,7 +91,7 @@ def test_a_miss_survives_a_restart_and_waits_longer_after_repeats():
     t0 = datetime(2026, 11, 11, 12, 0, tzinfo=UTC)
     assert fm.recently_missed(db, "DEAD.DE", now=t0) == (False, None)
     fm.record_miss(db, "DEAD.DE", "no data", now=t0)
-    assert fm.recently_missed(db, "dead.de", now=t0 + timedelta(hours=23)) == (True, "no data")
+    assert fm.recently_missed(db, "dead.de", now=t0 + timedelta(hours=19)) == (True, "no data")
     assert fm.recently_missed(db, "DEAD.DE", now=t0 + timedelta(hours=25))[0] is False
     # the same day does not count twice; three different days do
     fm.record_miss(db, "DEAD.DE", "no data", now=t0 + timedelta(hours=2))

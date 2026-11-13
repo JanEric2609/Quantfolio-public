@@ -14,9 +14,28 @@ from app.foundation.models.entities import FetchMiss
 
 logger = logging.getLogger(__name__)
 
-RETRY_SOON = timedelta(hours=24)
+#: Shorter than the nightly cadence: a 24 h wait made a symbol be retried every
+#: other night (audit 2026-11-12, WP6).
+RETRY_SOON = timedelta(hours=20)
 RETRY_LATE = timedelta(days=7)
 MANY_DAYS = 3
+
+
+_TRANSIENT_WORDS = ("timeout", "timed out", "429", "too many requests", "rate limit", "rate_limited",
+                    "throttl", "temporarily", "connection", "503", "502", "still open")
+
+
+def is_definitive_miss(message: str | None, *, short: bool = False) -> bool:
+    """True only when a provider answered and had no data for the symbol.
+
+    A timeout, an HTTP 429 or a throttled provider says nothing about the
+    symbol, and a short history is a history (215 misses on prod: 191 "no
+    history", 24 "short history").
+    """
+    if short:
+        return False
+    text = (message or "").lower()
+    return not any(word in text for word in _TRANSIENT_WORDS)
 
 
 def _aware(ts: datetime) -> datetime:
