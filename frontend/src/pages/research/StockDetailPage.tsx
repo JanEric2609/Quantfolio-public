@@ -84,7 +84,7 @@ function buildCandlestickOption(
     ],
     yAxis: [
       // scale: a price axis starting at 0 squeezed 67-92 into the top sliver.
-      { type: "value", gridIndex: 0, scale: true },
+      { type: "value", gridIndex: 0, scale: true, splitLine: { lineStyle: { color: "#262626" } } },
       { type: "value", gridIndex: 1, splitLine: { show: false }, splitNumber: 2, axisLabel: { show: false } },
     ],
     series: [
@@ -172,7 +172,7 @@ export function StockDetailPage() {
   // Fetch stock context
   const ctx = useQuery<StockContext>({
     queryKey: ["stock-context", tk],
-    queryFn: () => api<StockContext>(`/api/research/stock/${encodeURIComponent(tk)}?include=report,chart,news,fundamentals&chart_days=1830`),
+    queryFn: () => api<StockContext>(`/api/research/stock/${encodeURIComponent(tk)}?include=report,chart,news,fundamentals&chart_days=3660`),
     enabled: !!tk,
     staleTime: 5 * 60_000,
   });

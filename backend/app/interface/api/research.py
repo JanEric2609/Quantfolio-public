@@ -164,7 +164,7 @@ async def get_stock_context(
     # Price history for chart
     if "chart" in parts:
         from app.foundation.research import _price_history
-        result["price_history"] = _price_history(db, ticker_upper, days=min(max(chart_days, 5), 1830))
+        result["price_history"] = _price_history(db, ticker_upper, days=min(max(chart_days, 5), 3660))
         if result["price_history"]:
             # One price on the page: the quote carries its time, and a bar dated
             # today is an unfinished session (88.06 against a quote of 87.36).

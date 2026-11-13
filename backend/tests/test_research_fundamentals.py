@@ -112,3 +112,13 @@ def test_yfinance_empty_info_is_not_found():
     with patch.dict(sys.modules, {"yfinance": fake}):
         result = YFinanceProvider().get_fundamentals("ANDG.US")
     assert result["ok"] is False
+
+
+def test_52_week_range_uses_daily_highs_and_lows_not_closes():
+    from app.foundation.research import price_technicals
+
+    rows = [{"date": f"2026-01-{d:02d}", "open": 10, "high": 10 + d, "low": 9, "close": 10.0, "volume": 1} for d in range(1, 11)]
+    rows[3]["low"] = 7.5
+    out = price_technicals(rows, today=__import__("datetime").date(2026, 6, 1))
+    assert out["high_52w"] == 20.0 and out["high_52w_date"] == "2026-01-10"
+    assert out["low_52w"] == 7.5 and out["low_52w_date"] == "2026-01-04"
