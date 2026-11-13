@@ -149,6 +149,10 @@ class YFinanceProvider(MarketDataProvider):
         try:
             import yfinance as yf
 
+            # Yahoo has no ".US" market suffix: "AAPL.US" is the bare "AAPL".
+            if symbol.upper().endswith(".US"):
+                symbol = symbol[:-3]
+
             info = yf.Ticker(symbol).info or {}
             data = {
                 "pe_ratio": info.get("trailingPE"),
@@ -189,6 +193,10 @@ class YFinanceProvider(MarketDataProvider):
                 "isin": info.get("isin"),
                 "name": info.get("longName") or info.get("shortName"),
             }
+            from app.foundation.fundamentals_context import has_fundamentals_content
+
+            if not info.get("quoteType") and not has_fundamentals_content(data):
+                return self.unavailable("fundamentals", f"{symbol} not found", reason="not_found")
             missing = [key for key, value in data.items() if value is None]
             return provider_result(
                 self.name,

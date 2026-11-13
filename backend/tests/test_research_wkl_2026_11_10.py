@@ -144,9 +144,35 @@ def test_without_net_debt_the_debt_criterion_is_left_out_not_failed():
     assert result["max"] == 7 and result["score"] == 6
 
 
-def test_an_ordinary_balance_sheet_scores_on_nine():
+def test_an_ordinary_balance_sheet_with_all_inputs_scores_on_nine():
+    result = _score({"roe": 0.15, "fcf_yield": 0.04, "profit_margin": 0.1, "earnings_growth": 0.05,
+                     "debt_equity": 80.0, "ev_ebitda": 12.0, "pe_ratio": 12.0,
+                     "revenue_growth": 0.03, "gross_margin": 0.4})
+    assert result["max"] == 9 and result["total"] == 9
+    assert result["score"] == 9 and result["score_9"] == 9
+
+
+def test_missing_inputs_are_not_available_not_failed():
     result = _score({"roe": 0.15, "pb_ratio": 2.0, "debt_equity": 80.0, "pe_ratio": 12.0})
-    assert result["max"] == 9 and result["score_9"] == result["score"]
+    # 3 of 9 checks have data: below the minimum, so no score at all
+    assert result["available"] == 3 and result["total"] == 9
+    assert result["score"] is None and result["score_9"] is None
+    assert [s["pass"] for s in result["signals"]].count(None) == 6
+
+
+def test_five_available_checks_give_a_score_without_counting_missing_as_failed():
+    result = _score({"roe": 0.15, "profit_margin": 0.1, "debt_equity": 80.0, "pe_ratio": 12.0, "gross_margin": 0.4})
+    assert result["available"] == 5 and result["score"] == 5 and result["passed"] == 5
+    assert result["score_9"] == 5  # missing data still counts against the engine's 0-9 figure
+
+
+def test_a_payload_of_nulls_is_no_data():
+    db = _memory_db()
+    db.add(Fundamental(ticker="ANDG.US", source="yfinance", fetched_at=datetime.now(UTC),
+                       data_json=json.dumps({"pe_ratio": None, "roe": None, "growth_basis": "quarter_yoy"})))
+    db.commit()
+    result = compute_piotroski(db, "ANDG.US")
+    assert result["score"] is None and result["source"] == "unavailable"
 
 
 def test_the_universe_screen_stub_is_no_data_not_a_weak_score():

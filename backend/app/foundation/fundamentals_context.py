@@ -103,3 +103,20 @@ def growth_basis(data: dict[str, Any], source: str | None = None) -> str | None:
 def growth_basis_text(basis: str | None) -> str:
     """The period a growth figure covers, in words ("against a year earlier" when unknown)."""
     return GROWTH_BASIS_TEXT.get(basis or "", "against a year earlier")
+
+
+_FUNDAMENTALS_LABEL_KEYS = frozenset(
+    {"name", "sector", "industry", "currency", "isin", "growth_basis", "latest_period_end", "period_months"}
+)
+
+
+def has_fundamentals_content(data: Any) -> bool:
+    """True when a fundamentals payload carries at least one real metric.
+
+    A ticker no provider knows comes back from Yahoo as a dict of nulls (plus
+    the fixed ``growth_basis`` label). Storing that as a valid row scored the
+    ticker 0 of 9 as if every check had failed (audit 2026-11-12, WP1).
+    """
+    if not isinstance(data, dict):
+        return False
+    return any(v is not None for k, v in data.items() if k not in _FUNDAMENTALS_LABEL_KEYS)

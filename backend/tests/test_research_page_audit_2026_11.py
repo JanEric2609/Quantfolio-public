@@ -13,8 +13,8 @@ def test_normalise_verdicts_drops_invalid_and_tags_uncalibrated():
         "junk",
     ]
     out = normalise_verdicts(raw)
-    assert [v["horizon"] for v in out] == ["1m", "6m-1y"]
-    assert out[0] == {"horizon": "1m", "verdict": "BUY", "confidence": 1.0, "source": "llm_uncalibrated"}
+    assert [v["horizon"] for v in out] == ["1m", "6m-1y"]  # 1-3y and 5y+ are beyond one year
+    assert out[0] == {"horizon": "1m", "verdict": "BUY", "confidence": None, "source": "llm_uncalibrated"}
 
 
 def test_normalise_verdicts_non_list_is_empty():

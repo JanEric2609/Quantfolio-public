@@ -342,7 +342,7 @@ export function StockDetailPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-sm flex items-center gap-2">
-              <Target size={14} /> <span className="inline-flex items-center gap-1.5">Multi-Horizon Verdicts <InfoTooltip text="Language-model opinions on price direction across six horizons. Not backtested, not calibrated, not financial advice." side="right" /></span>
+              <Target size={14} /> <span className="inline-flex items-center gap-1.5">Multi-Horizon Verdicts <InfoTooltip text="Language-model opinions on price direction up to one year ahead. Not backtested, not calibrated, not financial advice. The model states no confidence." side="right" /></span>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -358,21 +358,17 @@ export function StockDetailPage() {
               </div>
             ) : verdicts.length === 0 ? (
               <div className="text-sm text-text-muted flex items-center gap-3">
-                <span>{verdictsQ.data?.error ?? "No verdicts available."}</span>
+                <span>{verdictsQ.data?.error === "not_found" ? "Not found: no provider has data for this ticker." : (verdictsQ.data?.error ?? "No verdicts available.")}</span>
                 <Button size="sm" variant="outline" onClick={() => verdictsQ.refetch()}>Try again</Button>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 gap-3">
                 {verdicts.map((v) => (
                   <div key={v.horizon} className="rounded-md border border-border bg-surface-2 p-3 text-center space-y-1">
                     <div className="text-[11px] uppercase tracking-wider text-text-muted">{v.horizon}</div>
                     <div className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold border ${verdictColor(v.verdict)}`}>
                       {verdictIcon(v.verdict)} {v.verdict}
                     </div>
-                    <span className="inline-flex items-center gap-1 text-[11px] text-text-muted">
-                      model confidence {Math.round(v.confidence * 100)}%
-                      <InfoTooltip text="The language model's own stated confidence, not a calibrated probability and not backtested. Treat it as a tone, not a hit rate." side="right" />
-                    </span>
                   </div>
                 ))}
               </div>
@@ -551,8 +547,8 @@ export function StockDetailPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-sm flex items-center gap-2">
-                  <Target size={14} /> <span className="inline-flex items-center gap-1.5">Fundamental Strength Score <InfoTooltip text="A 9-point fundamental strength score based on profitability, leverage, liquidity, and operating efficiency (1-9 scale)." side="right" /></span>
-                  <span className="text-[10px] text-text-muted font-normal">(Piotroski-inspired, 0–{pTotal})</span>
+                  <Target size={14} /> <span className="inline-flex items-center gap-1.5">Quality checks <InfoTooltip text="Nine pass/fail checks on profitability, leverage, valuation and efficiency, from summary ratios. Not the full Piotroski F-score. A check without data is shown as not available and is not counted as failed." side="right" /></span>
+                  <span className="text-[10px] text-text-muted font-normal">(Piotroski-inspired)</span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -562,7 +558,7 @@ export function StockDetailPage() {
                   <div className="space-y-3">
                     <div className="flex items-baseline gap-3">
                       <span className={`text-3xl font-display font-bold ${pColor}`}>{pScore}</span>
-                      <span className="text-sm text-text-muted">/ {pTotal}</span>
+                      <span className="text-sm text-text-muted">of {pTotal} checks passed{piotroski.data && piotroski.data.total > pTotal ? ` (${piotroski.data.total - pTotal} not available)` : ""}</span>
                       <span className={`text-sm font-medium ${pColor}`}>
                         {pShare != null && pShare >= 7 / 9 ? "Strong fundamentals" : pShare != null && pShare >= 4 / 9 ? "Mixed signals" : "Weak fundamentals"}
                       </span>
@@ -582,7 +578,7 @@ export function StockDetailPage() {
                         >
                           <div className="text-[10px] text-text-muted leading-tight">{s.name}</div>
                           <div className={`text-xs font-semibold mt-0.5 ${s.pass == null ? "text-text-muted" : s.pass ? "text-success" : "text-danger"}`}>
-                            {s.pass == null ? "n/m" : s.pass ? "✓" : "✗"}
+                            {s.pass == null ? "n/a" : s.pass ? "✓" : "✗"}
                           </div>
                           {s.value != null && (
                             <div className="text-[9px] text-text-muted mt-0.5">{formatSignalValue(s)}</div>
@@ -598,11 +594,11 @@ export function StockDetailPage() {
                       </ul>
                     )}
                     <p className="text-[10px] text-text-muted italic">
-                      Uses proxy metrics from available provider data. Strong at 7 of 9 criteria or the same share of those that apply; n/m = not meaningful for this company, left out.
+                      Uses proxy metrics from available provider data. Strong at 7 of 9 criteria or the same share of those that apply; n/a = not meaningful or no data; left out, not counted as failed.
                     </p>
                   </div>
                 ) : (
-                  <p className="text-sm text-text-muted">No fundamental data available for scoring.</p>
+                  <p className="text-sm text-text-muted">{piotroski.data?.source === "unavailable" ? "Not found, or too little data to run the checks." : "Too few checks have data to give a result."}</p>
                 )}
               </CardContent>
             </Card>

@@ -59,3 +59,56 @@ def test_nothing_cached_and_nothing_live_is_none(monkeypatch):
     monkeypatch.setattr(market, "build_provider_registry", lambda _db: _Registry({"ok": False}))
 
     assert _latest_fundamentals(db, "NOPE") is None
+
+
+def test_unknown_ticker_payload_has_no_content_and_stores_no_row():
+    from unittest.mock import patch
+
+    from app.foundation import market
+    from app.foundation.models.entities import Fundamental
+
+    assert not market.has_fundamentals_content({"pe_ratio": None, "roe": None, "growth_basis": "quarter_yoy", "name": None})
+    assert market.has_fundamentals_content({"pe_ratio": 12.0})
+
+    db = _memory_db()
+    empty = {"ok": True, "provider": "yfinance", "data": {"pe_ratio": None, "growth_basis": "quarter_yoy"}}
+
+    class _Registry:
+        def get_fundamentals(self, symbol):
+            return empty
+
+    with patch.object(market, "build_provider_registry", return_value=_Registry()):
+        result = market.fundamentals(db, "ANDG.US")
+    assert result["source"] == "unavailable"
+    assert db.query(Fundamental).count() == 0
+
+
+def test_unknown_ticker_gets_no_verdict_call():
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from app.foundation import research
+
+    assert not research.has_research_data({"fundamentals": {"pe_ratio": None}, "price_history": [{}] * 10})
+    assert research.has_research_data({"fundamentals": None, "price_history": [{}] * 260})
+
+    db = _memory_db()
+    llm = AsyncMock()
+    with patch.object(research, "build_context", return_value={"fundamentals": None, "price_history": []}), \
+            patch("app.foundation.llm.router.call", llm):
+        out = asyncio.run(research.generate_multi_horizon_verdicts(db, "ANDG.US", "u1"))
+    assert out["verdicts"] == [] and out["error"] == "not_found"
+    llm.assert_not_called()
+
+
+def test_yfinance_empty_info_is_not_found():
+    import sys
+    import types
+    from unittest.mock import patch
+
+    from app.foundation.providers.yfinance_provider import YFinanceProvider
+
+    fake = types.SimpleNamespace(Ticker=lambda sym: types.SimpleNamespace(info={}))
+    with patch.dict(sys.modules, {"yfinance": fake}):
+        result = YFinanceProvider().get_fundamentals("ANDG.US")
+    assert result["ok"] is False
