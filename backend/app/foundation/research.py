@@ -754,14 +754,9 @@ async def generate_report(db: Session, ticker: str, user_id: str, *,
             }
 
     context = build_context(db, ticker, user_id)
-    messages = [
-        {"role": "system", "content": _SYSTEM_PROMPT},
-        {"role": "user", "content": _build_user_message(context)},
-    ]
-
     from app.foundation.llm.router import call as llm_call
     try:
-        completion = await llm_call(db, "batch_research", messages, timeout_s=120.0, user_id=user_id)
+        report_text = await _sectioned_report(db, context, user_id, llm_call)
     except Exception as exc:
         logger.warning("LLM call failed for %s: %s", ticker, exc)
         return {
@@ -772,22 +767,6 @@ async def generate_report(db: Session, ticker: str, user_id: str, *,
             "generated_at": datetime.now(UTC).isoformat(),
             "error": str(exc),
         }
-    model_text = completion.content
-    if model_text and foreign_companies(model_text, context):
-        logger.warning("research: report for %s names another company %s; regenerating once",
-                       ticker, foreign_companies(model_text, context))
-        try:
-            retry = await llm_call(db, "batch_research", messages, timeout_s=120.0, user_id=user_id)
-            model_text = retry.content
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("LLM retry failed for %s: %s", ticker, exc)
-    if model_text and foreign_companies(model_text, context):
-        report_text = fallback_report(context)
-    elif model_text:
-        report_text = assemble_report(model_text, context)
-    else:
-        # No model text after the retry: the figures still make a report.
-        report_text = fallback_report(context)
 
     summary = summary_of(report_text.split("\n", 1)[1] if report_text else "")
     try:
@@ -811,6 +790,58 @@ async def generate_report(db: Session, ticker: str, user_id: str, *,
         "cached": False,
         "generated_at": report.generated_at.isoformat(),
     }
+
+
+async def _write_section(db: Session, section: str, context: dict[str, Any], facts: list[Any],
+                         user_id: str, llm_call: Any, first: bool) -> str | None:
+    """One model section: check, ask once more on a failed check, then the template."""
+    from app.foundation import research_facts as rf
+
+    has_news = bool(context.get("recent_news"))
+    if section == "Sentiment" and not has_news:
+        return rf.template_prose(section, context, facts)  # nothing to read: no call
+    messages = [
+        {"role": "system", "content": rf.SECTION_SYSTEM},
+        {"role": "user", "content": f"{rf.qualitative_input(context, facts)}\n\nSection: {section}. {rf.SECTION_TASKS[section]}"},
+    ]
+    for attempt in range(2):
+        try:
+            completion = await llm_call(db, "batch_research", messages, timeout_s=60.0, user_id=user_id)
+        except Exception:
+            if first and attempt == 0:
+                raise  # the model is down: the caller reports "unavailable"
+            break
+        text = _strip_leading_heading(completion.content or "").strip()
+        problems = rf.check_prose(section, text, facts, has_news=has_news) if text else ["empty"]
+        if not problems and not foreign_companies(text, context):
+            return text
+        logger.warning("research: %s section for %s rejected (%s)", section, context["ticker"], "; ".join(problems) or "foreign company")
+    return rf.template_prose(section, context, facts)
+
+
+async def _sectioned_report(db: Session, context: dict[str, Any], user_id: str, llm_call: Any) -> str:
+    """Code writes every figure, period and judgement word; the model writes four short prose sections."""
+    from app.foundation import research_facts as rf
+
+    facts = rf.build_fact_table(context)
+    prose: dict[str, str | None] = {}
+    for i, section in enumerate(rf.MODEL_SECTIONS):
+        prose[section] = await _write_section(db, section, context, facts, user_id, llm_call, first=i == 0)
+    parts = [report_title(context), ""]
+
+    def add(title: str, body: str | None) -> None:
+        if body:
+            parts.extend([f"## {title}", "", body, ""])
+
+    add("Executive Summary", prose["Executive Summary"])
+    add("Price Action", price_action_text(context.get("technicals")))
+    add("Technical View", rf.technical_text(facts))
+    fundamentals = [line for line in _fundamentals_lines(context.get("fundamentals")) if line.strip()]
+    add("Fundamental View", "\n".join(filter(None, [rf.fundamentals_text(facts), *fundamentals])))
+    add("Sentiment", prose["Sentiment"])
+    add("Risk Factors", prose["Risk Factors"])
+    add("Conclusion", prose["Conclusion"])
+    return "\n".join(parts).strip()
 
 
 # Up to one year (audit 2026-11-12, D2): nothing here can say anything about
