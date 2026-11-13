@@ -278,3 +278,13 @@ The money buys three things: the gap between a paper fill and a real fill (sprea
 **Not changed.** Thresholds, lambdas and the harm e-process stay as they were: splitting the error budget between skill and harm was not needed to pass the zero-alpha simulations. The shrinkage does not model time-varying beta; a sleeve that changes beta abruptly is mis-hedged for a few weeks.
 
 **Operations.** Evidence rows computed under the old rule must be recomputed: after the deploy run `DELETE FROM ladder_evidence_daily;` once (stages restart at the next ladder run from the paper snapshots).
+
+## Amendment 2026-11-12 (implementation): learning sleeve, the three open points
+
+Settled in code for WP11 (`foundation/capital_ladder.py: learning_amount_eur`, `decision/monthly_plan.py: learning_line`).
+
+1. **Euro amount in a plan that works in percent.** The line is a euro amount, `ladder_learning_eur_per_month` capped at 20. It appears as `evidence.satellite.learning` beside the percent-based picks and does not change any sleeve target. At stage 1 the amount is also capped by `w1` (percent of the book x the book): the smaller of the two applies. With the setting at 0 the plan payload differs from before only by an inactive `learning` block.
+2. **Fractional orders.** The stored Trading 212 instrument list has no minimum-quantity field, so the code cannot prove that a 20 EUR order works for every listed name. The pick is the largest paper satellite holding that the list contains by ISIN; the owner places the order in the app, which shows its own minimum. If the app refuses, the month stays empty. Not verified against Trading 212's documentation.
+3. **Identifying the sleeve's real positions.** Not built yet. The plan names the pick and amount; the purchase ledger, the EUNL.DE shadow purchase, the fill-against-paper comparison and the page section need the owner-confirmed pie (the #374 mechanism) and are the remaining part of WP11.
+
+**Stops** are read from the paper record: owner veto, harm e-value at 10 or more, relative drawdown beyond the band, tuition weight 0, stage 2 or higher (then the ladder funds the candidate), and 12 monthly plans after the day the setting was saved (`app_settings.updated_at`). Nothing here writes to a broker; `ALLOWED_PATHS` is pinned by `tests/test_trading212.py`.

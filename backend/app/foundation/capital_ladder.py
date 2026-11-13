@@ -51,7 +51,12 @@ DEFAULTS = {
     "ladder_bad_alpha_pct": -3.0,
     "ladder_proven_weight_pct": 15.0,
     "ladder_owner_veto": False,
+    "ladder_learning_eur_per_month": 0.0,
 }
+
+#: Learning sleeve (ADR 0025 amendment 2026-11-12): a fixed euro amount the owner chooses.
+LEARNING_SLEEVE_MAX_EUR = 20.0
+LEARNING_PLANS = 12
 
 STAGE_NAMES = {0: "Paper", 1: "Tuition", 2: "Earned", 3: "Proven"}
 
@@ -171,3 +176,76 @@ def ladder_funding(db: Session, user_id: str, *, today: date | None = None) -> d
         "weight_pct": weight_pct(db, candidate, stage, as_of),
         "as_of": as_of.isoformat(),
     }
+
+
+def learning_amount_eur(db: Session, user_id: str, *, today: date | None = None) -> dict[str, Any]:
+    """The learning sleeve's euro amount for this month's plan, and why (ADR 0025 amendment).
+
+    Read from the paper record only: the ``llm`` candidate at stage 0 or 1 with no
+    stage-1 exit (harm e-value below the threshold, drawdown inside the band, no
+    owner veto), inside 12 plans of the day the owner saved the setting. At stage 1
+    the caller applies ``w1_pct`` as a second cap, in percent of the book.
+    """
+    from app.foundation.models.entities import AppSetting
+    from app.foundation.settings import get_public_settings
+
+    today = today or now_utc().date()
+    as_of = month_start(today)
+    out: dict[str, Any] = {"amount_eur": 0.0, "stage": None, "w1_pct": None, "candidate_id": None,
+                           "reason": "", "estimate": True, "not_tax_advice": True, "not_financial_advice": True}
+    public = get_public_settings(db)
+    try:
+        asked = float(public.get("ladder_learning_eur_per_month") or 0.0)
+    except (TypeError, ValueError):
+        asked = 0.0
+    amount = min(max(asked, 0.0), LEARNING_SLEEVE_MAX_EUR)
+    if amount <= 0:
+        out["reason"] = "The learning sleeve is off."
+        return out
+    if public.get("ladder_owner_veto"):
+        out["reason"] = "Owner veto: every candidate stays at Paper."
+        return out
+    row = db.query(AppSetting.updated_at).filter(AppSetting.key == "ladder_learning_eur_per_month").first()
+    if row is not None and row[0] is not None:
+        saved = aware(row[0]).date()
+        months = (as_of.year - saved.year) * 12 + as_of.month - saved.month
+        if months >= LEARNING_PLANS:
+            out["reason"] = f"The authorisation ended after {LEARNING_PLANS} monthly plans; save the setting again to renew it."
+            return out
+    candidate = (
+        db.query(LadderCandidate)
+        .filter(LadderCandidate.user_id == user_id, LadderCandidate.slot == SLOT_LLM, LadderCandidate.retired_at.is_(None))
+        .first()
+    )
+    if candidate is None:
+        out["reason"] = "No LLM advisor candidate is registered."
+        return out
+    out["candidate_id"] = candidate.id
+    stage, _ = stage_on(db, candidate, as_of)
+    out["stage"] = stage
+    if stage >= 2:
+        out["reason"] = "The candidate has earned a weight; the ladder funds it, not the learning sleeve."
+        return out
+    last = (
+        db.query(LadderEvidenceDaily)
+        .filter(LadderEvidenceDaily.candidate_id == candidate.id, LadderEvidenceDaily.day < as_of)
+        .order_by(LadderEvidenceDaily.day.desc()).first()
+    )
+    if last is not None:
+        if float(last.e_harm or 0.0) >= HARM_THRESHOLD:
+            out["reason"] = "Harm signal: the paper record trails MSCI World with evidence, so the amount is 0."
+            return out
+        te = last.te
+        n = db.query(LadderEvidenceDaily).filter(LadderEvidenceDaily.candidate_id == candidate.id,
+                                                 LadderEvidenceDaily.day < as_of).count()
+        if te and last.rel_drawdown is not None and float(last.rel_drawdown) > DRAWDOWN_BAND_K * float(te) * math.sqrt(max(n, 1) / TRADING_DAYS_PER_YEAR):
+            out["reason"] = "The paper record's drawdown against MSCI World left its band, so the amount is 0."
+            return out
+    if stage == 1:
+        out["w1_pct"] = weight_pct(db, candidate, 1, as_of)
+        if out["w1_pct"] <= 0:
+            out["reason"] = "Tuition weight is 0 % on the current tracking error."
+            return out
+    out["amount_eur"] = amount
+    out["reason"] = "A learning expense you chose. It is not evidence that the picks work."
+    return out

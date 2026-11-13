@@ -819,6 +819,49 @@ def satellite_picks(
     ]
 
 
+def learning_line(
+    db: Session, user_id: str, book_eur: float, cfg: dict[str, Any], *, today: date | None = None
+) -> dict[str, Any]:
+    """The learning sleeve's one line for this plan (ADR 0025 amendment 2026-11-12); amount 0 means no line.
+
+    The pick is the largest holding of the LLM candidate's paper satellite sleeve that
+    Trading 212 lists by ISIN. At stage 1 the amount is also capped by the tuition
+    weight (percent of the book). The owner places the order; nothing here trades.
+    """
+    from app.foundation.broker_instruments import instrument_types
+    from app.foundation.capital_ladder import learning_amount_eur
+    from app.foundation.models.entities import LadderCandidate, PaperHolding
+
+    info = learning_amount_eur(db, user_id, today=today)
+    info["pick"] = None
+    if info["amount_eur"] <= 0:
+        return info
+    if info["w1_pct"] is not None:
+        info["amount_eur"] = round(min(info["amount_eur"], book_eur * info["w1_pct"] / 100.0), 2)
+        if info["amount_eur"] <= 0:
+            info["reason"] = "The tuition weight allows less than a cent."
+            return info
+    cand = db.get(LadderCandidate, info["candidate_id"])
+    rows = (
+        db.query(PaperHolding)
+        .filter(PaperHolding.portfolio_id == cand.portfolio_id, PaperHolding.quantity > 0)
+        .all()
+    ) if cand is not None else []
+    held = sorted(
+        ((h, str(h.isin).upper(), float(h.quantity) * float(h.avg_buy_price)) for h in rows
+         if h.isin and classify(str(h.isin).upper(), cfg) == "satellite" and h.asset_type not in ("etf", "fund", "cash")),
+        key=lambda hv: -hv[2],
+    )
+    listed = instrument_types(db, {isin for _, isin, _ in held})
+    for h, isin, _ in held:
+        if isin in listed:
+            info["pick"] = {"ticker": h.ticker, "isin": h.isin, "name": h.name}
+            return info
+    info["amount_eur"] = 0.0
+    info["reason"] = "No holding of the paper satellite sleeve is listed at Trading 212, so nothing is bought this month."
+    return info
+
+
 def paper_plan_targets(db: Session) -> dict[str, Any]:
     """The plan bounds the paper sleeves' optimiser works inside (plan 2026-10-12, D5).
 
@@ -1347,6 +1390,7 @@ def build_monthly_plan(db: Session, user_id: str, *, now: datetime | None = None
                 "picks": satellite_picks(
                     db, evidence.get("satellite_ladder"), targets["satellite"], book + contribution, cfg
                 ),
+                "learning": learning_line(db, user_id, book + contribution, cfg, today=now.date()),
             },
         },
         "actions": [asdict(a) for a in actions],
