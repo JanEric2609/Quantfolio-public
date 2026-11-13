@@ -1,5 +1,6 @@
 import type { EChartsOption } from "echarts";
 import { EChart, type EChartProps } from "./EChart";
+import { token } from "../../lib/theme/tokens";
 
 export interface AreaChartProps extends Omit<EChartProps, "option"> {
   series: { name: string; data: [number | string, number][] }[];
@@ -9,7 +10,7 @@ export interface AreaChartProps extends Omit<EChartProps, "option"> {
 }
 
 export function AreaChart({ series, xType = "time", yFormat, tone = "neutral", ...rest }: AreaChartProps) {
-  const areaStyle = tone === "danger" ? { color: "rgba(239, 68, 68, 0.3)" } : {};
+  const areaStyle = tone === "danger" ? { color: token("danger", 0.3) } : {};
   const option: EChartsOption = {
     tooltip: { trigger: "axis" as const },
     grid: { left: 48, right: 24, top: 32, bottom: 40 },

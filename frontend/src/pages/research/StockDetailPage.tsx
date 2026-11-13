@@ -21,6 +21,7 @@ import { InfoTooltip } from "../../components/ui/InfoTooltip";
 import { formatCompact, formatNumber, formatPercent, formatPercentPoints } from "../../lib/format";
 import { formatSignalValue } from "../../lib/strengthScore";
 import { FundamentalsGrid } from "./components/FundamentalsGrid";
+import { token } from "../../lib/theme/tokens";
 
 /* ---------- helpers ---------- */
 
@@ -61,7 +62,7 @@ function buildCandlestickOption(
   const dates = data.map((d) => d.date);
   const ohlc = data.map((d) => [d.open, d.close, d.low, d.high]);
   const volumes = data.map((d) => d.volume);
-  const colors = data.map((d) => (d.close >= d.open ? "#22c55e" : "#ef4444"));
+  const colors = data.map((d) => (d.close >= d.open ? token("success") : token("danger")));
 
   return {
     tooltip: {
@@ -84,7 +85,7 @@ function buildCandlestickOption(
     ],
     yAxis: [
       // scale: a price axis starting at 0 squeezed 67-92 into the top sliver.
-      { type: "value", gridIndex: 0, scale: true, splitLine: { lineStyle: { color: "#262626" } } },
+      { type: "value", gridIndex: 0, scale: true, splitLine: { lineStyle: { color: token("border") } } },
       { type: "value", gridIndex: 1, splitLine: { show: false }, splitNumber: 2, axisLabel: { show: false } },
     ],
     series: [
@@ -95,10 +96,10 @@ function buildCandlestickOption(
         yAxisIndex: 0,
         data: ohlc,
         itemStyle: {
-          color: "#22c55e",
-          color0: "#ef4444",
-          borderColor: "#22c55e",
-          borderColor0: "#ef4444",
+          color: token("success"),
+          color0: token("danger"),
+          borderColor: token("success"),
+          borderColor0: token("danger"),
         },
       },
       {
@@ -137,12 +138,12 @@ function buildBarChartOption(data: { label: string; value: number }[]): import("
   return {
     tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
     grid: { left: 80, right: 24, top: 24, bottom: 24 },
-    xAxis: { type: "value", axisLine: { lineStyle: { color: "#262626" } }, axisLabel: { color: "#b3b3b3", formatter: "{value}%" }, splitLine: { lineStyle: { color: "#1a1a1a" } } },
-    yAxis: { type: "category", data: sorted.map((d) => d.label), axisLine: { lineStyle: { color: "#262626" } }, axisLabel: { color: "#b3b3b3" }, splitLine: { show: false } },
+    xAxis: { type: "value", axisLine: { lineStyle: { color: token("border") } }, axisLabel: { color: token("text-secondary"), formatter: "{value}%" }, splitLine: { lineStyle: { color: "#1a1a1a" } } },
+    yAxis: { type: "category", data: sorted.map((d) => d.label), axisLine: { lineStyle: { color: token("border") } }, axisLabel: { color: token("text-secondary") }, splitLine: { show: false } },
     series: [{
       type: "bar",
       data: sorted.map((d) => ({ value: Math.round(d.value * 1000) / 10, itemStyle: { color: "#3b82f6" } })),
-      label: { show: true, position: "right", color: "#b3b3b3", formatter: "{c}%" },
+      label: { show: true, position: "right", color: token("text-secondary"), formatter: "{c}%" },
     }],
   };
 }
@@ -154,7 +155,7 @@ function buildPieChartOption(data: { name: string; value: number }[]): import("e
       type: "pie",
       radius: ["40%", "70%"],
       data: data.map((d) => ({ name: d.name, value: Math.round(d.value * 1000) / 10 })),
-      label: { color: "#b3b3b3" },
+      label: { color: token("text-secondary") },
       itemStyle: { borderRadius: 4, borderColor: "#0a0a0a", borderWidth: 2 },
     }],
   };
@@ -177,10 +178,13 @@ export function StockDetailPage() {
     staleTime: 5 * 60_000,
   });
 
+  // A company with earnings figures and no fund fields is not a fund: skip the probe that would 404.
+  const f = ctx.data?.fundamentals;
+  const looksLikeCompany = f != null && (typeof f.pe_ratio === "number" || typeof f.roe === "number") && f.ter == null && f.aum == null;
   const etfProfile = useQuery<EtfProfile>({
     queryKey: ["etf-profile", tk],
     queryFn: () => api<EtfProfile>(`/api/etf/${encodeURIComponent(tk)}/profile`),
-    enabled: !!tk,
+    enabled: !!tk && !ctx.isLoading && !looksLikeCompany,
     staleTime: 60 * 60_000,
     retry: false,
   });
@@ -235,7 +239,7 @@ export function StockDetailPage() {
 
   const riskProfileVal = riskProfile.data?.risk_profile ?? "moderate";
   const riskProfileColors: Record<string, string> = {
-    conservative: "bg-blue-500/15 text-blue-400 border-blue-500/30",
+    conservative: "bg-info/15 text-info border-info/30",
     moderate: "bg-warn/15 text-warn border-warn/30",
     aggressive: "bg-danger/15 text-danger border-danger/30",
   };
@@ -269,7 +273,6 @@ export function StockDetailPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        level={2}
         title={tk}
         subtitle={fundamentals?.name ? String(fundamentals.name) : quote?.name ? String(quote.name) : undefined}
         breadcrumb={[
@@ -379,13 +382,18 @@ export function StockDetailPage() {
 
       {/* Main content tabs */}
       <Tabs defaultValue="chart">
-        <TabsList>
+        {/* Scrolls sideways on a phone; the fade at the right edge says there is more. */}
+        <div className="relative max-w-full">
+        <div className="overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,black_calc(100%-24px),transparent)] sm:[mask-image:none]">
+        <TabsList className="w-max">
           <TabsTrigger value="chart"><BarChart3 size={14} className="mr-1" /> Chart</TabsTrigger>
           <TabsTrigger value="report" className="gap-1"><CheckCircle2 size={14} /> Report<InfoTooltip text="AI-generated research report analyzing the stock's fundamentals, technicals, and risk factors." side="bottom" /></TabsTrigger>
           <TabsTrigger value="news"><Newspaper size={14} className="mr-1" /> News</TabsTrigger>
           <TabsTrigger value="fundamentals"><Target size={14} className="mr-1" /> Fundamentals</TabsTrigger>
           {isEtf && <TabsTrigger value="etf"><PieChart size={14} className="mr-1" /> ETF</TabsTrigger>}
         </TabsList>
+        </div>
+        </div>
 
         {/* Chart tab */}
         <TabsContent value="chart">
@@ -563,29 +571,35 @@ export function StockDetailPage() {
                         {pShare != null && pShare >= 7 / 9 ? "Strong fundamentals" : pShare != null && pShare >= 4 / 9 ? "Mixed signals" : "Weak fundamentals"}
                       </span>
                     </div>
+                    {([["Quality", pSignals.filter((s) => s.group !== "valuation")], ["Valuation", pSignals.filter((s) => s.group === "valuation")]] as const)
+                      .filter(([, items]) => items.length > 0).map(([label, items]) => ({label, items})).map((group) => (
+                      <div key={group.label} className="space-y-1">
+                        <div className="text-[10px] uppercase tracking-wider text-text-muted">{group.label}</div>
                     <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
-                      {pSignals.map((s) => (
-                        <div
-                          key={s.name}
-                          title={s.note}
-                          className={`rounded-md border p-2 text-center ${
-                            s.pass == null
-                              ? "border-border bg-surface-2"
-                              : s.pass
-                                ? "border-success/30 bg-success/10"
-                                : "border-danger/30 bg-danger/10"
-                          }`}
-                        >
-                          <div className="text-[10px] text-text-muted leading-tight">{s.name}</div>
-                          <div className={`text-xs font-semibold mt-0.5 ${s.pass == null ? "text-text-muted" : s.pass ? "text-success" : "text-danger"}`}>
-                            {s.pass == null ? "n/a" : s.pass ? "✓" : "✗"}
+                        {group.items.map((s) => (
+                          <div
+                            key={s.name}
+                            title={s.note}
+                            className={`rounded-md border p-2 text-center ${
+                              s.pass == null
+                                ? "border-border bg-surface-2"
+                                : s.pass
+                                  ? "border-success/30 bg-success/10"
+                                  : "border-danger/30 bg-danger/10"
+                            }`}
+                          >
+                            <div className="text-[10px] text-text-muted leading-tight">{s.name}</div>
+                            <div className={`text-xs font-semibold mt-0.5 ${s.pass == null ? "text-text-muted" : s.pass ? "text-success" : "text-danger"}`}>
+                              {s.pass == null ? "n/a" : s.pass ? "✓" : "✗"}
+                            </div>
+                            {s.value != null && (
+                              <div className="text-[9px] text-text-muted mt-0.5">{formatSignalValue(s)}</div>
+                            )}
                           </div>
-                          {s.value != null && (
-                            <div className="text-[9px] text-text-muted mt-0.5">{formatSignalValue(s)}</div>
-                          )}
+                        ))}
+                      </div>
                         </div>
-                      ))}
-                    </div>
+                    ))}
                     {pSignals.some((s) => s.note) && (
                       <ul className="text-[10px] text-text-muted space-y-0.5">
                         {pSignals.filter((s) => s.note).map((s) => (

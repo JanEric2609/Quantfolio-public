@@ -4,11 +4,12 @@ import { useBookPerformance } from "../quantlab/hooks/useBookPerformance";
 import { Guess, type StationProps } from "./stations";
 import { Lesson } from "./Lesson";
 import { annualisedReturn, annualisedVolatility, arithmeticAnnual, dailyReturns, ols } from "./lessonMath";
+import { formatNumber } from "../../lib/format";
 
-const pct = (v: number, digits = 1) => formatPercentPoints(v * 100, { digits });
+export const pct = (v: number, digits = 1) => formatPercentPoints(v * 100, { digits });
 
 /** The reader's own series: daily returns of the real book, and of the benchmark on the same days. */
-function useOwnSeries() {
+export function useOwnSeries() {
   const perf = useBookPerformance();
   return useMemo(() => {
     const series = perf.data?.available ? perf.data.series : [];
@@ -26,7 +27,7 @@ function useOwnSeries() {
   }, [perf.data, perf.isLoading]);
 }
 
-function NoData({ loading, days, need }: { loading: boolean; days: number; need: number }) {
+export function NoData({ loading, days, need }: { loading: boolean; days: number; need: number }) {
   return (
     <p className="text-sm text-text-muted" data-testid="lesson-empty">
       {loading ? "Loading your book." : `Your book has ${days} priced days; this lesson needs ${need}. Skipped for now.`}
@@ -152,7 +153,7 @@ export function BetaLesson(p: StationProps) {
           {guess != null && fit ? (
             <div className="space-y-2 text-sm text-text-primary" role="status">
               <p>
-                β = <strong>{fit.beta.toFixed(2)}</strong> (± {fit.seBeta.toFixed(2)}), R² = {fit.r2.toFixed(2)}, α = {pct(fit.alpha * 252)} a year
+                β = <strong>{formatNumber(fit.beta, { digits: 2 })}</strong> (± {formatNumber(fit.seBeta, { digits: 2 })}), R² = {formatNumber(fit.r2, { digits: 2 })}, α = {pct(fit.alpha * 252)} a year
                 over {fit.n} days. You guessed {guess}.
               </p>
               <label className="block text-xs text-text-secondary">

@@ -4,6 +4,7 @@ import { Badge } from "../../components/ui/badge";
 import { Skeleton } from "../../components/ui/skeleton";
 import { fmtDay, fmtE } from "./trustFormat";
 import { useTrustForwardLab } from "./useTrust";
+import { formatNumber } from "../../lib/format";
 
 const STATE: Record<TrustForwardLabSignal["state"], { label: string; variant: "secondary" | "success" | "danger" }> = {
   not_started: { label: "Not started", variant: "secondary" },
@@ -12,7 +13,7 @@ const STATE: Record<TrustForwardLabSignal["state"], { label: string; variant: "s
   evidence_of_harm: { label: "Works backwards", variant: "danger" },
 };
 
-const bp = (v: number | null | undefined) => (v == null ? "—" : `${(v * 10000).toFixed(1)} bp`);
+const bp = (v: number | null | undefined) => (v == null ? "—" : `${formatNumber((v * 10000), { digits: 1 })} bp`);
 
 function SignalRow({ s }: { s: TrustForwardLabSignal }) {
   const state = STATE[s.state];
@@ -34,7 +35,7 @@ function SignalRow({ s }: { s: TrustForwardLabSignal }) {
       </p>
       {r && (
         <p className="text-xs text-text-muted">
-          Stress checks: noise alone reached the bar in {r.false_alarm == null ? "—" : `${(r.false_alarm * 100).toFixed(1)} %`}{" "}
+          Stress checks: noise alone reached the bar in {r.false_alarm == null ? "—" : `${formatNumber((r.false_alarm * 100), { digits: 1 })} %`}{" "}
           of resamples; without its 5 best days {fmtE(r.without_best_days)}; first half {fmtE(r.first_half)}, second half{" "}
           {fmtE(r.second_half)}.
         </p>

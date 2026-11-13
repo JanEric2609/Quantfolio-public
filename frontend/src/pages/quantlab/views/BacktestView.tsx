@@ -6,6 +6,7 @@ import { SummaryStrip } from "../components/SummaryStrip";
 import type { MetricItem } from "../components/SummaryStrip";
 import { useBacktest, useBacktestStrategies } from "../hooks/useBacktest";
 import type { BacktestLineStats, BacktestRun, BacktestRunRequest } from "../../../lib/api";
+import { Table } from "../../../components/ui/table";
 
 const pct = (v?: number | null, digits = 1) => formatPercent(v, { digits });
 const eur = (v?: number | null) => (v == null ? "-" : formatCurrency(v, "EUR", { digits: 0 }));
@@ -249,7 +250,7 @@ function BacktestResultPanel({ r }: { r: BacktestRun }) {
           )}
         </div>
         <div className="overflow-x-auto rounded-md p-3 bg-surface">
-          <table className="w-full text-xs">
+          <Table className="w-full text-xs">
             <thead className="text-text-muted">
               <tr>
                 <th className="text-left font-normal" />
@@ -272,7 +273,7 @@ function BacktestResultPanel({ r }: { r: BacktestRun }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
           <p className="mt-2 text-[11px] text-text-muted">Sharpe in excess of {pct(r.risk_free)} cash.</p>
         </div>
       </section>
@@ -280,7 +281,7 @@ function BacktestResultPanel({ r }: { r: BacktestRun }) {
       {(r.trades?.length ?? 0) > 0 && (
         <details className="rounded-md p-3 text-xs bg-surface">
           <summary className="cursor-pointer text-sm font-semibold text-text-primary">Trades ({r.trades!.length})</summary>
-          <table className="mt-2 w-full">
+          <Table className="mt-2 w-full">
             <thead className="text-text-muted">
               <tr><th className="text-left font-normal">Date</th><th className="text-left font-normal">Side</th><th className="text-right font-normal">Price (EUR)</th></tr>
             </thead>
@@ -293,7 +294,7 @@ function BacktestResultPanel({ r }: { r: BacktestRun }) {
                 </tr>
               ))}
             </tbody>
-          </table>
+          </Table>
         </details>
       )}
 

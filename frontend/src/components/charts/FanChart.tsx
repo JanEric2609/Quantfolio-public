@@ -1,5 +1,7 @@
 import type { EChartsOption } from "echarts";
 import { EChart, type EChartProps } from "./EChart";
+import { formatNumber } from "../../lib/format";
+import { token } from "../../lib/theme/tokens";
 
 export interface FanBand { p05: number; p25: number; median: number; p75: number; p95: number; }
 
@@ -32,7 +34,7 @@ export function FanChart({ steps, bands, labels, xName, yName, yFormat, lines = 
         const i = (p as Array<{ dataIndex: number }>)[0]?.dataIndex ?? 0;
         const b = bands[i];
         if (!b) return "";
-        const f = yFormat ?? ((v: number) => v.toFixed(0));
+        const f = yFormat ?? ((v: number) => formatNumber(v, { digits: 0 }));
         const extra = lines.map((l) => `<br/>${l.name}: ${f(l.data[i])}`).join("");
         return `${xName ?? ""} ${xData[i]}<br/>95th: ${f(b.p95)}<br/>75th: ${f(b.p75)}<br/><b>Median: ${f(b.median)}</b>`
           + `<br/>25th: ${f(b.p25)}<br/>5th: ${f(b.p05)}${extra}`;
@@ -44,13 +46,13 @@ export function FanChart({ steps, bands, labels, xName, yName, yFormat, lines = 
     yAxis: { type: "value" as const, name: yName, nameLocation: "middle", nameGap: 52, axisLabel: { formatter: yFormat } },
     series: [
       stack("base", bands.map((b) => b.p05), "transparent", 0, "outer"),
-      stack("5-95 %", bands.map((b) => b.p95 - b.p05), "#60a5fa", 0.18, "outer"),
+      stack("5-95 %", bands.map((b) => b.p95 - b.p05), token("info", 0.9), 0.18, "outer"),
       stack("base2", bands.map((b) => b.p25), "transparent", 0, "inner"),
-      stack("25-75 %", bands.map((b) => b.p75 - b.p25), "#3b82f6", 0.3, "inner"),
+      stack("25-75 %", bands.map((b) => b.p75 - b.p25), token("info"), 0.3, "inner"),
       { name: "Median", type: "line" as const, data: bands.map((b) => b.median), symbol: "none", lineStyle: { width: 2.5, color: "#1d4ed8" } },
       ...lines.map((l) => ({
         name: l.name, type: "line" as const, data: l.data, symbol: "none",
-        lineStyle: { width: 1.5, color: l.color ?? "#94a3b8", type: l.dashed ? ("dashed" as const) : ("solid" as const) },
+        lineStyle: { width: 1.5, color: l.color ?? token("text-muted"), type: l.dashed ? ("dashed" as const) : ("solid" as const) },
       })),
     ] as EChartsOption["series"],
   };

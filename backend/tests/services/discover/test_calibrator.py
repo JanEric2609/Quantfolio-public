@@ -162,3 +162,16 @@ def test_the_slope_is_never_negative():
 def test_the_version_names_the_rule():
     assert CALIBRATOR_VERSION["rule"] == 3 and CALIBRATOR_VERSION["min_n_eff"] == 100
     assert CALIBRATOR_VERSION["hit"] == "excess>0"
+
+
+def test_repeated_picks_of_one_name_inside_a_holding_period_are_one_training_row():
+    """WP7 follow-up: the same symbol picked on 5 days of one 30-day period is one outcome, not five."""
+    from app.decision.discover.calibrator import training_rows
+
+    db = _memory_db()
+    user = _make_user(db)
+    for d in range(5):
+        issued = NOW - timedelta(days=200 - d)
+        _pred(db, user.id, conviction=0.7, excess=0.02, status="resolved", issued=issued, resolve=issued + timedelta(days=30))
+    target = _pred(db, user.id, conviction=0.9, symbol="NEW")
+    assert len(training_rows(db, target)) == 1

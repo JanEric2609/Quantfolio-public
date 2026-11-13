@@ -1,5 +1,6 @@
 import type { EChartsOption } from "echarts";
 import { EChart, type EChartProps } from "./EChart";
+import { token } from "../../lib/theme/tokens";
 
 /** A step (``delta`` added to the running total) or, with ``total``, a bar of the running total itself. */
 export interface WaterfallItem { label: string; delta: number; total?: boolean; }
@@ -24,13 +25,13 @@ export function WaterfallChart({ items, yName, format, ...rest }: WaterfallChart
     if (item.total) {
       running = delta;
       base.push(Math.min(0, delta));
-      bars.push({ value: Math.abs(delta), itemStyle: { color: "#60a5fa" }, shown: delta });
+      bars.push({ value: Math.abs(delta), itemStyle: { color: token("info") }, shown: delta });
       continue;
     }
     const start = running;
     running += delta;
     base.push(Math.min(start, running));
-    bars.push({ value: Math.abs(delta), itemStyle: { color: delta >= 0 ? "#22c55e" : "#ef4444" }, shown: delta });
+    bars.push({ value: Math.abs(delta), itemStyle: { color: delta >= 0 ? token("success") : token("danger") }, shown: delta });
   }
   const option: EChartsOption = {
     tooltip: {

@@ -1,4 +1,5 @@
 import { BarChart } from "../../../components/charts/BarChart";
+import { formatNumber } from "../../../lib/format";
 
 /**
  * Daily returns binned by the Freedman-Diaconis rule (bin width 2·IQR/n^(1/3)),
@@ -13,7 +14,7 @@ export function histogramBins(values: number[], maxBins = 40): { label: string; 
   const iqr = q(0.75) - q(0.25);
   const lo = xs[0];
   const hi = xs[n - 1];
-  if (hi === lo) return [{ label: `${(lo * 100).toFixed(2)}`, count: n }];
+  if (hi === lo) return [{ label: `${formatNumber((lo * 100), { digits: 2 })}`, count: n }];
   let width = iqr > 0 ? (2 * iqr) / Math.cbrt(n) : (hi - lo) / 10;
   let k = Math.ceil((hi - lo) / width);
   if (k > maxBins) {
@@ -22,7 +23,7 @@ export function histogramBins(values: number[], maxBins = 40): { label: string; 
   }
   const counts = new Array(k).fill(0);
   for (const x of xs) counts[Math.min(k - 1, Math.floor((x - lo) / width))] += 1;
-  return counts.map((count, i) => ({ label: ((lo + (i + 0.5) * width) * 100).toFixed(2), count }));
+  return counts.map((count, i) => ({ label: formatNumber((lo + (i + 0.5) * width) * 100, { digits: 2 }), count }));
 }
 
 export function ReturnHistogram({ values = [] }: { values?: number[] }) {

@@ -2,6 +2,8 @@ import type { TrustTypeVerdict } from "../../lib/api";
 import { Card } from "../../components/ui/card";
 import { ScatterChart } from "../../components/charts/ScatterChart";
 import { fmtPct } from "./trustFormat";
+import { formatNumber } from "../../lib/format";
+import { Table } from "../../components/ui/table";
 
 /**
  * "When we said X %, what happened?" One point per bin of stated probability
@@ -21,7 +23,7 @@ export function ReliabilityPlot({ type }: { type: TrustTypeVerdict }) {
         <p className="text-xs text-text-muted">
           {type.n_stated_p} calls with a stated probability, in {bins.length} equal-count bins. Points on the diagonal
           mean the stated probability was right.
-          {type.spiegelhalter_z != null ? ` Spiegelhalter Z ${type.spiegelhalter_z.toFixed(2)} (beyond ±1.96 means miscalibrated).` : ""}
+          {type.spiegelhalter_z != null ? ` Spiegelhalter Z ${formatNumber(type.spiegelhalter_z, { digits: 2 })} (beyond ±1.96 means miscalibrated).` : ""}
         </p>
       </div>
       <ScatterChart
@@ -33,7 +35,7 @@ export function ReliabilityPlot({ type }: { type: TrustTypeVerdict }) {
         xName="Stated probability (%)"
         yName="Share that hit (%)"
       />
-      <div className="overflow-x-auto"><table className="w-full text-xs">
+      <div className="overflow-x-auto"><Table className="w-full text-xs">
         <caption className="sr-only">{type.label} reliability bins</caption>
         <thead>
           <tr className="border-b border-border text-left text-text-muted">
@@ -51,7 +53,7 @@ export function ReliabilityPlot({ type }: { type: TrustTypeVerdict }) {
             </tr>
           ))}
         </tbody>
-      </table></div>
+      </Table></div>
     </Card>
   );
 }

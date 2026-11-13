@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/ca
 import { Badge } from "../../components/ui/badge";
 import { type DiscoverCandidate, parseConcerns } from "../../lib/api";
 import { ConcernBadges } from "./ConcernBadges";
+import { Table } from "../ui/table";
 
 interface RejectedTableProps {
   candidates: DiscoverCandidate[];
@@ -29,7 +30,7 @@ export function RejectedTable({ candidates }: RejectedTableProps) {
       {expanded && (
         <CardContent>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <Table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
                   <th className="text-left py-2 pr-4 font-medium text-text-secondary">Symbol</th>
@@ -60,7 +61,7 @@ export function RejectedTable({ candidates }: RejectedTableProps) {
                   );
                 })}
               </tbody>
-            </table>
+            </Table>
           </div>
         </CardContent>
       )}

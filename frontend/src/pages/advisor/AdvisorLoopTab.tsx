@@ -5,6 +5,7 @@ import { api, type AdvisorCycleResponse } from "../../lib/api";
 import { formatMetricNumber, formatMetricPercent } from "../../components/composed/MetricTile";
 import { PaperRunCard } from "../portfolio/components/PaperRunCard";
 import { formatCurrency, formatDate, formatDateTime, formatNumber, formatPercent } from "../../lib/format";
+import { Table } from "../../components/ui/table";
 
 const fmt = (v: number | null | undefined, digits = 3) => formatMetricNumber(v, digits, "pending");
 const pct = (v: number | null | undefined) => formatMetricPercent(v, 2, "pending");
@@ -58,7 +59,7 @@ export function AdvisorLoopTab() {
             )}
             {(decision.decisions?.length ?? 0) > 0 && (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <Table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-xs text-text-muted border-b border-border">
                       <th className="py-1 pr-3">Ticker</th>
@@ -85,7 +86,7 @@ export function AdvisorLoopTab() {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </Table>
               </div>
             )}
             {(decision.funding_sells?.length ?? 0) > 0 && (
@@ -154,7 +155,7 @@ export function AdvisorLoopTab() {
         <h3 className="text-sm font-semibold text-text-primary mb-2">Executed paper trades</h3>
         {data.trades.length > 0 ? (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <Table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-text-muted border-b border-border">
                   <th className="py-1 pr-3">Date</th>
@@ -183,7 +184,7 @@ export function AdvisorLoopTab() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </div>
         ) : (
           <p className="text-sm text-text-muted">No trades executed yet.</p>

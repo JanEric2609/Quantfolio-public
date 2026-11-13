@@ -9,6 +9,7 @@ import { ScoreBar } from "../ui/ScoreBar";
 import { ConcernBadges } from "./ConcernBadges";
 import { brokerAvailability } from "./brokerAvailability";
 import { DossierActions } from "./DossierActions";
+import { formatNumber } from "../../lib/format";
 
 interface ShortlistCardsProps {
   candidates: DiscoverCandidate[];
@@ -70,9 +71,9 @@ function edgeShown(candidate: DiscoverCandidate, tiers?: TrustRankingSection["ti
 }
 
 const COST_ROUND_TRIP_EUR = 2 * ORDER_FEE_EUR + 2 * HALF_SPREAD * EXAMPLE_ORDER_EUR;
-const COST_TEXT = `buying €${EXAMPLE_ORDER_EUR} and selling again costs about €${COST_ROUND_TRIP_EUR.toFixed(2)} (${(
+const COST_TEXT = `buying €${EXAMPLE_ORDER_EUR} and selling again costs about €${formatNumber(COST_ROUND_TRIP_EUR, { digits: 2 })} (${formatNumber((
   (100 * COST_ROUND_TRIP_EUR) / EXAMPLE_ORDER_EUR
-).toFixed(1)} %)`;
+), { digits: 1 })} %)`;
 
 /** The cost every card shares, said once above the list instead of on each card. */
 function SharedCostNote() {

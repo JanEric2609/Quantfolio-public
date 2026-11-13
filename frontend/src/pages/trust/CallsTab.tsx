@@ -9,6 +9,7 @@ import { ErrorState } from "../../components/composed/ErrorState";
 import type { TrustCall, TrustTypeKey } from "../../lib/api";
 import { fmtDay, fmtPct, fmtPp, outcomeText } from "./trustFormat";
 import { useTrustCalls } from "./useTrust";
+import { Table } from "../../components/ui/table";
 
 const PAGE_SIZE = 25;
 const FILTERS: { key: TrustTypeKey | null; label: string }[] = [
@@ -72,7 +73,7 @@ function CallCards({ calls }: { calls: TrustCall[] }) {
 function CallsTable({ calls }: { calls: TrustCall[] }) {
   return (
     <div className="hidden overflow-x-auto rounded-md border border-border sm:block">
-      <table className="w-full text-sm">
+      <Table className="w-full text-sm">
         <caption className="sr-only">Resolved calls, newest first</caption>
         <thead>
           <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-text-muted">
@@ -105,7 +106,7 @@ function CallsTable({ calls }: { calls: TrustCall[] }) {
             </tr>
           ))}
         </tbody>
-      </table>
+      </Table>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { Badge } from "../ui/badge";
 import { Skeleton } from "../ui/skeleton";
 import { formatDateTime, formatNumber, formatPercent } from "../../lib/format";
 import { getFactorPremia, type FactorEvidenceCard } from "../../lib/api";
+import { Table } from "../ui/table";
 
 function pa(value: number | null): string {
   return formatPercent(value, { digits: 1, signed: true });
@@ -66,7 +67,7 @@ function RegionTable({ cards }: { cards: FactorEvidenceCard[] }) {
         </span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px] text-sm">
+        <Table className="w-full min-w-[560px] text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-text-secondary">
               <th className="py-2 pr-3 font-medium">Strategy</th>
@@ -86,7 +87,7 @@ function RegionTable({ cards }: { cards: FactorEvidenceCard[] }) {
               <Row key={c.strategy} card={c} />
             ))}
           </tbody>
-        </table>
+        </Table>
       </div>
     </div>
   );

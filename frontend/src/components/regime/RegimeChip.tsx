@@ -13,7 +13,7 @@ const REGIME_COLORS: Record<MacroRegimeLabel, RegimeStyle> = {
   bull:     { bg: "bg-success/15",   text: "text-success",        dot: "bg-success",   label: "Bull" },
   sideways: { bg: "bg-info/15",      text: "text-info",           dot: "bg-info",      label: "Sideways" },
   bear:     { bg: "bg-danger/15",    text: "text-danger",         dot: "bg-danger",    label: "Bear" },
-  unknown:  { bg: "bg-slate-500/15", text: "text-text-secondary", dot: "bg-slate-400", label: "Unknown" },
+  unknown:  { bg: "bg-surface-2", text: "text-text-secondary", dot: "bg-text-muted", label: "Unknown" },
 };
 
 /** Style for any label; one the table lacks must not throw in render. */
@@ -21,7 +21,7 @@ export function regimeStyle(label: string | null | undefined): RegimeStyle {
   const known = label ? REGIME_COLORS[label as MacroRegimeLabel] : undefined;
   if (known) return known;
   const text = label ? label.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()) : "Unknown";
-  return { bg: "bg-slate-500/15", text: "text-text-secondary", dot: "bg-slate-400", label: text };
+  return { bg: "bg-surface-2", text: "text-text-secondary", dot: "bg-text-muted", label: text };
 }
 
 function Row({ name, value }: { name: string; value: string }) {

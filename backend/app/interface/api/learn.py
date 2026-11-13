@@ -38,6 +38,7 @@ SOURCE_ALLOW_LIST: dict[str, tuple[str, str]] = {
     "e_processes": ("app.decision.graduation.ladder", "e_processes"),
     "beta_adjusted": ("app.decision.graduation.ladder", "beta_adjusted"),
     "shrunk_covariance": ("app.foundation.allocation", "shrunk_covariance"),
+    "gbm_fan_projection": ("app.foundation.quant_mc.projection", "gbm_fan_projection"),
     "apply_teilfreistellung": ("app.foundation.tax_calc.jurisdictions.de.teilfreistellung", "apply_teilfreistellung"),
 }
 

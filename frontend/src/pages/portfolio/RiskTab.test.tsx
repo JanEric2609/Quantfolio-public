@@ -88,10 +88,10 @@ describe("Portfolio -> Risk tab", () => {
     mockApi(risk());
     renderRisk();
 
-    expect(await screen.findByText("1.23 %")).toBeInTheDocument(); // VaR 95
-    expect(screen.getByText("2.11 %")).toBeInTheDocument(); // VaR 99
-    expect(screen.getByText("-18.3 %")).toBeInTheDocument(); // max drawdown
-    expect(screen.getByText("0.81")).toBeInTheDocument();
+    expect(await screen.findByText("1,23 %")).toBeInTheDocument(); // VaR 95
+    expect(screen.getByText("2,11 %")).toBeInTheDocument(); // VaR 99
+    expect(screen.getByText("-18,3 %")).toBeInTheDocument(); // max drawdown
+    expect(screen.getByText("0,81")).toBeInTheDocument();
     expect(screen.getByText(/Based on 252 daily returns of your current holdings \(2025-10-01 to 2026-09-30\)/)).toBeInTheDocument();
     expect(screen.getByText(/price history, not account balances/)).toBeInTheDocument();
   });
@@ -110,7 +110,7 @@ describe("Portfolio -> Risk tab", () => {
     expect(await screen.findAllByText("Too early")).toHaveLength(2);
     expect(screen.getAllByText("12 of 30 daily returns needed")).toHaveLength(2);
     // VaR and drawdown are still reported: they are meaningful with a short sample.
-    expect(screen.getByText("1.23 %")).toBeInTheDocument();
+    expect(screen.getByText("1,23 %")).toBeInTheDocument();
   });
 
   it("explains a missing price history instead of showing zeros", async () => {
@@ -129,7 +129,7 @@ describe("Portfolio -> Risk tab", () => {
     const note = await screen.findByText(/Using 0\/1 positions with available price data\./);
     expect(note).toHaveAttribute("role", "status");
     expect(note).toHaveTextContent("Missing: ABC.DE.");
-    expect(screen.queryByText("0.00 %")).not.toBeInTheDocument();
+    expect(screen.queryByText("0,00 %")).not.toBeInTheDocument();
   });
 
   it("looks ETFs through: HHI by holding, look-through HHI and the currency exposure", async () => {
@@ -143,7 +143,7 @@ describe("Portfolio -> Risk tab", () => {
 
     const values = screen.getByRole("list", { name: "Currency exposure values" });
     expect(values).toHaveTextContent("USD");
-    expect(values).toHaveTextContent("61.0 %");
+    expect(values).toHaveTextContent("61,0 %");
     expect(screen.getByText(/a euro-quoted MSCI World ETF is still mostly a dollar exposure/)).toBeInTheDocument();
   });
 
@@ -179,7 +179,7 @@ describe("Portfolio -> Risk tab", () => {
 
     const list = await screen.findByText("Dollar Slump");
     const item = list.closest("li") as HTMLElement;
-    expect(item).toHaveTextContent("-9.2 %");
+    expect(item).toHaveTextContent("-9,2 %");
     expect(item).toHaveTextContent("EUR appreciates 15% vs USD.");
     expect(screen.getByText("What-if scenarios on today's holdings, not forecasts.")).toBeInTheDocument();
     expect(screen.queryByText(/freq/i)).not.toBeInTheDocument();

@@ -7,6 +7,7 @@ import { useQuantAllocator, useSaveAllocatorUniverse } from "../hooks/useQuantAl
 import { SummaryStrip } from "../components/SummaryStrip";
 import type { MetricItem } from "../components/SummaryStrip";
 import type { NewMoneyPlan } from "../../../lib/api";
+import { Table } from "../../../components/ui/table";
 
 const pct = (v?: number | null, digits = 1) => formatPercent(v, { digits });
 const eur = (v?: number | null) => (v == null ? "-" : formatCurrency(v, "EUR", { digits: 0 }));
@@ -179,7 +180,7 @@ export function AllocatorView() {
               <h3 className="font-semibold">{p.label}</h3>
               <p className="mt-0.5 text-[11px] text-text-muted">{WHY[key]}</p>
               <p className="mt-2 text-xs text-text-primary" data-testid={`summary-${key}`}>{p.summary}</p>
-              <div className="overflow-x-auto"><table className="mt-2 w-full text-xs">
+              <div className="overflow-x-auto"><Table className="mt-2 w-full text-xs">
                 <thead className="text-text-muted">
                   <tr>
                     <th className="text-left font-normal">Fund</th>
@@ -200,7 +201,7 @@ export function AllocatorView() {
                     </tr>
                   ))}
                 </tbody>
-              </table></div>
+              </Table></div>
               <p className="mt-2 text-[11px] text-text-muted">
                 Volatility of the target mix {pct(p.volatility)} a year.
               </p>

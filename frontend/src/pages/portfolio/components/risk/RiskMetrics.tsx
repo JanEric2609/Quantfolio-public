@@ -1,10 +1,11 @@
 import { Card } from "../../../../components/ui/card";
 import type { RiskAssessment } from "../../../../lib/api";
+import { formatNumber } from "../../../../lib/format";
 
 const MIN_RETURNS_FOR_RATIOS = 30;
 
 function pct(value: number, digits = 2) {
-  return `${(value * 100).toFixed(digits)} %`;
+  return `${formatNumber((value * 100), { digits: digits })} %`;
 }
 
 function Tile({ label, value, hint, tone }: { label: string; value: string; hint: string; tone?: "bad" | "warn" | "muted" }) {
@@ -65,8 +66,8 @@ export function RiskMetrics({ risk }: { risk: RiskAssessment }) {
         hint="distance from the window's peak"
         tone={hasReturns && risk.current_drawdown < -0.1 ? "bad" : undefined}
       />
-      <Tile label="Sharpe" value={ratiosReady ? risk.sharpe_ratio.toFixed(2) : "Too early"} hint={ratioHint} tone={ratiosReady ? undefined : "muted"} />
-      <Tile label="Sortino" value={ratiosReady ? risk.sortino_ratio.toFixed(2) : "Too early"} hint={ratioHint} tone={ratiosReady ? undefined : "muted"} />
+      <Tile label="Sharpe" value={ratiosReady ? formatNumber(risk.sharpe_ratio, { digits: 2 }) : "Too early"} hint={ratioHint} tone={ratiosReady ? undefined : "muted"} />
+      <Tile label="Sortino" value={ratiosReady ? formatNumber(risk.sortino_ratio, { digits: 2 }) : "Too early"} hint={ratioHint} tone={ratiosReady ? undefined : "muted"} />
     </div>
   );
 }

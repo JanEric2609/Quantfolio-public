@@ -151,8 +151,7 @@ def training_rows(db: Session, prediction: DiscoveryPrediction) -> list[tuple[fl
     issued = _utc(prediction.predicted_at or datetime.now(UTC))
     cutoff = _embargo_cutoff(issued)
     rows = (
-        db.query(DiscoveryPrediction.conviction, DiscoveryPrediction.excess_return, DiscoveryPrediction.predicted_at,
-                 DiscoveryPrediction.resolve_at, DiscoveryPrediction.score_json)
+        db.query(DiscoveryPrediction)
         .filter(
             DiscoveryPrediction.user_id == prediction.user_id,
             DiscoveryPrediction.outcome_status.in_(("resolved", "delisted")),
@@ -168,13 +167,18 @@ def training_rows(db: Session, prediction: DiscoveryPrediction) -> list[tuple[fl
         )
         .all()
     )
-    out = []
-    for conviction, excess, predicted_at, resolve_at, score_json in rows:
-        if predicted_at is None or resolve_at is None or _utc(resolve_at) > cutoff:
-            continue
-        if _fx_basis(score_json) == "local_fallback":
-            continue  # its excess mixes a local return with a EUR benchmark
-        out.append((float(conviction), float(excess) > 0, _utc(predicted_at).date()))
+    from app.decision.discover.ledger import non_overlapping
+
+    usable = [
+        r for r in rows
+        if r.predicted_at is not None and r.resolve_at is not None and _utc(r.resolve_at) <= cutoff
+        and _fx_basis(r.score_json) != "local_fallback"  # its excess mixes a local return with a EUR benchmark
+    ]
+    # One pick per symbol and holding period: repeated picks of one name are one outcome (plan 2026-11-12, WP7).
+    out: list[tuple[float, bool, date]] = []
+    for r in non_overlapping(usable):
+        if r.conviction is not None and r.excess_return is not None and r.predicted_at is not None:
+            out.append((float(r.conviction), float(r.excess_return) > 0, _utc(r.predicted_at).date()))
     return out
 
 

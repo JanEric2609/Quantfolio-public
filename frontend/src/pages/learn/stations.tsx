@@ -6,6 +6,7 @@ import { useProjection } from "../quantlab/hooks/useProjection";
 import { useTrustVerdict } from "../trust/useTrust";
 import { Feedback, Station } from "./Station";
 import type { LearnState } from "./progress";
+import { formatNumber } from "../../lib/format";
 
 export interface StationProps {
   state: LearnState;
@@ -167,7 +168,7 @@ export function Ladder(_p: StationProps) {
     <Station id="ladder" title="The capital ladder" question="How much evidence does a stock-picking strategy need before it gets real money?"
       source="Capital ladder" sourceTo="/graduation" empty={empty}>
       <Feedback show={!!c}>
-        {c ? `${c.stage_name}: evidence ${c.e_skill.toFixed(1)} against ${c.thresholds.earned} needed for the next stage, after ${c.days_of_evidence} days. ${c.next_step}` : ""}
+        {c ? `${c.stage_name}: evidence ${formatNumber(c.e_skill, { digits: 1 })} against ${c.thresholds.earned} needed for the next stage, after ${c.days_of_evidence} days. ${c.next_step}` : ""}
       </Feedback>
     </Station>
   );

@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { api, type TaxSettings } from "../../../lib/api";
 import { Button } from "../../../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../../components/ui/card";
+import { Table } from "../../../components/ui/table";
 
 type Tri = "unknown" | "yes" | "no";
 const toTri = (v: boolean | null | undefined): Tri => (v == null ? "unknown" : v ? "yes" : "no");
@@ -100,7 +101,7 @@ export function TaxStatusCard() {
         </fieldset>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <Table className="w-full text-sm">
             <thead className="text-left text-text-secondary">
               <tr className="border-b border-border">
                 <th className="py-1.5 pr-3 font-medium">Bank</th>
@@ -157,7 +158,7 @@ export function TaxStatusCard() {
                 </td>
               </tr>
             </tbody>
-          </table>
+          </Table>
           {over && (
             <p className="mt-1 text-xs text-danger">
               The orders add up to {orders.toLocaleString("de-DE")} €, more than the {allowance.toLocaleString("de-DE")} € allowance.

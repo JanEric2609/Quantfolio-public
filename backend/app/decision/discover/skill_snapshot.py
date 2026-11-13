@@ -73,7 +73,10 @@ def write_skill_snapshot(
         for r in resolved
         if r.get("outcome_status") == "resolved" and rows.get(r["prediction_id"]) is not None
     ]
-    score_jsons = [r.score_json or {} for r in scored_rows]
+    # One pick per symbol and holding period: repeated picks of one name are one outcome (plan 2026-11-12, WP7).
+    from app.decision.discover.ledger import non_overlapping
+
+    score_jsons = [r.score_json or {} for r in non_overlapping(scored_rows)]
 
     hits = [float(sj["hit"]) for sj in score_jsons if sj.get("hit") is not None]
     briers = [float(sj["brier"]) for sj in score_jsons if sj.get("brier") is not None]

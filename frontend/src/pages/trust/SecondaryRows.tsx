@@ -3,6 +3,7 @@ import { Badge } from "../../components/ui/badge";
 import { Card } from "../../components/ui/card";
 import { LineChart } from "../../components/charts/LineChart";
 import { fmtDay, fmtPct, fmtPp } from "./trustFormat";
+import { formatNumber } from "../../lib/format";
 
 function Descriptive() {
   return (
@@ -28,7 +29,7 @@ export function PairedComparisonCard({ paired }: { paired: TrustPairedComparison
       ) : (
         <>
           <p className="text-sm text-text-primary">
-            On {paired.n_days.toLocaleString("en-US")} common trading days the advisor was{" "}
+            On {formatNumber(paired.n_days, { digits: 0 })} common trading days the advisor was{" "}
             <span className="font-mono font-semibold">{fmtPp(paired.mean_21d, 2)}</span> per 21 days against the
             picks
             {ci ? ` (90 % interval ${fmtPp(ci[0], 2)} to ${fmtPp(ci[1], 2)})` : ""}, ahead on{" "}

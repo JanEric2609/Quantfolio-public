@@ -226,7 +226,7 @@ describe("VerdictTab", () => {
     expect(screen.getByText(/one verdict needs 40, which keeps false discoveries at 5 %/)).toBeInTheDocument();
     expect(screen.getByText(/plus or minus 5 % a day/)).toBeInTheDocument();
     // The time to know is a range, from the simulation.
-    expect(screen.getAllByText(/about 19 years \(10–90 %: 5\.9 to 42\)/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/about 19 years \(10–90 %: 5\,9 to 42\)/).length).toBeGreaterThan(0);
     expect(screen.getByTestId("family-F1")).toHaveTextContent("Primary");
     expect(screen.getByTestId("family-F3")).toHaveTextContent("Secondary");
   });
@@ -341,8 +341,8 @@ describe("VerdictTab", () => {
       renderTab(verdict);
 
       expect(await screen.findByTestId("trust-headline")).toHaveTextContent("Evidence of skill vs your ETF over 200 calls.");
-      expect(screen.getAllByText("+0.89 pp").length).toBeGreaterThan(0);
-      expect(screen.getByText(/90 % interval \+0\.21 pp to \+1\.58 pp · mean active/)).toBeInTheDocument();
+      expect(screen.getAllByText("+0,89 pp").length).toBeGreaterThan(0);
+      expect(screen.getByText(/90 % interval \+0\,21 pp to \+1\,58 pp · mean active/)).toBeInTheDocument();
       expect(screen.getByTestId("trust-units")).toHaveTextContent("400");
       // The posterior is shown, with its prior, and says it is not the verdict.
       const posterior = screen.getByTestId("posterior-F1");
@@ -354,7 +354,7 @@ describe("VerdictTab", () => {
       expect(chip).toHaveTextContent("Evidence of skill");
       expect(chip.className).toMatch(/bg-success/);
       expect(screen.getByTestId("type-ideas")).toHaveTextContent("70 % (140 of 200)");
-      expect(screen.getByTestId("type-ideas")).toHaveTextContent("90 % interval +0.2 pp to +1.6 pp");
+      expect(screen.getByTestId("type-ideas")).toHaveTextContent("90 % interval +0,2 pp to +1,6 pp");
       // The resolved-call count no longer shows the empty-ledger notice.
       expect(screen.queryByText(/First resolutions due/)).not.toBeInTheDocument();
     });
@@ -380,7 +380,7 @@ describe("VerdictTab", () => {
       expect(chip).toHaveAttribute("data-state", "harm");
       expect(chip).toHaveTextContent("Evidence of harm vs your ETF");
       expect(chip.className).toMatch(/bg-danger/);
-      expect(screen.getAllByText("−2.10 pp").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("−2,10 pp").length).toBeGreaterThan(0);
       expect(within(screen.getByTestId("family-F1")).getAllByTitle(/./).find((el) => el.hasAttribute("data-state"))).toHaveAttribute(
         "data-state",
         "harm",
@@ -439,10 +439,10 @@ describe("VerdictTab", () => {
       const plot = await screen.findByTestId("reliability-ideas");
       expect(plot).toHaveTextContent("When we said 70 %, it happened 12 of 20 times.");
       expect(within(plot).getByRole("table", { name: /reliability bins/i })).toBeInTheDocument();
-      expect(plot).toHaveTextContent("Spiegelhalter Z -1.20");
+      expect(plot).toHaveTextContent("Spiegelhalter Z -1,20");
       // The same caption and a Brier line with its interval sit in the type card.
-      expect(screen.getByTestId("type-ideas")).toHaveTextContent("Brier 0.231 on 40 calls with a stated probability");
-      expect(screen.getByTestId("type-ideas")).toHaveTextContent("90 % interval -0.04 to 0.13");
+      expect(screen.getByTestId("type-ideas")).toHaveTextContent("Brier 0,231 on 40 calls with a stated probability");
+      expect(screen.getByTestId("type-ideas")).toHaveTextContent("90 % interval -0,04 to 0,13");
     });
   });
 
@@ -523,7 +523,7 @@ describe("VerdictTab", () => {
       }),
     );
     expect(await screen.findByTestId("paired-comparison")).toHaveTextContent(
-      "On 70 common trading days the advisor was −0.40 pp per 21 days against the picks",
+      "On 70 common trading days the advisor was −0,40 pp per 21 days against the picks",
     );
     expect(screen.getByTestId("paired-comparison")).toHaveTextContent("ahead on 47 % of days");
     expect(screen.queryByTestId("factor-neutral")).not.toBeInTheDocument();
@@ -557,7 +557,7 @@ describe("VerdictTab", () => {
       }),
     );
     expect(await screen.findByTestId("family-S")).toHaveTextContent("Too early");
-    expect(screen.getByTestId("selection-grid")).toHaveTextContent("0.25 %: > 40 years · 0.5 %: about 12 years · 1 %: about 3.4 years");
+    expect(screen.getByTestId("selection-grid")).toHaveTextContent("0,25 %: > 40 years · 0,5 %: about 12 years · 1 %: about 3,4 years");
     expect(screen.getByTestId("family-S")).toHaveTextContent("16 % a year apart from MSCI World");
     expect(screen.getByTestId("mandates")).toHaveTextContent("Mandate A: Measuring its noise");
     expect(within(screen.getByTestId("trust-alarms")).getByTestId("family-F1")).toBeInTheDocument();
@@ -621,7 +621,7 @@ describe("VerdictTab", () => {
       }),
     );
     expect(await screen.findByTestId("family-S")).toHaveTextContent("Not valid: serial correlation");
-    expect(screen.getByTestId("selection-noise")).toHaveTextContent("Noise check failed at day 63: day 63: 3.40 (limit 3)");
+    expect(screen.getByTestId("selection-noise")).toHaveTextContent("Noise check failed at day 63: day 63: 3,40 (limit 3)");
     expect(screen.getByTestId("mandates")).toHaveTextContent("retires once its noise check passes at 252 days");
   });
 

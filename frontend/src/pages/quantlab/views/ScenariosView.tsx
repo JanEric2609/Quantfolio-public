@@ -8,6 +8,7 @@ import type { MetricItem } from "../components/SummaryStrip";
 import { useLongHistoryProjection, useProjection } from "../hooks/useProjection";
 import { useGoals } from "../hooks/useGoals";
 import type { Goal, LongHistoryProjection } from "../../../lib/api";
+import { formatNumber } from "../../../lib/format";
 
 const eur = (v?: number | null) => (v == null ? "-" : formatCurrency(v, "EUR", { digits: 0 }));
 const pct = (v?: number | null, digits = 1) => formatPercent(v, { digits });
@@ -171,7 +172,7 @@ export function ScenariosView() {
           <label className="flex flex-col gap-1">
             <span className="text-text-muted">Real return (% a year)</span>
             <input className="w-20 rounded border border-line bg-surface px-2 py-1" inputMode="decimal" value={realReturn}
-              placeholder={d ? (100 * d.inputs.real_return).toFixed(1) : ""} onChange={(e) => setRealReturn(e.target.value)} />
+              placeholder={d ? formatNumber((100 * d.inputs.real_return), { digits: 1 }) : ""} onChange={(e) => setRealReturn(e.target.value)} />
           </label>
           <span className="text-text-muted">Empty fields use your book and your settings.</span>
         </section>

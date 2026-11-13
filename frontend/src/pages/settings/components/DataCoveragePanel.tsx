@@ -89,7 +89,7 @@ export function DataCoveragePanel() {
             {coverage.data.gaps_count >= 0 && (
               <div className="flex justify-between">
                 <span className="text-text-muted">Business day gaps:</span>
-                <span className={coverage.data.gaps_count > 5 ? "text-amber-600 dark:text-amber-400" : ""}>
+                <span className={coverage.data.gaps_count > 5 ? "text-warn" : ""}>
                   {coverage.data.gaps_count}
                 </span>
               </div>
@@ -100,10 +100,10 @@ export function DataCoveragePanel() {
 
       {symbols.isLoading && <p className="text-sm text-text-muted">Loading symbols…</p>}
       {symbols.error && (
-        <p className="text-sm text-red-600 dark:text-red-400">Error loading data coverage: {String(symbols.error)}</p>
+        <p className="text-sm text-danger">Error loading data coverage: {String(symbols.error)}</p>
       )}
       {coverage.error && (
-        <p className="text-sm text-red-600 dark:text-red-400">Error loading coverage: {String(coverage.error)}</p>
+        <p className="text-sm text-danger">Error loading coverage: {String(coverage.error)}</p>
       )}
     </div>
   );

@@ -14,6 +14,7 @@ import { ScoreBar } from "../ui/ScoreBar";
 import { ConcernBadges } from "./ConcernBadges";
 import { DossierActions } from "./DossierActions";
 import { brokerAvailability } from "./brokerAvailability";
+import { Table } from "../ui/table";
 
 interface DossierDrawerProps {
   open: boolean;
@@ -443,7 +444,7 @@ export function DossierDrawer({ open, onClose, dossier, symbol, concerns, name, 
                 <h4 className="text-sm font-semibold text-text-primary mb-2">What drives the score</h4>
                 <Card className="border-border bg-surface-2">
                   <CardContent className="p-0">
-                    <div className="overflow-x-auto"><table data-testid="composite-breakdown" className="w-full text-sm">
+                    <div className="overflow-x-auto"><Table data-testid="composite-breakdown" className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-border text-xs text-text-muted">
                           <th className="px-4 py-2 text-left font-normal">Signal</th>
@@ -468,7 +469,7 @@ export function DossierDrawer({ open, onClose, dossier, symbol, concerns, name, 
                           </tr>
                         ))}
                       </tbody>
-                    </table></div>
+                    </Table></div>
                   </CardContent>
                 </Card>
                 <p className="text-xs text-text-muted mt-1">
@@ -483,7 +484,7 @@ export function DossierDrawer({ open, onClose, dossier, symbol, concerns, name, 
                 <h4 className="text-sm font-semibold text-text-primary mb-2">Signal Breakdown</h4>
                 <Card className="border-border bg-surface-2">
                   <CardContent className="p-0">
-                    <div className="overflow-x-auto"><table className="w-full text-sm">
+                    <div className="overflow-x-auto"><Table className="w-full text-sm">
                       <tbody>
                         {Object.entries(dossier.signal_breakdown).map(([key, value]) => (
                           <tr key={key} className="border-b border-border last:border-b-0">
@@ -496,7 +497,7 @@ export function DossierDrawer({ open, onClose, dossier, symbol, concerns, name, 
                           </tr>
                         ))}
                       </tbody>
-                    </table></div>
+                    </Table></div>
                   </CardContent>
                 </Card>
               </section>

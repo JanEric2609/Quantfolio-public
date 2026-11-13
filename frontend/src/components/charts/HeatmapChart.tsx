@@ -35,7 +35,7 @@ export function HeatmapChart({ rows, cols, values, min, max, ...rest }: HeatmapC
     visualMap: { min: mn, max: mx, calculable: true, orient: "vertical" as const, right: 0, top: "middle", inRange: { color: DIVERGING } },
     series: [{
       type: "heatmap" as const, data,
-      label: { show: rows.length <= 8, formatter: (p: any) => (typeof p.data[2] === "number" ? p.data[2].toFixed(2) : "") },
+      label: { show: rows.length <= 8, formatter: (p: any) => (typeof p.data[2] === "number" ? formatNumber(p.data[2], { digits: 2 }) : "") },
       emphasis: { itemStyle: { shadowBlur: 10, shadowColor: "rgba(0,0,0,0.5)" } },
     }],
   };

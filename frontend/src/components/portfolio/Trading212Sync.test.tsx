@@ -43,7 +43,7 @@ describe("Trading212SyncButton", () => {
     wrap(<Trading212SyncButton />);
     expect(await screen.findByText(/key lacks a permission/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Fix" })).toHaveAttribute("href", "/settings/bank?connection=trading212");
-    expect(screen.getByText(/cash interest 3\.99 % p\.a\. \(measured\)/)).toBeInTheDocument();
+    expect(screen.getByText(/cash interest 3\,99 % p\.a\. \(measured\)/)).toBeInTheDocument();
   });
 });
 
@@ -52,8 +52,8 @@ describe("Trading212Pies", () => {
     wrap(<Trading212Pies />);
     const pie = await screen.findByRole("region", { name: "Pie Dividends" });
     expect(within(pie).getByText("Vanguard All-World High Div")).toBeInTheDocument();
-    expect(within(pie).getByText("60.0 %")).toBeInTheDocument();
-    expect(within(pie).getByText("55.0 %")).toBeInTheDocument();
+    expect(within(pie).getByText("60,0 %")).toBeInTheDocument();
+    expect(within(pie).getByText("55,0 %")).toBeInTheDocument();
     expect(within(pie).getByText(/dividends paid out/)).toBeInTheDocument();
     expect(within(pie).getByText(/approaching max position size/)).toBeInTheDocument();
     expect(screen.getByText(/latest read failed/)).toBeInTheDocument();

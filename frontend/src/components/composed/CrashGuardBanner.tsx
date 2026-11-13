@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ShieldAlert } from "lucide-react";
 import { getCrashGuard, type CrashGuardState } from "../../lib/api";
 import { cn } from "../../lib/utils";
+import { Table } from "../ui/table";
 
 const TONE: Record<string, string> = {
   correction: "border-warn/40 bg-warn/10",
@@ -92,7 +93,7 @@ export function CrashGuardCard({ data }: { data: CrashGuardState }) {
             Earlier falls of 10 % or more since {market.history_start?.slice(0, 4) ?? "the start of the data"} ({past.length})
           </summary>
           <div className="mt-2 overflow-x-auto">
-            <table className="w-full text-xs tabular-nums">
+            <Table className="w-full text-xs tabular-nums">
               <thead className="text-left text-text-muted">
                 <tr>
                   <th className="py-1 pr-3 font-medium">From the high of</th>
@@ -111,7 +112,7 @@ export function CrashGuardCard({ data }: { data: CrashGuardState }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </Table>
           </div>
         </details>
       ) : null}

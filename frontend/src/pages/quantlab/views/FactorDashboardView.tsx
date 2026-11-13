@@ -4,6 +4,7 @@ import { useFactorExposures } from "../hooks/useFactorExposures";
 import { useFactorRotation } from "../hooks/useFactorRotation";
 import { useSmartBetaComparison } from "../hooks/useSmartBetaComparison";
 import { MetricTooltip } from "../../../components/composed/MetricTooltip";
+import { Table } from "../../../components/ui/table";
 
 interface FactorExposureItem {
   name: string;
@@ -170,7 +171,7 @@ export function FactorDashboardView() {
           <div className="text-text-muted">Loading rotation data...</div>
         ) : (
           <div className="overflow-x-auto rounded-md border border-line">
-            <table className="w-full">
+            <Table className="w-full">
               <thead>
                 <tr className="border-b border-line bg-surface text-[10px] uppercase text-text-muted">
                   <th className="px-3 py-1.5 text-left">Factor</th>
@@ -206,7 +207,7 @@ export function FactorDashboardView() {
                   </tr>
                 )}
               </tbody>
-            </table>
+            </Table>
           </div>
         )}
       </section>
@@ -218,7 +219,7 @@ export function FactorDashboardView() {
           <div className="text-text-muted">Loading smart beta data...</div>
         ) : (
           <div className="overflow-x-auto rounded-md border border-line">
-            <table className="w-full">
+            <Table className="w-full">
               <thead>
                 <tr className="border-b border-line bg-surface text-[10px] uppercase text-text-muted">
                   <th className="px-3 py-1.5 text-left">ETF</th>
@@ -248,7 +249,7 @@ export function FactorDashboardView() {
                   </tr>
                 )}
               </tbody>
-            </table>
+            </Table>
           </div>
         )}
       </section>

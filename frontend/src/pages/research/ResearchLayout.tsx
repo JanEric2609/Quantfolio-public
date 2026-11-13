@@ -1,4 +1,4 @@
-import { Outlet } from "react-router-dom";
+import { Outlet, useMatch } from "react-router-dom";
 import { Star, Library, Sparkles, ClipboardPaste } from "lucide-react";
 import { PageHeader } from "../../components/composed/PageHeader";
 import { TabNav } from "../../components/composed/TabNav";
@@ -12,6 +12,9 @@ const WATCHLIST_TABS = [
 ];
 
 export function ResearchLayout() {
+  // A stock's page has its own title and breadcrumb: no "Research" title and tab row above it.
+  const onStock = useMatch("/research/stocks/:ticker") != null;
+  if (onStock) return <Outlet />;
   return (
     <div className="space-y-6">
       <PageHeader title="Research" />

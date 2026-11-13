@@ -1,3 +1,4 @@
+import contextvars
 import json
 import logging
 import math
@@ -116,7 +117,24 @@ def dividend_history(db: Session, ticker: str, start: date) -> list[dict[str, An
     return list(result.get("data") or []) if result.get("ok") else []
 
 
+#: When set (an ISO date), :func:`history` drops bars dated after it. The Discover stage cache sets it
+#: while computing a stage for a key dated D, so a result stored under D never contains a later,
+#: possibly partial, bar (plan 2026-11-12, WP6).
+history_as_of: contextvars.ContextVar[str | None] = contextvars.ContextVar("history_as_of", default=None)
+
+
 def history(
+    db: Session, ticker: str, days: int = 365, allow_live: bool = True
+) -> list[dict[str, Any]]:
+    """OHLCV history for ``ticker`` as :func:`_history_rows` returns it, capped at ``history_as_of`` when set."""
+    rows = _history_rows(db, ticker, days=days, allow_live=allow_live)
+    cap = history_as_of.get()
+    if cap is None:
+        return rows
+    return [r for r in rows if str(r.get("date"))[:10] <= cap]
+
+
+def _history_rows(
     db: Session, ticker: str, days: int = 365, allow_live: bool = True
 ) -> list[dict[str, Any]]:
     """Return cached/live OHLCV history for ``ticker``.

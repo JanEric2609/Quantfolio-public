@@ -6,6 +6,7 @@ import { EvidenceChip } from "./EvidenceChip";
 import { PairedComparisonCard } from "./SecondaryRows";
 import { MandatesCard, SelectionCard } from "./SelectionTests";
 import { STATE_META, assumptionLabel, fmtDay, fmtE, fmtPct, fmtPp, fmtYears, timeToKnowText } from "./trustFormat";
+import { formatNumber } from "../../lib/format";
 
 const TITLES: Record<TrustFamilyTest["family"], string> = {
   F1: "Discover's picks vs your ETF",
@@ -118,7 +119,7 @@ export function FamilyCard({ family, start }: { family: TrustFamilyTest; start: 
       <dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
         <Stat
           label="Trading days tested"
-          value={`${family.n_days.toLocaleString("en-US")}`}
+          value={`${formatNumber(family.n_days, { digits: 0 })}`}
           sub={family.n_days ? `since ${fmtDay(family.first_day ?? start)}` : `starts ${fmtDay(start)}`}
         />
         <Stat
@@ -133,7 +134,7 @@ export function FamilyCard({ family, start }: { family: TrustFamilyTest; start: 
         />
         <Stat
           label="Open on an average day"
-          value={family.mean_open != null ? family.mean_open.toFixed(1) : "—"}
+          value={family.mean_open != null ? formatNumber(family.mean_open, { digits: 1 }) : "—"}
           sub={isRanking(family) ? "scored runs (cohorts)" : "calls"}
         />
       </dl>
@@ -154,7 +155,7 @@ export function FamilyCard({ family, start }: { family: TrustFamilyTest; start: 
           ? "The weights hold the score's rank exposure fixed and take the least risky mix of stocks for it, with covariances from the year before each run (Ledoit, Wolf and Zhao, 2019). "
           : ""}
         {family.rho1 != null
-          ? `Day-to-day correlation of the first three months: ${family.rho1.toFixed(2)}${family.rho1_flag ? " (above 0.15: noted, the test stays valid)" : ""}.`
+          ? `Day-to-day correlation of the first three months: ${formatNumber(family.rho1, { digits: 2 })}${family.rho1_flag ? " (above 0.15: noted, the test stays valid)" : ""}.`
           : ""}
       </p>
     </Card>

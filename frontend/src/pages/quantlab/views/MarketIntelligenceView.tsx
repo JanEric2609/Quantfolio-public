@@ -82,8 +82,8 @@ export function MarketIntelligenceView() {
                   style={{
                     width: `${Math.abs(sentimentData.summary?.score ?? 0) * 100}%`,
                     background: (sentimentData.summary?.score ?? 0) >= 0
-                      ? "rgb(34, 197, 94)"
-                      : "rgb(239, 68, 68)",
+                      ? "rgb(var(--c-success))"
+                      : "rgb(var(--c-danger))",
                   }}
                 />
               </div>

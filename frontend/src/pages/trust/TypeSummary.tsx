@@ -2,6 +2,7 @@ import type { TrustAci, TrustTypeVerdict, TrustVerdict } from "../../lib/api";
 import { Card } from "../../components/ui/card";
 import { EvidenceChip } from "./EvidenceChip";
 import { STATE_META, cadenceText, fmtDay, fmtNeeded, fmtInterval, fmtPct, fmtPp } from "./trustFormat";
+import { formatNumber } from "../../lib/format";
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string | null }) {
   return (
@@ -61,11 +62,11 @@ export function TypeSummary({
           />
           <Stat
             label={type.benchmarked ? "Per-date evidence (secondary)" : "Evidence (e-value now)"}
-            value={`skill ${type.e_skill.toFixed(1)} · harm ${type.e_harm.toFixed(1)}`}
+            value={`skill ${formatNumber(type.e_skill, { digits: 1 })} · harm ${formatNumber(type.e_harm, { digits: 1 })}`}
             sub={
               !type.benchmarked
                 ? "not tested: no benchmark to compare against"
-                : `with calls in flight at their worst: skill ${(type.e_skill_lower ?? type.e_skill).toFixed(1)} · harm ${(type.e_harm_lower ?? type.e_harm).toFixed(1)}` +
+                : `with calls in flight at their worst: skill ${formatNumber((type.e_skill_lower ?? type.e_skill), { digits: 1 })} · harm ${formatNumber((type.e_harm_lower ?? type.e_harm), { digits: 1 })}` +
                   (type.family ? `; the state comes from the daily test (${type.family})` : "") +
                   (verdict?.ebh_threshold != null ? `, which needs ${verdict.ebh_threshold}` : "")
             }
@@ -80,10 +81,10 @@ export function TypeSummary({
       {type.calibration_caption ? <p className="text-sm text-text-primary">{type.calibration_caption}</p> : null}
       {type.brier != null ? (
         <p className="text-xs text-text-muted">
-          Brier {type.brier.toFixed(3)} on {type.n_stated_p} calls with a stated probability
+          Brier {formatNumber(type.brier, { digits: 3 })} on {type.n_stated_p} calls with a stated probability
           {type.bss != null
-            ? `; skill vs the base rate ${type.bss.toFixed(2)}${
-                type.bss_ci ? ` (90 % interval ${type.bss_ci[0].toFixed(2)} to ${type.bss_ci[1].toFixed(2)})` : ` (interval needs ${verdict?.min_calls_for_interval ?? "more"} calls)`
+            ? `; skill vs the base rate ${formatNumber(type.bss, { digits: 2 })}${
+                type.bss_ci ? ` (90 % interval ${formatNumber(type.bss_ci[0], { digits: 2 })} to ${formatNumber(type.bss_ci[1], { digits: 2 })})` : ` (interval needs ${verdict?.min_calls_for_interval ?? "more"} calls)`
               }`
             : ""}
           .

@@ -96,7 +96,7 @@ export const ROUTE_ENTRIES: RouteEntry[] = [
     match: isStrategyLabPath,
     keywords: ["evidence", "advisor", "mandates", "graduation", "capital ladder", "paper"],
   },
-  { id: "learn", to: "/learn", label: "Learn", icon: GraduationCap, group: "money", keywords: ["tutorial", "teach", "how it works", "quiz"] },
+  { id: "learn", to: "/learn", label: "Learn", icon: GraduationCap, group: "trust", keywords: ["tutorial", "teach", "how it works", "quiz"] },
   { id: "settings", to: "/settings", label: "Control Center", icon: Settings, group: "admin", keywords: ["settings", "connections", "status"] },
 ];
 

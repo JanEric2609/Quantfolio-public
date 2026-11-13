@@ -1,4 +1,5 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { formatNumber } from "../../lib/format";
 /** Every row behind N, by context, on one scale: exact counts and their share of N. */
 export function TrialsByContextCard({
   byContext,
@@ -25,7 +26,7 @@ export function TrialsByContextCard({
       <CardHeader>
         <CardTitle className="text-base">Trials by family</CardTitle>
         <CardDescription>
-          Where search breadth has been spent. The rows add up to N = {resolved.toLocaleString("en-US")}, the total
+          Where search breadth has been spent. The rows add up to N = {formatNumber(resolved, { digits: 0 })}, the total
           over every family; each gate deflates only by the families it draws from.
         </CardDescription>
       </CardHeader>
@@ -43,7 +44,7 @@ export function TrialsByContextCard({
                 />
               </span>
               <span className="font-mono text-xs tabular-nums text-text-primary">
-                {r.n.toLocaleString("en-US")} · {((r.n / total) * 100).toFixed(r.n / total < 0.01 ? 1 : 0)} %
+                {formatNumber(r.n, { digits: 0 })} · {formatNumber((r.n / total) * 100, { digits: r.n / total < 0.01 ? 1 : 0 })} %
               </span>
             </li>
           ))}

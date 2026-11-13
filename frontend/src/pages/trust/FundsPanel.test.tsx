@@ -42,8 +42,8 @@ describe("FundsPanel", () => {
       ],
     });
     const world = await screen.findByTestId("fund-IE00B4L5Y983");
-    expect(world).toHaveTextContent("MSCI World: −0.10 % a year against the median of its peers.");
-    expect(world).toHaveTextContent("Xtrackers MSCI World 1C tracked 0.20 % a year better.");
+    expect(world).toHaveTextContent("MSCI World: −0,10 % a year against the median of its peers.");
+    expect(world).toHaveTextContent("Xtrackers MSCI World 1C tracked 0,20 % a year better.");
     expect(world).toHaveTextContent("Trails a peer");
     expect(screen.getByTestId("fund-IE00BK5BQT80")).toHaveTextContent("no measured peer on the same index");
     expect(screen.getByText(/1 other positions are not compared/)).toBeInTheDocument();
