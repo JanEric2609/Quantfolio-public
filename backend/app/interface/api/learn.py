@@ -35,6 +35,7 @@ SOURCE_ALLOW_LIST: dict[str, tuple[str, str]] = {
     "newey_west_t_stat": ("app.foundation.quant_metrics", "newey_west_t_stat"),
     "deflated_sharpe_ratio": ("app.foundation.quant_metrics", "deflated_sharpe_ratio"),
     "diebold_mariano_nonoverlapping": ("app.foundation.quant_metrics", "diebold_mariano_nonoverlapping"),
+    "walk_forward_splits": ("app.lab.alphacrafter.tuning", "walk_forward_splits"),
     "e_processes": ("app.decision.graduation.ladder", "e_processes"),
     "beta_adjusted": ("app.decision.graduation.ladder", "beta_adjusted"),
     "shrunk_covariance": ("app.foundation.allocation", "shrunk_covariance"),

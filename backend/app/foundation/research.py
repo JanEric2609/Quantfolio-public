@@ -92,7 +92,8 @@ def _rsi(closes: list[float], period: int = 14) -> float | None:
     return round(100 - 100 / (1 + avg_gain / avg_loss), 1)
 
 
-def price_technicals(history_rows: list[dict[str, Any]], today: date | None = None) -> dict[str, Any] | None:
+def price_technicals(history_rows: list[dict[str, Any]], today: date | None = None,
+                     range_52w: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """The price and volume figures the report may quote, computed here.
 
     The model got a price range and nothing else, and filled the gap with
@@ -136,6 +137,14 @@ def price_technicals(history_rows: list[dict[str, Any]], today: date | None = No
     hi_i = max(range(len(highs)), key=highs.__getitem__)
     lo_i = min(range(len(lows)), key=lows.__getitem__)
     high_52w, low_52w = highs[hi_i], lows[lo_i]
+    high_date, low_date = str(year_rows[hi_i]["date"])[:10], str(year_rows[lo_i]["date"])[:10]
+    # The stored bars are dividend-adjusted; the range as traded comes from an unadjusted (split-adjusted only)
+    # series when one could be read, else the adjusted daily highs and lows stand in and the basis says so.
+    range_basis = "adjusted for dividends"
+    if range_52w and range_52w.get("high") and range_52w.get("low"):
+        high_52w, low_52w = float(range_52w["high"]), float(range_52w["low"])
+        high_date, low_date = str(range_52w.get("high_date") or high_date), str(range_52w.get("low_date") or low_date)
+        range_basis = "as traded"
     sma50, sma200 = _sma(50), _sma(200)
     return {
         "sessions": len(closes),
@@ -148,9 +157,10 @@ def price_technicals(history_rows: list[dict[str, Any]], today: date | None = No
         "return_6m_pct": _ret(126),
         "return_12m_pct": _ret(252),
         "high_52w": round(high_52w, 4),
-        "high_52w_date": str(year_rows[hi_i]["date"])[:10],
+        "high_52w_date": high_date,
         "low_52w": round(low_52w, 4),
-        "low_52w_date": str(year_rows[lo_i]["date"])[:10],
+        "low_52w_date": low_date,
+        "range_52w_basis": range_basis,
         "pct_below_52w_high": round((1 - last_close / high_52w) * 100, 1) if high_52w > 0 else None,
         "sma_50": sma50,
         "sma_200": sma200,
@@ -365,6 +375,21 @@ def has_research_data(context: dict[str, Any]) -> bool:
     return len(history_rows) >= MIN_BARS_FOR_RESEARCH
 
 
+_RANGE_MEMO: dict[tuple[str, date], dict[str, Any] | None] = {}
+
+
+def _unadjusted_range(ticker: str) -> dict[str, Any] | None:
+    """The traded 52-week range, read once per ticker and day (WP3)."""
+    from app.foundation.providers.yfinance_provider import unadjusted_52w_range
+
+    key = (ticker.upper(), datetime.now(UTC).date())
+    if key not in _RANGE_MEMO:
+        if len(_RANGE_MEMO) > 2000:
+            _RANGE_MEMO.clear()
+        _RANGE_MEMO[key] = unadjusted_52w_range(ticker)
+    return _RANGE_MEMO[key]
+
+
 def build_context(db: Session, ticker: str, user_id: str) -> dict[str, Any]:
     """Gather all data dimensions into one dict for the LLM prompt."""
     q = quote(db, ticker)
@@ -376,7 +401,7 @@ def build_context(db: Session, ticker: str, user_id: str) -> dict[str, Any]:
         "company": _company(db, ticker, fund),
         "quote": q,
         "price_history": price_history,
-        "technicals": price_technicals(price_history),
+        "technicals": price_technicals(price_history, range_52w=_unadjusted_range(ticker)),
         "fundamentals": fund,
         "recent_news": news,
         "news_coverage": news_coverage,
@@ -514,7 +539,7 @@ def _technicals_lines(t: dict[str, Any] | None) -> list[str]:
         ("pct_below_52w_high", "Below 52-week high %"), ("sma_50", "50-day average"), ("sma_200", "200-day average"),
         ("above_sma_50", "Above 50-day average"), ("above_sma_200", "Above 200-day average"),
         ("rsi_14", "RSI 14 days"), ("volatility_3m_annual_pct", "Volatility, last 3 months, annualised %"),
-        ("max_drawdown_12m_pct", "Largest fall from a peak, 12 months %"),
+        ("max_drawdown_12m_pct", "Largest fall from a peak, 12 months %, including dividends"),
         ("avg_volume_20d_completed", "Average daily volume, last 20 completed sessions"),
         ("last_completed_volume", "Volume of the last completed session"),
     ]
@@ -629,6 +654,12 @@ def report_title(context: dict[str, Any]) -> str:
     return f"# {name} ({context['ticker']})" if name else f"# {context['ticker']}"
 
 
+def _strip_section_name(section: str, text: str) -> str:
+    """Drop the section's own name the model sometimes writes first ("Risk Factors. The ...", "**Conclusion:**")."""
+    return re.sub(rf"^\s*(?:#+\s*)?(?:\*\*)?{re.escape(section)}(?:\*\*)?\s*[:.\-–—]?(?:\*\*)?\s*", "", text,
+                  count=1, flags=re.IGNORECASE)
+
+
 def _strip_leading_heading(text: str) -> str:
     """Drop any title the model wrote before its first section (it once named the wrong company)."""
     lines = text.lstrip().splitlines()
@@ -653,7 +684,8 @@ def price_action_text(t: dict[str, Any] | None) -> str:
         parts.append("Returns over the period: " + ", ".join(returns) + ".")
     if t.get("high_52w") is not None and t.get("low_52w") is not None:
         below = f", {t['pct_below_52w_high']} % below the high" if t.get("pct_below_52w_high") is not None else ""
-        parts.append(f"52-week range {t['low_52w']} ({t['low_52w_date']}) to {t['high_52w']} ({t['high_52w_date']}){below}.")
+        basis = " (prices adjusted for dividends)" if t.get("range_52w_basis") == "adjusted for dividends" else ""
+        parts.append(f"52-week range{basis} {t['low_52w']} ({t['low_52w_date']}) to {t['high_52w']} ({t['high_52w_date']}){below}.")
     averages = []
     for key, label in (("sma_50", "50-day"), ("sma_200", "200-day")):
         if t.get(key) is not None:
@@ -665,7 +697,7 @@ def price_action_text(t: dict[str, Any] | None) -> str:
     if t.get("volatility_3m_annual_pct") is not None:
         risk.append(f"volatility over the last 3 months {t['volatility_3m_annual_pct']} % annualised")
     if t.get("max_drawdown_12m_pct") is not None:
-        risk.append(f"largest fall from a peak in 12 months {t['max_drawdown_12m_pct']} %")
+        risk.append(f"largest fall from a peak in 12 months {t['max_drawdown_12m_pct']} % (including dividends)")
     if risk:
         parts.append(risk[0][0].upper() + "; ".join(risk)[1:] + ".")
     if t.get("avg_volume_20d_completed"):
@@ -754,6 +786,16 @@ async def generate_report(db: Session, ticker: str, user_id: str, *,
             }
 
     context = build_context(db, ticker, user_id)
+    if not has_research_data(context):
+        # An unknown ticker: no model call and nothing stored (audit 2026-11-12, WP1).
+        return {
+            "report": "",
+            "summary": "Not found: no provider has data for this ticker.",
+            "context": context,
+            "cached": False,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "error": "not_found",
+        }
     from app.foundation.llm.router import call as llm_call
     try:
         report_text = await _sectioned_report(db, context, user_id, llm_call)
@@ -811,8 +853,8 @@ async def _write_section(db: Session, section: str, context: dict[str, Any], fac
             if first and attempt == 0:
                 raise  # the model is down: the caller reports "unavailable"
             break
-        text = _strip_leading_heading(completion.content or "").strip()
-        problems = rf.check_prose(section, text, facts, has_news=has_news) if text else ["empty"]
+        text = _strip_section_name(section, _strip_leading_heading(completion.content or "")).strip()
+        problems = rf.check_prose(section, text, facts, has_news=has_news, **rf.prose_grounding(context)) if text else ["empty"]
         if not problems and not foreign_companies(text, context):
             return text
         logger.warning("research: %s section for %s rejected (%s)", section, context["ticker"], "; ".join(problems) or "foreign company")

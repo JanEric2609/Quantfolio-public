@@ -216,6 +216,16 @@ def _no_live_isin_lookup(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_live_unadjusted_range(monkeypatch):
+    """A research context reads the traded 52-week range from yfinance; offline in
+    tests (the stored bars stand in). A test that needs one stubs this."""
+    from app.foundation import research
+
+    research._RANGE_MEMO.clear()
+    monkeypatch.setattr(research, "_unadjusted_range", lambda _ticker: None)
+
+
+@pytest.fixture(autouse=True)
 def _no_live_split_events(monkeypatch):
     """A re-pull reads the provider's split events from yfinance; offline in
     tests (unreadable, so a split signature stays a split)."""

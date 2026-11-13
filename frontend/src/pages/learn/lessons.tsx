@@ -47,6 +47,7 @@ export function ReturnsLesson(p: StationProps) {
       misconception="average daily return times 252 is your yearly return."
       idea="Returns multiply, they do not add: +10 % then -10 % leaves you 1 % down. A yearly figure is the daily growth rate compounded for 252 trading days."
       formula="annualised = (Π (1 + rₜ))^(252 / N) − 1"
+      tex={String.raw`\text{annualised} = \Big(\prod_{t=1}^{N} (1 + r_t)\Big)^{252/N} - 1`}
       symbols={[["rₜ", "return on day t"], ["N", "number of days in the sample"], ["252", "trading days in a year"], ["Π", "the product of all the terms"]]}
       sourceName="annualised_return"
       quiz={{
@@ -93,6 +94,7 @@ export function VolatilityLesson(p: StationProps) {
       misconception="yearly volatility is daily volatility times 252."
       idea="Independent days add up their variances, not their sizes. So the spread of k days is the daily spread times √k, and a year (252 days) is √252 ≈ 15.9 times the daily spread."
       formula="σ_year = σ_day × √252"
+      tex={String.raw`\sigma_{\text{year}} = \sigma_{\text{day}} \cdot \sqrt{252}`}
       symbols={[["σ_day", "sample standard deviation of daily returns (N − 1 in the denominator)"], ["√252", "square root of the trading days in a year"]]}
       sourceName="annualised_volatility"
       quiz={{
@@ -138,6 +140,7 @@ export function BetaLesson(p: StationProps) {
       misconception="a positive alpha number means skill."
       idea="Regress your daily return on the benchmark's: the slope is how much of the market's move you took (beta), the intercept is what is left over (alpha). R² says how much of your ups and downs the market explains."
       formula="rₚ = α + β · r_b + ε"
+      tex={String.raw`r_{p,t} = \alpha + \beta \, r_{b,t} + \varepsilon_t`}
       symbols={[["rₚ", "your daily return"], ["r_b", "the benchmark's daily return"], ["β", "slope: sensitivity to the benchmark"], ["α", "intercept: return not explained by the benchmark, per day"], ["ε", "the part neither explains"]]}
       sourceName="beta"
       quiz={{

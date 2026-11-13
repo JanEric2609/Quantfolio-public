@@ -30,8 +30,9 @@ export function TStatLesson(p: StationProps) {
       misconception="a positive average means the effect is real."
       idea="An average of noisy numbers is itself noisy. The standard error says by how much; the t-statistic says how many standard errors the average sits from zero. Below about 2, zero is a fair explanation."
       formula="t = mean(x) / ( sd(x) / √N )"
+      tex={String.raw`t = \frac{\bar{x}}{\operatorname{sd}(x) / \sqrt{N}}`}
       symbols={[["x", "daily excess return over the benchmark"], ["sd(x)", "sample standard deviation"], ["N", "number of days"], ["sd/√N", "the standard error of the mean"]]}
-      sourceName="beta"
+      sourceName="diebold_mariano_nonoverlapping"
       quiz={{
         question: "You have 4 times as many days. Roughly what happens to the standard error of the mean?",
         options: ["It halves", "It quarters", "It stays the same"],
@@ -68,6 +69,7 @@ export function NeweyWestLesson(p: StationProps) {
       misconception="a thousand overlapping observations are a thousand pieces of evidence."
       idea="A 21-day return measured every day shares 20 of its 21 days with the day before. The numbers move together, so you have far fewer independent observations than rows. Newey-West widens the standard error to account for it."
       formula="long-run variance = γ₀ + 2 Σₖ (1 − k/(L+1)) γₖ"
+      tex={String.raw`\hat\sigma^2_{\text{long-run}} = \hat\gamma_0 + 2 \sum_{k=1}^{L} \Big(1 - \frac{k}{L+1}\Big)\hat\gamma_k`}
       symbols={[["γₖ", "covariance of the series with itself k days earlier"], ["L", "number of lags allowed"], ["1 − k/(L+1)", "Bartlett weight: far lags count less"]]}
       sourceName="newey_west_t_stat"
       quiz={{
@@ -107,6 +109,7 @@ export function MultipleTestingLesson(p: StationProps) {
       misconception="the best of many tries is a discovery."
       idea="Try 100 strategies that have no edge at all and a few will show t above 2 by luck. The more you try, the higher the best one looks. A bar of 3 and a count of how many things were tried keep luck from passing."
       formula="E[max of k noise t-stats] ≈ √(2 ln k)"
+      tex={String.raw`\mathbb{E}\Big[\max_{i \le k} t_i\Big] \approx \sqrt{2 \ln k}`}
       symbols={[["k", "number of strategies tried"], ["t", "t-statistic of one strategy's mean return"], ["ln k", "natural logarithm of k"]]}
       sourceName="deflated_sharpe_ratio"
       quiz={{
@@ -142,8 +145,9 @@ export function WalkForwardLesson(p: StationProps) {
       misconception="a rule that fitted the past will work on the future."
       idea="Pick a rule on a stretch of history, then score it only on the next stretch it has never seen, and roll forward. The in-sample score is always flattering; only the out-of-sample score is evidence."
       formula="rule: follow the sign of the trailing mean over the last T days"
+      tex={String.raw`\text{position}_t = \operatorname{sign}\Big(\frac{1}{T}\sum_{s=t-T}^{t-1} x_s\Big)`}
       symbols={[["T", "training window, in days"], ["in-sample", "the same days that chose the rule"], ["out-of-sample", "the 20 days after, unseen when the rule was chosen"]]}
-      sourceName="diebold_mariano_nonoverlapping"
+      sourceName="walk_forward_splits"
       quiz={{
         question: "A rule earns 12 % a year on the data it was tuned on and 0 % on new data. Which number do you believe?",
         options: ["12 %", "0 %", "The average, 6 %"],
@@ -182,6 +186,7 @@ export function EProcessLesson(p: StationProps) {
       misconception="you must fix the sample size before you may look."
       idea="Start with 1 euro and bet a fixed share of it each day that your excess return is positive. If there is no edge the wealth drifts down; if there is one it compounds. Reaching 20 euros is a rare event under no edge (1 in 20 at most), so you may look every day."
       formula="Eₜ = Eₜ₋₁ · (1 + λ · yₜ),   yₜ = clip(xₜ / σₜ)"
+      tex={String.raw`E_t = E_{t-1}\,(1 + \lambda\, y_t), \qquad y_t = \operatorname{clip}(x_t / \sigma_t)`}
       symbols={[["Eₜ", "your wealth after day t"], ["λ", "share of wealth bet, between 0 and 1"], ["xₜ", "excess return on day t"], ["σₜ", "volatility estimated from earlier days only"]]}
       sourceName="e_processes"
       quiz={{
@@ -227,6 +232,7 @@ export function ShrinkageLesson(p: StationProps) {
       misconception="the sample covariance matrix is the truth."
       idea="With many assets and little history, the sample correlations are noisy and the optimiser bets on the noise. Shrinkage pulls every correlation part-way toward zero, trading a little bias for much less noise."
       formula="Σ_shrunk = (1 − s) · S + s · diag(S)"
+      tex={String.raw`\hat\Sigma_{\text{shrunk}} = (1 - s)\, S + s \, \operatorname{diag}(S)`}
       symbols={[["S", "sample covariance matrix"], ["diag(S)", "its diagonal: the variances only"], ["s", "shrinkage, between 0 and 1; Ledoit-Wolf picks it from the data"]]}
       sourceName="shrunk_covariance"
       quiz={{
@@ -267,6 +273,7 @@ export function MonteCarloLesson(p: StationProps) {
       misconception="the middle line of a projection is what will happen."
       idea="Draw your own past days at random, with replacement, to build many possible futures. The spread of where they end is the fan. It assumes the future resembles the sample, so a short or calm sample gives a fan that is too narrow."
       formula="W_T = Π (1 + r*ₜ),  r*ₜ drawn at random from your daily returns"
+      tex={String.raw`W_T = \prod_{t=1}^{T} (1 + r^{*}_t), \qquad r^{*}_t \text{ drawn from your daily returns}`}
       symbols={[["r*ₜ", "a daily return drawn at random from your own history"], ["T", "horizon in trading days"], ["W_T", "final wealth per 1 € invested"]]}
       sourceName="gbm_fan_projection"
       quiz={{
@@ -316,6 +323,7 @@ export function TaxLesson(p: StationProps) {
       misconception="you pay 26.4 % of the gain."
       idea="For an equity fund 30 % of the gain is exempt (Teilfreistellung), the rest is taxed at 25 % plus a 5.5 % solidarity surcharge on that tax. So the real rate on the gain is lower than the headline. Your annual saver's allowance reduces it further."
       formula="tax = (gain × (1 − 30 %)) × 25 % × (1 + 5.5 %)"
+      tex={String.raw`\text{tax} = \text{gain} \times (1 - 30\,\%) \times 25\,\% \times (1 + 5.5\,\%)`}
       symbols={[["gain", "proceeds minus cost"], ["30 %", "partial exemption for equity funds (§20 InvStG)"], ["25 %", "flat withholding tax"], ["5.5 %", "solidarity surcharge on the tax"]]}
       sourceName="apply_teilfreistellung"
       quiz={{

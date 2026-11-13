@@ -13,7 +13,7 @@ const FUNDAMENTAL_FIELDS: { key: string; label: string }[] = [
   { key: "profit_margin", label: "Profit margin" },
   { key: "roe", label: "Return on equity" },
   { key: "debt_equity", label: "Debt / equity" },
-  { key: "net_debt_ebitda", label: "Net debt / EBITDA" },
+  { key: "net_debt_ebitda", label: "Net debt / EBITDA (incl. leases)" },
   { key: "revenue_growth", label: "Revenue growth" },
   { key: "earnings_growth", label: "Earnings growth" },
   { key: "beta", label: "Beta" },
@@ -26,7 +26,7 @@ const FIELD_HELP: Record<string, string> = {
   ev_ebitda: "Enterprise value (market cap plus net debt) divided by operating profit before depreciation. Compares companies with different debt.",
   beta: "How strongly the stock moved with its home index in the past. 1 moves with the market, above 1 moves more.",
   fcf_yield: "Provider free cash flow (operating cash flow less capex, before lease payments and minority interests) over market cap. A company's own adjusted FCF guidance gives a different, usually lower, yield.",
-  net_debt_ebitda: "Provider total debt (leases included) minus cash, over unadjusted EBITDA. A company's lease-adjusted ratio is usually lower.",
+  net_debt_ebitda: "Provider total debt (leases included) minus cash, over unadjusted EBITDA. A company's lease-adjusted ratio is usually lower. The quality check's limit of 3 is a rule of thumb, not a sector norm.",
   revenue_growth: "Growth over the period shown under the grid, in reported currency.",
   earnings_growth: "Growth over the period shown under the grid.",
 };
@@ -45,6 +45,7 @@ const MONEY_KEYS = new Set(["market_cap", "aum"]);
 const FCF_REASONS: Record<string, string> = {
   currency_mismatch: "n/a: cash flow and share price are in different currencies",
   financial_sector: "n/a: not meaningful for banks and insurers",
+  large_minorities: "n/a: a large share of the group belongs to minority owners, so group cash flow over the parent's value overstates it",
   out_of_range: "n/a: the provider's figure is implausible",
 };
 

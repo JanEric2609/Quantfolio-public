@@ -27,3 +27,12 @@ describe("YTD and Max", () => {
     expect(sliceChartRange(rows, "MAX").length).toBe(4);
   });
 });
+
+describe("daysForRange", () => {
+  it("counts YTD from 1 January and caps Max at the longest history", async () => {
+    const { daysForRange, MAX_HISTORY_DAYS } = await import("./chartRange");
+    expect(daysForRange("YTD", new Date("2026-01-10T12:00:00Z"))).toBe(10);
+    expect(daysForRange("1M")).toBe(31);
+    expect(daysForRange("MAX")).toBe(MAX_HISTORY_DAYS);
+  });
+});

@@ -18,10 +18,11 @@ import { Trading212SyncButton } from "../components/portfolio/Trading212Sync";
 import { BrokerBadge, BrokerFilterToggle, SourceLabel, brokerOf, matchesBroker, useBrokerFilter } from "../components/portfolio/BrokerFilter";
 import { RegimeBadge } from "../components/portfolio/RegimeBadge";
 import { type PortfolioRange, usePortfolioHistory } from "../hooks/usePortfolioHistory";
+import { CHART_RANGES } from "../lib/chartRange";
 import { usePriceMoves } from "../hooks/usePriceMoves";
 import { useIsPhone } from "../hooks/useMediaQuery";
 
-const ranges: PortfolioRange[] = ["1W", "1M", "3M", "YTD", "1Y", "All"];
+const ranges = CHART_RANGES;
 
 const activityColumns: ColumnDef<PortfolioActivity>[] = [
   { accessorKey: "date", header: "Date", cell: ({ row }) => formatDate(row.original.date) },
@@ -99,7 +100,7 @@ export function Dashboard() {
         <CardHeader className="flex-col items-start justify-between gap-3 space-y-0 sm:flex-row sm:items-center">
           <CardTitle>Portfolio value</CardTitle>
           <ToggleGroup type="single" value={range} className="max-w-full flex-wrap justify-start" onValueChange={(value) => value && setRange(value as PortfolioRange)}>
-            {ranges.map((item) => <ToggleGroupItem key={item} value={item} size="sm">{item}</ToggleGroupItem>)}
+            {ranges.map((item) => <ToggleGroupItem key={item.key} value={item.key} size="sm">{item.label}</ToggleGroupItem>)}
           </ToggleGroup>
         </CardHeader>
         <CardContent>
