@@ -56,3 +56,34 @@ class LadderEvidenceDaily(Base):
     rel_drawdown: Mapped[float | None] = mapped_column(Float, nullable=True)
     te: Mapped[float | None] = mapped_column(Float, nullable=True)
     stage: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class LearningPurchase(Base):
+    """One month of the learning sleeve (ADR 0025 amendment 2026-11-12).
+
+    Written when the monthly plan carries a learning line; the owner places the
+    order at Trading 212 and the sync fills ``fill_quantity``. The same amount
+    is shadow-bought in the benchmark ETF for comparison. Read only by the
+    learning-sleeve page: never by lessons, prompts, training, the trial
+    ledger or ``ladder_evidence_daily`` (``tests/test_learning_ledger.py``).
+    """
+
+    __tablename__ = "learning_purchases"
+    __table_args__ = (UniqueConstraint("user_id", "month", name="uq_learning_purchase_month"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    month: Mapped[date] = mapped_column(Date)
+    isin: Mapped[str] = mapped_column(String(12))
+    ticker: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    amount_eur: Mapped[float] = mapped_column(Float)
+    paper_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    shadow_ticker: Mapped[str] = mapped_column(String(40))
+    shadow_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    baseline_quantity: Mapped[float] = mapped_column(Float, default=0.0)
+    status: Mapped[str] = mapped_column(String(12), default="planned")  # planned | filled | skipped
+    fill_quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fill_price_eur: Mapped[float | None] = mapped_column(Float, nullable=True)  # owner-entered; else implied
+    filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

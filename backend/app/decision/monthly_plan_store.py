@@ -7,7 +7,7 @@ action by ``foundation.recommendation_execution.detect_executions``.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -53,6 +53,10 @@ def snapshot_monthly_plan(
             )
             db.add(row)
         rows.append(row)
+    from app.decision.learning_ledger import record_planned
+
+    record_planned(db, user_id, (plan.get("evidence", {}).get("satellite") or {}).get("learning") or {},
+                   date(int(str(plan["month"])[:4]), int(str(plan["month"])[5:7]), 1))
     db.commit()
     for row in rows:
         db.refresh(row)

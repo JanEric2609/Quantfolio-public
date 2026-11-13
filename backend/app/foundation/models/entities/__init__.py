@@ -23,6 +23,7 @@ from .advisor import AdvisorGraduationTransition as AdvisorGraduationTransition
 from .advisor import AdvisorShadowForecast as AdvisorShadowForecast
 from .ladder import LadderCandidate as LadderCandidate
 from .ladder import LadderEvidenceDaily as LadderEvidenceDaily
+from .ladder import LearningPurchase as LearningPurchase
 from .analysis import (
     AnalysisReport as AnalysisReport,
     BacktestResult as BacktestResult,
