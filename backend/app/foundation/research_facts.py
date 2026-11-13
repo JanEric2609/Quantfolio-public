@@ -20,6 +20,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
+from collections.abc import Sequence
 from typing import Any
 
 from app.foundation.fundamentals_context import (
@@ -208,6 +209,13 @@ _PERIOD_WORDS = {
 }
 SENTIMENT_WORDS = ("bullish", "bearish", "optimis", "pessimis", "investor sentiment", "market sentiment",
                    "positive sentiment", "negative sentiment")
+#: A sentence with one of these says sentiment cannot be judged; it is dropped unless it also carries a tone word.
+_NO_NEWS_WORDS = ("cannot", "can't", "can not", "no news", "lack of news", "without news", "unavailable",
+                  "not available", "lack of coverage", "no coverage")
+_SENTIMENT_TONE_WORDS = ("bullish", "bearish", "optimis", "pessimis", "positive", "negative")
+#: A period word that names the same span as a stored price fact ("the last quarter" = "3 months").
+_SAME_AS_PERIOD = {"quarter": "3 months", "half-year": "6 months", "ttm": "12 months"}
+_GROWTH_WORDS = ("revenue", "sales", "earnings", "profit")
 JUDGEMENT_WORDS = ("exceptional", "outstanding", "strong", "weak", "cheap", "expensive", "undervalued", "overvalued",
                    "excellent", "poor", "high", "low", "attractive")
 
@@ -244,9 +252,36 @@ def _named_fact_keys(sentence: str) -> set[str]:
     return named
 
 
-def check_prose(section: str, text: str, facts: list[Fact], *, has_news: bool) -> list[str]:
-    """Problems with the model's text for one section; empty when it may be used."""
+def prose_grounding(context: dict[str, Any]) -> dict[str, Any]:
+    """What the model was given besides the labels: the name, the headlines and the market regime (``check_prose``)."""
+    name = (context.get("company") or {}).get("name") or ""
+    ticker = context.get("ticker") or ""
+    names = [name, ticker, ticker.split(".")[0]] + [w for w in name.split() if _DIGIT.search(w)]
+    return {
+        "names": tuple(n for n in names if n),
+        "headlines": tuple(str(n.get("title") or "") for n in (context.get("recent_news") or [])[:5]),
+        "regime": context.get("regime"),
+    }
+
+
+def _without_grounded(text: str, grounded: Sequence[str]) -> str:
+    """The text with the company's own name, ticker and the given headlines cut out: given text is not the model's claim."""
+    for g in sorted({g.strip() for g in grounded if len(g.strip()) >= 2}, key=len, reverse=True):
+        text = re.sub(rf"(?<![\w]){re.escape(g)}(?![\w])", " ", text, flags=re.IGNORECASE)
+    return text
+
+
+def check_prose(
+    section: str, text: str, facts: list[Fact], *, has_news: bool,
+    names: Sequence[str] = (), headlines: Sequence[str] = (), regime: str | None = None,
+) -> list[str]:
+    """Problems with the model's text for one section; empty when it may be used.
+
+    ``names``, ``headlines`` and ``regime`` come from ``prose_grounding``: the model may repeat the company's name
+    (3M, 1&1) or a headline, and call a bear market bearish, without that counting as a figure or a sentiment claim.
+    """
     problems: list[str] = []
+    text = _without_grounded(text, [*names, *headlines])
     low = text.lower()
     if _DIGIT.search(text):
         # A digit is tolerated only where code wrote the same number within 1 %, for the measure the sentence names:
@@ -269,8 +304,30 @@ def check_prose(section: str, text: str, facts: list[Fact], *, has_news: bool) -
                 problems.append(f"number {m.group(0).strip()} is a figure withheld from the model")
     allowed_periods = " ".join(x.period.lower() for x in facts)
     for name, words in _PERIOD_WORDS.items():
-        if any(w in low for w in words) and not any(w in allowed_periods for w in words):
-            problems.append(f"period word '{name}' does not match the facts")
+        if any(w in allowed_periods for w in words):
+            continue
+        for w in words:
+            for m in re.finditer(re.escape(w), low):
+                # "the last quarter" for a 3-month price fact is the same period; beside revenue or earnings it
+                # would claim a growth basis the facts do not carry (the planted wrong_period error).
+                sentence = _sentence_at(low, m.start())
+                if _SAME_AS_PERIOD.get(name, "@") in allowed_periods and not any(g in sentence for g in _GROWTH_WORDS):
+                    continue
+                problems.append(f"period word '{name}' does not match the facts")
+                break
+            else:
+                continue
+            break
+    if regime in ("bull", "bear"):
+        # "a bearish broad-market regime" restates the regime label the model was given; it says nothing about the stock.
+        low = re.sub(rf"\b{regime}(?:ish)?\b(?:\s+[\w-]+){{0,2}}?\s+(?:market|regime|backdrop|environment|conditions)\b",
+                     " ", low)
+    if not has_news:
+        # "market sentiment cannot be judged without news" is the honest sentence, not a claim.
+        low = " ".join(
+            t for t in re.split(r"(?<=[.!?])\s+", low)
+            if not (any(n in t for n in _NO_NEWS_WORDS) and not any(w in t for w in _SENTIMENT_TONE_WORDS))
+        )
     if not has_news and any(w in low for w in SENTIMENT_WORDS):
         problems.append("sentiment claim without news")
     labels = " ".join((x.label or "").lower() for x in facts)

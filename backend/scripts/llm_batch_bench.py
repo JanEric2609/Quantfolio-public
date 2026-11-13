@@ -428,7 +428,8 @@ def report_score(item: dict[str, Any], section: str, raw: str) -> dict[str, Any]
 
     facts = rf.build_fact_table(item["context"])
     text = raw.strip()
-    problems = rf.check_prose(section, text, facts, has_news=item["has_news"]) if text else ["empty"]
+    problems = (rf.check_prose(section, text, facts, has_news=item["has_news"], **rf.prose_grounding(item["context"]))
+                if text else ["empty"])
     if text and foreign_companies(text, item["context"]):
         problems.append("foreign company")
     return {"section": section, "outcome": "ok" if not problems else "rejected", "problems": problems}
@@ -483,7 +484,7 @@ def run(task: str, set_path: Path, temps: list[float], label: str, out: Path, li
                                         "prompt_tokens": telemetry.get("prompt_tokens"),
                                         "completion_tokens": telemetry.get("completion_tokens"),
                                         "truncated": telemetry.get("truncated"), "ticker": item["ticker"],
-                                        **report_score(item, section, raw)})
+                                        "text": raw, **report_score(item, section, raw)})
                     continue
                 if task == "edgar":
                     if not item.get("text"):

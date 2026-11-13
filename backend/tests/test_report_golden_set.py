@@ -32,7 +32,8 @@ def test_every_planted_error_is_caught_and_every_clean_text_kept():
     for item in GOLDEN["items"]:
         facts = rf.build_fact_table(item["context"])
         for v in item["variants"]:
-            problems = rf.check_prose("Risk Factors", v["text"], facts, has_news=v["has_news"])
+            problems = rf.check_prose("Risk Factors", v["text"], facts, has_news=v["has_news"],
+                                      **rf.prose_grounding(item["context"]))
             if (not problems) != v["ok"]:
                 wrong.append((item["ticker"], v["error"], v["text"], problems))
     assert wrong == []
@@ -51,3 +52,28 @@ def test_the_withheld_proxy_figure_may_not_be_repeated():
     facts = rf.build_fact_table(ctx)
     assert any("withheld" in p for p in rf.check_prose("Risk Factors", "Free cash flow yields 6.2 %.", facts, has_news=True))
     assert "6.2" not in rf.qualitative_input(ctx, facts)
+
+
+def test_the_company_name_and_headlines_are_not_figures():
+    ctx = {"ticker": "MMM", "company": {"name": "3M Company"}, "regime": "bear",
+           "technicals": {"volatility_3m_annual_pct": 39.1},
+           "recent_news": [{"title": "3M raises 2026 outlook after Q3"}]}
+    facts = rf.build_fact_table(ctx)
+    g = rf.prose_grounding(ctx)
+    assert not rf.check_prose("Sentiment", "3M is the subject of the headline 3M raises 2026 outlook after Q3.",
+                              facts, has_news=True, **g)
+    # A digit the model wrote itself still has to come from the table.
+    assert rf.check_prose("Risk Factors", "3M carries volatility of 45 %.", facts, has_news=True, **g)
+    # Without the grounding the name alone is rejected, which was the A/B finding of 2026-11-12.
+    assert rf.check_prose("Risk Factors", "3M carries the labels above.", facts, has_news=True)
+
+
+def test_the_regime_label_may_describe_the_market_but_not_the_stock():
+    ctx = {"ticker": "X", "regime": "bear", "technicals": {"volatility_3m_annual_pct": 39.1}}
+    facts = rf.build_fact_table(ctx)
+    g = rf.prose_grounding(ctx)
+    assert not rf.check_prose("Conclusion", "This sits against a bearish market backdrop.", facts, has_news=False, **g)
+    assert rf.check_prose("Conclusion", "Investors are bearish on the shares.", facts, has_news=False, **g)
+    # A bull label does not excuse "bearish".
+    g_bull = rf.prose_grounding({**ctx, "regime": "bull"})
+    assert rf.check_prose("Conclusion", "This sits against a bearish market backdrop.", facts, has_news=False, **g_bull)

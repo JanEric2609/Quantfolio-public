@@ -471,8 +471,9 @@ def test_issue_days_needed_reference_values_and_speed():
     fv.issue_days_needed.cache_clear()
     start = time.perf_counter()
     default = fv.issue_days_needed(0.55, 0.5, 4, 0.05, 21)
-    # About 0.08 s locally; GitHub's shared runners took 0.22-0.23 s (2026-11-09), so 0.2 s was flaky.
-    assert time.perf_counter() - start < 0.5
+    # About 0.08 s locally; GitHub's shared runners took 0.22-0.23 s (2026-11-09), so 0.2 s was flaky, and the
+    # mean variant below failed at 0.3 s under local parallel load (2026-11-12): 2 s still catches a slow path.
+    assert time.perf_counter() - start < 2.0
     assert default == 9783  # seeded: median issue days to e >= K/alpha = 80
     assert fv.issue_days_needed(0.55, 0.5, 4, 0.05, 21) == default  # cached, deterministic
     assert fv.issue_days_needed(0.60, 0.5, 4, 0.05, 21) == 2105
@@ -518,7 +519,9 @@ def test_issue_days_needed_mean_reference_values():
     fv.issue_days_needed_mean.cache_clear()
     start = time.perf_counter()
     default = fv.issue_days_needed_mean(0.01, 0.05, 0.20, 4, 0.05, 21)
-    assert time.perf_counter() - start < 0.3
+    # 0.12 s on an idle machine; 2 s leaves room for six xdist workers on a shared host (it failed at 0.3 s
+    # under load on 2026-11-12) and still catches a slide back to a slow path.
+    assert time.perf_counter() - start < 2.0
     assert default == 4132  # +1 % per date, 5 % noise, K=4 -> e >= 80, h=21
     assert fv.issue_days_needed_mean(0.01, 0.05, 0.20, 4, 0.05, 1) == 262
     assert fv.issue_days_needed_mean(0.02, 0.05, 0.20, 4, 0.05, 21) == 1991

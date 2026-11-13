@@ -108,3 +108,14 @@ def test_a_clean_answer_is_kept_and_the_model_being_down_is_reported():
 
     with pytest.raises(RuntimeError):
         asyncio.run(research._sectioned_report(_memory_db(), _context(), "u", down))
+
+
+def test_the_section_name_the_model_repeats_is_dropped():
+    from app.foundation.research import _strip_section_name
+
+    assert _strip_section_name("Risk Factors", "Risk Factors. The company faces debt.") == "The company faces debt."
+    assert _strip_section_name("Conclusion", "**Conclusion:** Mixed labels.") == "Mixed labels."
+    assert _strip_section_name("Conclusion", "## Conclusion\nMixed labels.") == "Mixed labels."
+    # Only at the start, and only the section's own name.
+    assert _strip_section_name("Conclusion", "In conclusion, mixed.") == "In conclusion, mixed."
+    assert _strip_section_name("Sentiment", "Risk Factors. Debt.") == "Risk Factors. Debt."

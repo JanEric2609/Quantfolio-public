@@ -654,6 +654,12 @@ def report_title(context: dict[str, Any]) -> str:
     return f"# {name} ({context['ticker']})" if name else f"# {context['ticker']}"
 
 
+def _strip_section_name(section: str, text: str) -> str:
+    """Drop the section's own name the model sometimes writes first ("Risk Factors. The ...", "**Conclusion:**")."""
+    return re.sub(rf"^\s*(?:#+\s*)?(?:\*\*)?{re.escape(section)}(?:\*\*)?\s*[:.\-–—]?(?:\*\*)?\s*", "", text,
+                  count=1, flags=re.IGNORECASE)
+
+
 def _strip_leading_heading(text: str) -> str:
     """Drop any title the model wrote before its first section (it once named the wrong company)."""
     lines = text.lstrip().splitlines()
@@ -847,8 +853,8 @@ async def _write_section(db: Session, section: str, context: dict[str, Any], fac
             if first and attempt == 0:
                 raise  # the model is down: the caller reports "unavailable"
             break
-        text = _strip_leading_heading(completion.content or "").strip()
-        problems = rf.check_prose(section, text, facts, has_news=has_news) if text else ["empty"]
+        text = _strip_section_name(section, _strip_leading_heading(completion.content or "")).strip()
+        problems = rf.check_prose(section, text, facts, has_news=has_news, **rf.prose_grounding(context)) if text else ["empty"]
         if not problems and not foreign_companies(text, context):
             return text
         logger.warning("research: %s section for %s rejected (%s)", section, context["ticker"], "; ".join(problems) or "foreign company")

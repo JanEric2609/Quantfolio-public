@@ -213,10 +213,34 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_no_news_sentence",
+     "text": "Market sentiment cannot be judged without news coverage.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_despite_no_news_sentence",
+     "text": "No news is available, yet investors are optimistic.",
+     "has_news": false,
+     "ok": false
+    },
+    {
      "error": "sentiment_without_news",
      "text": "Investors are optimistic after the announcement.",
      "has_news": false,
      "ok": false
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company A0 is the company these labels describe.",
+     "has_news": false,
+     "ok": true
     }
    ]
   },
@@ -424,10 +448,28 @@
      "ok": false
     },
     {
+     "error": "clean_no_news_sentence",
+     "text": "Market sentiment cannot be judged without news coverage.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_despite_no_news_sentence",
+     "text": "No news is available, yet investors are optimistic.",
+     "has_news": false,
+     "ok": false
+    },
+    {
      "error": "sentiment_without_news",
      "text": "Investors are optimistic after the announcement.",
      "has_news": false,
      "ok": false
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company B1 is the company these labels describe.",
+     "has_news": false,
+     "ok": true
     }
    ]
   },
@@ -467,7 +509,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 2 announces an update",
+      "title": "Company C2 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -574,7 +616,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company C2 (T02.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 2 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company C2 (T02.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company C2 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -584,7 +626,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company C2 (T02.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 2 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company C2 (T02.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company C2 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -594,7 +636,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company C2 (T02.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 2 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company C2 (T02.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company C2 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -604,7 +646,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company C2 (T02.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 2 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company C2 (T02.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company C2 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -652,8 +694,26 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company C2 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bullish market environment.",
      "has_news": true,
      "ok": true
     }
@@ -695,7 +755,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 3 announces an update",
+      "title": "Company D3 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -802,7 +862,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company D3 (T03.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 3 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company D3 (T03.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company D3 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -812,7 +872,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company D3 (T03.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 3 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company D3 (T03.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company D3 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -822,7 +882,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company D3 (T03.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 3 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company D3 (T03.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company D3 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -832,7 +892,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company D3 (T03.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 3 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company D3 (T03.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company D3 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -880,8 +940,20 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company D3 is the company these labels describe.",
      "has_news": true,
      "ok": true
     }
@@ -923,7 +995,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 4 announces an update",
+      "title": "Company E4 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -1030,7 +1102,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company E4 (T04.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 4 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company E4 (T04.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company E4 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -1040,7 +1112,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company E4 (T04.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 4 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company E4 (T04.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company E4 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -1050,7 +1122,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company E4 (T04.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 4 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company E4 (T04.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company E4 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -1060,7 +1132,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company E4 (T04.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 4 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company E4 (T04.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company E4 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -1108,8 +1180,26 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company E4 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bullish market environment.",
      "has_news": true,
      "ok": true
     }
@@ -1151,7 +1241,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 5 announces an update",
+      "title": "Company F5 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -1250,7 +1340,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company F5 (T05.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 5 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company F5 (T05.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company F5 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -1260,7 +1350,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company F5 (T05.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 5 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company F5 (T05.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company F5 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -1270,7 +1360,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company F5 (T05.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 5 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company F5 (T05.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company F5 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -1280,7 +1370,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company F5 (T05.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 5 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company F5 (T05.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company F5 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -1326,6 +1416,18 @@
      "text": "Investors are optimistic after the announcement.",
      "has_news": true,
      "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company F5 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bearish market environment.",
+     "has_news": true,
+     "ok": true
     }
    ]
   },
@@ -1365,7 +1467,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 6 announces an update",
+      "title": "Company G6 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -1472,7 +1574,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company G6 (T06.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 6 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company G6 (T06.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company G6 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -1482,7 +1584,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company G6 (T06.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 6 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company G6 (T06.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company G6 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -1492,7 +1594,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company G6 (T06.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 6 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company G6 (T06.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company G6 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -1502,7 +1604,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company G6 (T06.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 6 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company G6 (T06.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company G6 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -1554,6 +1656,18 @@
      "text": "Investors are optimistic after the announcement.",
      "has_news": true,
      "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company G6 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bearish market environment.",
+     "has_news": true,
+     "ok": true
     }
    ]
   },
@@ -1593,7 +1707,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 7 announces an update",
+      "title": "Company H7 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -1692,7 +1806,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company H7 (T07.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 7 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company H7 (T07.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company H7 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -1702,7 +1816,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company H7 (T07.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 7 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company H7 (T07.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company H7 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -1712,7 +1826,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company H7 (T07.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 7 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company H7 (T07.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company H7 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -1722,7 +1836,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company H7 (T07.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 7 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company H7 (T07.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company H7 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -1764,8 +1878,20 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company H7 is the company these labels describe.",
      "has_news": true,
      "ok": true
     }
@@ -1975,8 +2101,44 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_no_news_sentence",
+     "text": "Market sentiment cannot be judged without news coverage.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_despite_no_news_sentence",
+     "text": "No news is available, yet investors are optimistic.",
+     "has_news": false,
+     "ok": false
+    },
+    {
      "error": "sentiment_without_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": false,
+     "ok": false
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company I8 is the company these labels describe.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bearish market environment.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_without_news_beside_regime",
+     "text": "Investors are bearish on the stock in a bear market.",
      "has_news": false,
      "ok": false
     }
@@ -2018,7 +2180,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 9 announces an update",
+      "title": "Company J9 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -2125,7 +2287,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company J9 (T09.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 9 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company J9 (T09.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company J9 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -2135,7 +2297,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company J9 (T09.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 9 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company J9 (T09.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company J9 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -2145,7 +2307,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company J9 (T09.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 9 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company J9 (T09.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company J9 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -2155,7 +2317,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company J9 (T09.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 9 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company J9 (T09.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company J9 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -2203,8 +2365,26 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company J9 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bullish market environment.",
      "has_news": true,
      "ok": true
     }
@@ -2414,8 +2594,38 @@
      "ok": false
     },
     {
+     "error": "clean_no_news_sentence",
+     "text": "Market sentiment cannot be judged without news coverage.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_despite_no_news_sentence",
+     "text": "No news is available, yet investors are optimistic.",
+     "has_news": false,
+     "ok": false
+    },
+    {
      "error": "sentiment_without_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": false,
+     "ok": false
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company K10 is the company these labels describe.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bullish market environment.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_without_news_beside_regime",
+     "text": "Investors are bearish on the stock in a bull market.",
      "has_news": false,
      "ok": false
     }
@@ -2611,8 +2821,38 @@
      "ok": false
     },
     {
+     "error": "clean_no_news_sentence",
+     "text": "Market sentiment cannot be judged without news coverage.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_despite_no_news_sentence",
+     "text": "No news is available, yet investors are optimistic.",
+     "has_news": false,
+     "ok": false
+    },
+    {
      "error": "sentiment_without_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": false,
+     "ok": false
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company L11 is the company these labels describe.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bullish market environment.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_without_news_beside_regime",
+     "text": "Investors are bearish on the stock in a bull market.",
      "has_news": false,
      "ok": false
     }
@@ -2654,7 +2894,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 12 announces an update",
+      "title": "Company M12 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -2753,7 +2993,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company M12 (T12.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 12 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company M12 (T12.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company M12 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -2763,7 +3003,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company M12 (T12.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 12 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company M12 (T12.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company M12 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -2773,7 +3013,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company M12 (T12.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 12 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company M12 (T12.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company M12 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -2783,7 +3023,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company M12 (T12.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 12 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company M12 (T12.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company M12 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -2825,8 +3065,26 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company M12 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bullish market environment.",
      "has_news": true,
      "ok": true
     }
@@ -3036,8 +3294,38 @@
      "ok": false
     },
     {
+     "error": "clean_no_news_sentence",
+     "text": "Market sentiment cannot be judged without news coverage.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_despite_no_news_sentence",
+     "text": "No news is available, yet investors are optimistic.",
+     "has_news": false,
+     "ok": false
+    },
+    {
      "error": "sentiment_without_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": false,
+     "ok": false
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company N13 is the company these labels describe.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bullish market environment.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_without_news_beside_regime",
+     "text": "Investors are bearish on the stock in a bull market.",
      "has_news": false,
      "ok": false
     }
@@ -3247,8 +3535,44 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_no_news_sentence",
+     "text": "Market sentiment cannot be judged without news coverage.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_despite_no_news_sentence",
+     "text": "No news is available, yet investors are optimistic.",
+     "has_news": false,
+     "ok": false
+    },
+    {
      "error": "sentiment_without_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": false,
+     "ok": false
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company O14 is the company these labels describe.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bearish market environment.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_without_news_beside_regime",
+     "text": "Investors are bearish on the stock in a bear market.",
      "has_news": false,
      "ok": false
     }
@@ -3290,7 +3614,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 15 announces an update",
+      "title": "Company P15 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -3397,7 +3721,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company P15 (T15.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 15 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company P15 (T15.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company P15 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -3407,7 +3731,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company P15 (T15.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 15 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company P15 (T15.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company P15 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -3417,7 +3741,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company P15 (T15.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 15 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company P15 (T15.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company P15 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -3427,7 +3751,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company P15 (T15.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 15 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company P15 (T15.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company P15 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -3479,6 +3803,18 @@
      "text": "Investors are optimistic after the announcement.",
      "has_news": true,
      "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company P15 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bearish market environment.",
+     "has_news": true,
+     "ok": true
     }
    ]
   },
@@ -3518,7 +3854,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 16 announces an update",
+      "title": "Company Q16 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -3625,7 +3961,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company Q16 (T16.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 16 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company Q16 (T16.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company Q16 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -3635,7 +3971,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company Q16 (T16.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 16 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company Q16 (T16.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company Q16 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -3645,7 +3981,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company Q16 (T16.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 16 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company Q16 (T16.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company Q16 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -3655,7 +3991,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company Q16 (T16.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 16 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company Q16 (T16.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company Q16 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -3703,8 +4039,20 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company Q16 is the company these labels describe.",
      "has_news": true,
      "ok": true
     }
@@ -3746,7 +4094,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 17 announces an update",
+      "title": "Company R17 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -3845,7 +4193,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company R17 (T17.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 17 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company R17 (T17.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company R17 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -3855,7 +4203,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company R17 (T17.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 17 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company R17 (T17.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company R17 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -3865,7 +4213,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company R17 (T17.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 17 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company R17 (T17.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company R17 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -3875,7 +4223,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company R17 (T17.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 17 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company R17 (T17.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company R17 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -3917,8 +4265,26 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company R17 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bearish market environment.",
      "has_news": true,
      "ok": true
     }
@@ -3960,7 +4326,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 18 announces an update",
+      "title": "Company S18 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -4067,7 +4433,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company S18 (T18.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 18 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company S18 (T18.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company S18 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -4077,7 +4443,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company S18 (T18.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 18 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company S18 (T18.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company S18 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -4087,7 +4453,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company S18 (T18.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 18 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company S18 (T18.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company S18 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -4097,7 +4463,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company S18 (T18.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 18 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company S18 (T18.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company S18 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -4149,6 +4515,12 @@
      "text": "Investors are optimistic after the announcement.",
      "has_news": true,
      "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company S18 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
     }
    ]
   },
@@ -4188,7 +4560,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 19 announces an update",
+      "title": "Company T19 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -4295,7 +4667,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company T19 (T19.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 19 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company T19 (T19.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company T19 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -4305,7 +4677,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company T19 (T19.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 19 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company T19 (T19.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company T19 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -4315,7 +4687,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company T19 (T19.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 19 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company T19 (T19.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company T19 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -4325,7 +4697,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company T19 (T19.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 19 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company T19 (T19.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): oversold\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company T19 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -4373,8 +4745,20 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company T19 is the company these labels describe.",
      "has_news": true,
      "ok": true
     }
@@ -4416,7 +4800,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 20 announces an update",
+      "title": "Company U20 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -4523,7 +4907,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company U20 (T20.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 20 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company U20 (T20.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company U20 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -4533,7 +4917,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company U20 (T20.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 20 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company U20 (T20.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company U20 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -4543,7 +4927,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company U20 (T20.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 20 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company U20 (T20.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company U20 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -4553,7 +4937,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company U20 (T20.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 20 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company U20 (T20.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company U20 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -4601,8 +4985,20 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company U20 is the company these labels describe.",
      "has_news": true,
      "ok": true
     }
@@ -4812,10 +5208,34 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_no_news_sentence",
+     "text": "Market sentiment cannot be judged without news coverage.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_despite_no_news_sentence",
+     "text": "No news is available, yet investors are optimistic.",
+     "has_news": false,
+     "ok": false
+    },
+    {
      "error": "sentiment_without_news",
      "text": "Investors are optimistic after the announcement.",
      "has_news": false,
      "ok": false
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company V21 is the company these labels describe.",
+     "has_news": false,
+     "ok": true
     }
    ]
   },
@@ -5023,8 +5443,38 @@
      "ok": false
     },
     {
+     "error": "clean_no_news_sentence",
+     "text": "Market sentiment cannot be judged without news coverage.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_despite_no_news_sentence",
+     "text": "No news is available, yet investors are optimistic.",
+     "has_news": false,
+     "ok": false
+    },
+    {
      "error": "sentiment_without_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": false,
+     "ok": false
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company W22 is the company these labels describe.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bullish market environment.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_without_news_beside_regime",
+     "text": "Investors are bearish on the stock in a bull market.",
      "has_news": false,
      "ok": false
     }
@@ -5066,7 +5516,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 23 announces an update",
+      "title": "Company X23 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -5173,7 +5623,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company X23 (T23.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 23 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company X23 (T23.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company X23 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -5183,7 +5633,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company X23 (T23.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 23 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company X23 (T23.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company X23 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -5193,7 +5643,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company X23 (T23.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 23 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company X23 (T23.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company X23 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -5203,7 +5653,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company X23 (T23.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 23 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company X23 (T23.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company X23 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -5253,6 +5703,12 @@
     {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company X23 is the company these labels describe.",
      "has_news": true,
      "ok": true
     }
@@ -5462,8 +5918,44 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_no_news_sentence",
+     "text": "Market sentiment cannot be judged without news coverage.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_despite_no_news_sentence",
+     "text": "No news is available, yet investors are optimistic.",
+     "has_news": false,
+     "ok": false
+    },
+    {
      "error": "sentiment_without_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": false,
+     "ok": false
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company Y24 is the company these labels describe.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bullish market environment.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_without_news_beside_regime",
+     "text": "Investors are bearish on the stock in a bull market.",
      "has_news": false,
      "ok": false
     }
@@ -5505,7 +5997,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 25 announces an update",
+      "title": "Company Z25 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -5612,7 +6104,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company Z25 (T25.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 25 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company Z25 (T25.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company Z25 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -5622,7 +6114,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company Z25 (T25.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 25 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company Z25 (T25.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company Z25 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -5632,7 +6124,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company Z25 (T25.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 25 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company Z25 (T25.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company Z25 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -5642,7 +6134,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company Z25 (T25.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 25 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company Z25 (T25.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company Z25 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -5690,8 +6182,20 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company Z25 is the company these labels describe.",
      "has_news": true,
      "ok": true
     }
@@ -5733,7 +6237,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 26 announces an update",
+      "title": "Company A26 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -5840,7 +6344,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company A26 (T26.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 26 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company A26 (T26.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company A26 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -5850,7 +6354,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company A26 (T26.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 26 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company A26 (T26.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company A26 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -5860,7 +6364,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company A26 (T26.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 26 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company A26 (T26.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company A26 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -5870,7 +6374,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company A26 (T26.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 26 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company A26 (T26.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company A26 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -5918,8 +6422,26 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company A26 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bearish market environment.",
      "has_news": true,
      "ok": true
     }
@@ -5961,7 +6483,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 27 announces an update",
+      "title": "Company B27 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -6068,7 +6590,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company B27 (T27.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 27 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company B27 (T27.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company B27 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -6078,7 +6600,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company B27 (T27.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 27 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company B27 (T27.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company B27 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -6088,7 +6610,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company B27 (T27.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 27 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company B27 (T27.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company B27 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -6098,7 +6620,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company B27 (T27.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 27 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company B27 (T27.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company B27 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -6150,6 +6672,12 @@
      "text": "Investors are optimistic after the announcement.",
      "has_news": true,
      "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company B27 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
     }
    ]
   },
@@ -6189,7 +6717,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 28 announces an update",
+      "title": "Company C28 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -6296,7 +6824,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company C28 (T28.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 28 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company C28 (T28.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company C28 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -6306,7 +6834,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company C28 (T28.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 28 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company C28 (T28.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company C28 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -6316,7 +6844,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company C28 (T28.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 28 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company C28 (T28.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company C28 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -6326,7 +6854,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company C28 (T28.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 28 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company C28 (T28.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest half-year against the same half-year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company C28 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -6374,8 +6902,26 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company C28 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bearish market environment.",
      "has_news": true,
      "ok": true
     }
@@ -6417,7 +6963,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 29 announces an update",
+      "title": "Company D29 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -6524,7 +7070,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company D29 (T29.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 29 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company D29 (T29.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company D29 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -6534,7 +7080,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company D29 (T29.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 29 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company D29 (T29.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company D29 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -6544,7 +7090,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company D29 (T29.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 29 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company D29 (T29.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company D29 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -6554,7 +7100,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company D29 (T29.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 29 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company D29 (T29.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company D29 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -6606,6 +7152,18 @@
      "text": "Investors are optimistic after the announcement.",
      "has_news": true,
      "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company D29 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bullish market environment.",
+     "has_news": true,
+     "ok": true
     }
    ]
   },
@@ -6645,7 +7203,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 30 announces an update",
+      "title": "Company E30 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -6752,7 +7310,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company E30 (T30.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 30 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company E30 (T30.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company E30 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -6762,7 +7320,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company E30 (T30.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 30 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company E30 (T30.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company E30 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -6772,7 +7330,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company E30 (T30.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 30 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company E30 (T30.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company E30 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -6782,7 +7340,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company E30 (T30.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 30 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company E30 (T30.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest year against the same year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company E30 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -6830,8 +7388,26 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company E30 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bullish market environment.",
      "has_news": true,
      "ok": true
     }
@@ -6873,7 +7449,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 31 announces an update",
+      "title": "Company F31 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -6972,7 +7548,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company F31 (T31.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 31 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company F31 (T31.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company F31 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -6982,7 +7558,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company F31 (T31.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 31 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company F31 (T31.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company F31 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -6992,7 +7568,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company F31 (T31.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 31 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company F31 (T31.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company F31 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -7002,7 +7578,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company F31 (T31.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 31 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company F31 (T31.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): deep\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company F31 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -7048,6 +7624,18 @@
      "text": "Investors are optimistic after the announcement.",
      "has_news": true,
      "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company F31 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bearish market environment.",
+     "has_news": true,
+     "ok": true
     }
    ]
   },
@@ -7087,7 +7675,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 32 announces an update",
+      "title": "Company G32 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -7194,7 +7782,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company G32 (T32.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 32 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company G32 (T32.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company G32 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -7204,7 +7792,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company G32 (T32.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 32 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company G32 (T32.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company G32 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -7214,7 +7802,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company G32 (T32.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 32 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company G32 (T32.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company G32 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -7224,7 +7812,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company G32 (T32.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 32 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company G32 (T32.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): loss\n- rsi 14 (14 days): overbought\n- volatility (last 3 months, annualised): low\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): above\n- revenue growth (in the latest year against the same year a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company G32 announces an update\nBroad-market regime (not about this stock): bull\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -7272,8 +7860,26 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company G32 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bullish market environment.",
      "has_news": true,
      "ok": true
     }
@@ -7483,8 +8089,38 @@
      "ok": false
     },
     {
+     "error": "clean_no_news_sentence",
+     "text": "Market sentiment cannot be judged without news coverage.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_despite_no_news_sentence",
+     "text": "No news is available, yet investors are optimistic.",
+     "has_news": false,
+     "ok": false
+    },
+    {
      "error": "sentiment_without_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": false,
+     "ok": false
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company H33 is the company these labels describe.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bearish market environment.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_without_news_beside_regime",
+     "text": "Investors are bearish on the stock in a bear market.",
      "has_news": false,
      "ok": false
     }
@@ -7526,7 +8162,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 34 announces an update",
+      "title": "Company I34 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -7633,7 +8269,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company I34 (T34.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 34 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company I34 (T34.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company I34 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -7643,7 +8279,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company I34 (T34.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 34 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company I34 (T34.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company I34 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -7653,7 +8289,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company I34 (T34.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 34 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company I34 (T34.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company I34 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -7663,7 +8299,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company I34 (T34.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 34 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company I34 (T34.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): deep\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company I34 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -7713,6 +8349,12 @@
     {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company I34 is the company these labels describe.",
      "has_news": true,
      "ok": true
     }
@@ -7922,10 +8564,34 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_no_news_sentence",
+     "text": "Market sentiment cannot be judged without news coverage.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_despite_no_news_sentence",
+     "text": "No news is available, yet investors are optimistic.",
+     "has_news": false,
+     "ok": false
+    },
+    {
      "error": "sentiment_without_news",
      "text": "Investors are optimistic after the announcement.",
      "has_news": false,
      "ok": false
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company J35 is the company these labels describe.",
+     "has_news": false,
+     "ok": true
     }
    ]
   },
@@ -8119,8 +8785,44 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_no_news_sentence",
+     "text": "Market sentiment cannot be judged without news coverage.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_despite_no_news_sentence",
+     "text": "No news is available, yet investors are optimistic.",
+     "has_news": false,
+     "ok": false
+    },
+    {
      "error": "sentiment_without_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": false,
+     "ok": false
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company K36 is the company these labels describe.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bullish market environment.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_without_news_beside_regime",
+     "text": "Investors are bearish on the stock in a bull market.",
      "has_news": false,
      "ok": false
     }
@@ -8330,8 +9032,44 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_no_news_sentence",
+     "text": "Market sentiment cannot be judged without news coverage.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_despite_no_news_sentence",
+     "text": "No news is available, yet investors are optimistic.",
+     "has_news": false,
+     "ok": false
+    },
+    {
      "error": "sentiment_without_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": false,
+     "ok": false
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company L37 is the company these labels describe.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bearish market environment.",
+     "has_news": false,
+     "ok": true
+    },
+    {
+     "error": "sentiment_without_news_beside_regime",
+     "text": "Investors are bearish on the stock in a bear market.",
      "has_news": false,
      "ok": false
     }
@@ -8373,7 +9111,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 38 announces an update",
+      "title": "Company M38 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -8480,7 +9218,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company M38 (T38.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 38 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company M38 (T38.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company M38 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -8490,7 +9228,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company M38 (T38.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 38 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company M38 (T38.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company M38 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -8500,7 +9238,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company M38 (T38.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 38 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company M38 (T38.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company M38 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -8510,7 +9248,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company M38 (T38.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company 38 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company M38 (T38.AS)\n- return 3m (3 months): loss\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): high\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): above\n- trend sma 200 (200-day): above\n- revenue growth (in the latest half-year against the same half-year a year earlier): shrinking\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): high\nHeadlines:\n- [not scored] Company M38 announces an update\nBroad-market regime (not about this stock): neutral\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -8558,8 +9296,20 @@
      "ok": false
     },
     {
+     "error": "clean_quarter_for_a_price_fact",
+     "text": "The shares moved over the last quarter.",
+     "has_news": true,
+     "ok": true
+    },
+    {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company M38 is the company these labels describe.",
      "has_news": true,
      "ok": true
     }
@@ -8601,7 +9351,7 @@
     },
     "recent_news": [
      {
-      "title": "Company 39 announces an update",
+      "title": "Company N39 announces an update",
       "source": "x",
       "published_at": "2026-11-10",
       "sentiment_label": null
@@ -8708,7 +9458,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company N39 (T39.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 39 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
+      "content": "Company: Company N39 (T39.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company N39 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Executive Summary. Two sentences that say what kind of stock this is from the labels above."
      }
     ],
     "Sentiment": [
@@ -8718,7 +9468,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company N39 (T39.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 39 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
+      "content": "Company: Company N39 (T39.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company N39 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Sentiment. One or two sentences on what the headlines say about this company. Only the headlines above count."
      }
     ],
     "Risk Factors": [
@@ -8728,7 +9478,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company N39 (T39.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 39 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
+      "content": "Company: Company N39 (T39.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company N39 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Risk Factors. Two or three risks that follow from the labels above (leverage, drawdown, volatility, growth)."
      }
     ],
     "Conclusion": [
@@ -8738,7 +9488,7 @@
      },
      {
       "role": "user",
-      "content": "Company: Company N39 (T39.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company 39 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
+      "content": "Company: Company N39 (T39.AS)\n- return 3m (3 months): gain\n- return 12m (12 months): gain\n- rsi 14 (14 days): neutral\n- volatility (last 3 months, annualised): moderate\n- drawdown (12 months): moderate\n- trend sma 50 (50-day): below\n- trend sma 200 (200-day): below\n- revenue growth (in the latest quarter against the same quarter a year earlier): growing\n- net debt ebitda (latest, provider debt incl. leases over unadjusted EBITDA): manageable\nHeadlines:\n- [not scored] Company N39 announces an update\nBroad-market regime (not about this stock): bear\nInvestor risk profile: moderate\n\nSection: Conclusion. Two sentences weighing the labels against each other. Give no BUY, HOLD or SELL: the verdict is shown elsewhere."
      }
     ]
    },
@@ -8788,6 +9538,18 @@
     {
      "error": "clean_sentiment_with_news",
      "text": "Investors are optimistic after the announcement.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_company_name",
+     "text": "Company N39 is the company these labels describe.",
+     "has_news": true,
+     "ok": true
+    },
+    {
+     "error": "clean_regime_word",
+     "text": "The stock trades in a bearish market environment.",
      "has_news": true,
      "ok": true
     }

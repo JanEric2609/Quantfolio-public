@@ -47,13 +47,13 @@ def _context(i: int, rng: random.Random) -> dict[str, Any]:
             "pe_ratio": round(rng.uniform(6, 45), 1), "debt_equity": round(rng.uniform(10, 250)),
             "total_debt": 5e9, "ebitda": round(rng.uniform(0.8, 3.0), 2) * 1e9, "cash": 3e8,
         },
-        "recent_news": [{"title": f"Company {i} announces an update", "source": "x", "published_at": "2026-11-10",
+        "recent_news": [{"title": f"Company {chr(65 + i % 26)}{i} announces an update", "source": "x", "published_at": "2026-11-10",
                          "sentiment_label": None}] if has_news else [],
         "recommendations": [],
     }
 
 
-def _variants(facts: list[Any], has_news: bool) -> list[dict[str, Any]]:
+def _variants(facts: list[Any], has_news: bool, context: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Clean controls and one text per error class the table allows."""
     from app.foundation.research_facts import JUDGEMENT_WORDS
 
@@ -84,10 +84,26 @@ def _variants(facts: list[Any], has_news: bool) -> list[dict[str, Any]]:
         add("proxy_figure", f"Free cash flow yields {by['fcf_yield'].text} of the market value.", False)
     word = next(w for w in JUDGEMENT_WORDS if w not in labels.split())
     add("adjective_without_label", f"The balance sheet looks {word}.", False)
+    if "return_3m" in by and "quarter" not in periods:
+        add("clean_quarter_for_a_price_fact", "The shares moved over the last quarter.", True)
+    if not has_news:
+        add("clean_no_news_sentence", "Market sentiment cannot be judged without news coverage.", True)
+        add("sentiment_despite_no_news_sentence", "No news is available, yet investors are optimistic.", False)
     if has_news:
         add("clean_sentiment_with_news", "Investors are optimistic after the announcement.", True)
     else:
         add("sentiment_without_news", "Investors are optimistic after the announcement.", False)
+    if context:
+        # Given text is not a claim: the company's own name may carry digits (3M, 1&1), and the regime label may be
+        # restated for the market; "bearish" about the stock itself is still a sentiment claim.
+        name = (context.get("company") or {}).get("name") or context["ticker"]
+        add("clean_company_name", f"{name} is the company these labels describe.", True)
+        regime = context.get("regime")
+        if regime in ("bull", "bear"):
+            add("clean_regime_word", f"The stock trades in a {regime}ish market environment.", True)
+            if not has_news:
+                add("sentiment_without_news_beside_regime",
+                    f"Investors are bearish on the stock in a {regime} market.", False)
     return out
 
 
@@ -108,7 +124,7 @@ def build(n: int = N_TABLES, seed: int = SEED) -> dict[str, Any]:
                 sec: [{"role": "system", "content": rf.SECTION_SYSTEM},
                       {"role": "user", "content": f"{rf.qualitative_input(context, facts)}\n\nSection: {sec}. {rf.SECTION_TASKS[sec]}"}]
                 for sec in rf.MODEL_SECTIONS if not (sec == "Sentiment" and not has_news)},
-            "variants": _variants(facts, has_news),
+            "variants": _variants(facts, has_news, context),
         })
     return {"seed": seed, "error_classes": list(ERROR_CLASSES), "items": items}
 
@@ -121,7 +137,8 @@ def score(golden: dict[str, Any]) -> dict[str, dict[str, int]]:
     for item in golden["items"]:
         facts = rf.build_fact_table(item["context"])
         for v in item["variants"]:
-            problems = rf.check_prose("Risk Factors", v["text"], facts, has_news=v["has_news"])
+            problems = rf.check_prose("Risk Factors", v["text"], facts, has_news=v["has_news"],
+                                      **rf.prose_grounding(item["context"]))
             row = out.setdefault(v["error"], {"n": 0, "as_expected": 0})
             row["n"] += 1
             row["as_expected"] += int((not problems) == v["ok"])
