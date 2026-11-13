@@ -22,6 +22,14 @@ function pct(value: number) {
 export function CrashGuardBanner() {
   const guard = useQuery({ queryKey: ["plan", "crash-guard"], queryFn: getCrashGuard, staleTime: 15 * 60_000 });
   const data = guard.data;
+  // A silent banner reads as "all calm". When the check itself fails, say so.
+  if (guard.isError) {
+    return (
+      <p role="alert" className="rounded-lg border border-warn/40 bg-warn/10 p-3 text-sm text-text-secondary">
+        The crash guard could not be loaded, so a fall in the market would not be shown here. Reload to try again.
+      </p>
+    );
+  }
   // A partial or failed answer renders nothing: this banner must never take the page down.
   if (!data?.market || !Array.isArray(data.behaviour) || !Array.isArray(data.episodes)) return null;
   if (!data.active && data.behaviour.length === 0 && !data.stale) return null;

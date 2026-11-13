@@ -61,22 +61,37 @@ const EXAMPLE_ORDER_EUR = 500;
  * average, and an edge is shown only once the tier's 90 % range of hit rates
  * against your ETF sits above a coin flip.
  */
-function WorthActing({ candidate, tiers }: { candidate: DiscoverCandidate; tiers?: TrustRankingSection["tiers"] }) {
+function edgeShown(candidate: DiscoverCandidate, tiers?: TrustRankingSection["tiers"]): boolean {
   const rank = candidate.pool_rank;
   const size = candidate.pool_size;
   const tier = rank != null && size ? tierOf(rank, size) : null;
   const measured = tier && tiers && tiers.n_eff > 0 ? tiers.tiers.find((t) => t.tier === tier) : undefined;
-  const shown = measured?.range != null && measured.range[0] > 0.5;
-  const cost = 2 * ORDER_FEE_EUR + 2 * HALF_SPREAD * EXAMPLE_ORDER_EUR;
-  const costText = `buying €${EXAMPLE_ORDER_EUR} and selling again costs about €${cost.toFixed(2)} (${(
-    (100 * cost) / EXAMPLE_ORDER_EUR
-  ).toFixed(1)} %)`;
+  return measured?.range != null && measured.range[0] > 0.5;
+}
+
+const COST_ROUND_TRIP_EUR = 2 * ORDER_FEE_EUR + 2 * HALF_SPREAD * EXAMPLE_ORDER_EUR;
+const COST_TEXT = `buying €${EXAMPLE_ORDER_EUR} and selling again costs about €${COST_ROUND_TRIP_EUR.toFixed(2)} (${(
+  (100 * COST_ROUND_TRIP_EUR) / EXAMPLE_ORDER_EUR
+).toFixed(1)} %)`;
+
+/** The cost every card shares, said once above the list instead of on each card. */
+function SharedCostNote() {
+  return (
+    <p className="text-xs text-text-secondary" data-testid="shortlist-cost-note">
+      Cost of acting on any pick: {COST_TEXT}. With no edge that cost is the expected result, so your ETF savings plan is the
+      better default.
+    </p>
+  );
+}
+
+function WorthActing({ candidate, tiers }: { candidate: DiscoverCandidate; tiers?: TrustRankingSection["tiers"] }) {
+  const shown = edgeShown(candidate, tiers);
   return (
     <p className="text-xs text-text-secondary" data-testid="worth-acting">
       <span className="font-medium text-text-primary">Worth acting on? </span>
       {shown
-        ? `Possibly: this tier has beaten your ETF more often than not, even at the low end of its range; ${costText}, so the order must be large enough for that to stay small.`
-        : `Not yet: no edge is shown for this tier, and ${costText}. With no edge that cost is the expected result, so your ETF savings plan is the better default.`}
+        ? "Possibly: this tier has beaten your ETF more often than not, even at the low end of its range. The order must be large enough for the cost to stay small."
+        : "Not yet: no edge is shown for this tier."}
     </p>
   );
 }
@@ -152,6 +167,7 @@ export function ShortlistCards({ candidates, onOpenDossier, tiers }: ShortlistCa
   return (
     <div className="space-y-4">
       <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wider">Shortlist</h3>
+      <SharedCostNote />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         {shortlisted.map((candidate) => {
           const conviction = cardScore(candidate);
@@ -200,8 +216,13 @@ export function ShortlistCards({ candidates, onOpenDossier, tiers }: ShortlistCa
                   </Badge>
 
                   <div className="flex flex-col">
-                    <Badge className={`text-xs ${returnChipClass(expectedReturn)}`}>
+                    {/* One fact for chip and sentence: with no edge shown the estimate is neutral and says so. */}
+                    <Badge
+                      className={`text-xs ${edgeShown(candidate, tiers) ? returnChipClass(expectedReturn) : "bg-muted text-muted-foreground"}`}
+                      title={edgeShown(candidate, tiers) ? undefined : "The model's estimate. No edge has been shown for this tier, so do not read it as a forecast."}
+                    >
                       Ret. est. {formatReturn(expectedReturn)}
+                      {edgeShown(candidate, tiers) ? "" : " · no edge shown"}
                     </Badge>
                   </div>
                 </div>

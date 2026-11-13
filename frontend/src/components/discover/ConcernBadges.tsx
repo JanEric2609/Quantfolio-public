@@ -41,6 +41,11 @@ export const CONCERN_LABELS: Record<string, ConcernMeta> = {
     severity: "warn",
     hint: "Regime-conditioned factor alignment was skipped for this run.",
   },
+  revenue_growth_unreliable: {
+    label: "Revenue growth not used",
+    severity: "info",
+    hint: "Data note, not a risk: the provider's revenue growth is unreliable for this kind of company, so it was left out.",
+  },
   fundamentals_unavailable: {
     label: "Fundamentals unavailable",
     severity: "info",

@@ -191,7 +191,6 @@ export function ImportsPage() {
                 <p className="font-medium">Supported formats:</p>
                 <ul className="list-disc list-inside space-y-1">
                   <li>DKB CSV (German banking statements)</li>
-                  <li>Comdirect (coming soon)</li>
                   <li>Trade Republic (coming soon)</li>
                 </ul>
               </div>

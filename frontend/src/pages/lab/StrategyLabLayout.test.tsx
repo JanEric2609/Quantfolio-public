@@ -19,7 +19,7 @@ describe("StrategyLabLayout", () => {
     renderAt("/advisor/loop");
 
     expect(screen.getByText("ADVISOR")).toBeInTheDocument();
-    for (const label of ["Evidence", "LLM advisor", "Mandates", "Capital ladder", "Paper portfolio"]) {
+    for (const label of ["Gate record", "LLM advisor", "Mandates", "Capital ladder", "Paper portfolio"]) {
       expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
     }
     expect(screen.getByText(/Its picks never set weights for your real book/)).toBeInTheDocument();

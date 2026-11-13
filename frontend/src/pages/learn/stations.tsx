@@ -7,7 +7,7 @@ import { useTrustVerdict } from "../trust/useTrust";
 import { Feedback, Station } from "./Station";
 import type { LearnState } from "./progress";
 
-interface StationProps {
+export interface StationProps {
   state: LearnState;
   onAnswer: (id: string, value: number) => void;
 }
@@ -15,7 +15,7 @@ interface StationProps {
 const pctText = (v: number) => formatPercentPoints(v, { digits: v >= 10 || v === 0 ? 0 : 1 });
 
 /** Slider that reveals the answer only after it was moved: predict first, then see. */
-function Guess({ id, state, onAnswer, min, max, step, unit, label }: StationProps & {
+export function Guess({ id, state, onAnswer, min, max, step, unit, label }: StationProps & {
   id: string; min: number; max: number; step: number; unit: string; label: string;
 }) {
   const value = state.answers[id] ?? null;
@@ -25,9 +25,9 @@ function Guess({ id, state, onAnswer, min, max, step, unit, label }: StationProp
       <input
         type="range" min={min} max={max} step={step} value={value ?? min}
         onChange={(e) => onAnswer(id, Number(e.target.value))}
-        className="mt-2 w-full" aria-label={label}
+        className={`mt-2 w-full accent-[rgb(var(--c-accent))] ${value == null ? "opacity-50" : ""}`} aria-label={label}
       />
-      <span className="text-text-primary" data-testid={`${id}-guess`}>{value == null ? "Move the slider to answer" : `${value}${unit}`}</span>
+      <span className="text-text-primary" data-testid={`${id}-guess`}>{value == null ? "Not answered yet: move the slider" : `${value}${unit}`}</span>
     </label>
   );
 }
@@ -189,24 +189,35 @@ export function CrashGuard(p: StationProps) {
   );
 }
 
-/** Tax on one sale of an equity fund, as an estimate: 25 % + solidarity surcharge on the gain after the 30 % partial exemption. */
-export function saleTaxEstimate(proceeds: number, cost: number): number {
-  const gain = Math.max(0, proceeds - cost);
-  return gain * 0.7 * 0.25 * 1.055;
+interface SaleTax {
+  gain_eur: number; teilfreistellung_pct: number; taxable_gain_eur: number; kest_rate: number; soli_rate: number;
+  tax_eur: number; estimate: boolean; not_tax_advice: boolean; note: string;
 }
 
-/** 8. Tax. */
+/** 8. Tax: the figure comes from the tax module (GET /api/learn/sale-tax), not from a copy of its rule here. */
 export function TaxStation(p: StationProps) {
   const proceeds = p.state.answers["sale"] ?? 10000;
   const cost = 8000;
-  const tax = saleTaxEstimate(proceeds, cost);
+  const answered = p.state.answers["sale"] != null;
+  const tax = useQuery({
+    queryKey: ["learn", "sale-tax", proceeds, cost],
+    queryFn: () => api<SaleTax>(`/api/learn/sale-tax?proceeds_eur=${proceeds}&cost_eur=${cost}&fund_class=aktien`),
+    enabled: answered,
+  });
+  const t = tax.data;
   return (
     <Station id="tax" title="What would one sale cost?" question={`You bought an equity fund for ${formatCurrency(cost, "EUR", { digits: 0 })}. What does a sale cost in tax?`}
       source="Tax cockpit" sourceTo="/tax">
       <Guess id="sale" {...p} min={8000} max={20000} step={500} unit=" € proceeds" label="Sale proceeds" />
-      <Feedback show={p.state.answers["sale"] != null}>
-        About {formatCurrency(tax, "EUR", { digits: 0 })}: 25 % plus solidarity surcharge on the gain, after the 30 % partial exemption for equity funds
-        and before your saver&apos;s allowance. <strong>Estimate, not tax advice</strong>; your broker&apos;s statement is the source of truth.
+      <Feedback show={answered}>
+        {t ? (
+          <>
+            About {formatCurrency(t.tax_eur, "EUR", { digits: 0 })}: {pctText(t.kest_rate * 100)} plus solidarity surcharge on{" "}
+            {formatCurrency(t.taxable_gain_eur, "EUR", { digits: 0 })}, the gain after the {pctText(t.teilfreistellung_pct * 100)} partial
+            exemption for equity funds. {t.note}{" "}
+          </>
+        ) : tax.isError ? "The tax estimate could not be loaded. " : "Calculating. "}
+        <strong>Estimate, not tax advice</strong>; your broker&apos;s statement is the source of truth.
       </Feedback>
     </Station>
   );

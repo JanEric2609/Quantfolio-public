@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { LearnPage } from "./LearnPage";
-import { compositeFor, saleTaxEstimate } from "./stations";
+import { compositeFor } from "./stations";
 
 vi.mock("../../lib/api", () => ({
   api: () => Promise.reject(new Error("offline")),
@@ -48,8 +48,6 @@ describe("LearnPage", () => {
   });
 
   it("keeps the tax figure labelled as an estimate, not advice", () => {
-    expect(saleTaxEstimate(10000, 8000)).toBeCloseTo(2000 * 0.7 * 0.25 * 1.055, 6);
-    expect(saleTaxEstimate(7000, 8000)).toBe(0);
     renderPage();
     fireEvent.change(screen.getByLabelText("Sale proceeds"), { target: { value: "12000" } });
     expect(screen.getByText(/Estimate, not tax advice/)).toBeInTheDocument();

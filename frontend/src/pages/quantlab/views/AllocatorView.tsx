@@ -179,7 +179,7 @@ export function AllocatorView() {
               <h3 className="font-semibold">{p.label}</h3>
               <p className="mt-0.5 text-[11px] text-text-muted">{WHY[key]}</p>
               <p className="mt-2 text-xs text-text-primary" data-testid={`summary-${key}`}>{p.summary}</p>
-              <table className="mt-2 w-full text-xs">
+              <div className="overflow-x-auto"><table className="mt-2 w-full text-xs">
                 <thead className="text-text-muted">
                   <tr>
                     <th className="text-left font-normal">Fund</th>
@@ -200,7 +200,7 @@ export function AllocatorView() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
               <p className="mt-2 text-[11px] text-text-muted">
                 Volatility of the target mix {pct(p.volatility)} a year.
               </p>

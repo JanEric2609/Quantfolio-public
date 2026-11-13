@@ -3,6 +3,13 @@ export interface GlossaryEntry { label: string; body: string }
 export const glossary: Record<string, GlossaryEntry> = {
   // Wealth
   net_worth: { label: "Net worth", body: "Total mirrored cash and security value across connected accounts and manual holdings." },
+  // Evidence and testing
+  e_value:        { label: "E-value", body: "A running score for a claim like \"this strategy beats the index\". It starts at 1 and grows when the evidence supports the claim. 20 or more is strong evidence; it stays valid however often you look at it." },
+  deflated_sharpe:{ label: "Deflated Sharpe", body: "A Sharpe ratio reduced for how many strategies were tried to find it, and for fat tails. The more you try, the better the best one looks by luck alone." },
+  newey_west:     { label: "Newey-West standard error", body: "A standard error that allows for returns that overlap or follow one another. Without it, 21-day returns measured every day look far more certain than they are." },
+  icir:           { label: "ICIR", body: "The mean rank IC divided by its standard deviation over time: how steady a signal's predictive power is, not just how big." },
+  brier:          { label: "Brier score", body: "Average squared gap between a stated probability and what happened (1 or 0). Lower is better; always saying 50 % scores 0.25." },
+  rank_ic:        { label: "Rank IC", body: "Rank correlation between what a signal predicted and what the stocks then returned. 0 means no information; 0.05 is already a useful signal in practice." },
   // Risk
   sharpe:    { label: "Sharpe ratio",    body: "Excess return per unit of total volatility. Higher is better; >1 is good, >2 is very good." },
   sortino:   { label: "Sortino ratio",   body: "Like Sharpe but only counts downside volatility." },

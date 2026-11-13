@@ -82,7 +82,7 @@ export const appChildren: RouteObject[] = [
     { path: "box3", ...lazyNamed(() => import("../pages/tax/Box3Tab"), "Box3Tab"), handle: { title: "Tax Cockpit — Box 3" } },
     { path: "settings", ...lazyNamed(() => import("../pages/tax/SettingsTab"), "SettingsTab"), handle: { title: "Tax Cockpit — Settings" } },
   ] },
-  { path: "research", ...lazyNamed(() => import("../pages/research/ResearchLayout"), "ResearchLayout"), handle: { title: "Watchlist" }, children: [
+  { path: "research", ...lazyNamed(() => import("../pages/research/ResearchLayout"), "ResearchLayout"), handle: { title: "Research" }, children: [
     // DiscoverHubPage (mounted at /discover) is a strict superset of the old
     // research/DiscoverTab — consolidated per unified-portfolio-engine Phase 8.
     { index: true, element: <Navigate to="/discover" replace /> },
@@ -116,7 +116,7 @@ export const appChildren: RouteObject[] = [
   // Report Phase 5: the Strategy lab. A pathless layout, so every tab keeps its URL.
   { path: "lab", element: <Navigate to="/evidence" replace /> },
   { ...lazyNamed(() => import("../pages/lab/StrategyLabLayout"), "StrategyLabLayout"), children: [
-    { path: "evidence", ...lazyNamed(() => import("../pages/EvidencePage"), "EvidencePage"), handle: { title: "Strategy lab — Evidence" } },
+    { path: "evidence", ...lazyNamed(() => import("../pages/EvidencePage"), "EvidencePage"), handle: { title: "Strategy lab — Gate record" } },
     { path: "advisor", ...lazyNamed(() => import("../pages/advisor/PaperPortfoliosHub"), "PaperPortfoliosHub"), handle: { title: "Strategy lab — LLM advisor" }, children: [
       { index: true, element: <Navigate to="loop" replace /> },
       { path: "portfolios", element: <Navigate to="/advisor/loop" replace /> },

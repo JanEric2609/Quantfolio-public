@@ -2,7 +2,6 @@ import * as echarts from "echarts/core";
 import {
   BarChart,
   CandlestickChart,
-  GaugeChart,
   HeatmapChart,
   LineChart,
   PieChart,
@@ -22,7 +21,6 @@ echarts.use([
   BarChart,
   CandlestickChart,
   DataZoomComponent,
-  GaugeChart,
   GridComponent,
   HeatmapChart,
   LegendComponent,

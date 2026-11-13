@@ -16,6 +16,13 @@ export function GainHarvestCard({ year }: { year: number }) {
     queryFn: () => api<GainHarvest>(`/api/tax/harvest?year=${year}`),
   });
   const h = harvest.data;
+  if (harvest.isError) {
+    return (
+      <p role="alert" className="rounded-lg border border-warn/40 bg-warn/10 p-3 text-xs text-text-secondary">
+        The gain-harvesting estimate could not be loaded. Reload to try again.
+      </p>
+    );
+  }
   if (!h || !h.enabled || !h.room) return null;
 
   const mode = h.mode ?? h.room.mode ?? "nv";

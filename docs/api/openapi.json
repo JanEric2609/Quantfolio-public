@@ -11363,6 +11363,74 @@
         "title": "RunningSavingsPlans",
         "type": "object"
       },
+      "SaleTaxOut": {
+        "properties": {
+          "cost_eur": {
+            "title": "Cost Eur",
+            "type": "number"
+          },
+          "estimate": {
+            "default": true,
+            "title": "Estimate",
+            "type": "boolean"
+          },
+          "fund_class": {
+            "title": "Fund Class",
+            "type": "string"
+          },
+          "gain_eur": {
+            "title": "Gain Eur",
+            "type": "number"
+          },
+          "kest_rate": {
+            "title": "Kest Rate",
+            "type": "number"
+          },
+          "not_tax_advice": {
+            "default": true,
+            "title": "Not Tax Advice",
+            "type": "boolean"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "proceeds_eur": {
+            "title": "Proceeds Eur",
+            "type": "number"
+          },
+          "soli_rate": {
+            "title": "Soli Rate",
+            "type": "number"
+          },
+          "tax_eur": {
+            "title": "Tax Eur",
+            "type": "number"
+          },
+          "taxable_gain_eur": {
+            "title": "Taxable Gain Eur",
+            "type": "number"
+          },
+          "teilfreistellung_pct": {
+            "title": "Teilfreistellung Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "proceeds_eur",
+          "cost_eur",
+          "gain_eur",
+          "fund_class",
+          "teilfreistellung_pct",
+          "taxable_gain_eur",
+          "kest_rate",
+          "soli_rate",
+          "tax_eur",
+          "note"
+        ],
+        "title": "SaleTaxOut",
+        "type": "object"
+      },
       "SankeyLinkOut": {
         "properties": {
           "source": {
@@ -13054,6 +13122,39 @@
           "min_ic_names"
         ],
         "title": "SkillSummaryResponse",
+        "type": "object"
+      },
+      "SourceOut": {
+        "properties": {
+          "file": {
+            "title": "File",
+            "type": "string"
+          },
+          "line": {
+            "title": "Line",
+            "type": "integer"
+          },
+          "module": {
+            "title": "Module",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "module",
+          "file",
+          "line",
+          "source"
+        ],
+        "title": "SourceOut",
         "type": "object"
       },
       "StageProgress": {
@@ -25900,6 +26001,115 @@
         "summary": "Job Summary",
         "tags": [
           "jobs"
+        ]
+      }
+    },
+    "/api/learn/sale-tax": {
+      "get": {
+        "operationId": "sale_tax_api_learn_sale_tax_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "proceeds_eur",
+            "required": true,
+            "schema": {
+              "maximum": 1000000000.0,
+              "minimum": 0,
+              "title": "Proceeds Eur",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cost_eur",
+            "required": true,
+            "schema": {
+              "maximum": 1000000000.0,
+              "minimum": 0,
+              "title": "Cost Eur",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fund_class",
+            "required": false,
+            "schema": {
+              "default": "aktien",
+              "maxLength": 24,
+              "title": "Fund Class",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SaleTaxOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sale Tax",
+        "tags": [
+          "learn"
+        ]
+      }
+    },
+    "/api/learn/source": {
+      "get": {
+        "operationId": "function_source_api_learn_source_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Function Source",
+        "tags": [
+          "learn"
         ]
       }
     },

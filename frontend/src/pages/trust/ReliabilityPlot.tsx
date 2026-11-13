@@ -33,7 +33,7 @@ export function ReliabilityPlot({ type }: { type: TrustTypeVerdict }) {
         xName="Stated probability (%)"
         yName="Share that hit (%)"
       />
-      <table className="w-full text-xs">
+      <div className="overflow-x-auto"><table className="w-full text-xs">
         <caption className="sr-only">{type.label} reliability bins</caption>
         <thead>
           <tr className="border-b border-border text-left text-text-muted">
@@ -51,7 +51,7 @@ export function ReliabilityPlot({ type }: { type: TrustTypeVerdict }) {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </Card>
   );
 }
