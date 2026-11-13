@@ -195,7 +195,7 @@ def job_schedule(
             next_run=next_run,
             last_run=summary.last_run if summary else None,
             last_status=summary.last_status if summary else None,
-            last_error=last_errors.get(job_id) if summary and summary.last_status == "error" else None,
+            last_error=last_errors.get(job_id) if summary and summary.last_status in ("error", "commit_failed", "degraded") else None,
             avg_duration_ms=summary.avg_duration_ms if summary else None,
             total_runs=summary.total_runs if summary else 0,
             success_rate=summary.success_rate if summary else None,
@@ -224,7 +224,7 @@ def _last_errors(db: Session) -> dict[str, str]:
 
     newest = (
         db.query(JobRun.job_name, func.max(JobRun.started_at).label("started_at"))
-        .filter(JobRun.status == "error")
+        .filter(JobRun.status.in_(("error", "commit_failed", "degraded")))
         .group_by(JobRun.job_name)
         .subquery()
     )

@@ -80,6 +80,7 @@ async def _worker() -> None:
                     messages,
                     structured_output=opts.get("structured_output"),
                     timeout_s=opts.get("timeout_s", 60.0),
+                    **({"max_tokens": opts["max_tokens"]} if opts.get("max_tokens") else {}),
                 )
             except Exception as exc:
                 _audit(db, backend, opts, messages, user_id, started, None, f"error:{type(exc).__name__}", is_degraded)
@@ -191,6 +192,7 @@ async def call(
     structured_output: type[BaseModel] | None = None,
     timeout_s: float = 60.0,
     user_id: str | None = None,
+    max_tokens: int | None = None,
 ) -> Completion:
     """Route an LLM call through the appropriate backend.
 
@@ -207,6 +209,7 @@ async def call(
         force_local: Override cloud routing for privacy-sensitive paths
         structured_output: Optional output schema
         timeout_s: Request timeout
+        max_tokens: Completion budget for this call, when the default is far too large for the task
 
     Returns:
         Completion with content, tokens, and backend info
@@ -242,6 +245,7 @@ async def call(
     opts: dict[str, Any] = {
         "structured_output": structured_output,
         "timeout_s": timeout_s,
+        "max_tokens": max_tokens,
         "task_type": task_type,
         # The module that asked, for the audit row.
         "caller": str(sys._getframe(1).f_globals.get("__name__", "router")),

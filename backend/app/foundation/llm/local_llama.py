@@ -21,7 +21,7 @@ _SCHEMA_REPAIR_INSTRUCTION = (
 DEFAULT_MAX_TOKENS = 4096
 
 
-def _build_completion_kwargs(structured_output: type[BaseModel] | None) -> dict[str, Any]:
+def _build_completion_kwargs(structured_output: type[BaseModel] | None, max_tokens: int | None = None) -> dict[str, Any]:
     """Build chat.completions.create kwargs except messages/model/timeout.
 
     Spreads the Qwen non-thinking sampling preset. ``top_k`` is non-standard
@@ -35,7 +35,7 @@ def _build_completion_kwargs(structured_output: type[BaseModel] | None) -> dict[
         "top_p": QWEN_SAMPLING["top_p"],
         # A completion budget on every call: without one a runaway answer runs
         # to the server's context limit (plan 2026-10-14, E4).
-        "max_tokens": DEFAULT_MAX_TOKENS,
+        "max_tokens": max_tokens or DEFAULT_MAX_TOKENS,
         "extra_body": {"top_k": QWEN_SAMPLING["top_k"]},
     }
     if structured_output is not None:
@@ -103,6 +103,7 @@ class LocalLlamaBackend:
         *,
         structured_output: type[BaseModel] | None = None,
         timeout_s: float = 60.0,
+        max_tokens: int | None = None,
     ) -> Completion:
         """Complete a chat request using local llama.cpp."""
         from openai import APIConnectionError, APIError
@@ -116,7 +117,7 @@ class LocalLlamaBackend:
                 model=self.model,
                 messages=typed_messages,
                 timeout=timeout_s,
-                **_build_completion_kwargs(structured_output),
+                **_build_completion_kwargs(structured_output, max_tokens),
             )
         except APIConnectionError as e:  # includes APITimeoutError
             raise LlmUnavailableError(f"Local llama.cpp endpoint unreachable: {e}") from e
@@ -146,7 +147,7 @@ class LocalLlamaBackend:
                     model=self.model,
                     messages=cast(list[ChatCompletionMessageParam], retry_messages),
                     timeout=timeout_s,
-                    **_build_completion_kwargs(None),
+                    **_build_completion_kwargs(None, max_tokens),
                 )
             except APIError as retry_error:
                 raise RuntimeError(
@@ -160,6 +161,8 @@ class LocalLlamaBackend:
                 data = json.loads(content)
                 structured_output.model_validate(data)
             except Exception as e:
+                # The raw answer is the evidence: a timed-out or malformed call used to leave nothing behind.
+                logger.warning("local llama answer failed schema validation (%s): %.500s", e, content)
                 raise ValueError(f"JSON schema validation failed: {e}") from e
 
         usage = response.usage

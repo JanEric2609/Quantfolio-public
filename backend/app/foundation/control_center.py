@@ -275,7 +275,7 @@ def _job_items(db: Session, heartbeat: dict[str, Any] | None, items: list[Attent
     rows = (
         db.query(JobRun.job_name)
         .join(newest, (JobRun.job_name == newest.c.job_name) & (JobRun.started_at == newest.c.started_at))
-        .filter(JobRun.status == "error")
+        .filter(JobRun.status.in_(("error", "commit_failed")))
         .all()
     )
     failed = sorted(row.job_name for row in rows if row.job_name in registered)
@@ -284,6 +284,19 @@ def _job_items(db: Session, heartbeat: dict[str, Any] | None, items: list[Attent
             "jobs-failed", "warning",
             f"{len(failed)} scheduled job{'s' if len(failed) > 1 else ''} failed on the last run",
             ", ".join(failed), "/settings/status#jobs", "View jobs",
+        ))
+    # A job that finished only part of its work (status "degraded") twice in a row: one bad night is noise.
+    degraded = []
+    for name in sorted(registered):
+        last_two = [r.status for r in db.query(JobRun.status).filter(JobRun.job_name == name, JobRun.status != "running")
+                    .order_by(JobRun.started_at.desc()).limit(2).all()]
+        if len(last_two) == 2 and all(status == "degraded" for status in last_two):
+            degraded.append(name)
+    if degraded:
+        items.append(AttentionItem(
+            "jobs-degraded", "warning",
+            f"{len(degraded)} scheduled job{'s' if len(degraded) > 1 else ''} only partly finished twice in a row",
+            ", ".join(degraded), "/settings/status#jobs", "View jobs",
         ))
 
 

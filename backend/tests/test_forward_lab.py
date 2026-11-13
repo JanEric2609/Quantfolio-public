@@ -305,7 +305,7 @@ def test_news_night_rates_us_members_and_skips_failures(monkeypatch):
 
     async def fake_rate(_db, headlines):
         calls.append(headlines)
-        if "MSFT" in str(headlines) or len(calls) == 2:
+        if len(calls) in (2, 3):             # the second stock fails both attempts (one retry)
             raise RuntimeError("model busy")
         return [news_tone._Rating(i=0, tone=0.6, event="product")], "qwen"
 
@@ -320,6 +320,8 @@ def test_news_night_rates_us_members_and_skips_failures(monkeypatch):
     assert row.source == "finnhub"
     # Masked before the model saw it.
     assert all("AAPL" not in h for h in calls[0])
+    assert len(calls) == 3 and out["no_news"] == 2      # one retry; XOM and SAP.DE had no headline, so no call
+    assert out["status"] == "degraded"                  # job result contract: some stocks failed
 
 
 def test_news_night_reads_8k_items_and_gdelt_headlines(monkeypatch):
