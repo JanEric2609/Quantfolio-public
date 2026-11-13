@@ -139,6 +139,7 @@ def parse_ratings(raw: str, n: int) -> list[_Rating]:
         try:
             rating = _Rating.model_validate(item)
         except Exception:  # noqa: BLE001 - one malformed item is skipped
+            logger.debug("malformed rating item skipped", exc_info=True)
             continue
         if 0 <= rating.i < n and rating.i not in seen:
             seen.add(rating.i)

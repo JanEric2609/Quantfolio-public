@@ -94,6 +94,7 @@ def _rank_ic(convictions: list[float], realised_returns: list[float]) -> float |
         correlation = cast(float, result[0])  # SpearmanrResult is a named tuple, index 0 = correlation
         return None if math.isnan(correlation) else correlation
     except Exception:
+        logger.debug("spearman correlation failed", exc_info=True)
         return None
 
 

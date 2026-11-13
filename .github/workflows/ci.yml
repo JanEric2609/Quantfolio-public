@@ -106,6 +106,10 @@ jobs:
         working-directory: backend
         run: .venv/bin/python scripts/check_no_new_cycles.py
 
+      - name: Broad exception handlers may only shrink
+        working-directory: backend
+        run: .venv/bin/python scripts/check_broad_excepts.py
+
       - name: Every test asserts something
         working-directory: backend
         run: .venv/bin/python scripts/check_tests_assert.py
