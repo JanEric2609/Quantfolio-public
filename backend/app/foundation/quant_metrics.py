@@ -237,8 +237,14 @@ def calmar_ratio(returns: Sequence[float], periods_per_year: int = 252) -> float
 
 
 def _var_threshold_index(n: int, confidence: float) -> int:
-    """Index into an ascending-sorted return series of the VaR observation."""
-    idx = int(math.floor((1.0 - confidence) * n))
+    """Index into an ascending-sorted return series of the VaR observation.
+
+    The quantile definition (ADR 0003): with ``a = 1 - confidence``, 0-based index ``floor(a*n)``, i.e. the
+    ``floor(a*n) + 1``-th smallest return. ``a*n`` is rounded to 9 places first: in floating point
+    ``(1 - 0.9) * 100`` is 9.999999999999998, which floored to 9 instead of 10 (also at 80 %), while 95 % and 99 %
+    floored correctly (plan 2026-11-12, WP10 item 5).
+    """
+    idx = int(math.floor(round((1.0 - confidence) * n, 9)))
     return min(max(idx, 0), n - 1)
 
 
@@ -1284,6 +1290,44 @@ def diebold_mariano_hln(
     dm = float(x.mean()) / math.sqrt(lrv / n)
     hln = math.sqrt(max(0.0, (n + 1 - 2 * h + h * (h - 1) / n) / n))
     stat = dm * hln
+    return {"stat": stat, "p_value": float(_t.sf(stat, n - 1)), "n": n, "mean": float(x.mean())}
+
+
+def diebold_mariano_nonoverlapping(
+    d: Sequence[float],
+    h: int = 1,
+    positions: Sequence[int] | None = None,
+) -> dict[str, float | int | None]:
+    """One-sided test that the mean loss differential is > 0, on dates at least ``h`` trading days apart.
+
+    The h-step forecasts of neighbouring dates share their outcome window, so ``d`` is autocorrelated. Newey-West
+    with Harvey-Leybourne-Newbold at 20 lags on 60 to 165 dates promoted 4.9 % of null challengers at the first
+    look against a stated 0.33 %, and 12 % over six looks against 1.25 % (``scripts/promotion_null_sim.py``,
+    plan 2026-11-12, WP10). A fixed-smoothing cosine variance (Lazarus et al. 2018) still promoted 7.9 %. Taking
+    only dates ``h`` apart leaves independent differences, and a plain t test on them promoted 1.29 % over six
+    looks (20,000 simulations, 95 % interval 1.13-1.44 %). ``positions`` are trading-day indexes of ``d``; the
+    first date is kept, then each next one at least ``h`` positions after the last kept. The cost is power:
+    60 trading days give 3 dates, 165 give 8. Returns the shape of :func:`diebold_mariano_hln`.
+    """
+    from scipy.stats import t as _t
+
+    keep = [i for i, v in enumerate(d) if v is not None and np.isfinite(v)]
+    picked: list[float] = []
+    last: float | None = None
+    for i in keep:
+        pos = float(positions[i]) if positions is not None else float(i)
+        if last is None or pos - last >= h:
+            picked.append(float(d[i]))
+            last = pos
+    n = len(picked)
+    mean = float(np.mean(picked)) if n else None
+    if n < 3:
+        return {"stat": None, "p_value": None, "n": n, "mean": mean}
+    x = np.asarray(picked)
+    sd = float(x.std(ddof=1))
+    if sd <= 0:
+        return {"stat": None, "p_value": None, "n": n, "mean": float(x.mean())}
+    stat = float(x.mean()) / (sd / math.sqrt(n))
     return {"stat": stat, "p_value": float(_t.sf(stat, n - 1)), "n": n, "mean": float(x.mean())}
 
 

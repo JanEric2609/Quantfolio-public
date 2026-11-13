@@ -108,7 +108,9 @@ def portfolio_risk_from_price_matrix(price_matrix: Any, weights: dict[str, float
         weight_series = weight_series / weight_series.sum()
     portfolio_returns = returns.mul(weight_series, axis=1).sum(axis=1)
     equity = (1 + portfolio_returns).cumprod() * 10000
-    drawdown = equity / equity.cummax() - 1
+    # The starting value is a peak too: 100, 90, 95 is a 10 % fall, not 0 %.
+    peak = equity.cummax().clip(lower=10000.0)
+    drawdown = equity / peak - 1
     volatility = portfolio_returns.rolling(21).std() * math.sqrt(252)
     annual_vol = portfolio_returns.std() * math.sqrt(252)
     annual_return = portfolio_returns.mean() * 252
@@ -157,8 +159,8 @@ def simple_efficient_frontier(expected_returns: dict[str, float], covariance: An
               sum(w) = 1
               w_i >= 0          (long-only)
 
-    Returns the same dict shape as before: {"current", "frontier", "suggested_weights"}.
-    Falls back to equal-weight if optimisation repeatedly fails (e.g. single asset).
+    Returns {"current", "frontier", "suggested_weights", "skipped_points"}. A target the optimiser cannot solve
+    is left out of the frontier and counted in ``skipped_points``.
     """
     import numpy as np
     import pandas as pd
@@ -228,11 +230,14 @@ def simple_efficient_frontier(expected_returns: dict[str, float], covariance: An
 
     frontier = []
     best = None
+    skipped = 0
     for target in targets:
         w = _solve_for_target(float(target))
         if w is None:
-            # Fallback: equal weight for this point.
-            w = np.full(n, 1.0 / n)
+            # The optimiser failed at this target. An equal-weight stand-in was shown as a frontier point;
+            # the point is dropped and the gap counted instead (plan 2026-11-12, WP10 item 4).
+            skipped += 1
+            continue
         ret = float(w @ mu)
         vol = float(math.sqrt(max(float(w @ cov @ w), 0.0)))
         sharpe = 0.0 if vol == 0 else ret / vol
@@ -253,7 +258,10 @@ def simple_efficient_frontier(expected_returns: dict[str, float], covariance: An
     else:
         current = {a: 1.0 / n for a in assets}
 
-    return {"current": current, "frontier": frontier, "suggested_weights": best["weights"] if best else {}}
+    return {
+        "current": current, "frontier": frontier, "suggested_weights": best["weights"] if best else {},
+        "skipped_points": skipped,
+    }
 
 
 def portfolio_optimizations_from_price_matrix(price_matrix: Any) -> dict:

@@ -52,9 +52,10 @@ def test_historical_cvar_is_the_empirical_tail_average():
     cvar95 = quant_metrics.historical_cvar(returns, 0.95)
     assert math.isclose(cvar95, 0.05, abs_tol=1e-9)
 
-    # At 80% confidence the tail widens to the worst two: mean(-0.05, -0.04).
+    # At 80% confidence a*n = 2, index 2 (ADR 0003): the tail is the worst three, mean(-0.05, -0.04, -0.03).
+    # This was 0.045 (the worst two) only because (1 - 0.8) * 10 is 1.9999999999999998 in floating point.
     cvar80 = quant_metrics.historical_cvar(returns, 0.80)
-    assert math.isclose(cvar80, 0.045, abs_tol=1e-9)
+    assert math.isclose(cvar80, 0.04, abs_tol=1e-9)
 
 
 def test_historical_cvar_never_below_historical_var():
@@ -390,3 +391,47 @@ def test_risk_series_benchmark_regression_and_beta():
     assert out["regression_points"][0] == [round(bench[0], 8), round(returns[0], 8)]
     assert len(out["rolling_beta"]) > 0
     assert all("date" in p and "value" in p for p in out["rolling_beta"])
+
+
+def test_var_uses_the_same_floor_index_at_every_confidence_level():
+    # 100 returns -0.100 .. -0.001; ADR 0003: index floor((1 - c) * n) of the ascending series. Floating point
+    # made (1 - 0.9) * 100 = 9.999999999999998 and shifted 90 % and 80 % down by one (WP10 item 5).
+    returns = [-i / 1000 for i in range(1, 101)]
+    assert quant_metrics.historical_var(returns, 0.99) == pytest.approx(0.099)   # index 1
+    assert quant_metrics.historical_var(returns, 0.95) == pytest.approx(0.095)   # index 5
+    assert quant_metrics.historical_var(returns, 0.90) == pytest.approx(0.090)   # index 10 (was 9)
+    assert quant_metrics.historical_var(returns, 0.80) == pytest.approx(0.080)   # index 20 (was 19)
+
+
+def test_portfolio_drawdown_counts_the_starting_value_as_a_peak():
+    import pandas as pd
+
+    from app.foundation.quant import portfolio_risk_from_price_matrix
+
+    frame = pd.DataFrame({"A": [100.0, 90.0, 95.0]}, index=pd.date_range("2026-01-01", periods=3))
+    out = portfolio_risk_from_price_matrix(frame)
+    assert out["max_drawdown"] == pytest.approx(0.10)
+
+
+def test_a_failed_frontier_point_is_dropped_and_counted(monkeypatch):
+    import numpy as np
+    from scipy import optimize
+
+    from app.foundation.quant import simple_efficient_frontier
+
+    cov = np.array([[0.04, 0.0], [0.0, 0.01]])
+    real_minimize = optimize.minimize
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):
+        calls["n"] += 1
+        res = real_minimize(*args, **kwargs)
+        if kwargs.get("constraints") is not None and len(kwargs["constraints"]) > 1 and calls["n"] % 2 == 0:
+            res.success = False
+        return res
+
+    monkeypatch.setattr(optimize, "minimize", flaky)
+    out = simple_efficient_frontier({"A": 0.10, "B": 0.05}, cov, points=6)
+    assert out["skipped_points"] > 0
+    assert out["skipped_points"] + len(out["frontier"]) == 6
+    assert all(abs(sum(p["weights"].values()) - 1.0) < 1e-6 for p in out["frontier"])

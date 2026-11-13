@@ -99,6 +99,7 @@ bert = [
 pythonpath = ["."]
 testpaths = ["tests"]
 addopts = "-n 6"
+markers = ["slow: a simulation that takes tens of seconds; still part of the normal run"]
 
 # Pyright config lives in pyrightconfig.json (takes precedence over [tool.pyright]).
 

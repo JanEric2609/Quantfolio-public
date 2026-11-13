@@ -88,3 +88,7 @@ Why two variants: DSR's input random variable is a return series, from which a S
 - `AGENTS.md`'s Quant section points here as the governing document, so repo doctrine matches reality.
 - Numeric outputs move only where a decision says they may: VaR golden values under decision 1's deliberate-change rule; the retired MC projection and dead Black-Litterman path have no numeric survivors.
 - New duplication has a place to be judged. If someone adds a fifth VaR or a fourth metrics builder, this ADR is what they're contradicting, and updating it is the explicit step.
+
+## Amendment 2026-11-12: the VaR index is rounded before it is floored
+
+`(1 - confidence) * n` is computed in floating point: `(1 - 0.9) * 100` is 9.999999999999998 and floored to index 9, not 10 (same at 80 %). The index is now `floor(round((1 - c) * n, 9))`. The convention is unchanged; at 90 % and 80 % the VaR now reads the observation the definition names, and the 95 % and 99 % goldens do not move.

@@ -88,6 +88,10 @@ class TestInferAction:
     def test_buy_verdict_maps_to_buy_equity(self):
         assert _infer_action_from_rec(self._rec("BUY")) == "buy_equity"
 
+    def test_avoid_and_rejected_by_risk_are_not_credited_to_the_buy_weight(self):
+        assert _infer_action_from_rec(self._rec("AVOID")) == "hold_cash"
+        assert _infer_action_from_rec(self._rec("REJECTED_BY_RISK")) == "hold_cash"
+
     def test_sell_verdict_maps_to_reduce_holding(self):
         assert _infer_action_from_rec(self._rec("SELL")) == "reduce_holding"
 

@@ -130,7 +130,9 @@ def _dividends_by_day(db: Session, user_id: str, start: str, isins: set[str] | N
         if isins is not None and ev.isin and ev.isin.upper() not in isins:
             continue
         if day >= start:
-            out[day] += float(ev.gross_eur or 0)
+            # What reached the account: gross less the tax withheld in Germany and abroad. The book's return
+            # was credited the gross, tax included (plan 2026-11-12, WP10 item 7).
+            out[day] += float(ev.gross_eur or 0) - float(ev.withheld_eur or 0) - float(ev.foreign_wht_eur or 0)
     return dict(out)
 
 
@@ -212,14 +214,21 @@ def compute_book_performance(
     irr_flows: list[tuple[date, float]] = [(date.fromisoformat(days[0]), -v_prev)]
     contributions = 0.0
     gaps = 0
+    # The last day whose whole book was priced: the unit value moves from there, so a day with a missing price
+    # costs nothing but its own return (it used to drop the next day's return as well, plan 2026-11-12, WP10).
+    ref_q, ref_v, div_acc = q_prev, v_prev, 0.0
     for day in days[1:]:
-        gross, complete = value(q_prev, day)
-        _, prev_complete = value(q_prev, series[-1]["date"])
+        gross, _ = value(q_prev, day)
         div = dividends.get(day, 0.0)
+        div_acc += div
+        ref_gross, ref_complete = value(ref_q, day)
         q_now = held_on(day)
-        v_now, _ = value(q_now, day)
-        if v_prev > 0 and complete and prev_complete:
-            unit *= (gross + div) / v_prev
+        v_now, now_complete = value(q_now, day)
+        if ref_v > 0 and ref_complete:
+            unit *= (ref_gross + div_acc) / ref_v
+            div_acc = 0.0
+            if now_complete:
+                ref_q, ref_v = q_now, v_now
         else:
             gaps += 1
         flow = v_now - gross - div

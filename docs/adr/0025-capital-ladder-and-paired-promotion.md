@@ -258,3 +258,23 @@ The money buys three things: the gap between a paper fill and a real fill (sprea
 **Supersedes.** In *Consequences*, "The satellite target is 0 % until a candidate has 126 trading days of evidence" now holds only while `ladder_learning_eur_per_month` is 0.
 
 **Open for the implementer to confirm in code, not decided here.** How the real positions of the sleeve are told apart from the rest of the Trading 212 depot (preferred: one dedicated pie that the owner confirms, the mechanism of #374); whether a 20 EUR fractional order is possible for every listed instrument; how the euro amount is expressed in a plan that otherwise works in percent of the book.
+
+## Amendment 2026-11-12: the promotion test reads independent dates
+
+**Finding.** §3's test (one-sided Diebold-Mariano, Newey-West at lag 20, Harvey-Leybourne-Newbold factor, t with T-1 degrees of freedom) was never simulated. `backend/scripts/promotion_null_sim.py` does it: matched differences with no true gap and the real overlap (a 21-day horizon makes each difference a moving average of 21 shocks), the advisor's own looks (first at 60 trading days, then every 21, six in all, Pocock level 0.00333 each). With 3,000 simulations the test promoted **4.9 %** of null challengers at the first look and **12.0 %** (95 % interval 10.8-13.2 %) over the six looks, against the stated 0.33 % and 1.25 %. Sixty to 165 dates carry only three to eight independent 21-day windows; a lag-20 kernel on them underestimates the variance.
+
+**Tried.** The fixed-smoothing cosine variance with nu = floor(0.4 T^(2/3)) read against t(nu) (Lazarus, Lewis, Stock and Watson 2018, formula written from memory and not checked against the paper) promoted 7.9 % over six looks, still six times the stated level.
+
+**Decision.** The test takes only dates at least 21 trading days apart (the first date, then each next one 21 or more positions later) and applies a one-sample one-sided t test with n-1 degrees of freedom (`quant_metrics.diebold_mariano_nonoverlapping`). With 20,000 simulations it promotes **1.29 %** over six looks (interval 1.13-1.44 %) and at most 0.38 % at any one look. The price is power: 3 independent dates at the first look and 8 at the sixth, so only a large and steady gap is promoted. The Newey-West function stays in `quant_metrics` for other uses.
+
+**Limits.** The simulation uses independent normal shocks with constant variance. Real losses have heavier tails and volatility clusters; the rate on real forecasts may differ. The harness is `scripts/promotion_null_sim.py`; `tests/test_promotion_null_simulation.py` pins both the old defect and the new rate. The "autocovariance pairs more than five days apart are dropped" note above no longer applies.
+
+## Amendment 2026-11-12: the ladder bets on beta-adjusted excess return
+
+**Defect.** The ladder's daily value was `r_sleeve - r_benchmark`. That equals alpha only when beta is 1. A sleeve with beta 1.3 earns 0.3 x the benchmark's premium as "skill" in a rising market and a sleeve with beta 0.3 (Mandate B, mostly cash) loses 0.7 x the premium as "harm", with no skill difference at all. Simulated with 10 % benchmark drift, 15 % volatility and zero alpha, plain excess return for beta 1.3 averages about +3 %/yr, so the skill e-process grows without bound.
+
+**Change.** `x_t = r_sleeve,t - beta_(t-1) * r_bench,t` (`graduation/ladder.py: beta_adjusted`). `beta_(t-1)` is an expanding OLS beta through day t-1 only, shrunk toward 1 with 20 pseudo-days (`BETA_PRIOR_DAYS`) and clipped to [0, 2]; the first days behave like plain excess return. The beta of day t is therefore known before day t's bet, which keeps the bet predictable (a beta that used the current day would make the process a non-supermartingale, as with any tuned bet). `tests/test_capital_ladder.py` simulates betas 0.3, 0.5, 1.0 and 1.3 at zero alpha with a drifting benchmark: each reaches Earned in at most 5 % of paths plus three Monte Carlo standard errors; the plain-excess rule would not (`test_plain_excess_would_have_credited_beta_above_one`).
+
+**Not changed.** Thresholds, lambdas and the harm e-process stay as they were: splitting the error budget between skill and harm was not needed to pass the zero-alpha simulations. The shrinkage does not model time-varying beta; a sleeve that changes beta abruptly is mis-hedged for a few weeks.
+
+**Operations.** Evidence rows computed under the old rule must be recomputed: after the deploy run `DELETE FROM ladder_evidence_daily;` once (stages restart at the next ladder run from the paper snapshots).
