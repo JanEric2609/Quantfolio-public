@@ -460,10 +460,13 @@ def _fundamentals_lines(fund: dict[str, Any] | None) -> list[str]:
     if not fund:
         return ["\n**Fundamentals:** not available."]
     unreliable = book_ratios_unreliable_in(fund)
-    basis_text = growth_basis_text(growth_basis(fund))
+    basis_text = growth_basis_text(growth_basis(fund), fund.get("period_months"))
     nd = net_debt_to_ebitda(fund)
     end = fund.get("latest_period_end")
-    period_end = f" (reporting period ending {end}; a half-year reporter's latest period is six months)" if end else ""
+    period_end = (
+        f" (reporting period ending {end})" if fund.get("period_months") else
+        f" (reporting period ending {end}; a half-year reporter's latest period is six months)"
+    ) if end else ""
     rows: list[tuple[str, str | None]] = [
         ("Sector / industry", " / ".join(str(x) for x in (fund.get("sector"), fund.get("industry")) if x) or None),
         ("Market cap", _market_cap(fund.get("market_cap"), fund.get("currency"))),

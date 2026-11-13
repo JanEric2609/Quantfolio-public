@@ -100,13 +100,67 @@ def growth_basis(data: dict[str, Any], source: str | None = None) -> str | None:
     return _BASIS_BY_SOURCE.get(str(source or "").split("_")[0].lower())
 
 
-def growth_basis_text(basis: str | None) -> str:
-    """The period a growth figure covers, in words ("against a year earlier" when unknown)."""
+def growth_basis_text(basis: str | None, period_months: int | float | None = None) -> str:
+    """The period a growth figure covers, in words ("against a year earlier" when unknown).
+
+    ``period_months`` is the length of the latest reporting period inferred from
+    the statement dates: WKL.AS reports half-years, and "latest quarter" was
+    wrong for it (audit 2026-11-12, WP2).
+    """
+    if basis == "quarter_yoy":
+        word = {3: "quarter", 6: "half-year", 12: "year"}.get(int(period_months)) if period_months else None
+        if word:
+            return f"in the latest {word} against the same {word} a year earlier"
     return GROWTH_BASIS_TEXT.get(basis or "", "against a year earlier")
 
 
+def period_months_from_dates(dates: list[Any]) -> int | None:
+    """3, 6 or 12 from the gap between the two newest statement dates, else None."""
+    from datetime import date, datetime
+
+    days: list[date] = []
+    for d in dates:
+        if isinstance(d, datetime):
+            days.append(d.date())
+        elif isinstance(d, date):
+            days.append(d)
+        else:
+            try:
+                days.append(datetime.fromisoformat(str(d)[:10]).date())
+            except ValueError:
+                continue
+    days = sorted(set(days), reverse=True)
+    if len(days) < 2:
+        return None
+    gap = (days[0] - days[1]).days
+    for months, lo, hi in ((3, 75, 110), (6, 160, 200), (12, 340, 390)):
+        if lo <= gap <= hi:
+            return months
+    return None
+
+
+#: Ingestion range checks: a value outside is stored as None with a reason.
+#: Measured 2026-11-12: 10 rows with a free-cash-flow yield above 30 %, 7 with a
+#: dividend yield above 12 %.
+RANGE_CHECKS: dict[str, tuple[float, float]] = {
+    "fcf_yield": (-1.0, 0.30),
+    "dividend_yield": (0.0, 0.12),
+}
+
+
+def apply_range_checks(data: dict[str, Any]) -> dict[str, Any]:
+    """Null out-of-range metrics and record ``<key>_reason`` for each."""
+    for key, (lo, hi) in RANGE_CHECKS.items():
+        v = _num(data.get(key))
+        if v is not None and not lo <= v <= hi:
+            data[key] = None
+            data[f"{key}_reason"] = "out_of_range"
+    return data
+
+
 _FUNDAMENTALS_LABEL_KEYS = frozenset(
-    {"name", "sector", "industry", "currency", "isin", "growth_basis", "latest_period_end", "period_months"}
+    {"name", "sector", "industry", "currency", "isin", "growth_basis", "latest_period_end", "period_months",
+     "fcf_yield_reason", "dividend_yield_reason"}
 )
 
 

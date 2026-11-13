@@ -29,3 +29,19 @@ describe("FundamentalsGrid reporting period", () => {
     expect(screen.queryByTestId("fund-latest_period_end")).toBeNull();
   });
 });
+
+describe("FundamentalsGrid WP2", () => {
+  it("shows n/a with the reason when the free-cash-flow yield cannot be computed", () => {
+    render(<FundamentalsGrid fundamentals={{ pe_ratio: 12, fcf_yield: null, fcf_yield_reason: "currency_mismatch" }} />);
+    expect(screen.getByTestId("fund-fcf_yield").textContent).toContain("different currencies");
+  });
+  it("names a half-year and puts the currency beside the market cap", () => {
+    render(<FundamentalsGrid fundamentals={{ market_cap: 1.9e10, currency: "EUR", revenue_growth: 0.02, growth_basis: "quarter_yoy", latest_period_end: "2026-06-30", period_months: 6 }} />);
+    expect(screen.getByTestId("fund-period-note").textContent).toContain("half-year to 2026-06-30");
+    expect(screen.getByTestId("fund-market_cap").textContent).toContain("EUR");
+  });
+  it("hides unknown raw keys", () => {
+    render(<FundamentalsGrid fundamentals={{ pe_ratio: 12, some_new_key: 5 }} />);
+    expect(screen.queryByTestId("fund-some_new_key")).toBeNull();
+  });
+});

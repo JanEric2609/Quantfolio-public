@@ -11,6 +11,10 @@ from app.foundation.providers.rate_limiter import RateLimitConfig, get_shared_li
 from app.foundation.providers.utils import is_us_listing, strip_exchange_suffix
 
 
+def _scaled(value: float | None, factor: float) -> float | None:
+    return None if value is None else value * factor
+
+
 class AlphaVantageProvider(MarketDataProvider):
     name = "alphavantage"
     capabilities = {"get_quote", "get_history", "get_fundamentals", "get_news", "get_fx_rate"}
@@ -130,7 +134,9 @@ class AlphaVantageProvider(MarketDataProvider):
                 "ev_ebitda": _float(overview.get("EVToEBITDA")),
                 "roe": _float(overview.get("ReturnOnEquityTTM")),
                 "profit_margin": _float(overview.get("ProfitMargin")),
-                "debt_equity": _float(overview.get("DebtToEquityRatio")),
+                # Alpha Vantage sends a plain ratio (1.5); every other provider and the
+                # strength score use percent (150): one unit at the boundary (WP2).
+                "debt_equity": _scaled(_float(overview.get("DebtToEquityRatio")), 100.0),
                 "revenue_growth": _float(overview.get("QuarterlyRevenueGrowthYOY")),
                 "earnings_growth": _float(overview.get("QuarterlyEarningsGrowthYOY")),
                 "market_cap": _float(overview.get("MarketCapitalization")),

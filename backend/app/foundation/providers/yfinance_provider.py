@@ -153,7 +153,8 @@ class YFinanceProvider(MarketDataProvider):
             if symbol.upper().endswith(".US"):
                 symbol = symbol[:-3]
 
-            info = yf.Ticker(symbol).info or {}
+            ticker_obj = yf.Ticker(symbol)
+            info = ticker_obj.info or {}
             data = {
                 "pe_ratio": info.get("trailingPE"),
                 "forward_pe": info.get("forwardPE"),
@@ -178,6 +179,7 @@ class YFinanceProvider(MarketDataProvider):
                 # The period those growth figures end on: a half-year reporter
                 # (Wolters Kluwer) shows H1 here, not a quarter.
                 "latest_period_end": _epoch_date(info.get("mostRecentQuarter")),
+                "period_months": _statement_period_months(ticker_obj) if info.get("mostRecentQuarter") else None,
                 "earnings_growth": info.get("earningsGrowth"),
                 "eps": info.get("trailingEps"),
                 "market_cap": info.get("marketCap"),
@@ -193,8 +195,12 @@ class YFinanceProvider(MarketDataProvider):
                 "isin": info.get("isin"),
                 "name": info.get("longName") or info.get("shortName"),
             }
+            from app.foundation.fundamentals_context import apply_range_checks
             from app.foundation.fundamentals_context import has_fundamentals_content
 
+            if data["fcf_yield"] is None and (reason := _fcf_yield_reason(info)):
+                data["fcf_yield_reason"] = reason
+            apply_range_checks(data)
             if not info.get("quoteType") and not has_fundamentals_content(data):
                 return self.unavailable("fundamentals", f"{symbol} not found", reason="not_found")
             missing = [key for key, value in data.items() if value is None]
@@ -396,14 +402,42 @@ def _epoch_date(value: Any) -> str | None:
         return None
 
 
+def _fcf_yield_reason(info: dict[str, Any]) -> str | None:
+    """Why a free-cash-flow yield cannot be computed cleanly, else None (D10).
+
+    HBR.L read 120 %, CO.PA 374 % and DTE.DE 23 % (audit 2026-11-12): the cash
+    flow is in the reporting currency and the market cap in the listing
+    currency, pence quotes are 100x, and for banks and insurers the cash flow
+    is not free cash flow at all.
+    """
+    listing, reporting = info.get("currency"), info.get("financialCurrency")
+    if listing in ("GBp", "GBX", "ZAc") or (listing and reporting and listing != reporting):
+        return "currency_mismatch"
+    text = f"{info.get('sector') or ''} {info.get('industry') or ''}".lower()
+    if any(w in text for w in ("bank", "insurance", "capital markets", "asset management")):
+        return "financial_sector"
+    return None
+
+
 def _fcf_yield(info: dict[str, Any]) -> float | None:
     free_cashflow = info.get("freeCashflow")
     market_cap = info.get("marketCap")
-    if not free_cashflow or not market_cap:
+    if not free_cashflow or not market_cap or _fcf_yield_reason(info):
         return None
     try:
         return float(free_cashflow) / float(market_cap)
     except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def _statement_period_months(ticker: Any) -> int | None:
+    """Length of the latest reporting period from the quarterly income statement's dates."""
+    from app.foundation.fundamentals_context import period_months_from_dates
+
+    try:
+        frame = ticker.quarterly_income_stmt
+        return period_months_from_dates(list(frame.columns))
+    except Exception:  # noqa: BLE001 - optional enrichment
         return None
 
 
