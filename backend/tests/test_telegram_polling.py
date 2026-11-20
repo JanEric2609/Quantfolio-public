@@ -115,7 +115,7 @@ def test_poll_deletes_the_webhook_first_then_long_polls_with_a_timeout():
     assert delete_payload == {"drop_pending_updates": False}
     assert poll_payload["timeout"] == 20
     assert "offset" not in poll_payload
-    assert poll_payload["allowed_updates"] == ["message"]
+    assert poll_payload["allowed_updates"] == ["message", "callback_query"]
 
 
 def test_webhook_is_only_deleted_once_per_token_and_process():
@@ -297,7 +297,7 @@ def test_sync_webhook_creates_the_secret_and_registers_the_url():
     method, payload = fake.calls[-1]
     assert method == "setWebhook"
     assert payload["url"] == "https://qf.example.ts.net/api/telegram/webhook"
-    assert payload["allowed_updates"] == ["message"]
+    assert payload["allowed_updates"] == ["message", "callback_query"]
     # The secret Telegram will echo back is the one the endpoint verifies against.
     assert verify_webhook_secret(db, payload["secret_token"]) is True
 

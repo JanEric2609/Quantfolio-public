@@ -41,7 +41,9 @@ def get_bot_token(db: Session) -> str | None:
     return secret[0] if secret else None
 
 
-def send_telegram_message(db: Session, chat_id: str, text: str) -> bool:
+def send_telegram_message(
+    db: Session, chat_id: str, text: str, reply_markup: dict[str, Any] | None = None
+) -> bool:
     token = get_bot_token(db)
     if not token:
         logger.warning("Telegram message not sent: no bot token configured")
@@ -51,7 +53,7 @@ def send_telegram_message(db: Session, chat_id: str, text: str) -> bool:
         with httpx.Client(timeout=10.0) as client:
             response = client.post(
                 f"{TELEGRAM_API_BASE}/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": text},
+                json={"chat_id": chat_id, "text": text, **({"reply_markup": reply_markup} if reply_markup else {})},
             )
             response.raise_for_status()
         return True
@@ -101,12 +103,23 @@ def _call_api(token: str, method: str, payload: dict[str, Any] | None = None, *,
     return body.get("result", True)
 
 
+ALLOWED_UPDATES = ("message", "callback_query")
+
+
+def answer_callback_query(db: Session, callback_id: str, text: str) -> bool:
+    """Answer a button tap so the client stops its spinner; *text* shows as a short toast."""
+    token = get_bot_token(db)
+    if not token:
+        return False
+    return _call_api(token, "answerCallbackQuery", {"callback_query_id": callback_id, "text": text[:200]}) is not None
+
+
 def get_updates(db: Session, offset: int | None, timeout_seconds: int) -> list[dict[str, Any]] | None:
     """One ``getUpdates`` long poll. ``None`` = failed or no bot token; ``[]`` = nothing new."""
     token = get_bot_token(db)
     if not token:
         return None
-    payload: dict[str, Any] = {"timeout": timeout_seconds, "allowed_updates": ["message"]}
+    payload: dict[str, Any] = {"timeout": timeout_seconds, "allowed_updates": list(ALLOWED_UPDATES)}
     if offset is not None:
         payload["offset"] = offset
     # The HTTP timeout outlasts the long poll, or every quiet poll would look like a failure.
@@ -131,7 +144,7 @@ def set_webhook(db: Session, url: str) -> bool:
         return False
     secret = ensure_webhook_secret(db)
     return (
-        _call_api(token, "setWebhook", {"url": url, "secret_token": secret, "allowed_updates": ["message"]})
+        _call_api(token, "setWebhook", {"url": url, "secret_token": secret, "allowed_updates": list(ALLOWED_UPDATES)})
         is not None
     )
 

@@ -84,6 +84,16 @@ case "${args[0]}" in
       transaction)
         [[ "${args[2]:-}" == "details" ]] || refuse 10 command_not_allowed "command not allowed"
         n=3; flags="--portfolio-id --transaction-id" ;;
+      # Market reads for the paper-only derivatives desk (ADR 0027).
+      quote)
+        n=2; flags="--isin" ;;
+      chart)
+        n=2; flags="--isin --timeframe" ;;
+      security-news)
+        n=2; flags="--isin --locale" ;;
+      derivatives)
+        [[ "${args[2]:-}" == "search" ]] || refuse 10 command_not_allowed "command not allowed"
+        n=3; flags="--underlying --type --strategy --limit --offset --leverage-max --expiry-from --expiry-to --sort-field --sort-order" ;;
       *) refuse 10 command_not_allowed "command not allowed" ;;
     esac ;;
   *) refuse 10 command_not_allowed "command not allowed" ;;
@@ -105,6 +115,18 @@ for ((i = 0; i < ${#rest[@]}; i += 2)); do
     --cursor)         re='^[A-Za-z0-9_=+/.:-]{1,512}$' ;;
     --page-size)      re='^([1-9]|[1-9][0-9]|100)$' ;;
     --type-filter)    re='^[A-Z_]{1,40}$' ;;
+    --isin|--underlying) re='^[A-Z]{2}[A-Z0-9]{9}[0-9]$' ;;
+    --type)           re='^(knockout|warrant)$' ;;
+    --strategy)       re='^(long|short|put|call)$' ;;
+    --limit)          re='^([1-9]|[1-9][0-9]|100)$' ;;
+    --offset)         re='^[0-9]{1,5}$' ;;
+    --leverage-max)   re='^[0-9]{1,3}(\.[0-9]{1,4})?$' ;;
+    --expiry-from|--expiry-to) re='^[0-9]{4}-[0-9]{2}-[0-9]{2}$' ;;
+    --sort-field)
+      re='^(strike|leverage|expiry-date|knockout-barrier|distance-to-knockout|premium-absolute|premium-relative|distance-to-strike|omega|delta|implied-volatility|factor)$' ;;
+    --sort-order)     re='^(asc|desc)$' ;;
+    --timeframe)      re='^(7d|1m|3m|6m|ytd|1y|max)$' ;;
+    --locale)         re='^[a-z][a-z]_[A-Z][A-Z]$' ;;
     --from-time|--to-time)
       re='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|[+-][0-9]{2}:[0-9]{2})$' ;;
     *) refuse 10 command_not_allowed "flag not allowed" ;;

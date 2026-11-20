@@ -221,6 +221,12 @@ def _enabled(db, **extra) -> None:
     ["broker", "transactions", "--portfolio-id", "pf-1", "--page-size", "100", "--from-time", "2026-09-01T00:00:00Z"],
     ["broker", "transaction", "details", "--portfolio-id", "pf-1", "--transaction-id", "abc:123"],
     ["overnight"],
+    ["broker", "quote", "--isin", "DE0005933931"],
+    ["broker", "derivatives", "search", "--underlying", "DE0008469008", "--type", "knockout",
+     "--strategy", "long", "--limit", "100", "--leverage-max", "5", "--sort-field", "leverage",
+     "--sort-order", "desc"],
+    ["broker", "chart", "--isin", "DE0005933931", "--timeframe", "7d"],
+    ["broker", "security-news", "--isin", "DE0005933931", "--locale", "de_DE"],
 ])
 def test_allowed_reads_pass(args):
     assert validate_argv(args) == args
@@ -241,6 +247,21 @@ def test_allowed_reads_pass(args):
     ["broker", "transactions", "--portfolio-id", "pf-1", "--page-size", "1000"],
     ["overnight", "--portfolio-id", "pf-1"],
     ["config", "show"],
+    ["broker", "quote", "--isin", "DE0005933931", "--isin", "DE0005933931"],
+    ["broker", "quote", "--isin", "-DE0005933931"],
+    ["broker", "quote", "--isin", "de0005933931"],
+    ["broker", "derivatives", "search", "--underlying", "DE0008469008", "--type", "factor", "--strategy", "long"],
+    ["broker", "derivatives", "search", "--underlying", "DE0008469008", "--type", "knockout", "--strategy", "sideways"],
+    ["broker", "derivatives", "search", "--underlying", "DE0008469008", "--sort-field", "bogus"],
+    ["broker", "derivatives", "search", "--underlying", "DE0008469008", "--limit", "101"],
+    ["broker", "derivatives", "search", "--issuer", "VONTOBEL"],
+    ["broker", "derivatives", "create", "--underlying", "DE0008469008"],
+    ["broker", "chart", "--isin", "DE0005933931", "--timeframe", "1d"],
+    ["broker", "chart", "--isin", "DE0005933931", "--timeframe", "7d", "--include-year-to-date", "true"],
+    ["broker", "search", "ETF"],
+    ["broker", "trade", "buy", "--isin", "DE0005933931", "--shares", "1"],
+    ["broker", "trade", "sell", "--isin", "DE0005933931", "--confirm", "true"],
+    ["broker", "security-news", "--isin", "DE0005933931", "--locale", "de-DE"],
 ])
 def test_writes_and_odd_shapes_are_refused(args):
     with pytest.raises(sc_cli.ScalableUsageError):
@@ -842,6 +863,19 @@ _SAMPLE_VALUES = {
     "--type-filter": "INTEREST",
     "--from-time": "2026-09-01T00:00:00Z",
     "--to-time": "2026-09-30T23:59:59+02:00",
+    "--isin": "DE0005933931",
+    "--underlying": "DE0008469008",
+    "--type": "knockout",
+    "--strategy": "long",
+    "--limit": "100",
+    "--offset": "20",
+    "--leverage-max": "5.5",
+    "--expiry-from": "2026-12-01",
+    "--expiry-to": "2027-01-31",
+    "--sort-field": "implied-volatility",
+    "--sort-order": "asc",
+    "--timeframe": "7d",
+    "--locale": "de_DE",
 }
 
 
@@ -868,6 +902,13 @@ def test_wrapper_accepts_exactly_the_python_allow_list(wrapper):
     ["broker", "holdings", "--portfolio-id", "pf-1"],
     ["whoami", "--json", "--json"],
     ["watchlist", "--json"],
+    ["broker", "quote", "--isin", "DE0005933931", "--isin", "DE0005933931", "--json"],
+    ["broker", "derivatives", "search", "--underlying", "DE0008469008", "--type", "factor", "--json"],
+    ["broker", "derivatives", "create", "--json"],
+    ["broker", "derivatives", "--json"],
+    ["broker", "chart", "--isin", "DE0005933931", "--timeframe", "1d", "--json"],
+    ["broker", "trade", "sell", "--isin", "DE0005933931", "--shares", "1", "--confirm", "true", "--json"],
+    ["broker", "security-news", "--isin", "-x", "--json"],
 ])
 def test_wrapper_refuses_writes_without_starting_sc(wrapper, args):
     result = wrapper(*args)

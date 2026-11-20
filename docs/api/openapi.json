@@ -5050,6 +5050,18 @@
         "title": "HaircutOut",
         "type": "object"
       },
+      "HaltIn": {
+        "properties": {
+          "reason": {
+            "default": "halted from the app",
+            "maxLength": 200,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "title": "HaltIn",
+        "type": "object"
+      },
       "HeldFundOut": {
         "properties": {
           "best_peer": {
@@ -5493,6 +5505,22 @@
           "n_runs"
         ],
         "title": "IcSummaryOut",
+        "type": "object"
+      },
+      "IdeaIn": {
+        "properties": {
+          "text": {
+            "description": "e.g. 'DAX up today ko'",
+            "maxLength": 120,
+            "minLength": 3,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "IdeaIn",
         "type": "object"
       },
       "ImportResponse": {
@@ -14002,6 +14030,21 @@
           "why"
         ],
         "title": "SuggestedFund",
+        "type": "object"
+      },
+      "TakeIn": {
+        "properties": {
+          "nonce": {
+            "maxLength": 64,
+            "minLength": 4,
+            "title": "Nonce",
+            "type": "string"
+          }
+        },
+        "required": [
+          "nonce"
+        ],
+        "title": "TakeIn",
         "type": "object"
       },
       "TargetAllocationItem": {
@@ -23912,6 +23955,397 @@
         "summary": "Put Terms",
         "tags": [
           "derivatives"
+        ]
+      }
+    },
+    "/api/desk/chain": {
+      "get": {
+        "operationId": "get_chain_api_desk_chain_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Chain Api Desk Chain Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Chain",
+        "tags": [
+          "desk"
+        ]
+      }
+    },
+    "/api/desk/events": {
+      "get": {
+        "operationId": "get_events_api_desk_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "after_seq",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "After Seq",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Get Events Api Desk Events Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Events",
+        "tags": [
+          "desk"
+        ]
+      }
+    },
+    "/api/desk/halt": {
+      "post": {
+        "operationId": "post_halt_api_desk_halt_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HaltIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Halt Api Desk Halt Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Halt",
+        "tags": [
+          "desk"
+        ]
+      }
+    },
+    "/api/desk/ideas": {
+      "post": {
+        "operationId": "post_idea_api_desk_ideas_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdeaIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Idea Api Desk Ideas Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Idea",
+        "tags": [
+          "desk"
+        ]
+      }
+    },
+    "/api/desk/positions": {
+      "get": {
+        "operationId": "get_positions_api_desk_positions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(proposed|expired|rejected|open|closed)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Get Positions Api Desk Positions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Positions",
+        "tags": [
+          "desk"
+        ]
+      }
+    },
+    "/api/desk/positions/{position_id}/close": {
+      "post": {
+        "operationId": "post_close_api_desk_positions__position_id__close_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "position_id",
+            "required": true,
+            "schema": {
+              "title": "Position Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Close Api Desk Positions  Position Id  Close Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Close",
+        "tags": [
+          "desk"
+        ]
+      }
+    },
+    "/api/desk/positions/{position_id}/take": {
+      "post": {
+        "operationId": "post_take_api_desk_positions__position_id__take_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "position_id",
+            "required": true,
+            "schema": {
+              "title": "Position Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TakeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Take Api Desk Positions  Position Id  Take Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Take",
+        "tags": [
+          "desk"
+        ]
+      }
+    },
+    "/api/desk/resume": {
+      "post": {
+        "operationId": "post_resume_api_desk_resume_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Resume Api Desk Resume Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Post Resume",
+        "tags": [
+          "desk"
+        ]
+      }
+    },
+    "/api/desk/scorecard": {
+      "get": {
+        "operationId": "get_scorecard_api_desk_scorecard_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Scorecard Api Desk Scorecard Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Scorecard",
+        "tags": [
+          "desk"
+        ]
+      }
+    },
+    "/api/desk/status": {
+      "get": {
+        "operationId": "get_status_api_desk_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Status Api Desk Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Status",
+        "tags": [
+          "desk"
         ]
       }
     },

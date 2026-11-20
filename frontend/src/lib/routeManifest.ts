@@ -66,6 +66,7 @@ export const ROUTE_ENTRIES: RouteEntry[] = [
     mobile: { slot: 3, label: "Holdings" },
     keywords: ["holdings", "positions", "performance", "risk", "accounts", "activity"],
   },
+  { id: "desk", to: "/desk", label: "Derivatives desk", icon: Gauge, group: "money", sidebar: false, keywords: ["knock-out", "warrant", "turbo", "paper", "idea", "derivatives"] },
   { id: "tax", to: "/tax", label: "Tax", icon: LandPlot, group: "money", keywords: ["tax cockpit", "kest", "vorabpauschale"] },
   {
     id: "budget", to: "/money/overview", label: "Budget", icon: CreditCard, group: "money",

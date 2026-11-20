@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
+from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -47,11 +48,38 @@ def telegram_mode(db: Session) -> str:
     return mode if mode in (MODE_POLLING, MODE_WEBHOOK) else MODE_POLLING
 
 
+# -- Handler registry (filled by higher layers; foundation never imports them) --
+
+#: ``fn(db, account, chat_id, text) -> None``, called for a message starting with the prefix.
+CommandHandler = Callable[[Session, Any, str, str], None]
+#: ``fn(db, account, chat_id, data) -> str`` (the toast text), called for a button tap.
+CallbackHandler = Callable[[Session, Any, str, str], str]
+
+_command_handlers: dict[str, CommandHandler] = {}
+_callback_handlers: dict[str, CallbackHandler] = {}
+
+
+def register_command_handler(prefix: str, fn: CommandHandler) -> None:
+    _command_handlers[prefix] = fn
+
+
+def register_callback_handler(prefix: str, fn: CallbackHandler) -> None:
+    _callback_handlers[prefix] = fn
+
+
+def _matching(registry: dict[str, Any], text: str) -> Any | None:
+    word = text.split(maxsplit=1)[0] if text else ""
+    return next((fn for prefix, fn in registry.items() if word == prefix or text.startswith(prefix + ":")), None)
+
+
 # -- Update handling (shared by webhook and polling) -------------------------
 
 
 def handle_update(db: Session, update: dict[str, Any]) -> bool:
-    """Act on one Telegram update. Returns True when it carried a text message."""
+    """Act on one Telegram update. Returns True when it carried a text message or a button tap."""
+    if isinstance(update.get("callback_query"), dict):
+        handle_callback_query(db, update["callback_query"])
+        return True
     message = update.get("message") or {}
     chat = message.get("chat") or {}
     chat_id = str(chat.get("id", ""))
@@ -60,6 +88,29 @@ def handle_update(db: Session, update: dict[str, Any]) -> bool:
         return False
     handle_message(db, chat_id, text)
     return True
+
+
+def handle_callback_query(db: Session, query: dict[str, Any]) -> None:
+    """A tap on an inline button: only a chat linked to an admin may act, anything else is ignored."""
+    from app.foundation.models.entities import User
+
+    callback_id = str(query.get("id") or "")
+    data = str(query.get("data") or "")
+    chat_id = str(((query.get("message") or {}).get("chat") or {}).get("id", ""))
+    if not callback_id or not chat_id:
+        return
+    account = get_account_by_chat_id(db, chat_id)
+    user = db.get(User, account.user_id) if account is not None else None
+    handler = _matching(_callback_handlers, data)
+    if account is None or user is None or user.role != "admin" or handler is None:
+        telegram_bot.answer_callback_query(db, callback_id, "Not allowed.")
+        return
+    try:
+        toast = handler(db, account, chat_id, data)
+    except Exception as exc:
+        logger.error("Telegram callback failed: %s", type(exc).__name__, exc_info=True)
+        toast = "Something went wrong."
+    telegram_bot.answer_callback_query(db, callback_id, toast)
 
 
 def handle_message(db: Session, chat_id: str, text: str) -> None:
@@ -80,6 +131,11 @@ def handle_message(db: Session, chat_id: str, text: str) -> None:
     account = get_account_by_chat_id(db, chat_id)
     if account is None:
         telegram_bot.send_telegram_message(db, chat_id, "This chat isn't linked yet. Generate a pairing code in Quantfolio Settings and send /start CODE.")
+        return
+
+    command = _matching(_command_handlers, text)
+    if command is not None:
+        command(db, account, chat_id, text)
         return
 
     if text == "/balance":

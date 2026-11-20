@@ -45,7 +45,23 @@ ALLOWED_COMMANDS: dict[tuple[str, ...], frozenset[str]] = {
     # Interest credited to the overnight account: capital income for the tax
     # cockpit. The type filter keeps it to INTEREST rows.
     ("overnight", "transactions"): frozenset({"--page-size", "--cursor", "--type-filter", "--from-time"}),
+    # Market reads for the paper-only derivatives desk (ADR 0027). Reads only:
+    # no order command exists anywhere in this list.
+    ("broker", "quote"): frozenset({"--isin"}),
+    ("broker", "derivatives", "search"): frozenset(
+        {"--underlying", "--type", "--strategy", "--limit", "--offset", "--leverage-max",
+         "--expiry-from", "--expiry-to", "--sort-field", "--sort-order"}
+    ),
+    ("broker", "chart"): frozenset({"--isin", "--timeframe"}),
+    ("broker", "security-news"): frozenset({"--isin", "--locale"}),
 }
+
+# The sc fields a derivatives search may be sorted by: exactly the values
+# `sc broker derivatives search --help` lists in sc 1.1.0 (checked on prod 2026-11-20).
+DERIVATIVE_SORT_FIELDS = (
+    "strike", "leverage", "expiry-date", "knockout-barrier", "distance-to-knockout", "premium-absolute",
+    "premium-relative", "distance-to-strike", "omega", "delta", "implied-volatility", "factor",
+)
 
 # Words that only ever appear in mutating sc commands. A command path holding
 # one is refused even if someone widens ALLOWED_COMMANDS by mistake.
@@ -64,6 +80,19 @@ _VALUE_PATTERNS: dict[str, re.Pattern[str]] = {
     "--type-filter": re.compile(r"^[A-Z_]{1,40}$"),
     "--from-time": re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$"),
     "--to-time": re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$"),
+    "--isin": re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$"),
+    "--underlying": re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$"),
+    "--type": re.compile(r"^(?:knockout|warrant)$"),
+    "--strategy": re.compile(r"^(?:long|short|put|call)$"),
+    "--limit": re.compile(r"^(?:[1-9]|[1-9][0-9]|100)$"),
+    "--offset": re.compile(r"^[0-9]{1,5}$"),
+    "--leverage-max": re.compile(r"^[0-9]{1,3}(?:\.[0-9]{1,4})?$"),
+    "--expiry-from": re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
+    "--expiry-to": re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"),
+    "--sort-field": re.compile("^(?:" + "|".join(DERIVATIVE_SORT_FIELDS) + ")$"),
+    "--sort-order": re.compile(r"^(?:asc|desc)$"),
+    "--timeframe": re.compile(r"^(?:7d|1m|3m|6m|ytd|1y|max)$"),
+    "--locale": re.compile(r"^[a-z]{2}_[A-Z]{2}$"),
 }
 
 MAX_STDOUT_BYTES = 20 * 1024 * 1024
@@ -286,6 +315,11 @@ def unwrap_result(args: Sequence[str], data: dict[str, Any]) -> dict[str, Any]:
         return data
     label = " ".join(a for a in args if not a.startswith("--"))
     result = data.get("result")
+    if not isinstance(result, dict) and tuple(a for a in args if not a.startswith("--"))[:2] in {
+        ("broker", "chart"), ("broker", "security-news"),
+    }:
+        # Observed unwrapped (``data.data_points``); parsed defensively by scalable/market.py.
+        return data
     if not isinstance(result, dict):
         raise ScalableProtocolError(
             "unexpected_shape", f"sc {label} returned no result object; the sc output format may have changed",

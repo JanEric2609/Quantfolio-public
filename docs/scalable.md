@@ -20,7 +20,9 @@ Four independent layers, so no single mistake opens a write path:
 3. **Allow-list in the app.** `backend/app/foundation/scalable/cli.py` runs only
    whole argv shapes on `ALLOWED_COMMANDS` (whoami, capabilities, broker
    context show / overview / cash-breakdown / holdings / savings-plans /
-   transactions / transaction details, overnight, overnight transactions).
+   transactions / transaction details, overnight, overnight transactions, and for
+   the paper-only derivatives desk (ADR 0027) `broker quote`, `broker derivatives
+   search`, `broker chart` and `broker security-news`).
    Flag values are checked with strict patterns and may not start with `-`.
 4. **Allow-list in a root-owned wrapper.** sudoers lets Quantfolio run only
    `/usr/local/libexec/quantfolio-sc-ro`, never `sc`. The wrapper checks the
@@ -40,6 +42,18 @@ know what happened.
 
 `tests/test_scalable.py` checks layers 3 and 4 against each other and greps
 the service for any command that is not on the list.
+
+### Desk reads (ADR 0027)
+
+| Command | Flags | Used for |
+|---|---|---|
+| `broker quote` | `--isin` | bid/ask of a product, ETF or stock (an index gives null) |
+| `broker derivatives search` | `--underlying --type knockout\|warrant --strategy long\|short\|put\|call --limit --offset --leverage-max --expiry-from --expiry-to --sort-field --sort-order` | candidate knock-outs and warrants |
+| `broker chart` | `--isin --timeframe 7d\|1m\|3m\|6m\|ytd\|1y\|max` | 30-minute points for the index rule (`1d` fails at sc) |
+| `broker security-news` | `--isin --locale` | headlines for the news guard |
+
+The desk never places an order. After a deploy, run `infra/scalable/install.sh` as root so the wrapper knows these
+reads; until then the desk shows `wrapper_outdated`.
 
 ## One-time server setup
 

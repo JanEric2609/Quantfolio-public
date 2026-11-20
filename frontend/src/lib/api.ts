@@ -4474,3 +4474,61 @@ export interface DerivativesResponse {
   estimate: boolean;
   not_financial_advice: boolean;
 }
+
+// --- Guarded derivatives desk (ADR 0027): paper only, admin only ----------------
+
+export interface DeskPositionDto {
+  id: string; short_id: string; mode: string; cell: string; signal: string; product_type: string;
+  isin: string; issuer: string | null; underlying: string; direction: string; liquid: boolean;
+  units: number | null; entry_price: string | null; stop_price: string | null; entry_at: string | null;
+  max_exit_at: string | null; exit_price: string | null; exit_at: string | null; exit_reason: string | null;
+  net_eur: string | null; status: string; would_take_live: boolean; last_bid: string | null;
+  last_quote_at: string | null; created_at: string | null;
+}
+
+export interface DeskStatusDto {
+  mode: string; banner: string; limits: Record<string, string | number>;
+  halt: { halted: boolean; reason?: string; at?: string; by?: string };
+  health: Record<string, unknown>;
+  usage_today: { entries: number; max_entries: number; loss: string; daily_loss: string; open_live: number;
+    max_open_live: number; pot_used: string; pot: string };
+  chain: { ok: boolean; first_bad_seq: number | null };
+  prereg_hash: string; registered_at: string | null; macro_calendar_years: number[];
+}
+
+export interface DeskEventDto {
+  seq: number; created_at: string | null; kind: string; mode: string; position_id: string | null;
+  payload: Record<string, unknown>; row_hash: string;
+}
+
+export interface DeskCellScore {
+  n: number; n_min: number; mean_net: number | null; hit_rate: number | null; median_cost_share: number | null;
+  p: number; p_holm: number; placebo_percentile: number | null; placebo_p95: number | null; passes: boolean;
+}
+
+export interface DeskScorecardDto {
+  prereg_hash: string; registered_at: string | null; n_min: number; cells: Record<string, DeskCellScore>;
+  external_closed: number;
+}
+
+export interface DeskProposalDto {
+  product_type: string; reason: string | null; nonce: string | null; position: DeskPositionDto | null;
+  news: string[]; message: string;
+}
+
+export const getDeskStatus = () => api<DeskStatusDto>("/api/desk/status");
+export const getDeskPositions = () => api<DeskPositionDto[]>("/api/desk/positions");
+export const getDeskEvents = (limit = 100) => api<DeskEventDto[]>(`/api/desk/events?limit=${limit}`);
+export const getDeskScorecard = () => api<DeskScorecardDto>("/api/desk/scorecard");
+export const postDeskIdea = (text: string) =>
+  api<{ proposals: DeskProposalDto[]; tap_window_s: number }>("/api/desk/ideas", {
+    method: "POST", body: JSON.stringify({ text }),
+  });
+export const postDeskTake = (positionId: string, nonce: string) =>
+  api<{ status: string; message: string; nonce: string | null; position: DeskPositionDto | null }>(
+    `/api/desk/positions/${positionId}/take`, { method: "POST", body: JSON.stringify({ nonce }) });
+export const postDeskClose = (positionId: string) =>
+  api<{ closed: boolean }>(`/api/desk/positions/${positionId}/close`, { method: "POST" });
+export const postDeskHalt = (reason: string) =>
+  api<DeskStatusDto>("/api/desk/halt", { method: "POST", body: JSON.stringify({ reason }) });
+export const postDeskResume = () => api<DeskStatusDto>("/api/desk/resume", { method: "POST" });

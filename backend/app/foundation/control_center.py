@@ -135,9 +135,62 @@ def attention_items(db: Session, *, today: date | None = None) -> list[dict[str,
     _error_items(db, now, items)
     _telegram_items(db, items)
     _derivative_items(db, clock, items)
+    _desk_items(db, now, items)
 
     items.sort(key=lambda item: _SEVERITY_ORDER[item.severity])
     return [asdict(item) for item in items]
+
+
+def _desk_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
+    """The paper derivatives desk (ADR 0027): halt, ledger chain, wrapper, quotes, external trades, calendar."""
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
+    from app.foundation.desk_chain import verify_chain
+    from app.foundation.models.entities import DeskEvent, DeskPosition
+    from app.foundation.settings import get_setting_row
+
+    try:
+        halt = get_setting_row(db, "desk_halt_json") or {}
+        health = get_setting_row(db, "desk_health_json") or {}
+        href = "/desk"
+        if isinstance(halt, dict) and halt.get("halted"):
+            items.append(AttentionItem("desk-halted", "warning", "Desk halted",
+                                       f"Reason: {halt.get('reason') or 'none given'}. Resume it on the Desk page.",
+                                       href, "Open the desk"))
+        if db.query(DeskEvent.id).first() is not None:
+            ok, bad = verify_chain(db)
+            if not ok:
+                items.append(AttentionItem("desk-chain-broken", "error", "Desk ledger chain is broken",
+                                           f"The hash chain fails at event {bad}: a row was changed or removed.",
+                                           href, "Open the desk"))
+        if isinstance(health, dict) and health.get("wrapper_outdated"):
+            items.append(AttentionItem("desk-wrapper", "warning", "Scalable wrapper lacks the desk reads",
+                                       "Run infra/scalable/install.sh as root so the wrapper allows quote, "
+                                       "derivatives search, chart and security-news.", href, "Open the desk"))
+        local = now.astimezone(ZoneInfo("Europe/Berlin"))
+        if local.weekday() < 5 and 8 <= local.hour < 22:
+            cutoff = now - timedelta(minutes=10)
+            stale = [p for p in db.query(DeskPosition).filter(DeskPosition.status == "open").all()
+                     if p.last_quote_at is not None and (p.last_quote_at if p.last_quote_at.tzinfo
+                                                         else p.last_quote_at.replace(tzinfo=UTC)) < cutoff]
+            if stale:
+                items.append(AttentionItem("desk-quote-lost", "warning", "Open paper position without a fresh quote",
+                                           f"{len(stale)} position(s) have had no quote for 10 minutes.", href,
+                                           "Open the desk"))
+        recent = db.query(DeskEvent).filter(DeskEvent.kind == "external_trade",
+                                            DeskEvent.created_at >= now - timedelta(days=7)).count()
+        if recent:
+            items.append(AttentionItem("desk-external", "info", "Derivative trades made outside the desk",
+                                       f"{recent} real trade(s) in the last 7 days were logged and are scored "
+                                       "separately.", href, "Open the desk"))
+        years = health.get("macro_years") if isinstance(health, dict) else None
+        if isinstance(years, list) and now.month == 12 and (now.year + 1) not in years:
+            items.append(AttentionItem("desk-macro-calendar", "warning", "Desk macro calendar is missing next year",
+                                       f"Add {now.year + 1} FOMC, ECB, CPI and payrolls dates to "
+                                       "MACRO_EVENTS_BY_YEAR in decision/desk/calendar.py.", href, "Open the desk"))
+    except Exception:  # noqa: BLE001 - the list must render without this source
+        logger.debug("control_center: desk items failed", exc_info=True)
 
 
 def _derivative_items(db: Session, clock: date, items: list[AttentionItem]) -> None:

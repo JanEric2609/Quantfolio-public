@@ -48,7 +48,7 @@ def _engine_args(database_url: str) -> dict:
             # worker's 20 job threads can hold (a tracked job keeps two
             # connections on PostgreSQL); tunable per process via env.
             "pool_size": int(os.getenv("DB_POOL_SIZE", "10")),
-            "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "30")),
+            "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "32")),
             "connect_args": {"client_encoding": "utf8"},
         }
     return {"pool_pre_ping": True}

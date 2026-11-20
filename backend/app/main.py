@@ -190,6 +190,9 @@ async def lifespan(_app: FastAPI):
     if settings.app_env == "local" or settings.database_url.startswith("sqlite"):
         create_all()
     _fit_threads_to_db_pool(settings.database_url)
+    from app.decision.desk import register_desk_telegram
+
+    register_desk_telegram()  # webhook mode: the same /idea, /desk, /stop, /close and take button as polling
 
     try:
         _announce_first_run_setup()
