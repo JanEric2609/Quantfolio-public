@@ -1,8 +1,8 @@
 """The frozen index intraday-momentum rule (Gao, Han, Li, Zhou 2018), no tuned parameter (ADR 0027).
 
 ``r1`` is the return from the previous session's close to 30 minutes after the
-open. Its sign is the direction. Enter 30 minutes before the close, exit one
-minute before it. Skip a day with ``r1 == 0``, a half day, a macro event on the
+open. Its sign is the direction. Enter 30 minutes before the close, exit three
+minutes before it. Skip a day with ``r1 == 0``, a half day, a macro event on the
 day, or (US) a Friday or pre-holiday, when the 21:30 Berlin cut-off falls
 before the planned exit.
 
@@ -31,7 +31,7 @@ from ..underlyings import ALIASES, Underlying
 INDEX_KEYS = ("DAX", "ES50", "SPX", "NDX")
 PRODUCT_TYPES = ("knockout", "warrant")
 ENTRY_BEFORE_CLOSE = timedelta(minutes=30)
-EXIT_BEFORE_CLOSE = timedelta(minutes=1)
+EXIT_BEFORE_CLOSE = timedelta(minutes=3)  # issuers stop quoting at 22:00 Berlin: two monitor retries before it
 FIRE_WINDOW = timedelta(minutes=5)  # the monitor ticks every minute; a missed tick may still fire within this
 
 

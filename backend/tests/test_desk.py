@@ -41,7 +41,7 @@ def test_limits_are_pinned():
         "pot": "250", "daily_loss": "15", "max_loss_per_trade": "5", "fee_per_order": "0.99",
         "max_open_live": 1, "max_entries_per_day": 2, "max_holding_trading_days": 2,
         "cutoff_hour": 21, "cutoff_minute": 30, "window_start_hour": 8, "window_start_minute": 5,
-        "window_end_hour": 21, "window_end_minute": 30, "warrant_min_days_to_expiry": 21,
+        "window_end_hour": 21, "window_end_minute": 45, "warrant_min_days_to_expiry": 21,
         "knockout_max_leverage": "5", "knockout_min_barrier_sigmas": "3", "warrant_min_abs_delta": "0.3",
         "warrant_max_abs_delta": "0.7", "spread_cap_liquid": "0.01", "spread_cap_other": "0.025",
         "max_quote_age_s": 60, "tap_window_s": 180, "reask_move": "0.01", "quote_lost_s": 600,
@@ -139,7 +139,9 @@ def test_guard_live_caps_do_not_stop_paper():
 def test_guard_halt_window_and_cutoff():
     assert "halted" in check_entry(DeskState(halted=True), _proposal(), NOW).reasons
     early = datetime(2026, 11, 18, 8, 4, tzinfo=cal.BERLIN)
-    late = datetime(2026, 11, 18, 21, 31, tzinfo=cal.BERLIN)
+    late = datetime(2026, 11, 18, 21, 46, tzinfo=cal.BERLIN)
+    us_entry = datetime(2026, 11, 18, 21, 30, 5, tzinfo=cal.BERLIN)  # the US rule's entry, Mon-Thu: inside
+    assert "outside_window_rule" not in check_entry(DeskState(), _proposal(signal="index_momentum"), us_entry).reasons
     assert "outside_window" in check_entry(DeskState(), _proposal(), early).reasons
     assert "outside_window" in check_entry(DeskState(), _proposal(), late).reasons
     assert "outside_window_rule" in check_entry(DeskState(), _proposal(signal="index_momentum"), late).reasons
@@ -479,7 +481,7 @@ def test_index_signal_fires_once_opens_both_products_and_skips_the_rest():
     rows = db.query(DeskPosition).filter(DeskPosition.signal == "index_momentum").all()
     assert {r.product_type for r in rows if r.status == "open"} == {"knockout", "warrant"}
     assert all(r.direction == "long" for r in rows)
-    assert all(r.max_exit_at.astimezone(cal.BERLIN).minute == 29 for r in rows if r.status == "open")
+    assert all(r.max_exit_at.astimezone(cal.BERLIN).minute == 27 for r in rows if r.status == "open")
     count = db.query(DeskPosition).count()
     assert index_momentum.fire_due_signals(db, user.id, sc.cli(), enter + timedelta(seconds=30)) == []
     assert db.query(DeskPosition).count() == count  # once per index and day
@@ -550,7 +552,7 @@ def test_scorecard_counts_only_positions_after_registration():
 
 
 def test_prereg_hash_is_pinned():
-    assert prereg.PREREG_HASH == "8d68e3918c799c38a422968b5506f4674f93e885c36de31f49feba14697e9f9a"
+    assert prereg.PREREG_HASH == "5729f1f3b36d93ed4cd3e8377093049407b5a63cc4bffe99f1fa4dcbfddcb3f9"
     assert prereg.CELLS == ("owner_call:knockout", "owner_call:warrant", "index_momentum:knockout",
                             "index_momentum:warrant")
 

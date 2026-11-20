@@ -37,7 +37,7 @@ SPEC = {
         "owner_call": "the owner's /idea call, taken by tap within 180 s, filled at a fresh quote",
         "index_momentum": {
             "rule": "Gao, Han, Li, Zhou (2018): sign of the return from the previous close to open+30min; "
-                    "enter close-30min, exit close-1min",
+                    "enter close-30min, exit close-3min",
             "indices": ["DAX", "ES50", "SPX", "NDX"],
             "skips": ["r1 == 0", "half day", "macro event on the day", "Friday or pre-holiday for the US rule"],
             "version": 1,

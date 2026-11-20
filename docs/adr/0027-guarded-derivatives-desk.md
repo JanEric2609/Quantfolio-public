@@ -39,11 +39,14 @@ the whole process with real quotes and fake fills until a pre-registered rule sh
 4. **Limits (code constants in `decision/desk/limits.py`, pinned by a test; changing one is a commit plus an
    amendment here):** pot 250 EUR; daily loss stop 15 EUR; at most 5 EUR lost per trade at its stop, both
    fees (0.99 EUR each) included; 1 open position; 2 entries a day; at most 2 trading days held, never over a
-   weekend or holiday, all closed by 21:30 Europe/Berlin on the last trading day of the week; no warrant under
+   weekend or holiday, all closed by 21:30 Europe/Berlin on the last trading day of the week; new entries
+   08:05-21:45 Berlin (amended 2026-11-20 from 21:30, before the first registration: the US rule enters at
+   21:30 and S&P 500 knock-outs are quoted until 22:00); no warrant under
    21 days to expiry; knock-out leverage at most 5 and barrier at least 3 daily sigma away; warrant |delta|
    0.3-0.7; spread cap 1.0 % of mid on the liquid list, 2.5 % otherwise; quote age at most 60 s.
 5. **Signals:** (a) the owner's own calls (`/idea`); (b) a frozen index intraday-momentum rule (Gao et al.)
-   on DAX, Euro Stoxx 50, S&P 500, Nasdaq-100. No parameter is tuned.
+   on DAX, Euro Stoxx 50, S&P 500, Nasdaq-100: enter 30 minutes before the close, exit 3 minutes before
+   it (issuers stop quoting at 22:00 Berlin; the 1-minute monitor gets two retries). No parameter is tuned.
 6. **News:** guard and log only. News never opens or closes a position.
 7. **Everything is documented:** every state change is an event in an append-only, hash-chained ledger
    (`desk_events`); a PostgreSQL trigger refuses UPDATE and DELETE; a broken chain is a Control Center error.

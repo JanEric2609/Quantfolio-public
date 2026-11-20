@@ -26,7 +26,7 @@ class Limits:
     window_start_hour: int = 8
     window_start_minute: int = 5
     window_end_hour: int = 21
-    window_end_minute: int = 30
+    window_end_minute: int = 45  # US last half hour starts 21:30 Berlin; issuers quote until 22:00
     # Product filters.
     warrant_min_days_to_expiry: int = 21
     knockout_max_leverage: Decimal = Decimal("5")
