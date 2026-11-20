@@ -251,7 +251,11 @@ def test_failed_llm_call_reports_only_the_exception_type():
     def _down(_db, _messages):
         raise ConnectionError("exception text that must stay in the server log")
 
-    decisions, errors = decide_trades(db, proposal, gate, llm_call=_down)
+    attempts: list[dict] = []
+    decisions, errors = decide_trades(db, proposal, gate, llm_call=_down, attempts=attempts)
 
     assert decisions == []
     assert errors == ["llm call failed (ConnectionError); details are in the server log"]
+    # The attempt records are served by GET /api/advisor/diagnostics.
+    assert [a["errors"] for a in attempts] == [["ConnectionError"]]
+    assert "must stay in the server log" not in str(attempts)

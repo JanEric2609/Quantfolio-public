@@ -801,7 +801,7 @@ def decide_trades(
             raw = call(db, messages)
         except Exception as exc:
             logger.exception("advisor llm_decision: LLM call failed")
-            _record_attempt(attempts, attempt, telemetry, parsed_as="call_failed", errors=[str(exc)])
+            _record_attempt(attempts, attempt, telemetry, parsed_as="call_failed", errors=[type(exc).__name__])
             if fallback is not None:
                 return fallback
             return [], [f"llm call failed ({type(exc).__name__}); details are in the server log"]
