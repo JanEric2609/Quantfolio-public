@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -29,9 +29,24 @@ class Candidate:
     days_to_expiry: int | None = None
     implied_vol: Decimal | None = None
     realised_vol: Decimal | None = None
+    # What the owner would type and see in the broker app.
+    name: str = ""  # the issuer's product name from the quote, e.g. "S&P 500 Long 5.812,34 HSBC"
+    barrier_or_strike: Decimal | None = None  # knock-out barrier, warrant strike
+    expiry: date | None = None  # None: open end
+
+    @property
+    def wkn(self) -> str | None:
+        return wkn_of(self.isin)
 
     def as_json(self) -> dict[str, Any]:
-        return {k: (str(v) if isinstance(v, Decimal) else v) for k, v in asdict(self).items()}
+        out = {k: (str(v) if isinstance(v, Decimal | date) else v) for k, v in asdict(self).items()}
+        out["wkn"] = self.wkn
+        return out
+
+
+def wkn_of(isin: str) -> str | None:
+    """The WKN inside a German ISIN (DE + 000 + WKN + check digit); None for any other country."""
+    return isin[5:11] if len(isin) == 12 and isin.startswith("DE000") else None
 
 
 @dataclass(frozen=True)
@@ -103,7 +118,9 @@ def select_product(
                 spread_pct=spread, quote_age_s=age, barrier_distance=row.distance_to_knockout, delta=row.delta,
                 days_to_expiry=(row.expiry - today).days if row.expiry else None,
                 implied_vol=row.implied_volatility,
-                realised_vol=(sigma * Decimal(252).sqrt()) if (sigma and product_type == "warrant") else None))
+                realised_vol=(sigma * Decimal(252).sqrt()) if (sigma and product_type == "warrant") else None,
+                name=quote.name, barrier_or_strike=row.barrier if product_type == "knockout" else row.strike,
+                expiry=row.expiry))
     out.sort(key=lambda c: c.spread_pct)
     return Selection(out, dropped, len(listings))
 

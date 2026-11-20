@@ -13,6 +13,7 @@ from app.decision.desk import (
     close_position_api,
     desk_status,
     list_events,
+    list_news,
     list_positions,
     scorecard,
     set_halt,
@@ -62,6 +63,15 @@ def get_events(
     user: User = Depends(require_admin), db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
     return list_events(db, after_seq, limit)
+
+
+@router.get("/news")
+def get_news(
+    limit: int = Query(default=50, ge=1, le=200), sent_only: bool = False,
+    user: User = Depends(require_admin), db: Session = Depends(get_db),
+) -> list[dict[str, Any]]:
+    """The news wire (Alpaca stream, Fed, ECB, SEC 8-K) with the local model's rating. Alert-only."""
+    return list_news(db, limit, sent_only)
 
 
 @router.get("/scorecard")

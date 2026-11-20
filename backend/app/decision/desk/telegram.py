@@ -17,7 +17,7 @@ from app.foundation.scalable import market
 from app.foundation.scalable import service as scalable_service
 from app.foundation.scalable.cli import ScalableError
 
-from . import service
+from . import cfd, service
 from .guard import DeskState
 from .limits import LIMITS
 from .signals import owner_calls
@@ -101,7 +101,8 @@ def handle_desk(db: Session, account: Any, chat_id: str, text: str) -> None:
         f"Open paper positions: {len(open_rows)}",
     ]
     for p in open_rows[:10]:
-        lines.append(f"  {p.id[:8]} {p.underlying_label} {p.direction} {p.product_type} {p.units}x stop {p.stop_price}")
+        size = f"{p.units}x {p.wkn or p.isin}" if p.product_type != "cfd" else f"{p.quantity:.4f} (manual CFD)"
+        lines.append(f"  {p.id[:8]} {p.underlying_label} {p.direction} {p.product_type} {size} stop {p.stop_price}")
     _say(db, chat_id, "\n".join(lines))
 
 
@@ -124,7 +125,7 @@ def handle_close(db: Session, account: Any, chat_id: str, text: str) -> None:
         return _say(db, chat_id, "No single open position with that id.")
     pos = matches[0]
     try:
-        ok = service.owner_close(db, pos, scalable_service.make_cli(db), datetime.now(UTC),
+        ok = cfd.close_any(db, pos, scalable_service.make_cli(db), datetime.now(UTC),
                                  _underlyings(db).get(pos.underlying_isin))
     except ScalableError as exc:
         db.rollback()

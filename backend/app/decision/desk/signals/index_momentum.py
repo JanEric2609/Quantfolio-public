@@ -6,6 +6,9 @@ minutes before it. Skip a day with ``r1 == 0``, a half day, a macro event on the
 day, or (US) a Friday or pre-holiday, when the 21:30 Berlin cut-off falls
 before the planned exit.
 
+Each fired signal opens a paper knock-out, a paper warrant and a paper CFD
+(``cfd.py``; the owner trades that one by hand on Trading 212).
+
 Which indices fire: DAX and Euro Stoxx 50 on Xetra hours (ETF proxies from sc's
 30-minute chart), S&P 500 and Nasdaq-100 on NYSE hours (SPY and QQQ 30-minute
 bars from Alpaca's free IEX feed).
@@ -24,7 +27,7 @@ from app.foundation.scalable import market
 from app.foundation.scalable.cli import ScalableCli
 
 from .. import calendar as cal
-from .. import news, service
+from .. import cfd, news, service
 from ..ledger import append_event
 from ..underlyings import ALIASES, Underlying
 
@@ -145,5 +148,7 @@ def fire_due_signals(db: Session, user_id: str, cli: ScalableCli, now: datetime)
                 product_type=product_type, cli=cli, now=now, max_exit_at=plan.exit_at)
             if result.position is not None and result.position.status == "proposed":
                 service.open_directly(db, result.position, cli, now, plan.underlying)
+        # The same signal as a manual Trading 212 CFD (cell index_momentum:cfd, paper-scored).
+        cfd.open_signal(db, user_id, plan.key, plan.underlying, direction, plan.exit_at, cli, now)
         fired.append(key)
     return fired

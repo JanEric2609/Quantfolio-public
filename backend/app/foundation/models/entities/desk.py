@@ -7,11 +7,11 @@ stored as ``Text`` with ``ensure_ascii=True`` (the prod database is SQL_ASCII).
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    Boolean, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, text,
+    Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -88,6 +88,15 @@ class DeskPosition(Base):
     # The underlying's own return over the holding, signed in the taken direction (a favourable
     # move is positive); the placebo flips it.
     underlying_move: Mapped[Decimal | None] = mapped_column(Numeric(14, 8), nullable=True)
+    # What exactly is bought: the issuer's product name from the quote, the WKN typed into the
+    # broker app (German ISINs), the barrier (knock-out) or strike (warrant) and the expiry
+    # (None = open end). A CFD row (Trading 212, manual) has a fractional ``quantity`` in
+    # reference-price units instead of ``units``; quantity x entry_price is its EUR exposure.
+    product_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    wkn: Mapped[str | None] = mapped_column(String(6), nullable=True)
+    barrier_or_strike: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    expiry: Mapped[date | None] = mapped_column(Date, nullable=True)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
     # proposed | expired | rejected | open | closed
     status: Mapped[str] = mapped_column(String(10), default="proposed", index=True)
     would_take_live: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -102,3 +111,30 @@ class DeskRegistration(Base):
     prereg_hash: Mapped[str] = mapped_column(String(64), unique=True)
     spec: Mapped[str] = mapped_column(Text)
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class NewsWireItem(Base):
+    """One headline or release from the news wire (ADR 0027 amendment 2026-11-20): logged, rated, maybe sent.
+
+    Alert-only: nothing reads this table to open or close a position. ``id`` is
+    ``<source>:<source id>`` so a re-delivered item is stored once.
+    """
+
+    __tablename__ = "news_wire_items"
+
+    id: Mapped[str] = mapped_column(String(96), primary_key=True)
+    source: Mapped[str] = mapped_column(String(16), index=True)  # alpaca | fed | ecb | sec_8k
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+    headline: Mapped[str] = mapped_column(String(400))
+    symbols: Mapped[str] = mapped_column(String(200), default="")  # comma-separated
+    url: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    # Why it matters to the owner: "holding:NVDA", "desk:SPX", "central_bank", "" (not watched).
+    relevance: Mapped[str] = mapped_column(String(64), default="")
+    # The local model's reading: 0 (noise) to 3 (moves the price today); None = not rated.
+    materiality: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    direction: Mapped[str | None] = mapped_column(String(8), nullable=True)  # up | down | unclear
+    scope: Mapped[str | None] = mapped_column(String(8), nullable=True)  # company | sector | market
+    rated_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # sent | rate_capped | quiet | "" (not sent)
+    alert: Mapped[str] = mapped_column(String(12), default="")

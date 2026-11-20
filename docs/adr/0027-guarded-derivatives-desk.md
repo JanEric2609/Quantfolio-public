@@ -87,3 +87,46 @@ the whole process with real quotes and fake fills until a pre-registered rule sh
   foundation never imports the desk.
 - The wrapper must be reinstalled (`infra/scalable/install.sh`) before the new reads work; until then the
   desk shows a "wrapper needs install.sh again" state.
+
+## Amendment 2026-11-20: instrument identity, the manual CFD cell, the news wire, the replay
+
+Accepted by the owner on 2026-11-20 ("go ahead with these things as you recommended"). Before the first
+deploy, so migration 0157 itself gains the new columns and table; nothing registered on prod changes.
+
+1. **Exactly which instrument.** Every position stores the issuer's product name (from the quote), the WKN
+   (German ISINs), the barrier (knock-out) or strike (warrant) and the expiry. The `/idea` proposal, the
+   index rule's paper-buy message, the exit message and the Desk page name the product, its terms and the
+   order line as it would be typed into the Scalable app ("Buy 37 x HT4LYZ at limit 1.6200 EUR (gettex)").
+2. **The index rule as a manual Trading 212 CFD** (`cfd.py`), cell `index_momentum:cfd`. Trading 212's API
+   has no CFD endpoint, so the desk sends a Telegram line at entry ("CFD signal: BUY US 500 now") and at exit
+   ("CLOSE your US 500 position now") and scores the trade on paper at the underlying's reference price.
+   The cost model is frozen in the spec: an assumed round-trip spread (DAX, SPX, NDX 2 bp; ES50 4 bp) and
+   Trading 212's 0.5 % currency fee on the result of a USD index; no order fee; no overnight financing (closed
+   three minutes before the close). Size: 5 EUR loss on a one-sigma adverse move, at most 1,000 EUR exposure;
+   simulated stop one daily sigma away. `would_take_live` is always False: no automated CFD path can exist.
+   The pre-registration becomes version 2 with five cells, Holm across five.
+3. **The news wire** (`foundation/news_wire.py` fetches, `decision/desk/newswire.py` decides). Sources, all
+   free and checked live: Alpaca's news stream subscribed to every symbol (the free key is accepted; items
+   arrive within seconds, European companies included), Fed and ECB press feeds and SEC's latest 8-K
+   filings, polled every minute (job `desk_news_wire`). Every item is stored in `news_wire_items` for 30
+   days; the local Qwen model rates each headline (materiality 0-3, direction, scope; about 0.7 s on the
+   GPU), with the headline fenced as untrusted text. Telegram gets a line for a holding or an open desk
+   position (materiality 2+), the Fed or ECB (2+), any 8-K of a holding, and a market-wide 3; quiet hours
+   22:00-07:00 Berlin pass only a 3; at most 12 messages an hour. **Alert-only**: nothing reads the table
+   to open, close or block a position.
+4. **The replay** (`lab/desk_replay.py`, `scripts/desk_replay.py`): the frozen rule on SPY and QQQ 30-minute
+   SIP bars from 2016-02 to 2026-11 (free history on the stored key), desk days only (no Fridays,
+   pre-holidays or half days). Research, outside the pass test, not a trial:
+
+   | | SPY | QQQ |
+   |---|---|---|
+   | Trades | 2,122 | 2,123 |
+   | Gross last-half-hour return per trade | -0.74 bp (t -1.16), hit 48 % | -0.20 bp (t -0.27), hit 50 % |
+   | Knock-out (leverage 5, desk sizing, 2 x 0.99 EUR, 0.5 % spread) | -2.38 EUR a trade | -2.29 EUR a trade |
+   | CFD (2 bp spread, 0.5 % FX fee on the result) | -0.19 EUR a trade (t -6.2) | -0.13 EUR a trade (t -4.7) |
+
+   Gao et al.'s effect (1993-2013) is not present in 2016-2026 on these ETFs. Only 2023 on SPY (+2.8 bp,
+   t 1.7) came near significance; 2021 was significantly negative on both. The paper cells keep running as
+   registered, unchanged, because changing the rule after seeing this would be a new trial. But the
+   prior is now that every index-rule cell fails, the CFD one included; the owner should not trade the CFD
+   signal with real money before its paper cell passes.

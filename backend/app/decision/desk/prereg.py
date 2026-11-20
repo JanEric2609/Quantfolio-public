@@ -18,16 +18,17 @@ from .limits import LIMITS
 
 SIGNALS = ("owner_call", "index_momentum")
 PRODUCTS = ("knockout", "warrant")
-CELLS = tuple(f"{s}:{p}" for s in SIGNALS for p in PRODUCTS)
+#: Scalable products for both signals, plus the index rule as a manual Trading 212 CFD (amendment 2026-11-20).
+CELLS = (*(f"{s}:{p}" for s in SIGNALS for p in PRODUCTS), "index_momentum:cfd")
 TRIAL_CONTEXT = "desk"
 
 SPEC = {
-    "version": 1,
+    "version": 2,
     "cells": list(CELLS),
     "metric": "mean net_eur per closed paper position (fees and spread included)",
     "n_min": 40,
     "alpha": "0.05",
-    "multiple_testing": "Holm across the 4 cells; a cell with n < n_min counts with p = 1",
+    "multiple_testing": "Holm across the 5 cells; a cell with n < n_min counts with p = 1",
     "bootstrap": {"kind": "day-block", "draws": 10000, "seed": 20261120, "p": "share of draws with mean <= 0"},
     "placebo": {
         "draws": 2000, "seed": 20261121, "direction_p": "0.5", "percentile": 95,
@@ -42,6 +43,18 @@ SPEC = {
             "skips": ["r1 == 0", "half day", "macro event on the day", "Friday or pre-holiday for the US rule"],
             "version": 1,
         },
+    },
+    "cfd": {
+        "cell": "index_momentum:cfd",
+        "execution": "manual by the owner on Trading 212 from a Telegram line; scored on paper only",
+        "price": "the underlying's reference price (SPY/QQQ on Alpaca, the Xetra ETF proxy on sc) at entry and exit",
+        "spread_bp": {"DAX": "2", "ES50": "4", "SPX": "2", "NDX": "2"},
+        "fx_fee_on_result": "0.005",
+        "fx_fee_applies_to": "USD indices (SPX, NDX)",
+        "exposure": "max_loss_per_trade / daily sigma, capped at max_exposure_eur",
+        "max_exposure_eur": "1000",
+        "stop": "one daily sigma of the underlying, simulated on the reference price",
+        "overnight_financing": "none: closed 3 minutes before the close",
     },
     "limits": LIMITS.as_json(),
 }

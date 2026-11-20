@@ -99,7 +99,12 @@ def underlying_of(position: DeskPosition, known: Underlying | None = None) -> Un
     """The position's underlying: the alias when it is one, else rebuilt from the row (single stocks)."""
     if known is not None:
         return known
+    from .underlyings import ALIASES
+
     isin = position.underlying_isin or ""
+    alias = next((u for u in ALIASES.values() if u.isin == isin), None)
+    if alias is not None:  # an index: its quoted proxy (ETF or Alpaca symbol) is the price source
+        return alias
     return Underlying(isin, position.underlying_label or isin, "XNYS" if isin.startswith("US") else "XETR",
                       bool(position.liquid))
 
@@ -200,7 +205,8 @@ def propose(
         direction=direction, liquid=underlying.liquid, leverage_or_omega=chosen.leverage_or_omega,
         units=sizing.units, entry_price=chosen.ask, stop_price=sizing.stop_price, max_exit_at=window_end,
         spread_pct=chosen.spread_pct, status="proposed", would_take_live=False, prereg_hash=prereg.PREREG_HASH,
-        created_at=now.astimezone(UTC))
+        product_name=chosen.name[:120] or None, wkn=chosen.wkn, barrier_or_strike=chosen.barrier_or_strike,
+        expiry=chosen.expiry, created_at=now.astimezone(UTC))
     db.add(position)
     db.flush()
     if not verdict.paper_ok:
@@ -218,7 +224,9 @@ def propose(
 
 def _proposal_payload(position: DeskPosition, c: Candidate, sizing, verdict: Verdict) -> dict[str, Any]:
     return {
-        "isin": c.isin, "issuer": c.issuer, "product_type": c.product_type, "units": sizing.units,
+        "isin": c.isin, "wkn": c.wkn, "name": c.name, "issuer": c.issuer, "product_type": c.product_type,
+        "barrier_or_strike": None if c.barrier_or_strike is None else str(c.barrier_or_strike),
+        "expiry": c.expiry.isoformat() if c.expiry else None, "units": sizing.units,
         "ask": str(c.ask), "bid": str(c.bid), "spread_pct": str(c.spread_pct), "stop": str(sizing.stop_price),
         "stop_fraction": str(sizing.stop_fraction), "notional": str(sizing.notional),
         "worst_case_loss": str(sizing.worst_case_loss), "leverage_or_omega": str(c.leverage_or_omega),
@@ -373,7 +381,9 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
     """Quote every open position once and apply ``check_exit``. Returns the positions closed this tick."""
     closed: list[tuple[DeskPosition, str]] = []
     halted = is_halted(db)
-    for p in db.query(DeskPosition).filter(DeskPosition.status == "open", DeskPosition.mode == MODE).all():
+    rows = db.query(DeskPosition).filter(DeskPosition.status == "open", DeskPosition.mode == MODE,
+                                         DeskPosition.product_type != "cfd").all()  # CFDs: cfd.manage
+    for p in rows:
         quote = None
         try:
             quote = market.get_quote(cli, p.isin)
@@ -398,6 +408,8 @@ def owner_close(db: Session, position: DeskPosition, cli: ScalableCli, now: date
                 underlying: Underlying | None = None) -> bool:
     if position.status != "open":
         return False
+    if position.product_type == "cfd":
+        return False  # a CFD closes through cfd.owner_close (no import back from here)
     quote = market.get_quote(cli, position.isin)
     bid = quote.bid if quote else Decimal(position.last_bid or 0)
     if bid <= 0:

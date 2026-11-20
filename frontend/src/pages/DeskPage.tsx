@@ -7,9 +7,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { PageHeader } from "../components/composed/PageHeader";
 import { formatDateTime } from "../lib/format";
 import {
-  getDeskEvents, getDeskPositions, getDeskScorecard, getDeskStatus, postDeskClose, postDeskHalt, postDeskIdea,
+  getDeskEvents, getDeskNews, getDeskPositions, getDeskScorecard, getDeskStatus, postDeskClose, postDeskHalt, postDeskIdea,
   postDeskResume, postDeskTake,
-  type DeskEventDto, type DeskPositionDto, type DeskProposalDto, type DeskScorecardDto, type DeskStatusDto,
+  type DeskEventDto, type DeskNewsDto, type DeskPositionDto, type DeskProposalDto, type DeskScorecardDto, type DeskStatusDto,
 } from "../lib/api";
 
 const LIMIT_LABELS: [string, string][] = [
@@ -22,19 +22,31 @@ const LIMIT_LABELS: [string, string][] = [
 
 const fmt = (v: number | null | undefined, digits = 2) => (v == null ? "-" : v.toFixed(digits));
 
+/** Exactly what is held: the issuer's name, WKN (or ISIN) and the terms that decide the risk. */
+function productTerms(p: DeskPositionDto): string {
+  if (p.product_type === "cfd") return "Trading 212 CFD, manual";
+  const lev = p.leverage_or_omega ? Number(p.leverage_or_omega).toFixed(1) : "?";
+  const level = p.barrier_or_strike ? Number(p.barrier_or_strike).toLocaleString() : "?";
+  const kind = p.product_type === "knockout" ? `leverage ${lev}, barrier ${level}` : `omega ${lev}, strike ${level}`;
+  return `${p.wkn ? `WKN ${p.wkn}` : p.isin}, ${kind}, ${p.expiry ?? "open end"}`;
+}
+
 export function DeskPage() {
   const [status, setStatus] = useState<DeskStatusDto | null>(null);
   const [positions, setPositions] = useState<DeskPositionDto[]>([]);
   const [events, setEvents] = useState<DeskEventDto[]>([]);
   const [score, setScore] = useState<DeskScorecardDto | null>(null);
+  const [news, setNews] = useState<DeskNewsDto[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [idea, setIdea] = useState("");
   const [proposals, setProposals] = useState<DeskProposalDto[]>([]);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    Promise.all([getDeskStatus(), getDeskPositions(), getDeskEvents(100), getDeskScorecard()])
-      .then(([s, p, e, c]) => {
+    Promise.all([getDeskStatus(), getDeskPositions(), getDeskEvents(100), getDeskScorecard(),
+      getDeskNews(40).catch(() => [] as DeskNewsDto[])])
+      .then(([s, p, e, c, n]) => {
+        setNews(Array.isArray(n) ? n : []);
         // A partial payload (an error body, a stub) must not take the page down.
         setStatus(s && s.halt && s.limits && s.usage_today && s.chain ? s : null);
         setPositions(Array.isArray(p) ? p : []);
@@ -149,11 +161,13 @@ export function DeskPage() {
         <CardContent>
           {open.length === 0 ? <p className="text-sm text-text-secondary">None open.</p> : (
             <table className="w-full text-sm">
-              <thead><tr className="text-left"><th>Product</th><th>Units</th><th>Entry</th><th>Stop</th><th>Last bid</th><th>Quote age</th><th /></tr></thead>
+              <thead><tr className="text-left"><th>Product</th><th>Size</th><th>Entry</th><th>Stop</th><th>Last bid</th><th>Quote age</th><th /></tr></thead>
               <tbody>{open.map((p) => (
                 <tr key={p.id} className="border-t border-border/50">
-                  <td>{p.underlying} {p.direction} {p.product_type} <span className="text-text-secondary">{p.short_id}</span></td>
-                  <td>{p.units}</td><td>{p.entry_price}</td><td>{p.stop_price}</td><td>{p.last_bid ?? "-"}</td>
+                  <td>{p.underlying} {p.direction} {p.product_type} <span className="text-text-secondary">{p.short_id}</span>
+                    <div className="text-xs">{p.product_name ?? "-"}</div>
+                    <div className="text-xs text-text-secondary">{productTerms(p)}</div></td>
+                  <td>{p.product_type === "cfd" ? `${Number(p.quantity ?? 0).toFixed(4)} (${(Number(p.quantity ?? 0) * Number(p.entry_price ?? 0)).toFixed(0)} EUR)` : p.units}</td><td>{p.entry_price}</td><td>{p.stop_price}</td><td>{p.last_bid ?? "-"}</td>
                   <td>{p.last_quote_at ? `${Math.max(0, Math.round((Date.now() - new Date(p.last_quote_at).getTime()) / 1000))} s` : "-"}</td>
                   <td><Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => postDeskClose(p.id), () => "Closed")}>Close</Button></td>
                 </tr>))}
@@ -189,6 +203,31 @@ export function DeskPage() {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>News wire</CardTitle>
+          <CardDescription>
+            Alpaca stream, Fed, ECB and SEC 8-K, rated 0-3 by the local model. Information only: the desk never trades on news.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {news.length === 0 ? <p className="text-sm text-text-secondary">Nothing received yet.</p> : (
+            <ul className="max-h-96 space-y-1 overflow-y-auto text-sm">
+              {news.map((n) => (
+                <li key={n.id} className={n.alert === "sent" ? "font-medium" : ""}>
+                  <span className="text-xs text-text-secondary">
+                    {n.received_at ? formatDateTime(n.received_at) : ""} {n.source}
+                    {n.materiality == null ? "" : ` ${n.materiality}/3 ${n.direction ?? ""}`}
+                    {n.relevance ? ` ${n.relevance}` : ""}{n.alert === "sent" ? " sent" : ""}
+                  </span>{" "}
+                  {n.url ? <a href={n.url} target="_blank" rel="noreferrer noopener" className="underline">{n.headline}</a> : n.headline}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader><CardTitle>Event log</CardTitle><CardDescription>Append-only. Newest last.</CardDescription></CardHeader>

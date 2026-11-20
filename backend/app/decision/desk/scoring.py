@@ -91,9 +91,10 @@ def score_cell(trades: list[Trade]) -> dict[str, Any]:
 
 
 def _trade(p: DeskPosition) -> Trade | None:
-    if p.net_eur is None or p.entry_at is None or p.units is None or p.entry_price is None:
+    size = p.units if p.units is not None else p.quantity  # a CFD has a fractional quantity
+    if p.net_eur is None or p.entry_at is None or size is None or p.entry_price is None:
         return None
-    notional = float(p.entry_price) * p.units
+    notional = float(p.entry_price) * float(size)
     spread_cost = float(p.spread_pct or 0) * notional
     cost = float((p.entry_fee or 0) + (p.exit_fee or 0)) + spread_cost
     return Trade(

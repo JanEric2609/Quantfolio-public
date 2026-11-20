@@ -1,4 +1,4 @@
-"""desk_events (hash-chained), desk_positions, desk_registrations (ADR 0027).
+"""desk_events (hash-chained), desk_positions, desk_registrations, news_wire_items (ADR 0027).
 
 Additive only. On PostgreSQL a trigger refuses UPDATE and DELETE on desk_events.
 
@@ -82,6 +82,11 @@ def upgrade() -> None:
             sa.Column("last_bid", sa.Numeric(20, 6), nullable=True),
             sa.Column("last_quote_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("underlying_move", sa.Numeric(14, 8), nullable=True),
+            sa.Column("product_name", sa.String(120), nullable=True),
+            sa.Column("wkn", sa.String(6), nullable=True),
+            sa.Column("barrier_or_strike", sa.Numeric(20, 6), nullable=True),
+            sa.Column("expiry", sa.Date(), nullable=True),
+            sa.Column("quantity", sa.Numeric(20, 8), nullable=True),
             sa.Column("status", sa.String(10), nullable=False, server_default="proposed"),
             sa.Column("would_take_live", sa.Boolean(), nullable=False, server_default=sa.false()),
             sa.Column("prereg_hash", sa.String(64), nullable=True),
@@ -103,6 +108,25 @@ def upgrade() -> None:
             sa.Column("spec", sa.Text(), nullable=False),
             sa.Column("registered_at", sa.DateTime(timezone=True), nullable=False),
         )
+    if not inspector.has_table("news_wire_items"):
+        op.create_table(
+            "news_wire_items",
+            sa.Column("id", sa.String(96), primary_key=True),
+            sa.Column("source", sa.String(16), nullable=False),
+            sa.Column("published_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("received_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("headline", sa.String(400), nullable=False),
+            sa.Column("symbols", sa.String(200), nullable=False, server_default=""),
+            sa.Column("url", sa.String(400), nullable=True),
+            sa.Column("relevance", sa.String(64), nullable=False, server_default=""),
+            sa.Column("materiality", sa.Integer(), nullable=True),
+            sa.Column("direction", sa.String(8), nullable=True),
+            sa.Column("scope", sa.String(8), nullable=True),
+            sa.Column("rated_ms", sa.Integer(), nullable=True),
+            sa.Column("alert", sa.String(12), nullable=False, server_default=""),
+        )
+        op.create_index("ix_news_wire_items_source", "news_wire_items", ["source"])
+        op.create_index("ix_news_wire_items_received_at", "news_wire_items", ["received_at"])
 
 
 def downgrade() -> None:
@@ -111,6 +135,6 @@ def downgrade() -> None:
     if bind.dialect.name == "postgresql":
         bind.execute(sa.text("DROP TRIGGER IF EXISTS desk_events_no_change ON desk_events"))
         bind.execute(sa.text("DROP FUNCTION IF EXISTS desk_events_append_only()"))
-    for table in ("desk_registrations", "desk_positions", "desk_events"):
+    for table in ("news_wire_items", "desk_registrations", "desk_positions", "desk_events"):
         if inspector.has_table(table):
             op.drop_table(table)

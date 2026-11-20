@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.foundation.scalable.cli import ScalableCli
 
-from .. import service
+from .. import instrument, service
 from ..underlyings import ALIASES, ISIN_RE, Underlying, UnderlyingUnknown, resolve_underlying
 
 HORIZON_DAYS = {"today": 1, "1d": 2, "2d": 2}
@@ -92,7 +92,8 @@ def format_proposal(result: service.ProposalResult, underlying: Underlying, prod
     notional = (p.entry_price or 0) * (p.units or 0)
     lines = [
         f"PAPER idea: {underlying.label} {'up' if p.direction == 'long' else 'down'} via {p.product_type}",
-        f"{p.isin} ({p.issuer}), {p.units} units at {p.entry_price:.4f}, notional {notional:.2f} EUR",
+        *instrument.identity_lines(p),
+        instrument.order_line(p) + f", notional {notional:.2f} EUR",
         f"Fees 2 x 0.99 EUR, spread {float(p.spread_pct or 0) * 100:.2f} %, stop {p.stop_price:.4f}",
         "Paper only: no real order is placed. Tap within 3 minutes.",
     ]

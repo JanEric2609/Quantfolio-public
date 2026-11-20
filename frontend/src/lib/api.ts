@@ -4484,6 +4484,14 @@ export interface DeskPositionDto {
   max_exit_at: string | null; exit_price: string | null; exit_at: string | null; exit_reason: string | null;
   net_eur: string | null; status: string; would_take_live: boolean; last_bid: string | null;
   last_quote_at: string | null; created_at: string | null;
+  product_name?: string | null; wkn?: string | null; barrier_or_strike?: string | null; expiry?: string | null;
+  leverage_or_omega?: string | null; quantity?: string | null;
+}
+
+export interface DeskNewsDto {
+  id: string; source: string; published_at: string | null; received_at: string | null; headline: string;
+  symbols: string[]; url: string | null; relevance: string; materiality: number | null; direction: string | null;
+  scope: string | null; rated_ms: number | null; alert: string;
 }
 
 export interface DeskStatusDto {
@@ -4519,6 +4527,7 @@ export interface DeskProposalDto {
 export const getDeskStatus = () => api<DeskStatusDto>("/api/desk/status");
 export const getDeskPositions = () => api<DeskPositionDto[]>("/api/desk/positions");
 export const getDeskEvents = (limit = 100) => api<DeskEventDto[]>(`/api/desk/events?limit=${limit}`);
+export const getDeskNews = (limit = 40) => api<DeskNewsDto[]>(`/api/desk/news?limit=${limit}`);
 export const getDeskScorecard = () => api<DeskScorecardDto>("/api/desk/scorecard");
 export const postDeskIdea = (text: string) =>
   api<{ proposals: DeskProposalDto[]; tap_window_s: number }>("/api/desk/ideas", {

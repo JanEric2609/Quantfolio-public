@@ -19,6 +19,7 @@ dependencies = [
   "apscheduler>=3.10",
   "redis>=5.0",
   "httpx>=0.27",
+  "websockets>=13,<17",  # the news wire's Alpaca stream (ADR 0027 amendment 2026-11-20)
   "openai>=1.30",
   "anthropic>=0.35",
   "pgvector>=0.3",

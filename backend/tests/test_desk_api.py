@@ -37,7 +37,7 @@ def test_every_desk_route_is_admin_only(api):
     client, _db, _admin, guest, state = api
     state["user"] = guest
     for method, path in [("get", "/api/desk/status"), ("get", "/api/desk/positions"), ("get", "/api/desk/events"),
-                         ("get", "/api/desk/scorecard"), ("get", "/api/desk/chain"),
+                         ("get", "/api/desk/scorecard"), ("get", "/api/desk/chain"), ("get", "/api/desk/news"),
                          ("post", "/api/desk/ideas"), ("post", "/api/desk/halt"), ("post", "/api/desk/resume"),
                          ("post", "/api/desk/positions/x/take"), ("post", "/api/desk/positions/x/close")]:
         resp = getattr(client, method)(path, **({"json": {"text": "DAX up", "nonce": "abcd"}} if method == "post" else {}))
@@ -168,3 +168,31 @@ def test_control_center_macro_calendar_warning_only_in_december(monkeypatch):
     assert "desk-macro-calendar" in _ids(db)
     upsert_public_settings(db, {"desk_health_json": {"macro_years": [2026, 2027]}})
     assert "desk-macro-calendar" not in _ids(db)
+
+
+def test_news_wire_lists_newest_first_and_can_filter_sent(api):
+    from app.foundation.models.entities import NewsWireItem
+
+    client, db, *_ = api
+    t = datetime(2026, 11, 20, 18, 0, tzinfo=UTC)
+    db.add(NewsWireItem(id="alpaca:1", source="alpaca", received_at=t, headline="old", symbols="NVDA",
+                        relevance="holding:NVDA", materiality=1, alert=""))
+    db.add(NewsWireItem(id="fed:a", source="fed", received_at=t + timedelta(minutes=1), headline="new",
+                        relevance="central_bank", materiality=2, direction="down", alert="sent"))
+    db.commit()
+    rows = client.get("/api/desk/news").json()
+    assert [r["headline"] for r in rows] == ["new", "old"] and rows[1]["symbols"] == ["NVDA"]
+    assert [r["id"] for r in client.get("/api/desk/news?sent_only=true").json()] == ["fed:a"]
+    assert client.get("/api/desk/news?limit=0").status_code == 422
+
+
+def test_positions_carry_the_exact_instrument(api):
+    client, db, admin, *_ = api
+    db.add(DeskPosition(user_id=admin.id, cell="owner_call:knockout", signal="owner_call", product_type="knockout",
+                        isin="DE000HT4LYZ5", underlying_isin=DAX_ETF, direction="long", status="open",
+                        product_name="S&P 500 Long HSBC", wkn="HT4LYZ", barrier_or_strike=Decimal("5812.34"),
+                        leverage_or_omega=Decimal("4.8"), created_at=NOW))
+    db.commit()
+    row = client.get("/api/desk/positions").json()[0]
+    assert (row["product_name"], row["wkn"], row["barrier_or_strike"], row["expiry"]) == (
+        "S&P 500 Long HSBC", "HT4LYZ", "5812.340000", None)

@@ -24127,6 +24127,67 @@
         ]
       }
     },
+    "/api/desk/news": {
+      "get": {
+        "description": "The news wire (Alpaca stream, Fed, ECB, SEC 8-K) with the local model's rating. Alert-only.",
+        "operationId": "get_news_api_desk_news_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sent_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Sent Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "title": "Response Get News Api Desk News Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get News",
+        "tags": [
+          "desk"
+        ]
+      }
+    },
     "/api/desk/positions": {
       "get": {
         "operationId": "get_positions_api_desk_positions_get",

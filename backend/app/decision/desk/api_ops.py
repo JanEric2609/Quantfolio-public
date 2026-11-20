@@ -14,7 +14,7 @@ from app.foundation.scalable import service as scalable_service
 from app.foundation.scalable.cli import ScalableError
 
 from . import calendar as cal
-from . import prereg, service
+from . import cfd, prereg, service
 from .limits import LIMITS
 from .signals import owner_calls
 from .underlyings import ALIASES, Underlying
@@ -38,6 +38,9 @@ def position_dict(p: DeskPosition) -> dict[str, Any]:
         "exit_price": num(p.exit_price), "exit_at": _iso(p.exit_at), "exit_reason": p.exit_reason,
         "net_eur": num(p.net_eur), "status": p.status, "would_take_live": p.would_take_live,
         "last_bid": num(p.last_bid), "last_quote_at": _iso(p.last_quote_at), "created_at": _iso(p.created_at),
+        "product_name": p.product_name, "wkn": p.wkn, "barrier_or_strike": num(p.barrier_or_strike),
+        "expiry": p.expiry.isoformat() if p.expiry else None, "leverage_or_omega": num(p.leverage_or_omega),
+        "quantity": num(p.quantity),
     }
 
 
@@ -72,6 +75,20 @@ def list_events(db: Session, after_seq: int = 0, limit: int = 200) -> list[dict[
     return [{"seq": e.seq, "created_at": _iso(e.created_at), "kind": e.kind, "mode": e.mode,
              "position_id": e.position_id, "payload": json.loads(e.payload), "row_hash": e.row_hash}
             for e in rows]
+
+
+def list_news(db: Session, limit: int = 50, sent_only: bool = False) -> list[dict[str, Any]]:
+    """The news wire, newest first (alert-only: nothing trades on it)."""
+    from app.foundation.models.entities import NewsWireItem
+
+    q = db.query(NewsWireItem)
+    if sent_only:
+        q = q.filter(NewsWireItem.alert == "sent")
+    rows = q.order_by(NewsWireItem.received_at.desc()).limit(limit).all()
+    return [{"id": r.id, "source": r.source, "published_at": _iso(r.published_at), "received_at": _iso(r.received_at),
+             "headline": r.headline, "symbols": [s for s in r.symbols.split(",") if s], "url": r.url,
+             "relevance": r.relevance, "materiality": r.materiality, "direction": r.direction, "scope": r.scope,
+             "rated_ms": r.rated_ms, "alert": r.alert} for r in rows]
 
 
 def chain_status(db: Session) -> dict[str, Any]:
@@ -141,7 +158,7 @@ def close_position_api(db: Session, user_id: str, position_id: str) -> dict[str,
         raise DeskActionError(404, "Unknown position.")
     underlying = next((u for u in ALIASES.values() if u.isin == position.underlying_isin), None)
     try:
-        ok = service.owner_close(db, position, _cli(db), datetime.now(UTC), underlying)
+        ok = cfd.close_any(db, position, _cli(db), datetime.now(UTC), underlying)
     except ScalableError as exc:
         db.rollback()
         raise DeskActionError(502, f"Could not read the market: {exc.code}") from exc

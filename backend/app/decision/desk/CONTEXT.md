@@ -20,7 +20,10 @@ user, no trade wrapper, no `trade` argv; the broker allow-lists stay read-only.
 | `service.py` | Position lifecycle, halt flag (`desk_halt_json`), health (`desk_health_json`), live rehearsal |
 | `prereg.py`, `scoring.py` | The pre-registered spec/hash, per-cell bootstrap, placebo, Holm |
 | `news.py` | Guard and log only; news never opens or closes a position |
-| `telegram.py`, `jobs.py` | `/idea /desk /stop /close` + "Paper: take"; 1-minute monitor, hourly reconcile |
+| `newswire.py` | The news wire: Alpaca stream (worker thread), Fed/ECB/SEC 8-K (job `desk_news_wire`), local-model rating, Telegram alerts; alert-only |
+| `cfd.py` | The index rule as a manual Trading 212 CFD line, paper-scored in `index_momentum:cfd` |
+| `instrument.py` | Names the exact product: issuer name, ISIN/WKN, leverage and barrier or omega and strike, expiry, order line |
+| `telegram.py`, `jobs.py` | `/idea /desk /stop /close` + "Paper: take"; 1-minute monitor, hourly reconcile, 1-minute news wire |
 
 ## Public surface
 
@@ -33,3 +36,5 @@ every other context, with zero seeded exceptions.
 - Every state change is a ledger event in the same transaction as the position update.
 - `external` positions (the owner's own app trades) are logged and scored separately, never in a pass-rule cell.
 - Phase 2 (real orders) is Proposed in ADR 0027 and not built.
+- A CFD is never automated (`would_take_live` is always False); Trading 212 stays read-only.
+- Nothing reads `news_wire_items` to open, close or block a position.

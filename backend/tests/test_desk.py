@@ -479,7 +479,7 @@ def test_index_signal_fires_once_opens_both_products_and_skips_the_rest():
     db.commit()
     assert any(k.startswith("DAX:") for k in fired)
     rows = db.query(DeskPosition).filter(DeskPosition.signal == "index_momentum").all()
-    assert {r.product_type for r in rows if r.status == "open"} == {"knockout", "warrant"}
+    assert {r.product_type for r in rows if r.status == "open"} == {"knockout", "warrant", "cfd"}
     assert all(r.direction == "long" for r in rows)
     assert all(r.max_exit_at.astimezone(cal.BERLIN).minute == 27 for r in rows if r.status == "open")
     count = db.query(DeskPosition).count()
@@ -552,17 +552,17 @@ def test_scorecard_counts_only_positions_after_registration():
 
 
 def test_prereg_hash_is_pinned():
-    assert prereg.PREREG_HASH == "5729f1f3b36d93ed4cd3e8377093049407b5a63cc4bffe99f1fa4dcbfddcb3f9"
+    assert prereg.PREREG_HASH == "acda5491d40711ac7172e6df6e2a685e7123ddf3d715c9553e92fa89086d74d3"
     assert prereg.CELLS == ("owner_call:knockout", "owner_call:warrant", "index_momentum:knockout",
-                            "index_momentum:warrant")
+                            "index_momentum:warrant", "index_momentum:cfd")
 
 
-def test_prereg_registers_once_and_records_four_trials():
+def test_prereg_registers_once_and_records_one_trial_per_cell():
     db = memory_db()
     prereg.register(db, now=NOW)
     prereg.register(db, now=NOW + timedelta(days=1))
     rows = db.query(TrialLedgerEntry).filter(TrialLedgerEntry.context == "desk").all()
-    assert len(rows) == 4 and len({r.config_hash for r in rows}) == 4  # 4 trials under ADR 0025, not 1
+    assert len(rows) == 5 and len({r.config_hash for r in rows}) == 5  # 5 trials under ADR 0025, not 1
     assert db.query(DeskEvent).filter(DeskEvent.kind == "registered").count() == 1
     assert prereg.registered_at(db) == NOW.astimezone(UTC)
 
