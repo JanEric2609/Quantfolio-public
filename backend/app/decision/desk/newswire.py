@@ -156,7 +156,8 @@ async def rate(db: Session, item: news_wire.WireItem) -> Rating:
     try:
         completion = await router_call(db, task_type="routine", messages=_messages(item), force_local=True,
                                        timeout_s=RATE_TIMEOUT_S, structured_output=_Rating, max_tokens=60)
-    except (RuntimeError, ValueError, OSError, asyncio.TimeoutError) as exc:
+    except (RuntimeError, ValueError, OSError, asyncio.TimeoutError, LookupError, TypeError, AttributeError) as exc:
+        # LookupError/TypeError/AttributeError: a malformed model reply (e.g. no choices); the item goes unrated.
         logger.info("news wire: rating failed: %s", type(exc).__name__)
         return Rating(None, None, None, None)
     parsed = parse_rating(completion.content)
@@ -376,7 +377,7 @@ def _run_forever(stop: threading.Event) -> None:
     while not stop.is_set():
         try:
             reason = asyncio.run(_stream_once())
-        except (RuntimeError, KeyError, TypeError, AttributeError, SQLAlchemyError) as exc:
+        except (RuntimeError, LookupError, TypeError, AttributeError, ValueError, OSError, SQLAlchemyError) as exc:
             # Keep the thread alive: a bug in one item must not end the wire for the day.
             logger.warning("news wire: stream loop error: %s", type(exc).__name__)
             reason = "dropped"

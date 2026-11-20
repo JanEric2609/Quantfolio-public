@@ -359,6 +359,21 @@ def test_tap_after_the_window_expires_and_wrong_nonce_is_unknown():
     assert late.status == "expired" and res.position.status == "expired"
 
 
+def test_a_halt_between_proposal_and_tap_refuses_the_fill():
+    db = memory_db()
+    user, sc = _setup_idea(db)
+    outcome = owner_calls.start_idea(db, user.id, owner_calls.parse_idea("/idea DAX up ko"), sc.cli(), NOW)
+    res = outcome.proposals[0]
+    db.commit()
+    service.set_halt(db, True, "test", "test", now=NOW + timedelta(seconds=5))
+    tap = service.take(db, res.position.id, res.nonce, sc.cli(), NOW + timedelta(seconds=30), outcome.underlying)
+    db.commit()
+    assert tap.status == "refused" and "halted" in tap.message and res.position.status == "rejected"
+    assert res.position.entry_at is None
+    kinds = [e.kind for e in db.query(DeskEvent).order_by(DeskEvent.seq)]
+    assert "fill" not in kinds and kinds[-1] == "error" and verify_chain(db) == (True, None)
+
+
 def test_tap_reasks_when_the_ask_moved_more_than_one_percent():
     db = memory_db()
     user, sc = _setup_idea(db)

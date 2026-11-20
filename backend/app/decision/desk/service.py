@@ -239,7 +239,7 @@ def _proposal_payload(position: DeskPosition, c: Candidate, sizing, verdict: Ver
 
 @dataclass
 class TapResult:
-    status: str  # filled | expired | replay | reask | unknown | not_open | no_quote
+    status: str  # filled | refused | expired | replay | reask | unknown | not_open | no_quote
     position: DeskPosition | None = None
     nonce: str | None = None
     message: str = ""
@@ -289,7 +289,9 @@ def take(db: Session, position_id: str, nonce: str, cli: ScalableCli, now: datet
         return TapResult("reask", position, new_nonce, "The price moved; please confirm again.")
     append_event(db, "tap", MODE, {"result": "taken", "nonce": nonce}, position_id, now=now)
     # cli is passed so the underlying's entry price is stored: the placebo needs the underlying move.
-    open_position(db, position, quote, now, underlying_of(position, underlying), cli)
+    refused = open_position(db, position, quote, now, underlying_of(position, underlying), cli)
+    if refused:
+        return TapResult("refused", position, message="Not filled: " + ", ".join(refused) + ".")
     return TapResult("filled", position, message="Paper position opened.")
 
 
@@ -300,9 +302,17 @@ def _sigma_from_stop(position: DeskPosition, old_ask: Decimal) -> Decimal:
     return fraction / lev if lev else fraction
 
 
+#: Entry reasons that also refuse a fill: the desk was halted, or the clock ran past the entry
+#: window, between the proposal and the tap. Price and size were checked at the proposal (a
+#: re-ask re-sizes), so quote noise inside the 180 s window does not refuse a fill.
+FILL_BLOCKING = frozenset({"halted", "after_cutoff", "outside_window", "underlying_closed"})
+
+
 def open_position(db: Session, position: DeskPosition, quote: market.Quote, now: datetime,
-                  underlying: Underlying | None = None, cli: ScalableCli | None = None) -> None:
-    """Fill at the quote's ask and record the fill, the simulated stop and the live rehearsal."""
+                  underlying: Underlying | None = None, cli: ScalableCli | None = None) -> tuple[str, ...]:
+    """Fill at the quote's ask and record the fill, the simulated stop and the live rehearsal.
+
+    Returns the reasons the fill was refused (the position is then ``rejected``), else ``()``."""
     state = build_state(db, position.user_id, now)
     units = position.units or 0
     stop = Decimal(position.stop_price or 0)
@@ -314,6 +324,11 @@ def open_position(db: Session, position: DeskPosition, quote: market.Quote, now:
         days_to_expiry=99 if position.product_type == "warrant" else None,
         is_index=bool(underlying and underlying.is_index))
     verdict = check_entry(state, proposal, now)
+    refused = tuple(r for r in verdict.reasons if r in FILL_BLOCKING)
+    if refused:
+        position.status = "rejected"
+        append_event(db, "error", MODE, {"code": "refused_at_fill", "reasons": list(refused)}, position.id, now=now)
+        return refused
     position.entry_price = quote.ask
     position.entry_fee = LIMITS.fee_per_order
     position.entry_at = now.astimezone(UTC)
@@ -330,6 +345,7 @@ def open_position(db: Session, position: DeskPosition, quote: market.Quote, now:
         "would_take_live": verdict.ok, "live_reasons": list(verdict.reasons)}, position.id, now=now)
     append_event(db, "stop_set", MODE, {"stop": str(stop), "simulated": True,
                                         "max_exit_at": position.max_exit_at.isoformat()}, position.id, now=now)
+    return ()
 
 
 def open_directly(db: Session, position: DeskPosition, cli: ScalableCli, now: datetime,
@@ -340,8 +356,7 @@ def open_directly(db: Session, position: DeskPosition, cli: ScalableCli, now: da
         position.status = "rejected"
         append_event(db, "error", MODE, {"code": "no_fresh_quote_at_fill", "isin": position.isin}, position.id, now=now)
         return False
-    open_position(db, position, quote, now, underlying, cli)
-    return True
+    return not open_position(db, position, quote, now, underlying, cli)
 
 
 # -- closing -----------------------------------------------------------------------
