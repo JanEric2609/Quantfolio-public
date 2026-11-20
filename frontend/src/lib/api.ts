@@ -4526,7 +4526,8 @@ export interface DeskProposalDto {
 
 export const getDeskStatus = () => api<DeskStatusDto>("/api/desk/status");
 export const getDeskPositions = () => api<DeskPositionDto[]>("/api/desk/positions");
-export const getDeskEvents = (limit = 100) => api<DeskEventDto[]>(`/api/desk/events?limit=${limit}`);
+/** The newest `limit` ledger events, oldest first. */
+export const getDeskEvents = (limit = 100) => api<DeskEventDto[]>(`/api/desk/events?limit=${limit}&latest=true`);
 export const getDeskNews = (limit = 40) => api<DeskNewsDto[]>(`/api/desk/news?limit=${limit}`);
 export const getDeskScorecard = () => api<DeskScorecardDto>("/api/desk/scorecard");
 export const postDeskIdea = (text: string) =>

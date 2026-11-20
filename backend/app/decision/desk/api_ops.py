@@ -70,8 +70,12 @@ def list_positions(db: Session, user_id: str, status: str | None = None, limit: 
     return [position_dict(p) for p in query.order_by(DeskPosition.created_at.desc()).limit(limit)]
 
 
-def list_events(db: Session, after_seq: int = 0, limit: int = 200) -> list[dict[str, Any]]:
-    rows = db.query(DeskEvent).filter(DeskEvent.seq > after_seq).order_by(DeskEvent.seq).limit(limit)
+def list_events(db: Session, after_seq: int = 0, limit: int = 200, *, latest: bool = False) -> list[dict[str, Any]]:
+    q = db.query(DeskEvent).filter(DeskEvent.seq > after_seq)
+    if latest:
+        rows = list(reversed(q.order_by(DeskEvent.seq.desc()).limit(limit).all()))
+    else:
+        rows = q.order_by(DeskEvent.seq).limit(limit).all()
     return [{"seq": e.seq, "created_at": _iso(e.created_at), "kind": e.kind, "mode": e.mode,
              "position_id": e.position_id, "payload": json.loads(e.payload), "row_hash": e.row_hash}
             for e in rows]

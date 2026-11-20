@@ -147,7 +147,14 @@ export function DeskPage() {
             <div key={i} className="rounded-md border border-border p-3 text-sm">
               <pre className="whitespace-pre-wrap font-sans">{p.message}</pre>
               {p.position && p.nonce && (
-                <Button className="mt-2" disabled={busy} onClick={() => act(() => postDeskTake(p.position!.id, p.nonce!), (r) => r.message)}>
+                <Button className="mt-2" disabled={busy} onClick={() => act(() => postDeskTake(p.position!.id, p.nonce!), (r) => {
+                  // A re-ask (the price moved) answers with a new single-use code: the next tap must use it.
+                  setProposals((cur) => cur.map((q, j) => (j !== i ? q
+                    : { ...q, nonce: r.status === "reask" ? r.nonce : r.status === "no_quote" ? q.nonce : null,
+                        position: r.position ?? q.position,
+                        message: r.status === "reask" ? `${q.message}\n\n${r.message}` : q.message })));
+                  return r.message;
+                })}>
                   <Timer className="mr-1 size-4" aria-hidden /> Paper: take
                 </Button>
               )}

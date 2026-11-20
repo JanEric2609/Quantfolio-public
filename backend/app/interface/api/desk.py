@@ -60,9 +60,11 @@ def get_positions(
 @router.get("/events")
 def get_events(
     after_seq: Annotated[int, Query(), ROWS_BOUND] = 0, limit: int = Query(default=200, ge=1, le=500),
+    latest: bool = False,
     user: User = Depends(require_admin), db: Session = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    return list_events(db, after_seq, limit)
+    """Events in ledger order; ``latest=true`` gives the newest ``limit`` of them (still oldest first)."""
+    return list_events(db, after_seq, limit, latest=latest)
 
 
 @router.get("/news")

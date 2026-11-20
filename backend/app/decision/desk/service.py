@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import DeskPosition
@@ -121,7 +122,7 @@ def underlying_price(db: Session, cli: ScalableCli, u: Underlying) -> Decimal | 
             return Decimal(str(data["close"])) if data and data.get("close") else None
         q = market.get_quote(cli, u.proxy_isin or u.isin)
         return q.mid if q else None
-    except (ScalableError, ValueError, KeyError, TypeError, ArithmeticError) as exc:
+    except (ScalableError, ValueError, KeyError, TypeError, ArithmeticError, httpx.HTTPError) as exc:
         logger.info("desk underlying read failed: %s", type(exc).__name__)
         return None
 
@@ -138,7 +139,7 @@ def underlying_sigma(db: Session, cli: ScalableCli, u: Underlying) -> Decimal | 
             return daily_sigma([r["close"] for r in rows if r.get("close")])
         points = market.get_chart(cli, u.proxy_isin or u.isin, "3m")
         return daily_sigma(last_close_per_day(points))
-    except (ScalableError, ValueError, KeyError, TypeError, ArithmeticError) as exc:
+    except (ScalableError, ValueError, KeyError, TypeError, ArithmeticError, httpx.HTTPError) as exc:
         logger.info("desk underlying read failed: %s", type(exc).__name__)
         return None
 
@@ -258,7 +259,9 @@ def take(db: Session, position_id: str, nonce: str, cli: ScalableCli, now: datet
     if position is None or proposal is None or proposal.get("nonce") != nonce:
         append_event(db, "tap", MODE, {"result": "unknown", "position_id": position_id}, now=now)
         return TapResult("unknown", message="Unknown proposal.")
-    if any(json.loads(e.payload).get("nonce") == nonce for e in events_for(db, position_id, "tap")):
+    # "No fresh quote" does not use the nonce up: the owner may tap the same button again.
+    if any((ev := json.loads(e.payload)).get("nonce") == nonce and ev.get("result") != "no_quote"
+           for e in events_for(db, position_id, "tap")):
         append_event(db, "tap", MODE, {"result": "replay", "nonce": nonce}, position_id, now=now)
         return TapResult("replay", position, message="Already used.")
     if position.status != "proposed":
@@ -277,8 +280,14 @@ def take(db: Session, position_id: str, nonce: str, cli: ScalableCli, now: datet
     old = Decimal(proposal["ask"])
     if abs(quote.ask / old - 1) > LIMITS.reask_move:
         new_nonce = secrets.token_urlsafe(8)
+        pot_left = LIMITS.pot - build_state(db, position.user_id, now).pot_used
         sizing = size_position(quote.ask, Decimal(position.leverage_or_omega or 1), _sigma_from_stop(position, old),
-                               LIMITS.pot)
+                               pot_left)
+        if sizing.units < 1:
+            position.status = "rejected"
+            append_event(db, "tap", MODE, {"result": "refused", "nonce": nonce, "reason": "too_small",
+                                           "old_ask": str(old), "new_ask": str(quote.ask)}, position_id, now=now)
+            return TapResult("refused", position, message="Not filled: at the new price not even one unit fits the limits.")
         position.entry_price, position.stop_price, position.units = quote.ask, sizing.stop_price, sizing.units
         append_event(db, "tap", MODE, {"result": "reask", "nonce": nonce, "old_ask": str(old),
                                        "new_ask": str(quote.ask)}, position_id, now=now)
@@ -303,9 +312,9 @@ def _sigma_from_stop(position: DeskPosition, old_ask: Decimal) -> Decimal:
 
 
 #: Entry reasons that also refuse a fill: the desk was halted, or the clock ran past the entry
-#: window, between the proposal and the tap. Price and size were checked at the proposal (a
+#: window, between the proposal and the tap, or the position holds no unit. Price and size were checked at the proposal (a
 #: re-ask re-sizes), so quote noise inside the 180 s window does not refuse a fill.
-FILL_BLOCKING = frozenset({"halted", "after_cutoff", "outside_window", "underlying_closed"})
+FILL_BLOCKING = frozenset({"halted", "after_cutoff", "outside_window", "underlying_closed", "too_small"})
 
 
 def open_position(db: Session, position: DeskPosition, quote: market.Quote, now: datetime,

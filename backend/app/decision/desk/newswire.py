@@ -240,12 +240,11 @@ async def ingest(db: Session, user_id: str, item: news_wire.WireItem, watch: dic
     row.materiality, row.direction, row.scope, row.rated_ms = (rating.materiality, rating.direction, rating.scope,
                                                                rating.ms)
     decision = alert_decision(db, item, why, rating, now)
+    row.alert = "sent" if decision == "send" else decision
+    db.commit()  # stored before it is sent: a failed commit must not send the line twice
     if decision == "send":
         telegram.alert(db, user_id, format_alert(item, why, rating, now))
-        decision = "sent"
-    row.alert = decision
-    db.commit()
-    return decision
+    return row.alert
 
 
 # -- polled feeds (scheduler, every minute) -----------------------------------------------

@@ -23983,6 +23983,7 @@
     },
     "/api/desk/events": {
       "get": {
+        "description": "Events in ledger order; ``latest=true`` gives the newest ``limit`` of them (still oldest first).",
         "operationId": "get_events_api_desk_events_get",
         "parameters": [
           {
@@ -24005,6 +24006,16 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "latest",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Latest",
+              "type": "boolean"
             }
           }
         ],

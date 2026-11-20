@@ -10,6 +10,7 @@ import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.foundation.providers.alpaca_provider import AlpacaProvider
@@ -61,10 +62,22 @@ def headlines(db: Session, cli: ScalableCli, underlying: Underlying, since: date
                 return []
             return [{"id": n["id"], "title": n["headline"]} for n in provider.get_news([sym], since)]
         isin = underlying.proxy_isin or underlying.isin
-        return [{"id": n["id"], "title": n["title"]} for n in market.get_security_news(cli, isin)]
-    except (ScalableError, ValueError) as exc:
+        return [{"id": n["id"], "title": n["title"]} for n in market.get_security_news(cli, isin)
+                if not _older_than(n.get("published"), since)]
+    except (ScalableError, ValueError, httpx.HTTPError) as exc:  # httpx: Alpaca timeouts and refused connections
         logger.info("desk news fetch failed: %s", type(exc).__name__)
         return []
+
+
+def _older_than(published: str | None, since: datetime) -> bool:
+    """True when sc's ``published`` stamp parses and lies before *since*; an unknown stamp is kept."""
+    if not published:
+        return False
+    try:
+        value = datetime.fromisoformat(published.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return (value if value.tzinfo else value.replace(tzinfo=UTC)) < since
 
 
 def window_end(now: datetime, days: int = 2) -> date:

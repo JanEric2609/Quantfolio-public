@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -91,6 +91,11 @@ def check_entry(state: DeskState, p: Proposal, now: datetime) -> Verdict:
     return Verdict(tuple(reasons), not reasons, not paper)
 
 
+def _aware(value: datetime | None) -> datetime | None:
+    """SQLite hands stored times back without a zone; they are UTC."""
+    return value if value is None or value.tzinfo else value.replace(tzinfo=UTC)
+
+
 def check_exit(position: Any, bid: Decimal | None, now: datetime, *, halted: bool = False) -> str | None:
     """The exit reason, or ``None`` to keep holding.
 
@@ -103,13 +108,14 @@ def check_exit(position: Any, bid: Decimal | None, now: datetime, *, halted: boo
         return "halt"
     if bid is not None and position.stop_price is not None and bid <= Decimal(position.stop_price):
         return "stop"
-    if position.max_exit_at is not None and now >= position.max_exit_at:
+    max_exit = _aware(position.max_exit_at)
+    if max_exit is not None and now >= max_exit:
         return "horizon"
     local = now.astimezone(cal.BERLIN)
     if cal.flat_by_day(local.date()) and local >= cal.cutoff_at(local.date()):
         return cal.cutoff_kind(local.date())
     if bid is None and cal.in_trading_window(now):
-        seen = position.last_quote_at or position.entry_at
+        seen = _aware(position.last_quote_at or position.entry_at)
         if seen is not None and now - seen >= timedelta(seconds=LIMITS.quote_lost_s):
             return "quote_lost"
     return None

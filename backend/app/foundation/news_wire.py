@@ -137,10 +137,14 @@ def alpaca_item(msg: dict[str, Any]) -> WireItem | None:
 
 
 def fetch(url: str, user_agent: str, *, timeout_s: float = 15.0) -> bytes:
-    """GET *url*; raises ``ValueError`` on a non-200 answer."""
+    """GET *url*; raises ``ValueError`` on a non-200 answer or a network failure (timeout, refused,
+    DNS), so one unreachable host costs only its own feed."""
     import httpx
 
-    response = httpx.get(url, headers={"User-Agent": user_agent}, timeout=timeout_s, follow_redirects=True)
+    try:
+        response = httpx.get(url, headers={"User-Agent": user_agent}, timeout=timeout_s, follow_redirects=True)
+    except httpx.HTTPError as exc:
+        raise ValueError(f"network: {type(exc).__name__}") from exc
     if response.status_code != 200:
         raise ValueError(f"HTTP {response.status_code}")
     return response.content

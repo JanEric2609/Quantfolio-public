@@ -24,6 +24,7 @@ import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import DeskPosition
@@ -60,7 +61,7 @@ def _index_level(db: Session, ticker: str) -> Decimal | None:
         rows = history(db, ticker, days=10)
         closes = [r.get("close") for r in rows if r.get("close") is not None]
         return Decimal(str(closes[-1])) if closes else None
-    except (ValueError, KeyError, TypeError, OSError, ArithmeticError) as exc:
+    except (ValueError, KeyError, TypeError, OSError, ArithmeticError, httpx.HTTPError) as exc:
         logger.info("desk cfd level read failed: %s", type(exc).__name__)
         return None
 
@@ -71,7 +72,7 @@ def _eur_per_usd(db: Session, now: datetime) -> Decimal | None:
 
         rate, _src = eur_per_unit(db, "USD", now.date())
         return Decimal(str(rate)) if rate else None
-    except (ValueError, KeyError, TypeError, OSError, ArithmeticError) as exc:
+    except (ValueError, KeyError, TypeError, OSError, ArithmeticError, httpx.HTTPError) as exc:
         logger.info("desk cfd fx read failed: %s", type(exc).__name__)
         return None
 

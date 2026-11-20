@@ -16,10 +16,12 @@ bars from Alpaca's free IEX feed).
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import DeskEvent
@@ -30,6 +32,8 @@ from .. import calendar as cal
 from .. import cfd, news, service
 from ..ledger import append_event
 from ..underlyings import ALIASES, Underlying
+
+logger = logging.getLogger(__name__)
 
 INDEX_KEYS = ("DAX", "ES50", "SPX", "NDX")
 PRODUCT_TYPES = ("knockout", "warrant")
@@ -92,11 +96,22 @@ def compute_r1_xetra(points: list[tuple[datetime, Decimal]], day: date) -> Decim
     return (px / prev_close - 1) if px is not None and prev_close else None
 
 
+#: Regular-session 30-minute bar starts (New York). Alpaca's bars include pre- and after-market
+#: trading; the registered rule and the replay (``lab/desk_replay.py``) use the regular session only.
+US_FIRST_BAR, US_LAST_BAR = time(9, 30), time(15, 30)
+
+
+class DataUnavailable(RuntimeError):
+    """The price read failed (network, rate limit): try again next minute, do not log a no-data day."""
+
+
 def compute_r1_us(bars: list[dict], day: date) -> Decimal | None:
-    """Previous session's last 30-minute close to the close of the first 30-minute bar of *day* (New York)."""
+    """Previous session's regular close (the 15:30 bar's close, i.e. 16:00) to the close of the first
+    30-minute bar of *day* (New York). Extended-hours bars are ignored, as in the replay."""
     def local(b):
         return b["t"].astimezone(cal.NEW_YORK)
-    prev = [b for b in bars if local(b).date() < day and b["c"] is not None]
+    prev = [b for b in bars if local(b).date() < day and b["c"] is not None
+            and US_FIRST_BAR <= local(b).time() <= US_LAST_BAR]
     first = [b for b in bars if local(b).date() == day and local(b).time() == time(9, 30) and b["c"] is not None]
     if not prev or not first:
         return None
@@ -110,8 +125,11 @@ def compute_r1(db: Session, cli: ScalableCli, plan: Plan) -> Decimal | None:
         provider = news.alpaca_for(db)
         if provider is None:
             return None
-        bars = provider.get_intraday_bars(u.alpaca_symbol, "30Min", datetime.now(UTC) - timedelta(days=7),
-                                          datetime.now(UTC))
+        try:
+            bars = provider.get_intraday_bars(u.alpaca_symbol, "30Min", datetime.now(UTC) - timedelta(days=7),
+                                              datetime.now(UTC))
+        except (ValueError, httpx.HTTPError) as exc:  # HTTP 429/5xx (ValueError) or a timeout
+            raise DataUnavailable(type(exc).__name__) from exc
         return compute_r1_us(bars, plan.day)
     return compute_r1_xetra(market.get_chart(cli, u.proxy_isin or u.isin, "7d"), plan.day)
 
@@ -134,7 +152,13 @@ def fire_due_signals(db: Session, user_id: str, cli: ScalableCli, now: datetime)
         if _already_fired(db, key):
             continue
         skip = skip_reason(plan)
-        r1 = None if skip else compute_r1(db, cli, plan)
+        try:
+            r1 = None if skip else compute_r1(db, cli, plan)
+        except DataUnavailable as exc:
+            if now + timedelta(minutes=1) < plan.enter_at + FIRE_WINDOW:
+                logger.info("desk index rule %s: price read failed (%s), retrying next minute", key, exc)
+                continue
+            r1 = None  # the window's last minute: logged as a no-data day
         if skip or r1 is None or r1 == 0:
             reason = skip or ("no_data" if r1 is None else "r1_zero")
             append_event(db, "signal", service.MODE, {"key": key, "fired": False, "reason": reason}, now=now)

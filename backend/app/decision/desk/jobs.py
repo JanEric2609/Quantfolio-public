@@ -39,6 +39,9 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
     if owner is None:
         return {"skipped": "no_admin"}
     prereg.register(db, now=now)
+    # Messages go out only after the tick's commit: a failed tick rolls back its closes, and an
+    # exit alert sent before that would be sent again when the next tick closes them for real.
+    outbox: list[str] = []
     try:
         cli = cli or scalable_service.make_cli(db)
         underlyings: dict[str, Underlying] = {u.isin: u for u in ALIASES.values()}
@@ -46,19 +49,21 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
             underlyings.setdefault(p.underlying_isin, Underlying(p.underlying_isin, p.underlying_label, "XETR", p.liquid))
         fired = index_momentum.fire_due_signals(db, owner.id, cli, now) if not service.is_halted(db) else []
         if fired:
-            _announce_fills(db, owner.id, now)
+            outbox += _announce_fills(db, now)
         expired = service.expire_proposals(db, now)
         closed = service.manage_open_positions(db, cli, now, underlyings)
         for position, reason in closed:
-            telegram.alert(db, owner.id, f"Desk paper exit ({reason}), net {position.net_eur} EUR:\n"
-                                         + instrument.order_line(position, "Sell", position.exit_price))
+            outbox.append(f"Desk paper exit ({reason}), net {position.net_eur} EUR:\n"
+                          + instrument.order_line(position, "Sell", position.exit_price))
         for position, reason in cfd.manage(db, cli, now, underlyings):
-            telegram.alert(db, owner.id, cfd.close_message(position, reason))
+            outbox.append(cfd.close_message(position, reason))
             closed.append((position, reason))
-        seen = _news_check(db, cli, owner.id, now, underlyings) if now.minute % 5 == 0 else 0
+        seen = _news_check(db, cli, now, underlyings, outbox) if now.minute % 5 == 0 else 0
         service.set_health(db, last_tick_at=now.isoformat(), wrapper_outdated=False, last_error=None,
                            macro_years=sorted(cal.MACRO_EVENTS_BY_YEAR))
         db.commit()
+        for text in outbox:
+            telegram.alert(db, owner.id, text)
         return {"fired": fired, "expired": expired, "closed": len(closed), "news": seen}
     except market.WrapperOutdated:
         db.rollback()
@@ -72,13 +77,14 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
         return {"skipped": exc.code}
 
 
-def _announce_fills(db: Any, user_id: str, now: datetime) -> None:
-    """Name exactly what the index rule bought this tick, and send the manual CFD line."""
+def _announce_fills(db: Any, now: datetime) -> list[str]:
+    """Name exactly what the index rule bought this tick, and the manual CFD line (sent after the commit)."""
     from app.foundation.models.entities import DeskPosition
 
-    from . import cfd, instrument, telegram
+    from . import cfd, instrument
     from .underlyings import ALIASES
 
+    out: list[str] = []
     keys = {u.isin: k for k, u in ALIASES.items()}
     rows = db.query(DeskPosition).filter(DeskPosition.signal == "index_momentum", DeskPosition.status == "open",
                                          DeskPosition.entry_at >= now - timedelta(minutes=1)).all()
@@ -86,34 +92,42 @@ def _announce_fills(db: Any, user_id: str, now: datetime) -> None:
         if p.product_type == "cfd":
             key = keys.get(p.underlying_isin)
             if key:
-                telegram.alert(db, user_id, cfd.open_message(db, p, key, now))
+                out.append(cfd.open_message(db, p, key, now))
         else:
-            telegram.alert(db, user_id, "Desk paper buy (index rule, no real order):\n" + instrument.describe(p))
+            out.append("Desk paper buy (index rule, no real order):\n" + instrument.describe(p))
+    return out
 
 
-def _news_check(db: Any, cli: Any, user_id: str, now: datetime, underlyings: dict[str, Any]) -> int:
-    """New headlines on open positions' and pending proposals' underlyings: logged and sent, never acted on."""
+def _news_check(db: Any, cli: Any, now: datetime, underlyings: dict[str, Any], outbox: list[str]) -> int:
+    """New headlines on open positions' and pending proposals' underlyings: logged on each position,
+    one message per underlying (an index signal holds a knock-out, a warrant and a CFD on the same
+    one), never acted on."""
     from app.foundation.models.entities import DeskEvent, DeskPosition
 
-    from . import news, service, telegram
+    from . import news, service
     from .ledger import append_event
 
     count = 0
-    rows = db.query(DeskPosition).filter(DeskPosition.status.in_(("open", "proposed"))).all()
-    for p in rows:
-        u = underlyings.get(p.underlying_isin)
+    by_underlying: dict[str, list[Any]] = {}
+    for p in db.query(DeskPosition).filter(DeskPosition.status.in_(("open", "proposed"))).order_by(DeskPosition.id):
+        by_underlying.setdefault(p.underlying_isin, []).append(p)
+    for isin, positions in by_underlying.items():
+        u = underlyings.get(isin)
         if u is None:
             continue
         known: set[str] = set()
-        for ev in db.query(DeskEvent).filter(DeskEvent.position_id == p.id, DeskEvent.kind == "news_seen"):
+        for ev in db.query(DeskEvent).filter(DeskEvent.position_id.in_([p.id for p in positions]),
+                                             DeskEvent.kind == "news_seen"):
             known.update(json.loads(ev.payload).get("ids", []))
         fresh = [h for h in news.headlines(db, cli, u, now - timedelta(hours=6)) if h["id"] not in known]
-        if fresh:
+        if not fresh:
+            continue
+        for p in positions:
             append_event(db, "news_seen", service.MODE, {"ids": [h["id"] for h in fresh],
                                                         "titles": [h["title"] for h in fresh[:5]]}, p.id, now=now)
-            telegram.alert(db, user_id, f"Desk news on {p.underlying_label} (logged only): " + " | ".join(
-                h["title"] for h in fresh[:3]))
-            count += len(fresh)
+        outbox.append(f"Desk news on {positions[0].underlying_label} (logged only): "
+                      + " | ".join(h["title"] for h in fresh[:3]))
+        count += len(fresh)
     return count
 
 
