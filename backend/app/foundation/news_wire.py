@@ -1,6 +1,6 @@
 """Free real-time news sources, read only (ADR 0027 amendment 2026-11-20).
 
-Four sources, all free and checked live on 2026-11-20:
+Six sources, all free and checked live on 2026-11-20:
 
 * **Alpaca news stream** (Benzinga): ``wss://stream.data.alpaca.markets/v1beta1/news``.
   The free plan's key may subscribe to every symbol (``"*"``); items arrive
@@ -8,6 +8,14 @@ Four sources, all free and checked live on 2026-11-20:
   key, so only the worker opens it.
 * **Federal Reserve** press releases (RSS), **ECB** press releases, speeches and
   decisions (RSS): polled once a minute.
+
+The RSS feeds get a neutral User-Agent (``FEED_USER_AGENT``); only SEC gets the
+configured one, which SEC requires to carry a contact.
+* **finanznachrichten.de ad-hoc feed** (RSS): every German ad-hoc disclosure
+  (Art. 17 MAR: profit warnings, takeovers, management exits) about a minute
+  after release, each item tagged with the company's ISIN.
+* **Handelsblatt headlines** (RSS): German business and market headlines.
+  Headlines only; the articles behind them stay paywalled and are never read.
 * **SEC EDGAR** latest 8-K filings (Atom, ``getcurrent``), polled once a minute
   inside SEC's 10 requests/second limit with the configured User-Agent.
 
@@ -17,6 +25,7 @@ the desk's news wire (``decision/desk/newswire.py``). Nothing here can trade.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -35,7 +44,12 @@ ALPACA_NEWS_STREAM = "wss://stream.data.alpaca.markets/v1beta1/news"
 FEEDS: dict[str, str] = {
     "fed": "https://www.federalreserve.gov/feeds/press_all.xml",
     "ecb": "https://www.ecb.europa.eu/rss/press.html",
+    "de_adhoc": "https://www.finanznachrichten.de/rss-aktien-adhoc",
+    "handelsblatt": "https://www.handelsblatt.com/contentexport/feed/schlagzeilen",
 }
+FEED_USER_AGENT = "news-wire-reader/1.0"
+_FN_ISIN = "{http://www.finanznachrichten.de/service/rss}isin"
+_ISIN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
 SEC_CURRENT_8K = "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&count=100&output=atom"
 _ATOM = "{http://www.w3.org/2005/Atom}"
 _SEC_TITLE = re.compile(r"^(?P<form>[^ ]+) - (?P<name>.+?) \((?P<cik>\d{10})\) \((?P<role>[^)]+)\)$")
@@ -44,11 +58,12 @@ _SEC_ITEM = re.compile(r"Item (\d+\.\d+)")
 
 @dataclass(frozen=True)
 class WireItem:
-    source: str  # alpaca | fed | ecb | sec_8k
+    source: str  # alpaca | fed | ecb | de_adhoc | handelsblatt | sec_8k
     source_id: str
     headline: str
     published_at: datetime | None
     url: str | None = None
+    #: Tickers (Alpaca) or ISINs (the German ad-hoc feed), matched against the watchlist.
     symbols: tuple[str, ...] = ()
     #: SEC only: the filer's CIK and the 8-K item codes ("2.02", "5.02", ...).
     cik: str | None = None
@@ -56,7 +71,10 @@ class WireItem:
 
     @property
     def id(self) -> str:
-        return f"{self.source}:{self.source_id}"[:96]
+        """``source:source_id``; a longer one (an article URL) is hashed, never cut, so two
+        articles whose URLs share a long prefix stay two items."""
+        raw = f"{self.source}:{self.source_id}"
+        return raw if len(raw) <= 96 else f"{self.source}:h:{hashlib.sha256(self.source_id.encode()).hexdigest()}"
 
 
 def _parse_time(raw: str | None) -> datetime | None:
@@ -74,7 +92,7 @@ def _parse_time(raw: str | None) -> datetime | None:
 
 
 def parse_rss(body: bytes, source: str) -> list[WireItem]:
-    """RSS 2.0 items (Fed, ECB). Malformed XML raises ``ElementTree.ParseError``."""
+    """RSS 2.0 items (Fed, ECB, German ad-hoc, Handelsblatt). Malformed XML raises ``ElementTree.ParseError``."""
     root = ElementTree.fromstring(body)
     out: list[WireItem] = []
     for item in root.iter("item"):
@@ -83,7 +101,8 @@ def parse_rss(body: bytes, source: str) -> list[WireItem]:
         guid = (item.findtext("guid") or "").strip() or link or title
         if not title:
             continue
-        out.append(WireItem(source, guid, unescape(title)[:400], _parse_time(item.findtext("pubDate")), link))
+        isins = tuple(dict.fromkeys(i for el in item.findall(_FN_ISIN) if _ISIN.match(i := (el.text or "").strip().upper())))
+        out.append(WireItem(source, guid, unescape(title)[:400], _parse_time(item.findtext("pubDate")), link, isins))
     return out
 
 

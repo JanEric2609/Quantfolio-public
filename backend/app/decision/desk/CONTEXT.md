@@ -20,7 +20,7 @@ user, no trade wrapper, no `trade` argv; the broker allow-lists stay read-only.
 | `service.py` | Position lifecycle, halt flag (`desk_halt_json`), health (`desk_health_json`), live rehearsal |
 | `prereg.py`, `scoring.py` | The pre-registered spec/hash, per-cell bootstrap, placebo, Holm |
 | `news.py` | Guard and log only; news never opens or closes a position |
-| `newswire.py` | The news wire: Alpaca stream (worker thread), Fed/ECB/SEC 8-K (job `desk_news_wire`), local-model rating, Telegram alerts; alert-only |
+| `newswire.py` | The news wire: Alpaca stream (worker thread), Fed/ECB, German ad-hoc (by ISIN), Handelsblatt, SEC 8-K (job `desk_news_wire`), local-model rating, Telegram alerts; alert-only |
 | `cfd.py` | The index rule as a manual Trading 212 CFD line, paper-scored in `index_momentum:cfd` |
 | `instrument.py` | Names the exact product: issuer name, ISIN/WKN, leverage and barrier or omega and strike, expiry, order line |
 | `telegram.py`, `jobs.py` | `/idea /desk /stop /close` + "Paper: take"; 1-minute monitor, hourly reconcile, 1-minute news wire |

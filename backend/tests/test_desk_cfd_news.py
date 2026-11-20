@@ -277,9 +277,14 @@ def test_poll_feeds_baselines_a_new_feed_then_sends_new_items(monkeypatch):
 
     monkeypatch.setattr(newswire, "rate", fake_rate)
     feeds = {"fed": RSS, "ecb": RSS.replace(b"fed.example/a", b"ecb.example/a")}
+    agents: set[str] = set()
 
     def fetch(url, ua):
-        return feeds["fed" if "federalreserve" in url else "ecb"]
+        agents.add(ua)
+        for source, host in (("fed", "federalreserve"), ("ecb", "ecb.europa")):
+            if host in url:
+                return feeds[source]
+        raise ValueError("HTTP 503")  # the other feeds are down: logged, the rest still runs
 
     now = datetime(2026, 11, 20, 19, 1, tzinfo=UTC)
     assert newswire.poll_feeds(db, user.id, now, fetch=fetch) == {"fed": 1, "ecb": 1}
@@ -287,6 +292,38 @@ def test_poll_feeds_baselines_a_new_feed_then_sends_new_items(monkeypatch):
     feeds["fed"] = RSS.replace(b"fed.example/a", b"fed.example/b").replace(b"FOMC statement", b"Rate cut")
     assert newswire.poll_feeds(db, user.id, now, fetch=fetch) == {"fed": 1}
     assert len(sent) == 1 and "central bank" in sent[0] and "Rate cut" in sent[0]
+    assert agents == {news_wire.FEED_USER_AGENT}  # the SEC contact never goes to the RSS hosts
+
+
+FN_ADHOC = """<?xml version="1.0" encoding="utf-8"?><rss version="2.0"
+xmlns:fn="http://www.finanznachrichten.de/service/rss"><channel><item>
+<title>EQS-Adhoc: Bayer AG: Bayer senkt Prognose</title><link>https://fn.example/1</link>
+<pubDate>2026-11-20T18:27:00Z</pubDate><fn:isin>de000bay0017</fn:isin><fn:isin>not-an-isin</fn:isin></item>
+</channel></rss>""".encode()
+
+
+def test_german_adhoc_items_carry_the_isin_and_match_a_holding_by_it(monkeypatch):
+    item = news_wire.parse_rss(FN_ADHOC, "de_adhoc")[0]
+    assert item.symbols == ("DE000BAY0017",) and item.headline == "EQS-Adhoc: Bayer AG: Bayer senkt Prognose"
+    assert item.published_at == datetime(2026, 11, 20, 18, 27, tzinfo=UTC)
+    assert set(news_wire.FEEDS) == {"fed", "ecb", "de_adhoc", "handelsblatt"}
+
+    class Pos:
+        def __init__(self, isin, ticker, name):
+            self.isin, self.ticker, self.name = isin, ticker, name
+
+    monkeypatch.setattr("app.foundation.live_positions.combined_positions",
+                        lambda db, uid: [Pos("DE000BAY0017", None, "Bayer AG"), Pos("US67066G1040", "NVDA", "NVIDIA")])
+    db = memory_db()
+    user = make_user(db)
+    watch = newswire.watchlist(db, user.id)
+    assert watch["DE000BAY0017"] == "holding:Bayer AG" and watch["NVDA"] == watch["US67066G1040"] == "holding:NVDA"
+    assert newswire.relevance(item, watch) == "holding:Bayer AG"
+    long_a, long_b = ("https://news.example/" + "dax-aktuell-" * 8 + n for n in ("1.html", "2.html"))
+    ids = {news_wire.WireItem("handelsblatt", u, "h", None).id for u in (long_a, long_b)}
+    assert len(ids) == 2 and all(len(i) <= 96 for i in ids)
+    headline = news_wire.WireItem("handelsblatt", "g", "Ausverkauf an der Nasdaq", None)
+    assert newswire.relevance(headline, watch) == ""  # no symbols: sent only as a market-wide shock
 
 
 def test_the_news_wire_never_touches_positions():

@@ -108,8 +108,14 @@ deploy, so migration 0157 itself gains the new columns and table; nothing regist
    The pre-registration becomes version 2 with five cells, Holm across five.
 3. **The news wire** (`foundation/news_wire.py` fetches, `decision/desk/newswire.py` decides). Sources, all
    free and checked live: Alpaca's news stream subscribed to every symbol (the free key is accepted; items
-   arrive within seconds, European companies included), Fed and ECB press feeds and SEC's latest 8-K
-   filings, polled every minute (job `desk_news_wire`). Every item is stored in `news_wire_items` for 30
+   arrive within seconds, European companies included), Fed and ECB press feeds, German ad-hoc
+   disclosures (finanznachrichten.de's ad-hoc feed: every Art. 17 MAR release about a minute after it,
+   each tagged with the company's ISIN, so it is matched to a holding by ISIN), Handelsblatt's headline
+   feed (headlines only, a market-wide 3 is sent) and SEC's latest 8-K filings, polled every minute (job
+   `desk_news_wire`). The RSS hosts get a neutral User-Agent; only SEC gets the configured one with its
+   contact. The publishers' feeds are for personal reading: the wire alerts the owner and republishes
+   nothing. The feeds need no login and none is stored (WiWo's headlines largely repeat Handelsblatt's,
+   so it is left out). Every item is stored in `news_wire_items` for 30
    days; the local Qwen model rates each headline (materiality 0-3, direction, scope; about 0.7 s on the
    GPU), with the headline fenced as untrusted text. Telegram gets a line for a holding or an open desk
    position (materiality 2+), the Fed or ECB (2+), any 8-K of a holding, and a market-wide 3; quiet hours
