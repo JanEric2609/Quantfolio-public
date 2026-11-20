@@ -240,3 +240,18 @@ def test_attempt_records_carry_the_endpoint_account_of_each_call():
     assert attempts[0]["parsed_as"] == "strict"
     assert attempts[0]["decisions"] == 1
     assert attempts[0]["errors"] == []
+
+
+def test_failed_llm_call_reports_only_the_exception_type():
+    """The error list reaches the API; the exception's text stays in the server log."""
+    db = _memory_db()
+    proposal = _proposal()
+    gate = check_risk_gate(proposal)
+
+    def _down(_db, _messages):
+        raise ConnectionError("exception text that must stay in the server log")
+
+    decisions, errors = decide_trades(db, proposal, gate, llm_call=_down)
+
+    assert decisions == []
+    assert errors == ["llm call failed (ConnectionError); details are in the server log"]
