@@ -113,3 +113,39 @@ def test_obsidian_sync_failure_message_is_fixed(monkeypatch):
     result = research_sync.sync_to_obsidian(_memory_db(), "u1")
     assert result["synced"] is False
     assert result["message"] == "Failed to sync to Obsidian"
+
+
+def _ingest_with_failing_write(exc: Exception):
+    from sqlalchemy import text
+
+    db = _memory_db()
+    rows = [
+        {"date": d.date().isoformat(), "open": c, "high": c, "low": c, "close": c, "volume": 1}
+        for d, c in zip(pd.bdate_range("2025-10-20", periods=5), [100.0, 100.5, 101.0, 100.8, 101.2])
+    ]
+    registry = MagicMock()
+    registry.get_price_history.return_value = {"ok": True, "provider": "yfinance", "data": rows}
+    ingester = _bare_ingester(db, registry)
+    ingester.split_events = lambda symbol: []  # type: ignore[method-assign]
+
+    def _fail(*_a, **_k):
+        raise exc
+
+    ingester._upsert_bars = _fail  # type: ignore[method-assign]
+    result = ingester.ingest_bar_prices("SPY", days=10)
+    stored = db.execute(text("SELECT message FROM provider_health_history")).scalars().all()
+    return result, stored
+
+
+def test_provider_error_health_row_stores_only_the_exception_type():
+    result, stored = _ingest_with_failing_write(RuntimeError(SECRET_TEXT))
+    assert result["message"] == "provider error (RuntimeError); details are in the server log"
+    assert stored == ["provider_error: RuntimeError"]
+
+
+def test_schema_error_health_row_stores_only_the_exception_type():
+    from sqlalchemy import exc as sa_exc
+
+    result, stored = _ingest_with_failing_write(sa_exc.IntegrityError(SECRET_TEXT, None, Exception(SECRET_TEXT)))
+    assert result["error_type"] == "schema"
+    assert stored == ["schema_error: IntegrityError"]

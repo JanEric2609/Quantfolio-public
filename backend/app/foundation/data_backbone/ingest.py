@@ -610,7 +610,7 @@ class DataIngester:
                 provider=provider,
                 capability="bar_prices",
                 ok=False,
-                message=f"schema_error: {e}",
+                message=f"schema_error: {type(e).__name__}",
             )
             return {
                 "success": False,
@@ -628,7 +628,7 @@ class DataIngester:
                 provider=provider,
                 capability="bar_prices",
                 ok=False,
-                message=str(e),
+                message=f"provider_error: {type(e).__name__}",
             )
             return {
                 "success": False,
