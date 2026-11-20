@@ -24,6 +24,8 @@ class Underlying:
     #: an Alpaca symbol for the US indices.
     proxy_isin: str | None = None
     alpaca_symbol: str | None = None
+    #: A single stock's ticker (earnings calendar, US headlines); ``None`` for an index or when unknown.
+    symbol: str | None = None
 
 
 ALIASES: dict[str, Underlying] = {
@@ -47,7 +49,8 @@ def resolve_underlying(db: Session | None, text: str, user_id: str | None = None
         known = next((u for u in ALIASES.values() if u.isin == key), None)
         if known:
             return known
-        return Underlying(key, key, "XNYS" if key.startswith("US") else "XETR", False)
+        return Underlying(key, key, "XNYS" if key.startswith("US") else "XETR", False,
+                          symbol=ticker_for_isin(db, key, user_id))
     candidates: dict[str, str] = {}
     if db is not None:
         from app.foundation.broker_instruments import isin_for_us_ticker
@@ -65,8 +68,30 @@ def resolve_underlying(db: Session | None, text: str, user_id: str | None = None
             candidates[us] = key
     if len(candidates) == 1:
         isin, name = next(iter(candidates.items()))
-        return Underlying(isin, name[:60], "XNYS" if isin.startswith("US") else "XETR", isin in LIQUID_ISINS)
+        return Underlying(isin, name[:60], "XNYS" if isin.startswith("US") else "XETR", isin in LIQUID_ISINS,
+                          symbol=key)
     raise UnderlyingUnknown(f"'{text}' is {'ambiguous' if candidates else 'unknown'}: send the ISIN instead.")
+
+
+def ticker_for_isin(db: Session | None, isin: str, user_id: str | None = None) -> str | None:
+    """A ticker for an ISIN the owner typed (the earnings guard needs one): the owner's own holding,
+    the stored index universe, then Trading 212's US list. ``None`` when none is known. A venue suffix
+    is kept (``SAP.DE``): stripping it could name an unrelated US ticker."""
+    if db is None:
+        return None
+    from app.foundation.broker_instruments import us_ticker_for_isin
+    from app.foundation.live_positions import combined_positions
+    from app.foundation.models.entities import IndexUniverseMember
+
+    if user_id:
+        for pos in combined_positions(db, user_id):
+            if pos.isin == isin and pos.ticker:
+                return pos.ticker.upper()
+    row = db.query(IndexUniverseMember.symbol).filter(IndexUniverseMember.isin == isin,
+                                                      IndexUniverseMember.symbol.isnot(None)).first()
+    if row and row[0]:
+        return row[0].upper()
+    return us_ticker_for_isin(db, isin)
 
 
 def daily_sigma(closes: Sequence[Decimal | float], window: int = 20) -> Decimal | None:

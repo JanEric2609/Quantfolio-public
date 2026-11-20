@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.foundation.desk_chain import verify_chain
+from app.foundation.desk_chain import verify_chain, verify_chain_cached
 from app.foundation.models.entities import DeskEvent, DeskPosition
 from app.foundation.scalable import market
 from app.foundation.scalable import service as scalable_service
@@ -17,7 +17,7 @@ from . import calendar as cal
 from . import cfd, prereg, service
 from .limits import LIMITS
 from .signals import owner_calls
-from .underlyings import ALIASES, Underlying
+from .underlyings import Underlying
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -47,7 +47,7 @@ def position_dict(p: DeskPosition) -> dict[str, Any]:
 def desk_status(db: Session, user_id: str) -> dict[str, Any]:
     now = datetime.now(UTC)
     state = service.build_state(db, user_id, now)
-    ok, bad = verify_chain(db)
+    ok, bad = verify_chain_cached(db)  # polled every 30 s: new rows only, a full pass every 10 minutes
     reg = prereg.registered_at(db)
     return {
         "mode": "paper", "banner": "Paper trading: no real orders are placed", "limits": LIMITS.as_json(),
@@ -107,6 +107,10 @@ class DeskActionError(Exception):
         self.detail = detail
 
 
+def _wall_clock() -> datetime:
+    return datetime.now(UTC)
+
+
 def _cli(db: Session):
     try:
         return scalable_service.make_cli(db)
@@ -123,7 +127,7 @@ def submit_idea(db: Session, user_id: str, text: str) -> dict[str, Any]:
     except owner_calls.IdeaParseError as exc:
         raise DeskActionError(422, str(exc)) from exc
     try:
-        outcome = owner_calls.start_idea(db, user_id, idea, _cli(db), datetime.now(UTC))
+        outcome = owner_calls.start_idea(db, user_id, idea, _cli(db), datetime.now(UTC), clock=_wall_clock)
     except market.WrapperOutdated as exc:
         raise DeskActionError(409, "wrapper_outdated: run infra/scalable/install.sh again") from exc
     except ScalableError as exc:
@@ -145,7 +149,7 @@ def take_proposal(db: Session, user_id: str, position_id: str, nonce: str) -> di
     position = db.get(DeskPosition, position_id)
     if position is None or position.user_id != user_id:
         raise DeskActionError(404, "Unknown proposal.")
-    underlying = next((u for u in ALIASES.values() if u.isin == position.underlying_isin), None)
+    underlying = service.underlying_of(position)
     try:
         result = service.take(db, position_id, nonce, _cli(db), datetime.now(UTC), underlying)
     except ScalableError as exc:
@@ -160,7 +164,7 @@ def close_position_api(db: Session, user_id: str, position_id: str) -> dict[str,
     position = db.get(DeskPosition, position_id)
     if position is None or position.user_id != user_id:
         raise DeskActionError(404, "Unknown position.")
-    underlying = next((u for u in ALIASES.values() if u.isin == position.underlying_isin), None)
+    underlying = service.underlying_of(position)
     try:
         ok = cfd.close_any(db, position, _cli(db), datetime.now(UTC), underlying)
     except ScalableError as exc:

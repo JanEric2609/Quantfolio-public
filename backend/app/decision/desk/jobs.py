@@ -47,7 +47,7 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
         underlyings: dict[str, Underlying] = {u.isin: u for u in ALIASES.values()}
         for p in db.query(DeskPosition).filter(DeskPosition.status == "open").all():
             underlyings.setdefault(p.underlying_isin, service.underlying_of(p))  # a US stock is XNYS
-        fired = index_momentum.fire_due_signals(db, owner.id, cli, now) if not service.is_halted(db) else []
+        # Stops, horizons and knock-outs first: they must not depend on the index rule's reads succeeding.
         expired = service.expire_proposals(db, now)
         closed = service.manage_open_positions(db, cli, now, underlyings)
         for position, reason in closed:
@@ -56,14 +56,23 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
         for position, reason in cfd.manage(db, cli, now, underlyings):
             outbox.append(cfd.close_message(position, reason))
             closed.append((position, reason))
+        opened: list[str] = []
+        errors: list[str] = []
+        fired = index_momentum.fire_due_signals(db, owner.id, cli, now, opened, errors) \
+            if not service.is_halted(db) else []
         seen = _news_check(db, cli, now, underlyings, outbox) if now.minute % 5 == 0 else 0
-        service.set_health(db, last_tick_at=now.isoformat(), wrapper_outdated=False, last_error=None,
+        # A read the index rule could not make (an expired session, the sync holding the lock) no longer
+        # fails the tick; it is still logged once per new code and shown as the desk's last error.
+        last_error = errors[-1] if errors else None
+        if last_error and service.health(db).get("last_error") != last_error:
+            append_event(db, "error", service.MODE, {"code": last_error}, now=now)
+        service.set_health(db, last_tick_at=now.isoformat(), wrapper_outdated=False, last_error=last_error,
                            macro_years=sorted(cal.MACRO_EVENTS_BY_YEAR))
         db.commit()
         if fired:
             # Built after the commit: the CFD line reads index history, whose cache write commits, and a
             # fill saved before a failed tick would never be announced (the signal counts as fired).
-            outbox = _announce_fills(db, now) + outbox
+            outbox = _announce_fills(db, now, opened) + outbox
         for text in outbox:
             telegram.alert(db, owner.id, text)
         return {"fired": fired, "expired": expired, "closed": len(closed), "news": seen}
@@ -79,8 +88,10 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
         return {"skipped": exc.code}
 
 
-def _announce_fills(db: Any, now: datetime) -> list[str]:
-    """Name exactly what the index rule bought this tick, and the manual CFD line (sent after the commit)."""
+def _announce_fills(db: Any, now: datetime, position_ids: list[str]) -> list[str]:
+    """Name exactly what the index rule bought this tick (*position_ids*, from ``fire_due_signals``), and
+    the manual CFD line; sent after the commit. By id, not by entry time: a second index firing a minute
+    later must not announce the first one's fills (and its "CFD: BUY") again."""
     from app.foundation.models.entities import DeskPosition
 
     from . import cfd, instrument
@@ -88,8 +99,10 @@ def _announce_fills(db: Any, now: datetime) -> list[str]:
 
     out: list[str] = []
     keys = {u.isin: k for k, u in ALIASES.items()}
-    rows = db.query(DeskPosition).filter(DeskPosition.signal == "index_momentum", DeskPosition.status == "open",
-                                         DeskPosition.entry_at >= now - timedelta(minutes=1)).all()
+    if not position_ids:
+        return out
+    rows = db.query(DeskPosition).filter(DeskPosition.id.in_(position_ids), DeskPosition.status == "open").all()
+    rows.sort(key=lambda p: position_ids.index(p.id))  # the order they were opened in
     for p in rows:
         if p.product_type == "cfd":
             key = keys.get(p.underlying_isin)

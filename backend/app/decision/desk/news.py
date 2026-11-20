@@ -32,23 +32,29 @@ def alpaca_for(db: Session) -> AlpacaProvider | None:
     return provider if provider.enabled else None
 
 
-def earnings_in_window(db: Session, symbol: str | None, start: date, end: date) -> bool:
-    """True when a known earnings date falls in [start, end]. Unknown (non-US, no key) is False."""
+def earnings_in_window(db: Session, symbol: str | None, start: date, end: date) -> bool | None:
+    """True when a known earnings date falls in [start, end], False when the calendar answers with a
+    date outside it or none, ``None`` when it cannot be read (no ticker, no key, a failed lookup).
+    The caller decides what unknown means: for a US stock it is not "no earnings"."""
     if not symbol:
-        return False
+        return None
     try:
         from app.foundation.providers.registry import build_provider_registry
 
         result = build_provider_registry(db).get_earnings_calendar(symbol)
     except (ValueError, KeyError, TypeError, OSError) as exc:
         logger.info("desk earnings lookup failed: %s", type(exc).__name__)
+        return None
+    if not isinstance(result, dict) or not result.get("ok", True):
+        return None
+    data = result.get("data")
+    nxt = data.get("next_earnings_date") if isinstance(data, dict) else None
+    if not nxt:
         return False
-    data = (result or {}).get("data") if isinstance(result, dict) else None
-    nxt = (data or {}).get("next_earnings_date") if isinstance(data, dict) else None
     try:
-        return bool(nxt) and start <= date.fromisoformat(str(nxt)) <= end
+        return start <= date.fromisoformat(str(nxt)) <= end
     except ValueError:
-        return False
+        return None
 
 
 def headlines(db: Session, cli: ScalableCli, underlying: Underlying, since: datetime,

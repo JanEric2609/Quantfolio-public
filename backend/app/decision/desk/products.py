@@ -1,6 +1,7 @@
 """Choosing the product (ADR 0027): search, local filters, quote each candidate, rank by spread."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -76,8 +77,10 @@ def spread_fraction(bid: Decimal, ask: Decimal) -> Decimal:
 # leverage-1 products whose 3 % minimum stop leaves a fraction of that exposure.
 def select_product(
     cli: ScalableCli, underlying_isin: str, direction: str, product_type: str, now: datetime, *,
-    sigma: Decimal | None, liquid: bool,
+    sigma: Decimal | None, liquid: bool, clock: Callable[[], datetime] | None = None,
 ) -> Selection:
+    """*clock*: when given, each quote's age is measured when that quote is read (an idea's twenty
+    sc calls take time; an age against the time before them reads too young)."""
     strategy = strategy_for(direction, product_type)
     today = now.astimezone(UTC).date()
     if product_type == "knockout":
@@ -104,7 +107,8 @@ def select_product(
         if quote is None:
             dropped.append({"isin": row.isin, "reason": "no_quote"})
             continue
-        age = (now - quote.ts_utc).total_seconds() if quote.ts_utc else float("inf")
+        read_at = clock() if clock else now
+        age = (read_at - quote.ts_utc).total_seconds() if quote.ts_utc else float("inf")
         spread = spread_fraction(quote.bid, quote.ask)
         if quote.outdated or age > LIMITS.max_quote_age_s:
             dropped.append({"isin": row.isin, "reason": "quote_stale"})

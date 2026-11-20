@@ -113,6 +113,11 @@ def max_exit_at(entry_at: datetime, *, days: int | None = None) -> datetime:
         counted += 1
 
 
+def window_start_at(d: date) -> datetime:
+    """The start of the desk's trading window on day *d* (Berlin)."""
+    return datetime.combine(d, time(LIMITS.window_start_hour, LIMITS.window_start_minute), tzinfo=BERLIN)
+
+
 def in_trading_window(now: datetime) -> bool:
     local = now.astimezone(BERLIN)
     if not is_trading_day(local.date(), "XETR"):

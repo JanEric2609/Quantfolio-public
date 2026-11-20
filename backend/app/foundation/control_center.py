@@ -146,7 +146,7 @@ def _desk_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
     from datetime import timedelta
     from zoneinfo import ZoneInfo
 
-    from app.foundation.desk_chain import verify_chain
+    from app.foundation.desk_chain import verify_chain_cached
     from app.foundation.models.entities import DeskEvent, DeskPosition
     from app.foundation.settings import get_setting_row
 
@@ -159,7 +159,7 @@ def _desk_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
                                        f"Reason: {halt.get('reason') or 'none given'}. Resume it on the Desk page.",
                                        href, "Open the desk"))
         if db.query(DeskEvent.id).first() is not None:
-            ok, bad = verify_chain(db)
+            ok, bad = verify_chain_cached(db)
             if not ok:
                 items.append(AttentionItem("desk-chain-broken", "error", "Desk ledger chain is broken",
                                            f"The hash chain fails at event {bad}: a row was changed or removed.",

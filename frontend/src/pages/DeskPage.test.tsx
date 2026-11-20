@@ -39,3 +39,24 @@ describe("DeskPage taps", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("DeskPage close", () => {
+  it("says 'Not closed' when the API answers closed=false, never 'Closed'", async () => {
+    const { vi } = await import("vitest");
+    const { fireEvent, waitFor } = await import("@testing-library/react");
+    const sonner = await import("sonner");
+    const api = await import("../lib/api");
+    const position = { id: "p1", short_id: "p1", status: "open", underlying: "DAX", direction: "long",
+      product_type: "knockout", units: 10, entry_price: "1", stop_price: "0.9" } as unknown as import("../lib/api").DeskPositionDto;
+    vi.spyOn(api, "getDeskPositions").mockResolvedValue([position]);
+    const close = vi.spyOn(api, "postDeskClose").mockResolvedValue({ closed: false });
+    const ok = vi.spyOn(sonner.toast, "success");
+    const err = vi.spyOn(sonner.toast, "error");
+    render(<MemoryRouter><DeskPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "Close" }));
+    await waitFor(() => expect(close).toHaveBeenCalledWith("p1"));
+    await waitFor(() => expect(err).toHaveBeenCalledWith(expect.stringMatching(/^Not closed/)));
+    expect(ok).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+});

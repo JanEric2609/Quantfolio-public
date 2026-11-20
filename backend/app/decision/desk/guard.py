@@ -38,6 +38,7 @@ class Proposal:
     days_to_expiry: int | None = None
     earnings_in_window: bool = False
     event_flag: bool = False  # the owner said "event": earnings are accepted
+    earnings_unknown: bool = False  # a US stock whose earnings calendar could not be read
     macro_events: tuple[tuple[str, str], ...] = field(default_factory=tuple)
     is_index: bool = False
 
@@ -71,6 +72,8 @@ def check_entry(state: DeskState, p: Proposal, now: datetime) -> Verdict:
         reasons.append("warrant_too_near_expiry")
     if p.earnings_in_window and not p.event_flag:
         reasons.append("event_block_earnings")
+    elif p.earnings_unknown and not p.event_flag:
+        reasons.append("earnings_unknown")
     if p.is_index and p.macro_events:
         reasons.append("event_block_macro")
     if not cal.underlying_session_open(p.exchange, now) and p.signal == "owner_call":
@@ -101,7 +104,7 @@ def check_exit(position: Any, bid: Decimal | None, now: datetime, *, halted: boo
 
     ``stop``: the bid is at or under the stop. ``horizon``: past the latest exit. ``friday_cutoff`` /
     ``holiday_cutoff``: 21:30 Berlin on the last trading day before a weekend or a holiday.
-    ``quote_lost``: no fresh quote for 10 minutes in trading hours (paper closes at the last bid).
+    ``quote_lost``: no fresh quote for 10 minutes inside today's trading window (paper closes at the last bid).
     ``owner_close`` is an explicit action, not a tick decision; so is ``knock_out`` (no bid and the
     underlying past the barrier: closed at 0 by the service, which can read the underlying).
     """
@@ -117,6 +120,11 @@ def check_exit(position: Any, bid: Decimal | None, now: datetime, *, halted: boo
         return cal.cutoff_kind(local.date())
     if bid is None and cal.in_trading_window(now):
         seen = _aware(position.last_quote_at or position.entry_at)
+        # Counted inside today's window only: an overnight position's last quote is from last night,
+        # and the issuers' first quotes of the morning may take a few minutes.
+        opened = cal.window_start_at(local.date())
+        if seen is not None and seen < opened:
+            seen = opened
         if seen is not None and now - seen >= timedelta(seconds=LIMITS.quote_lost_s):
             return "quote_lost"
     return None

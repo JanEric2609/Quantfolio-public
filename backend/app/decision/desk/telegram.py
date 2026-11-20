@@ -6,6 +6,7 @@ chat reaches these handlers. Resuming a halt is possible only from the app.
 """
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,6 +22,14 @@ from . import cfd, service
 from .guard import DeskState
 from .limits import LIMITS
 from .signals import owner_calls
+
+
+#: ``/close`` takes the 8-character id ``/desk`` shows (or more of the id): hex digits and dashes only.
+SHORT_ID = re.compile(r"[0-9a-f][0-9a-f-]{7,35}")
+
+
+def _wall_clock() -> datetime:
+    return datetime.now(UTC)
 
 
 def _is_admin(db: Session, account: Any) -> bool:
@@ -42,9 +51,9 @@ def handle_idea(db: Session, account: Any, chat_id: str, text: str) -> None:
         return _say(db, chat_id, str(exc))
     if service.is_halted(db):
         return _say(db, chat_id, "The desk is halted. Resume it in the app first.")
-    now = datetime.now(UTC)
     try:
-        outcome = owner_calls.start_idea(db, account.user_id, idea, scalable_service.make_cli(db), now)
+        outcome = owner_calls.start_idea(db, account.user_id, idea, scalable_service.make_cli(db),
+                                         datetime.now(UTC), clock=_wall_clock)
     except market.WrapperOutdated:
         return _say(db, chat_id, "The sc wrapper needs install.sh again before the desk can read quotes.")
     except ScalableError as exc:
@@ -64,11 +73,11 @@ def handle_take(db: Session, account: Any, chat_id: str, data: str) -> str:
     parts = data.split(":")
     if len(parts) != 4:
         return "Bad button."
-    cli = scalable_service.make_cli(db)
     position = db.get(DeskPosition, parts[2])
     # The position's own underlying (an index alias, or the stock on its own exchange: a US stock is XNYS).
     underlying = service.underlying_of(position) if position else None
     try:
+        cli = scalable_service.make_cli(db)  # no Scalable session is a ScalableError too
         result = service.take(db, parts[2], parts[3], cli, datetime.now(UTC), underlying)
     except ScalableError as exc:
         db.rollback()
@@ -86,7 +95,8 @@ def handle_desk(db: Session, account: Any, chat_id: str, text: str) -> None:
         return _say(db, chat_id, "The desk is for the admin account.")
     now = datetime.now(UTC)
     state: DeskState = service.build_state(db, account.user_id, now)
-    open_rows = db.query(DeskPosition).filter(DeskPosition.status == "open").all()
+    open_rows = db.query(DeskPosition).filter(DeskPosition.user_id == account.user_id,
+                                              DeskPosition.status == "open").all()
     lines = [
         "Desk (PAPER only, no real orders)" + (" - HALTED" if state.halted else ""),
         f"Live rehearsal today: entries {state.entries_today}/{LIMITS.max_entries_per_day}, "
@@ -111,9 +121,13 @@ def handle_close(db: Session, account: Any, chat_id: str, text: str) -> None:
     if not _is_admin(db, account):
         return _say(db, chat_id, "The desk is for the admin account.")
     parts = text.split()
-    if len(parts) != 2:
-        return _say(db, chat_id, "Usage: /close <id from /desk>")
-    matches = db.query(DeskPosition).filter(DeskPosition.id.like(parts[1] + "%"), DeskPosition.status == "open").all()
+    if len(parts) != 2 or not SHORT_ID.fullmatch(parts[1].lower()):
+        return _say(db, chat_id, "Usage: /close <8-character id from /desk>")
+    # A literal prefix (no LIKE wildcards) of the owner's own open positions.
+    prefix = parts[1].lower()
+    matches = [p for p in db.query(DeskPosition).filter(DeskPosition.user_id == account.user_id,
+                                                        DeskPosition.status == "open").all()
+               if p.id.lower().startswith(prefix)]
     if len(matches) != 1:
         return _say(db, chat_id, "No single open position with that id.")
     pos = matches[0]

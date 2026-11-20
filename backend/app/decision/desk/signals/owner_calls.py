@@ -1,6 +1,7 @@
-"""``/idea <TICKER|ISIN> <up|down> [today|1d|2d] [ko|warrant|both] [event]`` (ADR 0027)."""
+"""``/idea <TICKER|ISIN> <up|down> [today|1d] [ko|warrant|both] [event]`` (ADR 0027)."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -10,11 +11,12 @@ from sqlalchemy.orm import Session
 from app.foundation.scalable.cli import ScalableCli
 
 from .. import instrument, service
-from ..underlyings import ALIASES, ISIN_RE, Underlying, UnderlyingUnknown, resolve_underlying
+from ..underlyings import Underlying, UnderlyingUnknown, resolve_underlying
 
-HORIZON_DAYS = {"today": 1, "1d": 2, "2d": 2}
+#: ``1d`` holds to 21:30 on the next trading day: the desk's maximum (``max_holding_trading_days``).
+HORIZON_DAYS = {"today": 1, "1d": 2}
 PRODUCT_WORDS = {"ko": ("knockout",), "knockout": ("knockout",), "warrant": ("warrant",), "both": ("knockout", "warrant")}
-USAGE = "Usage: /idea <TICKER or ISIN> <up|down> [today|1d|2d] [ko|warrant|both] [event]"
+USAGE = "Usage: /idea <TICKER or ISIN> <up|down> [today|1d] [ko|warrant|both] [event]"
 
 
 class IdeaParseError(ValueError):
@@ -51,6 +53,9 @@ def parse_idea(text: str) -> Idea:
             seen.add("p")
         elif w == "event":
             event = True
+        elif w.endswith("d") and w[:-1].isdigit():
+            raise IdeaParseError(f"'{raw}' is longer than the desk holds: at most 1d (until 21:30 on the "
+                                 f"next trading day). {USAGE}")
         else:
             raise IdeaParseError(f"I don't know '{raw}'. {USAGE}")
     return Idea(target, "long" if side in ("up", "long") else "short", horizon, products, event)
@@ -63,13 +68,9 @@ class IdeaOutcome:
     error: str | None = None
 
 
-def _symbol(target: str) -> str | None:
-    """The ticker for the earnings lookup: only when the owner typed a ticker, not an ISIN or an index alias."""
-    key = target.upper()
-    return None if (key in ALIASES or ISIN_RE.fullmatch(key)) else key
-
-
-def start_idea(db: Session, user_id: str, idea: Idea, cli: ScalableCli, now: datetime) -> IdeaOutcome:
+def start_idea(db: Session, user_id: str, idea: Idea, cli: ScalableCli, now: datetime,
+               clock: Callable[[], datetime] | None = None) -> IdeaOutcome:
+    """*clock*: the wall clock for a live idea (see ``service.propose``); each proposal reads it again."""
     try:
         underlying = resolve_underlying(db, idea.target, user_id)
     except UnderlyingUnknown as exc:
@@ -77,8 +78,8 @@ def start_idea(db: Session, user_id: str, idea: Idea, cli: ScalableCli, now: dat
     results = [
         service.propose(
             db, user_id, signal="owner_call", underlying=underlying, direction=idea.direction, product_type=pt,
-            cli=cli, now=now, event_flag=idea.event, horizon_days=HORIZON_DAYS[idea.horizon],
-            symbol=_symbol(idea.target))
+            cli=cli, now=clock() if clock else now, event_flag=idea.event,
+            horizon_days=HORIZON_DAYS[idea.horizon], clock=clock)
         for pt in idea.product_types
     ]
     return IdeaOutcome(results, underlying)

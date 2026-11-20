@@ -290,22 +290,47 @@ def poll_feeds(db: Session, user_id: str, now: datetime | None = None,
     if ciks:
         try:
             filings = news_wire.parse_sec_current(fetch(news_wire.SEC_CURRENT_8K, ua))
+            # Filtered to the holdings before storing: the batch is often empty, so "first read" is the
+            # stored marker below, not "no sec_8k row yet" (a holding's first 8-K would be the baseline).
             batches.append(("sec_8k", [f for f in filings if f.cik in ciks]))
         except (ValueError, OSError, SyntaxError) as exc:
             logger.info("news wire: SEC feed failed: %s", type(exc).__name__)
 
+    read = _sources_read(db)
+
     async def run() -> None:
         for source, items in batches:
-            first = db.query(NewsWireItem).filter(NewsWireItem.source == source).first() is None
+            # The first successful read of a feed is its backlog: stored as baseline, nothing sent.
+            first = source not in read and db.query(NewsWireItem).filter(NewsWireItem.source == source).first() is None
             for item in items:
                 state = await ingest(db, user_id, item, watch, ciks, now=now, baseline=first)
                 if state != "duplicate":
                     counts[source] = counts.get(source, 0) + 1
 
     asyncio.run(run())
+    new = {source for source, _ in batches} - set(read)
+    if new:
+        _mark_sources_read(db, {**read, **{source: now.astimezone(UTC).isoformat() for source in new}})
     if now.astimezone(UTC).hour == 3 and now.minute == 0:
         prune(db, now)
     return counts
+
+
+#: Internal state: when each feed was first read successfully (no catalog entry; written only here).
+READ_KEY = "desk_news_wire_read_json"
+
+
+def _sources_read(db: Session) -> dict[str, str]:
+    from app.foundation.settings import get_setting_row
+
+    value = get_setting_row(db, READ_KEY)
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _mark_sources_read(db: Session, read: dict[str, str]) -> None:
+    from app.foundation.settings import upsert_public_settings
+
+    upsert_public_settings(db, {READ_KEY: read})  # commits
 
 
 def prune(db: Session, now: datetime) -> None:
@@ -345,7 +370,7 @@ def _set_stream_health(state: str, now: datetime | None = None) -> None:
 
     db = SessionLocal()
     try:
-        service.set_health(db, news_stream=state, news_stream_at=(now or datetime.now(UTC)).isoformat())
+        service.set_stream_health(db, state, now or datetime.now(UTC))
         db.commit()
     except SQLAlchemyError:
         db.rollback()

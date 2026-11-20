@@ -76,6 +76,13 @@ export function DeskPage() {
     }
   }
 
+  // The API answers 200 with closed=false when no fresh price could be read: that is not a close.
+  async function closeOrThrow(positionId: string) {
+    const r = await postDeskClose(positionId);
+    if (!r.closed) throw new Error("Not closed: no fresh price. Try again in a minute.");
+    return r;
+  }
+
   const open = positions.filter((p) => p.status === "open");
   const halted = status?.halt.halted ?? false;
 
@@ -133,7 +140,7 @@ export function DeskPage() {
       <Card>
         <CardHeader>
           <CardTitle>New idea</CardTitle>
-          <CardDescription>Ticker or ISIN, up or down, optional: today, 1d, 2d, ko, warrant, both, event. Confirm within 3 minutes.</CardDescription>
+          <CardDescription>Ticker or ISIN, up or down, optional: today or 1d (to the next trading day), ko, warrant, both, event. Confirm within 3 minutes.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <form className="flex flex-wrap gap-2" onSubmit={(e) => {
@@ -176,7 +183,7 @@ export function DeskPage() {
                     <div className="text-xs text-text-secondary">{productTerms(p)}</div></td>
                   <td>{p.product_type === "cfd" ? `${Number(p.quantity ?? 0).toFixed(4)} (${(Number(p.quantity ?? 0) * Number(p.entry_price ?? 0)).toFixed(0)} EUR)` : p.units}</td><td>{p.entry_price}</td><td>{p.stop_price}</td><td>{p.last_bid ?? "-"}</td>
                   <td>{p.last_quote_at ? `${Math.max(0, Math.round((Date.now() - new Date(p.last_quote_at).getTime()) / 1000))} s` : "-"}</td>
-                  <td><Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => postDeskClose(p.id), () => "Closed")}>Close</Button></td>
+                  <td><Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => closeOrThrow(p.id), () => "Closed")}>Close</Button></td>
                 </tr>))}
               </tbody>
             </table>

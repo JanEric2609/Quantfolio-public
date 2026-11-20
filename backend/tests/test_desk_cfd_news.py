@@ -87,7 +87,7 @@ def test_prereg_has_five_cells_and_a_pinned_hash():
 
 
 def _open_cfd(db, user, key="DAX", direction="long", now=NOW):
-    sc = FakeSc(standard_handler({DAX_ETF: ("100", "100")}, chart_pts=daily_points()))
+    sc = FakeSc(standard_handler({DAX_ETF: ("100", "100")}, chart_pts=daily_points(), now=now))
     exit_at = now + timedelta(minutes=27)
     p = cfd.open_signal(db, user.id, key, ALIASES[key], direction, exit_at, sc.cli(), now)
     db.commit()
@@ -137,8 +137,9 @@ def test_cfd_manage_closes_on_time_stop_and_halt_and_not_before():
     assert [(c.id, r) for c, r in closed] == [(p.id, "time")]
     assert "CLOSE your Germany 40 (GER40) position now (3 minutes before the close)" in cfd.close_message(p, "time")
     q, _ = _open_cfd(db, user, now=NOW + timedelta(hours=1))
-    low = FakeSc(standard_handler({DAX_ETF: ("90", "90")}, chart_pts=daily_points()))
-    assert [r for _, r in cfd.manage(db, low.cli(), NOW + timedelta(hours=1, minutes=5), {})] == ["stop"]
+    at = NOW + timedelta(hours=1, minutes=5)
+    low = FakeSc(standard_handler({DAX_ETF: ("90", "90")}, chart_pts=daily_points(), now=at))
+    assert [r for _, r in cfd.manage(db, low.cli(), at, {})] == ["stop"]
     h, _ = _open_cfd(db, user, now=NOW + timedelta(hours=2))
     service.set_halt(db, True, "test", "test")
     assert [r for _, r in cfd.manage(db, sc.cli(), NOW + timedelta(hours=2, minutes=1), {})] == ["halt"]
@@ -151,7 +152,9 @@ def test_scalable_exit_management_ignores_cfds_and_owner_close_uses_the_referenc
     assert service.manage_open_positions(db, sc.cli(), NOW + timedelta(hours=5), {}) == []
     assert p.status == "open"
     assert service.owner_close(db, p, sc.cli(), NOW, ALIASES["DAX"]) is False  # not its path
-    assert cfd.close_any(db, p, sc.cli(), NOW + timedelta(minutes=5), ALIASES["DAX"]) is True
+    at = NOW + timedelta(minutes=5)
+    fresh = FakeSc(standard_handler({DAX_ETF: ("100", "100")}, chart_pts=daily_points(), now=at))
+    assert cfd.close_any(db, p, fresh.cli(), at, ALIASES["DAX"]) is True
     assert p.exit_reason == "owner_close" and p.exit_price == Decimal("100")
 
 

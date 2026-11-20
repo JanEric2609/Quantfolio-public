@@ -12,18 +12,18 @@ user, no trade wrapper, no `trade` argv; the broker allow-lists stay read-only.
 |---|---|
 | `limits.py` | Frozen `LIMITS` (code constants, pinned by a test, part of the pre-registration) |
 | `calendar.py` | Trading days, 21:30 Berlin cut-offs, `MACRO_EVENTS_BY_YEAR` (maintain each year) |
-| `guard.py` | Pure `check_entry` / `check_exit`; live-only caps vs reasons that stop a paper entry too. The service adds two exits the pure check cannot see: `knock_out` (no bid and the underlying past the barrier: closed at 0) and refusing a proposal or fill whose latest exit has passed (`exit_time_passed`) |
+| `guard.py` | Pure `check_entry` / `check_exit`; live-only caps vs reasons that stop a paper entry too. `quote_lost` counts from the later of the last quote and today's window start (an overnight position is not lost at 08:05). A US stock whose earnings calendar cannot be read is `earnings_unknown` (the owner's `event` accepts it). The service adds two exits the pure check cannot see: `knock_out` and refusing a proposal or fill whose latest exit has passed (`exit_time_passed`) |
 | `sizing.py` | Units and stop from the 5 EUR budget (both fees included), against the whole pot: the pot already used is a live-only cap (`pot_exceeded`), paper is not shrunk by it |
 | `ledger.py` | Append-only hash-chained `desk_events` (verification lives in `foundation/desk_chain.py`) |
 | `products.py`, `underlyings.py` | Search, local filters, per-candidate quotes, ranking; the four index aliases |
 | `signals/` | `owner_calls` (`/idea`, tap) and `index_momentum` (frozen rule) |
-| `service.py` | Position lifecycle, halt flag (`desk_halt_json`), health (`desk_health_json`), live rehearsal |
+| `service.py` | Position lifecycle, halt flag (`desk_halt_json`), health (`desk_health_json`, written by the monitor only; the news stream's state is `desk_news_stream_json`), live rehearsal. `underlying_price` returns only a fresh price (not outdated, at most 60 s old), in the proxy's own units (DAX ETF, SPY, a US stock's EUR line). `knock_out`: the barrier is converted at the fill into those units with the listing's distance (`barrier_ref` in the fill event), and a knock-out with no bid closes at 0 when the reference's path since the fill (Alpaca 1-minute lows/highs, sc's 7-day chart) or its current price touched it |
 | `prereg.py`, `scoring.py` | The pre-registered spec/hash, per-cell bootstrap, placebo, Holm |
 | `news.py` | Guard and log only; news never opens or closes a position |
 | `newswire.py` | The news wire: Alpaca stream (worker thread), Fed/ECB, German ad-hoc (by ISIN), Handelsblatt, SEC 8-K (job `desk_news_wire`), local-model rating, Telegram alerts; alert-only |
 | `cfd.py` | The index rule as a manual Trading 212 CFD line, paper-scored in `index_momentum:cfd` |
 | `instrument.py` | Names the exact product: issuer name, ISIN/WKN, leverage and barrier or omega and strike, expiry, order line |
-| `telegram.py`, `jobs.py` | `/idea /desk /stop /close` + "Paper: take"; 1-minute monitor, hourly reconcile, 1-minute news wire |
+| `telegram.py`, `jobs.py` | `/idea /desk /stop /close` + "Paper: take"; 1-minute monitor (exits first, then the index rule; each index in its own savepoint, so one failed read rolls back only that index; fills announced by the ids opened this tick), hourly reconcile, 1-minute news wire (a feed's first successful read is stored as `desk_news_wire_read_json`; only that read is a silent baseline) |
 
 ## Public surface
 

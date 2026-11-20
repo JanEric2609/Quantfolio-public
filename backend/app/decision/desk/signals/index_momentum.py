@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import DeskEvent
 from app.foundation.scalable import market
-from app.foundation.scalable.cli import ScalableCli
+from app.foundation.scalable.cli import ScalableCli, ScalableError
 
 from .. import calendar as cal
 from .. import cfd, news, service
@@ -141,8 +141,15 @@ def _already_fired(db: Session, signal_key: str) -> bool:
     return False
 
 
-def fire_due_signals(db: Session, user_id: str, cli: ScalableCli, now: datetime) -> list[str]:
-    """Open this minute's paper positions (one per product type) for every index whose entry time has come."""
+def fire_due_signals(db: Session, user_id: str, cli: ScalableCli, now: datetime,
+                     opened: list[str] | None = None, errors: list[str] | None = None) -> list[str]:
+    """Open this minute's paper positions (one per product type) for every index whose entry time has come.
+
+    Each index runs in its own savepoint: a failed read (Alpaca, or any sc error such as the 6-hourly
+    sync holding the session lock) rolls back that index only, and is retried next minute inside the
+    fire window; on the window's last minute it is logged as a ``no_data`` day. An outdated wrapper is
+    not a per-index failure and propagates. *opened* collects the ids of the positions opened, so the
+    caller announces exactly this tick's fills; *errors* collects the failed reads' codes (health)."""
     fired: list[str] = []
     day = now.astimezone(UTC).date()
     for plan in plans_for_day(day) + plans_for_day(day - timedelta(days=1)):
@@ -151,28 +158,50 @@ def fire_due_signals(db: Session, user_id: str, cli: ScalableCli, now: datetime)
         key = f"{plan.key}:{plan.day.isoformat()}"
         if _already_fired(db, key):
             continue
-        skip = skip_reason(plan)
+        ids: list[str] = []
         try:
-            r1 = None if skip else compute_r1(db, cli, plan)
-        except DataUnavailable as exc:
+            with db.begin_nested():
+                did_fire = _fire_plan(db, user_id, cli, plan, key, now, ids)
+        except market.WrapperOutdated:
+            raise
+        except (DataUnavailable, ScalableError) as exc:
+            code = str(getattr(exc, "code", None) or type(exc).__name__)[:60]
+            if errors is not None:
+                errors.append(code)
             if now + timedelta(minutes=1) < plan.enter_at + FIRE_WINDOW:
-                logger.info("desk index rule %s: price read failed (%s), retrying next minute", key, exc)
+                logger.info("desk index rule %s: read failed (%s), retrying next minute", key, code)
                 continue
-            r1 = None  # the window's last minute: logged as a no-data day
-        if skip or r1 is None or r1 == 0:
-            reason = skip or ("no_data" if r1 is None else "r1_zero")
-            append_event(db, "signal", service.MODE, {"key": key, "fired": False, "reason": reason}, now=now)
+            append_event(db, "signal", service.MODE, {"key": key, "fired": False, "reason": "no_data",
+                                                      "error": code}, now=now)
             continue
-        direction = "long" if r1 > 0 else "short"
-        append_event(db, "signal", service.MODE,
-                     {"key": key, "fired": True, "r1": str(r1), "direction": direction}, now=now)
-        for product_type in PRODUCT_TYPES:
-            result = service.propose(
-                db, user_id, signal="index_momentum", underlying=plan.underlying, direction=direction,
-                product_type=product_type, cli=cli, now=now, max_exit_at=plan.exit_at)
-            if result.position is not None and result.position.status == "proposed":
-                service.open_directly(db, result.position, cli, now, plan.underlying)
-        # The same signal as a manual Trading 212 CFD (cell index_momentum:cfd, paper-scored).
-        cfd.open_signal(db, user_id, plan.key, plan.underlying, direction, plan.exit_at, cli, now)
-        fired.append(key)
+        if did_fire:
+            fired.append(key)
+            if opened is not None:
+                opened.extend(ids)
     return fired
+
+
+def _fire_plan(db: Session, user_id: str, cli: ScalableCli, plan: Plan, key: str, now: datetime,
+               ids: list[str]) -> bool:
+    """One index's signal: logged as skipped, or fired with its knock-out, warrant and CFD."""
+    skip = skip_reason(plan)
+    r1 = None if skip else compute_r1(db, cli, plan)
+    if skip or r1 is None or r1 == 0:
+        reason = skip or ("no_data" if r1 is None else "r1_zero")
+        append_event(db, "signal", service.MODE, {"key": key, "fired": False, "reason": reason}, now=now)
+        return False
+    direction = "long" if r1 > 0 else "short"
+    append_event(db, "signal", service.MODE,
+                 {"key": key, "fired": True, "r1": str(r1), "direction": direction}, now=now)
+    for product_type in PRODUCT_TYPES:
+        result = service.propose(
+            db, user_id, signal="index_momentum", underlying=plan.underlying, direction=direction,
+            product_type=product_type, cli=cli, now=now, max_exit_at=plan.exit_at)
+        if result.position is not None and result.position.status == "proposed":
+            if service.open_directly(db, result.position, cli, now, plan.underlying):
+                ids.append(result.position.id)
+    # The same signal as a manual Trading 212 CFD (cell index_momentum:cfd, paper-scored).
+    position = cfd.open_signal(db, user_id, plan.key, plan.underlying, direction, plan.exit_at, cli, now)
+    if position is not None:
+        ids.append(position.id)
+    return True

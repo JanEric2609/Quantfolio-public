@@ -333,11 +333,11 @@ def test_warrant_direction_mapping_and_delta_band():
 
 
 def test_parse_idea():
-    i = owner_calls.parse_idea("/idea DAX up 2d ko")
-    assert (i.target, i.direction, i.horizon, i.product_types, i.event) == ("DAX", "long", "2d", ("knockout",), False)
+    i = owner_calls.parse_idea("/idea DAX up 1d ko")
+    assert (i.target, i.direction, i.horizon, i.product_types, i.event) == ("DAX", "long", "1d", ("knockout",), False)
     j = owner_calls.parse_idea("/idea US0000000001 down event")
     assert j.direction == "short" and j.product_types == ("knockout", "warrant") and j.event
-    for bad in ("/idea", "/idea DAX", "/idea DAX sideways", "/idea DAX up banana"):
+    for bad in ("/idea", "/idea DAX", "/idea DAX sideways", "/idea DAX up banana", "/idea DAX up 2d"):
         with pytest.raises(owner_calls.IdeaParseError):
             owner_calls.parse_idea(bad)
 

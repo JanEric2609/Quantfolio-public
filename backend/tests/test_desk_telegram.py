@@ -153,6 +153,8 @@ def test_close_by_short_id(monkeypatch, bot):
     db.refresh(pos)
     assert pos.status == "closed" and pos.exit_reason == "owner_close"
     telegram_updates.handle_update(db, _msg("555", "/close zzzz"))
+    assert "Usage" in bot.messages[-1][1]
+    telegram_updates.handle_update(db, _msg("555", "/close 0123abcd"))
     assert "No single open position" in bot.messages[-1][1]
 
 

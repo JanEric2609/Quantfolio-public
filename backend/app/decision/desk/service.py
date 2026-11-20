@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -34,6 +35,9 @@ logger = logging.getLogger(__name__)
 
 HALT_KEY = "desk_halt_json"
 HEALTH_KEY = "desk_health_json"
+#: The news stream's own state: written by the stream thread only, so it never races the monitor's
+#: read-modify-write of ``HEALTH_KEY`` (two writers on one JSON row lose each other's fields).
+STREAM_KEY = "desk_news_stream_json"
 MODE = "paper"
 
 
@@ -57,12 +61,24 @@ def set_halt(db: Session, halted: bool, reason: str, by: str, *, now: datetime |
 
 
 def health(db: Session) -> dict[str, Any]:
+    """The monitor's health fields plus the news stream's (two keys, one writer each)."""
     value = get_setting_row(db, HEALTH_KEY)
-    return value if isinstance(value, dict) else {}
+    out = dict(value) if isinstance(value, dict) else {}
+    stream = get_setting_row(db, STREAM_KEY)
+    if isinstance(stream, dict):
+        out.update(stream)
+    return out
 
 
 def set_health(db: Session, **fields: Any) -> None:
-    upsert_public_settings(db, {HEALTH_KEY: {**health(db), **fields}})
+    """Merge *fields* into the monitor's key. Only the 1-minute monitor tick calls this."""
+    value = get_setting_row(db, HEALTH_KEY)
+    upsert_public_settings(db, {HEALTH_KEY: {**(value if isinstance(value, dict) else {}), **fields}})
+
+
+def set_stream_health(db: Session, state: str, at: datetime) -> None:
+    """The news stream thread's state, in its own key."""
+    upsert_public_settings(db, {STREAM_KEY: {"news_stream": state, "news_stream_at": at.isoformat()}})
 
 
 # -- live rehearsal: what the live limits would have said ---------------------------
@@ -110,18 +126,36 @@ def underlying_of(position: DeskPosition, known: Underlying | None = None) -> Un
                       bool(position.liquid))
 
 
-def underlying_price(db: Session, cli: ScalableCli, u: Underlying) -> Decimal | None:
-    """A reference price for the underlying: Alpaca for the US indices, an ETF proxy or the line itself."""
+#: A reference price older than this is not used (no CFD fill, stop or exit at it, no knock-out read).
+REF_MAX_AGE_S = LIMITS.max_quote_age_s
+
+
+def underlying_price(db: Session, cli: ScalableCli, u: Underlying, *, now: datetime) -> Decimal | None:
+    """A fresh reference price for the underlying, or ``None``: Alpaca for the US indices, else an ETF
+    proxy or the line itself on sc. An outdated quote, or one older than ``REF_MAX_AGE_S`` at *now*, is
+    ``None``: a frozen price must not move stops, fill a CFD or reset the quote-lost clock.
+
+    The price is in the proxy's own units (the DAX ETF in EUR, SPY in USD, a US stock's gettex line in
+    EUR), never index points: compare it only with levels converted by :func:`barrier_in_reference`."""
     try:
         if u.alpaca_symbol:
             provider = news.alpaca_for(db)
             if provider is None:
                 return None
             quote = provider.get_quote(u.alpaca_symbol)
-            data = quote.get("data") if isinstance(quote, dict) else None
-            return Decimal(str(data["close"])) if data and data.get("close") else None
+            if not isinstance(quote, dict):
+                return None
+            data = quote.get("data")
+            as_of = (quote.get("quality") or {}).get("as_of")
+            if not data or not data.get("close") or not isinstance(as_of, datetime):
+                return None
+            if _quote_age(now, _aware(as_of)) > REF_MAX_AGE_S:
+                return None
+            return Decimal(str(data["close"]))
         q = market.get_quote(cli, u.proxy_isin or u.isin)
-        return q.mid if q else None
+        if q is None or q.outdated or _quote_age(now, q.ts_utc) > REF_MAX_AGE_S:
+            return None
+        return q.mid
     except (ScalableError, ValueError, KeyError, TypeError, ArithmeticError, httpx.HTTPError) as exc:
         logger.info("desk underlying read failed: %s", type(exc).__name__)
         return None
@@ -168,14 +202,24 @@ def propose(
     db: Session, user_id: str, *, signal: str, underlying: Underlying, direction: str, product_type: str,
     cli: ScalableCli, now: datetime, event_flag: bool = False, horizon_days: int = 1,
     max_exit_at: datetime | None = None, symbol: str | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> ProposalResult:
-    """Pick a product, size it, run the guard and write the ledger. No fill happens here."""
+    """Pick a product, size it, run the guard and write the ledger. No fill happens here.
+
+    *symbol* (earnings calendar, US headlines) defaults to the underlying's own ticker, if known.
+
+    *clock* (the owner's ideas: the wall clock) re-reads the time after the market reads, so quote ages
+    are measured when the quotes are in and the 180 s tap window starts when the proposal is ready, not
+    before twenty sc calls. Without it, *now* is used throughout (the index rule, tests)."""
+    symbol = symbol or underlying.symbol
     sigma = underlying_sigma(db, cli, underlying)
     base = {"signal": signal, "underlying": underlying.isin, "direction": direction, "product_type": product_type}
     if sigma is None or sigma <= 0:
         append_event(db, "guard_verdict", MODE, {**base, "ok": False, "reasons": ["no_volatility"]}, now=now)
         return ProposalResult(None, "no_volatility")
-    selection = select_product(cli, underlying.isin, direction, product_type, now, sigma=sigma, liquid=underlying.liquid)
+    selection = select_product(cli, underlying.isin, direction, product_type, now, sigma=sigma,
+                               liquid=underlying.liquid, clock=clock)
+    now = clock() if clock else now
     append_event(db, "candidates", MODE, {
         **base, "searched": selection.searched, "sigma": str(sigma),
         "candidates": [c.as_json() for c in selection.candidates], "dropped": selection.dropped[:50]}, now=now)
@@ -192,14 +236,18 @@ def propose(
     state = build_state(db, user_id, now)
     # Paper is sized against the whole pot: the pot left over is a live-only cap (``pot_exceeded``).
     sizing = size_position(chosen.ask, chosen.leverage_or_omega, sigma, LIMITS.pot)
-    earnings = news.earnings_in_window(db, symbol, now.date(), window_end.date())
+    earnings_known = news.earnings_in_window(db, symbol, now.date(), window_end.date())
+    earnings = bool(earnings_known)
+    # A US stock whose earnings calendar cannot be read is not "no earnings" (``earnings_unknown``; the
+    # owner's "event" accepts it). Other listings are not covered by the calendar (US only).
+    earnings_unknown = earnings_known is None and not underlying.is_index and underlying.exchange == "XNYS"
     macro = tuple(cal.macro_events_between(now.astimezone(cal.BERLIN).date(), window_end.date())) \
         if underlying.is_index else ()
     proposal = Proposal(
         signal=signal, product_type=product_type, units=sizing.units, ask=chosen.ask, notional=sizing.notional,
         worst_case_loss=sizing.worst_case_loss, spread_pct=chosen.spread_pct, liquid=underlying.liquid,
         quote_age_s=chosen.quote_age_s, exchange=underlying.exchange, days_to_expiry=chosen.days_to_expiry,
-        earnings_in_window=earnings, event_flag=event_flag, macro_events=macro, is_index=underlying.is_index)
+        earnings_in_window=earnings, earnings_unknown=earnings_unknown, event_flag=event_flag, macro_events=macro, is_index=underlying.is_index)
     verdict = check_entry(state, proposal, now)
     append_event(db, "guard_verdict", MODE, {
         **base, "isin": chosen.isin, "ok": verdict.ok, "paper_ok": verdict.paper_ok,
@@ -222,9 +270,10 @@ def propose(
         return ProposalResult(position, ",".join(verdict.paper_reasons))
     nonce = secrets.token_urlsafe(8)
     headlines = news.headlines(db, cli, underlying, now - timedelta(hours=24), symbol)
+    now = clock() if clock else now  # the tap window starts when the proposal goes out
     append_event(db, "proposal", MODE, {
         **_proposal_payload(position, chosen, sizing, verdict), "nonce": nonce, "proposed_at": now.isoformat(),
-        "news_seen": [h["title"] for h in headlines[:5]], "earnings_in_window": earnings}, position.id, now=now)
+        "news_seen": [h["title"] for h in headlines[:5]], "earnings_in_window": "unknown" if earnings_known is None else earnings}, position.id, now=now)
     return ProposalResult(position, None, nonce, selection.searched, [h["title"] for h in headlines[:3]])
 
 
@@ -232,6 +281,7 @@ def _proposal_payload(position: DeskPosition, c: Candidate, sizing, verdict: Ver
     return {
         "isin": c.isin, "wkn": c.wkn, "name": c.name, "issuer": c.issuer, "product_type": c.product_type,
         "barrier_or_strike": None if c.barrier_or_strike is None else str(c.barrier_or_strike),
+        "barrier_distance": None if c.barrier_distance is None else str(c.barrier_distance),
         "expiry": c.expiry.isoformat() if c.expiry else None, "units": sizing.units,
         "ask": str(c.ask), "bid": str(c.bid), "spread_pct": str(c.spread_pct), "stop": str(sizing.stop_price),
         "stop_fraction": str(sizing.stop_fraction), "notional": str(sizing.notional),
@@ -357,10 +407,13 @@ def open_position(db: Session, position: DeskPosition, quote: market.Quote, now:
     if position.max_exit_at is None:
         position.max_exit_at = cal.max_exit_at(now)
     if underlying is not None and cli is not None:
-        position.underlying_entry = underlying_price(db, cli, underlying)
+        position.underlying_entry = underlying_price(db, cli, underlying, now=now)
+    barrier_ref = barrier_in_reference(position, (_latest_proposal(db, position.id) or {}).get("barrier_distance"))
     append_event(db, "fill", MODE, {
         "price": str(quote.ask), "bid": str(quote.bid), "units": units, "fee": str(LIMITS.fee_per_order),
-        "would_take_live": verdict.ok, "live_reasons": list(verdict.reasons)}, position.id, now=now)
+        "would_take_live": verdict.ok, "live_reasons": list(verdict.reasons),
+        "underlying_entry": None if position.underlying_entry is None else str(position.underlying_entry),
+        "barrier_ref": None if barrier_ref is None else str(barrier_ref)}, position.id, now=now)
     append_event(db, "stop_set", MODE, {"stop": str(stop), "simulated": True,
                                         "max_exit_at": position.max_exit_at.isoformat()}, position.id, now=now)
     return ()
@@ -428,7 +481,7 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
             p.last_bid, p.last_quote_at = bid, now.astimezone(UTC)
         u = underlying_of(p, underlyings.get(p.underlying_isin))
         if not bid:  # no quote, or a zero bid: a knock-out past its barrier is worth nothing
-            level = _knocked_out_at(db, cli, p, u)
+            level = _knocked_out_at(db, cli, p, u, now)
             if level is not None:
                 close_position(db, p, Decimal(0), "knock_out", now, level)
                 closed.append((p, "knock_out"))
@@ -439,24 +492,80 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
         exit_bid = bid if bid is not None else Decimal(p.last_bid or 0)
         if exit_bid <= 0:
             continue
-        close_position(db, p, exit_bid, reason, now, underlying_price(db, cli, u))
+        close_position(db, p, exit_bid, reason, now, underlying_price(db, cli, u, now=now))
         closed.append((p, reason))
     return closed
 
 
-def _knocked_out_at(db: Session, cli: ScalableCli, p: DeskPosition, u: Underlying) -> Decimal | None:
-    """The underlying's level when a knock-out's barrier has been crossed, else ``None``.
+def barrier_in_reference(position: DeskPosition, distance: Any) -> Decimal | None:
+    """The knock-out barrier in the reference price's own units, or ``None``.
+
+    The issuer's barrier is in the underlying's points and currency (DAX 19,000 points, a US stock in
+    USD); the reference the desk can read is a proxy (the DAX ETF at 200 EUR, SPY, a US stock's EUR line).
+    The listing's distance to the barrier is a fraction of the underlying's level, so the same fraction
+    of the proxy's price at the fill is the barrier in the proxy's units. What it leaves out: the
+    proxy's tracking drift and, for a US stock's EUR line, the EUR/USD move since the fill (a two-day
+    hold: tenths of a percent against a barrier at least 3 daily sigmas away)."""
+    if position.product_type != "knockout" or distance in (None, "") or not position.underlying_entry:
+        return None
+    try:
+        d = abs(Decimal(str(distance)))
+    except ArithmeticError:
+        return None
+    if not (0 < d < 1):
+        return None
+    entry = Decimal(position.underlying_entry)
+    return (entry * (1 - d) if position.direction == "long" else entry * (1 + d)).quantize(Decimal("0.000001"))
+
+
+def _barrier_ref_of(db: Session, p: DeskPosition) -> Decimal | None:
+    fills = events_for(db, p.id, "fill")
+    raw = json.loads(fills[-1].payload).get("barrier_ref") if fills else None
+    return Decimal(raw) if raw else None
+
+
+def reference_path(db: Session, cli: ScalableCli, u: Underlying, since: datetime, now: datetime) -> list[Decimal]:
+    """The reference's lows and highs since *since*: Alpaca 1-minute bars for the US indices (low and
+    high of each bar), else sc's 7-day chart of the proxy (one mid per point). Empty when unreadable."""
+    try:
+        if u.alpaca_symbol:
+            provider = news.alpaca_for(db)
+            if provider is None:
+                return []
+            out: list[Decimal] = []
+            for bar in provider.get_intraday_bars(u.alpaca_symbol, "1Min", since, now):
+                out += [Decimal(v) for v in (bar.get("l"), bar.get("h")) if v is not None]
+            return out
+        return [mid for ts, mid in market.get_chart(cli, u.proxy_isin or u.isin, "7d") if since <= ts <= now]
+    except (ScalableError, ValueError, KeyError, TypeError, ArithmeticError, httpx.HTTPError) as exc:
+        logger.info("desk underlying path read failed: %s", type(exc).__name__)
+        return []
+
+
+def _knocked_out_at(db: Session, cli: ScalableCli, p: DeskPosition, u: Underlying, now: datetime) -> Decimal | None:
+    """The reference level that crossed the knock-out barrier since the fill, else ``None``.
 
     A knocked-out product has no bid; closing it at its last good bid would score a -100 % trade as a
-    small loss. Unknown barrier or price: ``None`` (the quote-lost rule still applies)."""
-    if p.product_type != "knockout" or p.barrier_or_strike is None:
+    small loss. Knock-out depends on the path: a touch counts even when the level has recovered, so the
+    reference's lows (long) or highs (short) since the fill are read, plus the current price. Both sides
+    are in the reference's units (:func:`barrier_in_reference`), never index points against an ETF
+    price. Unknown barrier or no readable price: ``None`` (the quote-lost rule still applies)."""
+    if p.product_type != "knockout":
         return None
-    level = underlying_price(db, cli, u)
-    if level is None or level <= 0:
+    barrier = _barrier_ref_of(db, p)
+    entry_at = _aware(p.entry_at)
+    if barrier is None or entry_at is None:
         return None
-    barrier = Decimal(p.barrier_or_strike)
-    crossed = level <= barrier if p.direction == "long" else level >= barrier
-    return level if crossed else None
+    levels = reference_path(db, cli, u, entry_at, now)
+    current = underlying_price(db, cli, u, now=now)
+    if current is not None:
+        levels.append(current)
+    levels = [v for v in levels if v > 0]
+    if not levels:
+        return None
+    worst = min(levels) if p.direction == "long" else max(levels)
+    crossed = worst <= barrier if p.direction == "long" else worst >= barrier
+    return worst if crossed else None
 
 
 def owner_close(db: Session, position: DeskPosition, cli: ScalableCli, now: datetime,
@@ -469,10 +578,10 @@ def owner_close(db: Session, position: DeskPosition, cli: ScalableCli, now: date
     u = underlying_of(position, underlying)
     fresh = quote is not None and not quote.outdated and _quote_age(now, quote.ts_utc) <= LIMITS.max_quote_age_s
     if not (fresh and quote and quote.bid > 0):
-        level = _knocked_out_at(db, cli, position, u)
+        level = _knocked_out_at(db, cli, position, u, now)
         if level is not None:
             close_position(db, position, Decimal(0), "knock_out", now, level)
             return True
         return False  # no fresh quote: the paper close would be at a stale price
-    close_position(db, position, quote.bid, "owner_close", now, underlying_price(db, cli, u))
+    close_position(db, position, quote.bid, "owner_close", now, underlying_price(db, cli, u, now=now))
     return True

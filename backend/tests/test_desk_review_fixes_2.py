@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.decision.desk import jobs, news, newswire, service, telegram
+from app.decision.desk.ledger import append_event
 from app.decision.desk.signals import owner_calls
 from app.decision.desk.underlyings import Underlying
 from app.foundation import telegram_updates
@@ -48,6 +49,7 @@ def _propose_us(db, user, now):
 
 
 def _open_ko(db, user, *, barrier="90", direction="long"):
+    """An open knock-out whose barrier, in the reference price's units, is *barrier* (the fill event)."""
     p = DeskPosition(user_id=user.id, mode=service.MODE, signal="owner_call", cell="owner_call:knockout",
                      product_type="knockout", direction=direction, isin=KO, underlying_isin=US_STOCK.isin,
                      underlying_label="Fake Corp", status="open", liquid=True, units=10, entry_price=Decimal("1.00"),
@@ -56,6 +58,8 @@ def _open_ko(db, user, *, barrier="90", direction="long"):
                      last_quote_at=(NOW - timedelta(minutes=1)).astimezone(UTC),
                      max_exit_at=(NOW + timedelta(hours=8)).astimezone(UTC))
     db.add(p)
+    db.flush()
+    append_event(db, "fill", service.MODE, {"barrier_ref": barrier}, p.id, now=NOW)
     db.commit()
     return p
 
@@ -167,7 +171,7 @@ def test_fill_messages_are_built_after_the_commit(monkeypatch):
     make_user(db)
     log: list[str] = []
     monkeypatch.setattr("app.decision.desk.signals.index_momentum.fire_due_signals", lambda *a, **k: ["DAX"])
-    monkeypatch.setattr(jobs, "_announce_fills", lambda db_, now: log.append("announce") or ["CFD: BUY"])
+    monkeypatch.setattr(jobs, "_announce_fills", lambda db_, now, ids: log.append("announce") or ["CFD: BUY"])
     monkeypatch.setattr("app.decision.desk.telegram.alert", lambda db_, uid, text: log.append(text))
     real_commit = db.commit
     monkeypatch.setattr(db, "commit", lambda: (log.append("commit"), real_commit())[1])

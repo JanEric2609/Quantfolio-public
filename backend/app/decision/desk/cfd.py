@@ -97,7 +97,7 @@ def open_signal(db: Session, user_id: str, key: str, underlying: Underlying, dir
                 exit_at: datetime, cli: ScalableCli, now: datetime) -> DeskPosition | None:
     """Open the paper CFD at the reference price; the caller sends :func:`open_message`."""
     base = {"signal": "index_momentum", "underlying": underlying.isin, "direction": direction, "product_type": "cfd"}
-    ref = service.underlying_price(db, cli, underlying)
+    ref = service.underlying_price(db, cli, underlying, now=now)
     sigma = service.underlying_sigma(db, cli, underlying)
     if ref is None or ref <= 0 or sigma is None or sigma <= 0:
         append_event(db, "guard_verdict", service.MODE, {**base, "ok": False, "reasons": ["no_reference_price"]},
@@ -167,12 +167,12 @@ def close(db: Session, position: DeskPosition, price: Decimal, reason: str, now:
 
 def owner_close(db: Session, position: DeskPosition, cli: ScalableCli, now: datetime,
                 underlying: Underlying | None = None) -> bool:
-    """``/close`` or the app's Close on a paper CFD: exit at the reference price now."""
+    """``/close`` or the app's Close on a paper CFD: exit at a fresh reference price now. Without one
+    nothing is closed (``False``): the last stored price may be minutes old."""
     if position.status != "open" or position.product_type != "cfd":
         return False
-    price = service.underlying_price(db, cli, service.underlying_of(position, underlying)) or Decimal(
-        position.last_bid or 0)
-    if price <= 0:
+    price = service.underlying_price(db, cli, service.underlying_of(position, underlying), now=now)
+    if price is None or price <= 0:
         return False
     close(db, position, price, "owner_close", now)
     return True
@@ -199,7 +199,9 @@ def manage(db: Session, cli: ScalableCli, now: datetime, underlyings: dict[str, 
     rows = db.query(DeskPosition).filter(DeskPosition.status == "open", DeskPosition.mode == service.MODE,
                                          DeskPosition.product_type == "cfd").all()
     for p in rows:
-        price = service.underlying_price(db, cli, service.underlying_of(p, underlyings.get(p.underlying_isin)))
+        # Only a fresh price moves the stop and resets the quote-lost clock (a frozen proxy quote is None).
+        price = service.underlying_price(db, cli, service.underlying_of(p, underlyings.get(p.underlying_isin)),
+                                         now=now)
         if price is not None and price > 0:
             p.last_bid, p.last_quote_at = price, now.astimezone(UTC)
         exit_at = service._aware(p.max_exit_at)
