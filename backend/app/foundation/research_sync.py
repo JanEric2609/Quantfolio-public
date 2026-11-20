@@ -86,9 +86,9 @@ def sync_to_obsidian(db: Session, user_id: str) -> dict[str, Any]:
         }
 
     settings = get_public_settings(db)
-    secret_key = "obsidian"
+    service = "obsidian"
     from app.foundation.settings import get_secret
-    secret = get_secret(db, secret_key)
+    secret = get_secret(db, service)
     url = settings.get("obsidian_rest_url", "http://127.0.0.1:27123").rstrip("/")
 
     headers = _headers(secret)

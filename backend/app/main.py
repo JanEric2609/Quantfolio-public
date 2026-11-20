@@ -48,9 +48,8 @@ def _startup_security_checks(settings) -> None:
             # A warning, not a refusal: an existing deployment must not stop
             # booting on upgrade. Generate one with `openssl rand -hex 32`.
             logger.warning(
-                "JWT_SECRET is shorter than %d characters; sessions signed with it are brute-forceable. "
+                "JWT_SECRET is shorter than 32 characters; sessions signed with it are brute-forceable. "
                 "Replace it with `openssl rand -hex 32` (this signs everyone out).",
-                _MIN_JWT_SECRET_LENGTH,
             )
         if not settings.encryption_key:
             raise RuntimeError(

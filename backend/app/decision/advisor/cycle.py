@@ -690,7 +690,7 @@ def _execute_planned(
         logger.warning(
             "advisor cycle: trade %s %s rejected: %s", planned.side, planned.decision.ticker, exc
         )
-        return None, f"{planned.side} rejected: {exc}"
+        return None, f"{planned.side} rejected: not enough cash or holdings"
 
 
 def _record_cycle(
