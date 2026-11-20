@@ -1,0 +1,83 @@
+[Unit]
+Description=QuantFolio llama.cpp Server (Qwen3.5-9B-UD-Q4_K_XL, hybrid DeltaNet, full GPU offload)
+Documentation=file:///opt/quantfolio/infra/proxmox/qwen35-9b-notes.md
+After=network.target
+
+[Service]
+Type=simple
+User=quantfolio
+Group=quantfolio
+WorkingDirectory=/var/lib/quantfolio
+
+# Settings for this unit only (optional file, mode 0600, root- or quantfolio-owned):
+#   LLAMA_API_KEY     Bearer key llama-server demands (its --api-key; llama.cpp reads this
+#                     variable itself, so the key never shows up in `ps`). Use the same value
+#                     as LLM_API_KEY in the app LXC's /opt/quantfolio/.env (or as the Local LLM
+#                     credential in Control Center). Generate: `openssl rand -hex 32`.
+#   LLAMA_BIND_HOST   Address to listen on. 0.0.0.0 keeps the old behaviour; set the LLM LXC's
+#                     LAN address (10.0.0.22) so the model is not reachable on other
+#                     interfaces. The app LXC must still be able to reach it.
+# The app's /opt/quantfolio/.env (JWT secret, database URL, provider keys) is no longer loaded
+# here: the server needs none of it.
+EnvironmentFile=-/etc/quantfolio/llama.env
+Environment=LLAMA_BIND_HOST=0.0.0.0
+Environment=PATH=/opt/llama.cpp:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# GPU gate: wait up to 60s for the GPU, then fail loudly instead of silently
+# running CPU-only. (2026-06-19 incident: CUDA init failed at container boot,
+# llama-server degraded to CPU and 175 tokens took 36 minutes — every client
+# timed out, so the app only ever saw empty responses.)
+# Runs as root ("+") so nvidia-smi can trigger device node creation.
+ExecStartPre=+/bin/sh -c 'i=0; while [ $i -lt 30 ]; do nvidia-smi >/dev/null 2>&1 && exit 0; i=$((i+1)); sleep 2; done; echo "GPU not available - refusing CPU-only start" >&2; exit 1'
+
+# Say so in the journal when the server will accept unauthenticated requests. Not fatal, so an
+# update does not take the LLM down before the key has been set; $$ keeps systemd from expanding it.
+ExecStartPre=/bin/sh -c 'test -n "$$LLAMA_API_KEY" || echo "WARNING: LLAMA_API_KEY is not set - llama-server will answer unauthenticated requests on ${LLAMA_BIND_HOST}" >&2'
+
+ExecStart=/opt/llama.cpp/llama-server \
+  --model /var/lib/quantfolio/models/Qwen3.5-9B-UD-Q4_K_XL.gguf \
+  --host ${LLAMA_BIND_HOST} --port 8080 \
+  --ctx-size 32768 \
+  --n-gpu-layers 99 \
+  --flash-attn on \
+  --threads 8 \
+  --parallel 1 \
+  --cont-batching --temp 0.7 --top-p 0.8 --top-k 20 --min-p 0.00 \
+  --presence-penalty 1.5 \
+  --no-context-shift \
+  --reasoning-budget 0 \
+  --chat-template-kwargs '{"enable_thinking":false}' --metrics
+
+# Resource limits (match LXC container allocation)
+# GPU: 8 GB VRAM (Qwen3.5-9B weights ~5.6 GB + KV @ 32K ~0.9 GB; measured 6903 MiB total)
+# System RAM: 16 GB (hybrid model fully in VRAM; RAM for OS + mmproj headroom)
+MemoryMax=14G
+MemoryHigh=12G
+# 8 cores = 800%
+CPUQuota=800%
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitInterval=300
+StartLimitBurst=3
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=quantfolio-llm
+
+# Security (this unit never calls sudo, so the full set is safe here)
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/var/lib/quantfolio
+
+# Ensure logs are preserved across restarts
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

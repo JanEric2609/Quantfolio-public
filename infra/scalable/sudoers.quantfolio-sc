@@ -1,0 +1,10 @@
+# /etc/sudoers.d/quantfolio-sc
+# Lets the Quantfolio API and worker (user `quantfolio`) run the read-only
+# wrapper as the user that owns the Scalable session. Only the wrapper, never
+# `sc` itself; the wrapper refuses every command that isn't a read.
+#
+# Install (root):
+#   install -o root -g root -m 0440 sudoers.quantfolio-sc /etc/sudoers.d/quantfolio-sc
+#   visudo -cf /etc/sudoers.d/quantfolio-sc
+Defaults!/usr/local/libexec/quantfolio-sc-ro env_reset, !setenv
+quantfolio ALL=(scalable-cli-user) NOPASSWD: /usr/local/libexec/quantfolio-sc-ro

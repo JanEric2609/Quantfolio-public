@@ -1,0 +1,23 @@
+name: Idea or feature request
+description: Suggest a change or a new feature.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: For anything that would trade, write to a bank or broker, or give advice, read the ground rules in CONTRIBUTING.md first.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: For research or scoring changes, the paper, data or test that supports it.

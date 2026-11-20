@@ -1,0 +1,890 @@
+"""Trust API — "Can I trust it?" (frozen-call verdicts).
+
+GET /api/trust/verdict — headline, three numbers and one evidence row per prediction type
+GET /api/trust/calls   — resolved calls, newest first, with the five worst misses
+GET /api/trust/ranking — descriptive shadow-ledger metrics of Discover's ranking (ADR 0018 §5)
+GET /api/trust/history — the historical panel: factor tilt, ranking model, satellite (simulated, not live)
+GET /api/trust/funds   — each held curated fund's tracking difference against its same-index peers
+GET /api/trust/risk-bands — risk forecasts stored before the fact and how they did (plan 2026-10-14, D3)
+GET /api/trust/plan-bands — the plan's one-year bands, stored monthly before the fact (plan 2026-10-14, D6)
+
+The verdict, calls and ranking read the immutable prediction ledgers for the
+signed-in user only; every value there is frozen at issue/resolution time (see
+``decision/verification/trust.py``). The funds row is not a ledger: it reads
+live synced positions and the monthly tracking-difference measurement.
+"""
+from __future__ import annotations
+
+from typing import Annotated, Any, Literal
+
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app.decision.verification import build_history, build_ranking_metrics
+from app.decision.verification.trust import build_verdict, list_calls
+from app.foundation.auth import current_user
+from app.foundation.core.db import get_db
+from app.foundation.models.entities import User
+from app.interface.api.params import ROWS_BOUND
+from app.lab.forward_lab import stored_summary as forward_lab_summary
+from app.lab.plan_bands import summary as plan_band_summary
+from app.lab.risk_forecast import summary as risk_summary
+
+router = APIRouter(prefix="/api/trust", tags=["trust"])
+
+EvidenceState = Literal["too_early", "skill", "harm", "no_evidence"]
+TypeKey = Literal["ideas", "advisor", "mandates", "regime"]
+
+
+class SkillOut(BaseModel):
+    metric: str
+    value: float
+    ci_low: float | None = None
+    ci_high: float | None = None
+    n: int = Field(description="Rebalance dates (the independent unit).")
+    n_calls: int = 0
+    benchmark_label: str
+
+
+class RangeCoverageOut(BaseModel):
+    k: int
+    n: int
+    rate: float | None = None
+    ci_low: float | None = None
+    ci_high: float | None = None
+    nominal: float
+
+
+class AciDateOut(BaseModel):
+    date: str
+    inside: int
+    n: int
+
+
+class AciOut(BaseModel):
+    """Online conformal correction of the stated ranges (ADR 0018 §6)."""
+
+    active: bool
+    matured_weeks: int
+    weeks_needed: int
+    alpha_target: float
+    alpha_now: float
+    gamma: float
+    widen_now: float | None = None
+    per_date: list[AciDateOut] = []
+    corrected: RangeCoverageOut | None = None
+    raw_same_dates: RangeCoverageOut | None = None
+
+
+class TypeRangeCoverageOut(RangeCoverageOut):
+    aci: AciOut | None = None
+
+
+class ReliabilityBinOut(BaseModel):
+    p_mean: float
+    hit_rate: float
+    n: int
+
+
+class CorpOut(BaseModel):
+    mcb: float = Field(description="Miscalibration (CORP): Brier lost to unreliable probabilities.")
+    dsc: float = Field(description="Discrimination: Brier gained over the base rate.")
+    unc: float = Field(description="Uncertainty: Brier of the base rate.")
+
+
+class TypeVerdictOut(BaseModel):
+    type: TypeKey
+    label: str
+    n: int = Field(description="Rebalance dates: the picks of one date form one equal-weight basket.")
+    n_needed: int | None = Field(
+        default=None, description="Simulated median issue days until this verdict would say skill at the target hit rate."
+    )
+    n_needed_is_lower_bound: bool = False
+    h_eff: int | None = Field(default=None, description="Chains the observed issue cadence needs per horizon window (used for dates needed).")
+    cadence_days: float | None = Field(default=None, description="Median trading days between rebalance dates (1 below 5 dates).")
+    years_needed: float | None = Field(default=None, description="n_needed dates at this cadence, in years (252 trading days).")
+    horizon_days: int = Field(default=21, description="Holding period (trading days); also the lag-h of the e-process.")
+    lag_h: int = 21
+    n_unscored: int = Field(default=0, description="Resolved calls that could not be scored (no benchmark price).")
+    n_holds: int = Field(default=0, description="Logged holds, left out of hit statistics by design.")
+    n_issue_days: int = 0
+    n_calls: int = 0
+    n_delisted: int = 0
+    call_hits: int = 0
+    call_hit_rate: float | None = None
+    hits: int
+    hit_rate: float | None = None
+    hit_ci: list[float] | None = None
+    mean_excess: float | None = None
+    mean_excess_ci: list[float] | None = None
+    hac_lag: int = 0
+    e_skill: float = Field(description="Current e-value (valid at any stopping time); the state uses it via e-BH.")
+    e_harm: float
+    e_skill_peak: float = 1.0
+    e_harm_peak: float = 1.0
+    n_tests: int = 0
+    e_skill_lower: float | None = Field(
+        default=None, description="Legacy e-value if every call still in flight resolved at its worst; only this may cross."
+    )
+    e_harm_lower: float | None = None
+    family: str | None = Field(default=None, description="Calendar-time family whose test sets the state (F1 ideas, F3 advisor).")
+    e_skill_crossed_strong: bool = False
+    state: EvidenceState
+    benchmarked: bool = True
+    benchmark_label: str = ""
+    brier: float | None = None
+    bss: float | None = None
+    bss_ci: list[float] | None = None
+    n_stated_p: int = 0
+    n_eff_stated: int = Field(default=0, description="Issue dates behind the stated probabilities: the effective labels.")
+    spiegelhalter_z: float | None = None
+    reliability: list[ReliabilityBinOut] = Field(default_factory=list)
+    corp: CorpOut | None = None
+    range_coverage: TypeRangeCoverageOut | None = None
+    calibration_caption: str | None = None
+    next_resolution_at: str | None = None
+    note: str | None = None
+
+
+class EPathPointOut(BaseModel):
+    day: str
+    e_skill: float
+    e_harm: float
+
+
+class PosteriorSensitivityOut(BaseModel):
+    tau_21d: float
+    p_positive: float
+    mean_21d: float
+
+
+class PosteriorOut(BaseModel):
+    tau_21d: float = Field(description="Prior standard deviation of the edge, per 21 trading days.")
+    n: int
+    sample_mean_21d: float
+    sample_se_21d: float
+    shrinkage: float = Field(description="Weight on the data: tau^2 / (tau^2 + se^2).")
+    mean_21d: float
+    ci_low_21d: float
+    ci_high_21d: float
+    p_positive: float = Field(description="Posterior chance the edge is positive. Never a verdict.")
+    sensitivity: list[PosteriorSensitivityOut] = Field(default_factory=list)
+
+
+class WithinOut(BaseModel):
+    years: int
+    p: float
+
+
+class ForecastGridOut(BaseModel):
+    assumption: float
+    q50_days: int | None = None
+    q50_years: float | None = None
+
+
+class TimeToKnowOut(BaseModel):
+    assumption_unit: Literal["excess_per_21d", "rank_ic"]
+    assumption: float
+    ic_sd: float | None = None
+    basket_sd_21d: float | None = None
+    sd_daily: float
+    sd_measured: bool = False
+    q10_days: int | None = None
+    q50_days: int | None = None
+    q90_days: int | None = None
+    q10_years: float | None = None
+    q50_years: float | None = None
+    q90_years: float | None = None
+    max_days: int
+    p_within: list[WithinOut] = Field(default_factory=list)
+    grid: list[ForecastGridOut] = Field(default_factory=list)
+
+
+class PreRegistrationOut(BaseModel):
+    n_days: int = 0
+    mean_21d: float | None = None
+
+
+class FamilyTestOut(BaseModel):
+    family: Literal["F1", "F2", "F3"]
+    series: Literal["ideas", "ranking", "advisor", "ranking_ef"]
+    role: Literal["primary", "secondary"]
+    alarm_only: bool = Field(
+        default=False,
+        description="Shown only when it crosses: harm or a large edge (ADR 0018 amendment of 2026-10-14, §6).",
+    )
+    question: str
+    start: str
+    n_days: int = Field(description="Trading days with something open since the start; each is one observation.")
+    n_empty_days: int = 0
+    n_stale_days: int = 0
+    n_clipped: int = 0
+    first_day: str | None = None
+    last_day: str | None = None
+    mean_open: float | None = None
+    mean_21d: float | None = None
+    mean_ci_21d: list[float] | None = None
+    sd_daily: float | None = None
+    e_skill: float
+    e_harm: float
+    e_skill_peak: float = 1.0
+    e_harm_peak: float = 1.0
+    threshold: float
+    n_tests: int
+    state: EvidenceState
+    rho1: float | None = None
+    rho1_flag: bool = False
+    pre_registration: PreRegistrationOut
+    path: list[EPathPointOut] = Field(default_factory=list)
+    posterior: PosteriorOut | None = None
+    time_to_know: TimeToKnowOut
+
+
+class TimeGridPointOut(BaseModel):
+    edge_21d: float
+    q50_years: float | None = None
+    beyond_40y: bool = False
+
+
+class TimeGridOut(BaseModel):
+    """Median years to a verdict at stated edges (ADR 0018 amendment of 2026-10-14, §10)."""
+
+    sd_daily: float
+    sd_measured: bool = False
+    grid: list[TimeGridPointOut] = Field(default_factory=list)
+
+
+class NoiseLookOut(BaseModel):
+    day: int = Field(description="Observed days the look uses.")
+    cutoff: float
+    vr: float | None = Field(default=None, description="VR(21) of the first `day` observed values; null before then.")
+    failed: bool = False
+
+
+class NoiseCheckOut(BaseModel):
+    """ADR 0018 §11: serial correlation that would void the daily e-processes."""
+
+    status: Literal["pending", "passing", "passed", "failed"]
+    failed_at_day: int | None = None
+    looks: list[NoiseLookOut] = Field(default_factory=list)
+
+
+class RobustnessOut(BaseModel):
+    false_alarm: float | None = Field(
+        default=None, description="Share of noise-only resamples of this series whose e-value reached the threshold."
+    )
+    without_best_days: float = Field(description="Skill e-value with the five best days removed.")
+    first_half: float
+    second_half: float
+
+
+class SelectionTestOut(BaseModel):
+    """S (picks against same-run, same-sector non-picks) and U (futility) on one series.
+
+    ``selection`` is the frozen design of 2026-10-14 (secondary since
+    2026-11-08); ``selection_w`` the matched, precision-weighted one of the
+    2026-11-08 amendment (primary).
+    """
+
+    family: Literal["S"] = "S"
+    series: Literal["selection", "selection_w"] = "selection"
+    role: Literal["primary", "secondary"] = "primary"
+    question: str
+    futility_question: str
+    start: str
+    n_days: int
+    n_days_pre_registration: int = 0
+    first_day: str | None = None
+    mean_21d: float | None = None
+    mean_ci_21d: list[float] | None = None
+    sd_daily: float | None = None
+    clip: float
+    sigma_ref: float
+    e_skill: float
+    e_harm: float
+    e_futility: float
+    threshold: float
+    robustness: RobustnessOut | None = Field(
+        default=None, description="Stress checks of the evidence (plan 2026-11-09, §4); shown, not a guard."
+    )
+    futility_threshold: float
+    futility_delta_21d: float = Field(description="U's margin per 21 days, gross of costs.")
+    n_fallback_days: int = 0
+    rho1: float | None = Field(default=None, description="Lag-1 autocorrelation of the first 63 days (shown, never whitened).")
+    rho1_flag: bool = False
+    state: Literal["too_early", "no_evidence", "skill", "harm", "not_worth_following", "not_valid"]
+    provisional: bool = Field(default=False, description="A verdict reached before the noise check's last look.")
+    noise_check: NoiseCheckOut | None = None
+    path: list[EPathPointOut] = Field(default_factory=list)
+    time_to_know: TimeGridOut
+
+
+class MandateTestOut(BaseModel):
+    """M: is the mandate worth running? A rejection retires it."""
+
+    series: Literal["mandate_a", "mandate_b"]
+    mandate: str
+    n_days: int
+    n_tested_days: int = Field(description="Days after the first 63, which only set the reference noise.")
+    sigma_ref_daily: float | None = None
+    clip: float | None = None
+    mean_21d: float | None = None
+    e_futility: float
+    delta_21d: float
+    threshold: float
+    retire: bool = False
+    state: Literal["too_early", "no_evidence", "retire", "retire_pending", "not_valid"]
+    noise_check: NoiseCheckOut | None = None
+
+
+class PairedPointOut(BaseModel):
+    day: str
+    cumulative: float
+
+
+class PairedComparisonOut(BaseModel):
+    """Advisor minus Discover picks on common days; descriptive, never a verdict."""
+
+    question: str
+    start: str
+    n_days: int
+    n_days_pre_registration: int = 0
+    n_days_advisor_only: int = 0
+    n_days_ideas_only: int = 0
+    mean_21d: float | None = None
+    mean_ci_21d: list[float] | None = None
+    share_advisor_ahead: float | None = None
+    enough_days: bool = False
+    path: list[PairedPointOut] = []
+
+
+class FactorStudyOut(BaseModel):
+    """ADR 0018 §8: recorded once per spec version; "waiting" until it can be."""
+
+    status: Literal["waiting", "decided"]
+    spec_version: int
+    n_backfilled_picks: int | None = None
+    spec: dict[str, Any] | None = None
+    decision: Literal["build", "drop", "neither"] | None = None
+    oos_r2: float | None = None
+    n_days: int | None = None
+    n_oos_days: int | None = None
+    betas: dict[str, float] | None = None
+    computed_at: str | None = None
+
+
+class FactorNeutralRowOut(BaseModel):
+    n_days: int
+    first_day: str | None = None
+    last_day: str | None = None
+    mean_21d: float | None = None
+    mean_ci_21d: list[float] | None = None
+
+
+class FactorGateOut(BaseModel):
+    build: float
+    drop: float
+    min_oos_days: int
+    min_fit_days: int
+
+
+class FactorNeutralOut(BaseModel):
+    study: FactorStudyOut
+    row: FactorNeutralRowOut | None = None
+    gate: FactorGateOut
+
+
+class DailyTestsOut(BaseModel):
+    start: str = Field(description="First day an observation may enter an e-value (ADR 0018).")
+    clip: float
+    sigma_ref: float
+    prior_var: float
+    bet_cap: float
+    fdr_level: float
+    threshold: float
+    min_days_for_state: int
+    horizon_days: int
+    families: list[FamilyTestOut]
+    selection: SelectionTestOut | None = Field(
+        default=None, description="The frozen selection design of 2026-10-14; secondary since 2026-11-08.",
+    )
+    selection_weighted: SelectionTestOut | None = Field(
+        default=None,
+        description="S and U on selection_w, the primary selection test since ADR 0018's amendment of 2026-11-08.",
+    )
+    ranking_efficient: FamilyTestOut | None = Field(
+        default=None,
+        description="F2 on ranking_ef (covariance-efficient weights), primary since the amendment of 2026-11-08.",
+    )
+    mandates: list[MandateTestOut] = Field(default_factory=list)
+    paired: PairedComparisonOut | None = None
+    factor_neutral: FactorNeutralOut | None = Field(
+        default=None,
+        description="Withdrawn on 2026-10-14 (ADR 0018 amendment, §8): always null. Kept for old clients.",
+    )
+
+
+class VerdictOut(BaseModel):
+    headline: str
+    resolved_calls: int
+    resolved_units: int = 0
+    n_needed: int | None = None
+    n_needed_is_lower_bound: bool = False
+    h_eff: int | None = None
+    cadence_days: float | None = None
+    years_needed: float | None = None
+    ebh_threshold: float | None = Field(default=None, description="e-value one rejection needs under e-BH: K / alpha.")
+    horizon_days: int | None = None
+    min_calls_for_state: int | None = Field(default=None, description="Rebalance dates before a state other than too early.")
+    n_unscored: int = 0
+    assumed_edge: float | None = Field(default=None, description="Assumed true mean excess return per 21-day date, for the time-to-know number.")
+    assumed_sd: float | None = Field(default=None, description="Assumed standard deviation of one date's basket excess return.")
+    excess_clip: float | None = Field(default=None, description="Excess returns are clipped to +-this before betting.")
+    min_calls_for_reliability: int | None = None
+    min_n_eff_for_probability: int | None = Field(default=None, description="Issue dates before any probability is stated.")
+    min_units_for_interval: int | None = None
+    min_calls_for_interval: int | None = None
+    target_hit_rate: float | None = None
+    n_tests: int = 0
+    fdr_level: float | None = None
+    skill: SkillOut | None = None
+    state: EvidenceState
+    types: list[TypeVerdictOut]
+    frozen_at_issue: bool = True
+    method_note: str
+    legacy_method_note: str | None = None
+    first_resolution_due: str | None = None
+    daily_tests: DailyTestsOut | None = None
+
+
+class CallOut(BaseModel):
+    type: TypeKey
+    id: str
+    issued_at: str
+    resolved_at: str
+    subject: str
+    call: str
+    stated_p: float | None = None
+    stated_range: list[float] | None = None
+    outcome: float | None = None
+    benchmark_outcome: float | None = None
+    excess: float | None = None
+    hit: bool
+    verdict: str | None = None
+    delisted: bool = False
+
+
+class CallsOut(BaseModel):
+    horizon_days: int | None = Field(default=None, description="Longest holding period (trading days) of the benchmarked calls.")
+    type: TypeKey | None = None
+    total: int
+    limit: int
+    offset: int
+    items: list[CallOut] = Field(default_factory=list)
+    worst_misses: list[CallOut] = Field(default_factory=list)
+    frozen_at_issue: bool = True
+
+
+class IcSummaryOut(BaseModel):
+    n_runs: int
+    mean: float | None = None
+    t_nw: float | None = Field(default=None, description="Newey-West t of the mean IC (lag 5 runs).")
+    icir: float | None = None
+    share_positive: float | None = None
+
+
+class IcDecayOut(BaseModel):
+    horizon_days: int
+    n_runs: int
+    mean_ic: float | None = None
+
+
+class QuintileOut(BaseModel):
+    quintile: int = Field(description="1 = the highest composite scores.")
+    n_runs: int
+    mean_excess: float | None = None
+
+
+class PairedGapOut(BaseModel):
+    n_runs: int
+    mean_gap: float | None = None
+    ci: list[float] | None = Field(default=None, description="90 % run-block bootstrap interval.")
+
+
+class GateCheckOut(PairedGapOut):
+    reject_stage: str
+    n_names: int
+
+
+class TierRateOut(BaseModel):
+    n_runs: int
+    hit_rate: float | None = None
+    range: list[float] | None = Field(default=None, description="90 % Beta(1, 1) range on the runs (effective labels).")
+
+
+class TierOut(TierRateOut):
+    tier: Literal["top", "middle", "bottom"]
+
+
+class TiersOut(BaseModel):
+    n_eff: int = Field(description="Issue dates behind the rates: the effective number of labels.")
+    base: TierRateOut
+    tiers: list[TierOut]
+
+
+class RankingSectionOut(BaseModel):
+    n_runs: int
+    n_cohort_runs: int
+    n_snapshots: int
+    n_outcomes: int
+    outcome_status: dict[str, int] = Field(default_factory=dict)
+    first_issue: str | None = None
+    last_issue: str | None = None
+    ic: IcSummaryOut
+    ic_decay: list[IcDecayOut]
+    sector_neutral_ic: IcSummaryOut
+    quintiles: list[QuintileOut]
+    picked_vs_rest: PairedGapOut
+    gate_check: list[GateCheckOut]
+    tiers: TiersOut | None = None
+    etf_ic: IcSummaryOut
+
+
+class RankingMetricsOut(BaseModel):
+    horizon_days: int
+    min_stocks: int
+    ic_hac_lag: int
+    live: RankingSectionOut
+    exploratory: RankingSectionOut | None = Field(
+        default=None, description="Back-filled snapshots: exploratory, never in a verdict."
+    )
+    verdict_note: str
+
+
+class ForwardLabSignalOut(BaseModel):
+    signal: str
+    label: str
+    source: str
+    days: int
+    first_day: str | None = None
+    last_day: str | None = None
+    mean_daily: float | None = None
+    ci90_daily: tuple[float, float] | None = None
+    annual_ir: float | None = None
+    mean_rank_ic: float | None = None
+    e_skill: float
+    e_harm: float
+    names: int
+    state: Literal["not_started", "collecting", "evidence_of_skill", "evidence_of_harm"]
+    robustness: RobustnessOut | None = None
+
+
+class ForwardLabOut(BaseModel):
+    start: str
+    alpha: float
+    threshold_single: float
+    signals: list[ForwardLabSignalOut]
+    note: str
+    computed_at: str | None = None
+    resamples: int = 0
+
+
+class FanPointOut(BaseModel):
+    p: int
+    cumulative_excess: float
+
+
+class FanOut(BaseModel):
+    years: int
+    percentiles: list[FanPointOut]
+    share_beat: float = Field(description="Share of simulated ten-year periods that beat the ETF after costs and tax.")
+
+
+class DecayOut(BaseModel):
+    full_period: float | None = None
+    last_10_years: float | None = None
+    after_haircut: float | None = None
+
+
+class TiltCheckOut(BaseModel):
+    name: str
+    label: str
+    value: float | None = None
+    passed: bool
+
+
+class TiltCardOut(BaseModel):
+    strategy: str | None = None
+    label: str | None = None
+    region: str | None = None
+    gates_tilt: bool = False
+    citation: str | None = None
+    passed: bool = False
+    long_short_t: float | None = None
+    t_bar: float = 2.0
+    months: int | None = None
+    start: str | None = None
+    end: str | None = None
+    stale: bool = False
+    decay: DecayOut
+    tracking_error_annual: float | None = None
+    worst_5y_excess: float | None = None
+    checks: list[TiltCheckOut] = Field(default_factory=list)
+    fan: FanOut | None = None
+    computed_at: str | None = None
+
+
+class RankingModelRowOut(BaseModel):
+    model: str | None = None
+    months: int | None = None
+    first_month: str | None = None
+    last_month: str | None = None
+    ic_mean: float | None = None
+    ic_t: float | None = None
+    long_short_annual: float | None = None
+    long_only_annual: float | None = None
+    recent_months: int | None = None
+    recent_ic_mean: float | None = None
+    recent_long_short_annual: float | None = None
+    dsr: float | None = None
+
+
+class RankingModelOut(BaseModel):
+    available: bool
+    status: str
+    models: list[RankingModelRowOut] = Field(default_factory=list)
+    pbo: float | None = None
+    data_to: str | None = None
+    stale: bool = False
+    computed_at: str | None = None
+
+
+class SatelliteBestOut(BaseModel):
+    name: str | None = None
+    sharpe_annual: float | None = None
+    mean_annual: float | None = None
+    dsr: float | None = None
+    months: int | None = None
+
+
+class SatelliteOut(BaseModel):
+    available: bool
+    unlocked: bool
+    reason: str | None = None
+    dsr_bar: float
+    best: SatelliteBestOut | None = None
+    n_candidates: int = 0
+    pbo: float | None = None
+    computed_at: str | None = None
+
+
+class TiltReviewOut(BaseModel):
+    status: Literal["not_live", "too_early", "inside", "under_review"]
+    note: str
+
+
+class HaircutOut(BaseModel):
+    publication_decay: float
+    implementation_cost: float
+    after_tax_factor: float
+
+
+class HistoryOut(BaseModel):
+    title: str
+    tilt_cards: list[TiltCardOut]
+    ranking_model: RankingModelOut
+    satellite: SatelliteOut
+    tilt_review: TiltReviewOut
+    n_trials: int | None = None
+    haircut: HaircutOut
+    not_covered: str
+    disclosures: list[str]
+
+
+class FundPeerOut(BaseModel):
+    isin: str
+    name: str
+    td_pct: float
+
+
+class HeldFundOut(BaseModel):
+    isin: str
+    name: str
+    index: str
+    value: float
+    td_pct: float | None = Field(default=None, description="% a year against the same-index median; null when unmeasured.")
+    best_peer: FundPeerOut | None = None
+    gap_pct: float | None = None
+    flag: bool = False
+
+
+class FundsOut(BaseModel):
+    """Held curated funds against their same-index peers (plan 2026-10-14, C4 live check)."""
+
+    as_of: str | None = None
+    years: int
+    flag_pct: float
+    funds: list[HeldFundOut] = Field(default_factory=list)
+    n_other_positions: int = 0
+    note: str
+
+
+@router.get("/funds", response_model=FundsOut)
+def get_funds(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Each held curated fund's tracking difference against funds on the same index (descriptive, monthly)."""
+    from app.decision.fund_tracking import held_funds
+
+    return held_funds(db, user.id)
+
+
+@router.get("/verdict", response_model=VerdictOut)
+def get_verdict(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Headline sentence, resolved-call count, skill vs the passive core and the
+    evidence state per prediction type (too early / skill / no evidence / harm)."""
+    return build_verdict(db, user.id)
+
+
+@router.get("/calls", response_model=CallsOut)
+def get_calls(
+    type: TypeKey | None = Query(None, description="Only this prediction type"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: Annotated[int, Query(ge=0), ROWS_BOUND] = 0,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Resolved calls, newest first, with the five worst misses against the ETF."""
+    return list_calls(db, user.id, type=type, limit=limit, offset=offset)
+
+
+@router.get("/ranking", response_model=RankingMetricsOut)
+def get_ranking(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """How well Discover's score sorted every scored stock (descriptive; the verdict is F2)."""
+    return build_ranking_metrics(db, user.id)
+
+
+@router.get("/forward-lab", response_model=ForwardLabOut)
+def get_forward_lab(
+    _user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """The nightly forward-test lab: published signals scored before the outcome (shadow, no effect on picks)."""
+    return forward_lab_summary(db)
+
+
+@router.get("/history", response_model=HistoryOut)
+def get_history(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """What decades of past data say (simulated, not live); it tests none of the live calls."""
+    return build_history(db)
+
+
+class RiskBandHorizonOut(BaseModel):
+    horizon_days: int
+    forecast_day: str
+    #: Fractions of the target's value; losses positive.
+    sigma: float
+    var95: float
+    es975: float
+    #: Share of the value without stored prices (counted as flat, which understates risk).
+    unpriced_share: float = 0.0
+    #: Scored forecasts used (non-overlapping windows) and how many lost more than VaR 95 %.
+    n_scored: int
+    breaches: int
+    coverage_low: float | None = None
+    coverage_high: float | None = None
+    #: E-backtest values (Wang, Wang & Ziegel); 20 or more rejects "the forecasts are right" at 5 %.
+    e_var: float
+    e_es: float
+
+
+class RiskBandTargetOut(BaseModel):
+    target: str
+    label: str
+    horizons: list[RiskBandHorizonOut] = []
+
+
+class RiskBandsOut(BaseModel):
+    targets: list[RiskBandTargetOut] = []
+    note: str = ""
+
+
+RISK_BANDS_NOTE = (
+    "Forecasts are stored before the fact and scored once the horizon has passed. At 95 % about 1 day in "
+    "20 should lose more than the VaR; an e-value of 20 or more says the bands are too narrow."
+)
+
+
+@router.get("/risk-bands", response_model=RiskBandsOut)
+def get_risk_bands(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """The latest 1- and 21-day risk forecasts per sleeve, book and benchmark, and their scores so far."""
+    return {"targets": risk_summary(db, user.id), "note": RISK_BANDS_NOTE}
+
+
+class PlanBandOut(BaseModel):
+    forecast_day: str
+    end_day: str
+    #: The book's real return over the year, as fractions.
+    p10: float
+    p50: float
+    p90: float
+    start_value: float
+    monthly_contribution: float
+    #: The book's value in a year in today's euros, the planned contributions included.
+    value_p10: float
+    value_p50: float
+    value_p90: float
+
+
+class PlanBandModelOut(BaseModel):
+    model: Literal["planner", "long_history"]
+    label: str
+    latest: PlanBandOut
+    n_bands: int
+    n_scored: int
+    inside: int
+    below: int
+    above: int
+    #: Scored bands whose years do not overlap; the coverage interval uses only these.
+    n_independent: int
+    coverage_low: float | None = None
+    coverage_high: float | None = None
+    #: The end of the earliest band not yet scored.
+    first_check: str | None = None
+
+
+class PlanBandsOut(BaseModel):
+    models: list[PlanBandModelOut] = []
+    note: str = ""
+    estimate: bool = True
+
+
+PLAN_BANDS_NOTE = (
+    "Each month the app stores where your book's real return should land over the next year, at 10, 50 and 90 %, "
+    "before the year starts. A year later it is checked against the book's time-weighted return less euro-area "
+    "inflation: about 8 in 10 should land inside. Monthly bands for one-year horizons overlap, so the interval "
+    "counts only years that do not overlap."
+)
+
+
+@router.get("/plan-bands", response_model=PlanBandsOut)
+def get_plan_bands(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """The latest one-year plan band per model and how the scored ones did."""
+    return {"models": plan_band_summary(db, user.id), "note": PLAN_BANDS_NOTE, "estimate": True}

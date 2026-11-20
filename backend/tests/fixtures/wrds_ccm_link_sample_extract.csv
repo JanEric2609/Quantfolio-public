@@ -1,0 +1,4 @@
+gvkey,lpermno,lpermco,linkdt,linkenddt,linktype,linkprim
+001000,10001,20000,1980-01-01,2005-12-31,LC,P
+001000,10002,20000,2006-01-01,,LC,P
+002000,10003,20001,1990-01-01,,LU,C

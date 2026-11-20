@@ -1,0 +1,265 @@
+from __future__ import annotations
+
+from sqlalchemy.orm import Mapped, mapped_column
+from app.foundation.core.db_base import Base
+from ._core import now_utc, uuid_pk
+from datetime import date, datetime
+from decimal import Decimal
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, Integer, Numeric, String, Text, UniqueConstraint
+
+
+class PriceCache(Base):
+    __tablename__ = "price_cache"
+    __table_args__ = (UniqueConstraint("ticker", "date", name="uq_price_cache_ticker_date"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    ticker: Mapped[str] = mapped_column(String(32), index=True)
+    date: Mapped[date] = mapped_column(Date, index=True)
+    open: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    high: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    low: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    close: Mapped[Decimal] = mapped_column(Numeric(20, 6))
+    volume: Mapped[Decimal | None] = mapped_column(Numeric(24, 2))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    source: Mapped[str] = mapped_column(String(40), default="manual")
+    stale: Mapped[bool] = mapped_column(Boolean, default=False)
+    currency: Mapped[str] = mapped_column(String(3), default="EUR")
+
+
+class ListingCurrency(Base):
+    """The unit a symbol's stored prices are quoted in, as its provider reports it.
+
+    ``bar_prices.currency`` and ``price_cache.currency`` were once filled
+    from the ``assets`` table (a fund's base currency: EUNL.DE read USD) or an
+    "EUR" fallback, so 429 of 780 symbols were mislabelled (2026-09-28). This
+    table is what price readers consult first
+    (``data_backbone.listing_currency.resolve_quote_currency``). ``currency``
+    keeps the provider's case: "GBp" is pence, "GBP" pounds.
+    """
+
+    __tablename__ = "listing_currencies"
+
+    symbol: Mapped[str] = mapped_column(String(32), primary_key=True)
+    currency: Mapped[str] = mapped_column(String(3))
+    source: Mapped[str] = mapped_column(String(40))
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class IndexCurrencyWeights(Base):
+    """The currencies an equity index's constituents trade in, as weights.
+
+    What an unhedged index ETF is exposed to: EUNL.DE is quoted in EUR on
+    Xetra, but ~73% of MSCI World trades in USD. Refreshed from a tracking
+    fund's published holdings (``foundation.etf_currency``); the module's
+    seed values stand in until the first refresh. The same refresh stores
+    the constituents' country weights (``country_weights_json``).
+    """
+
+    __tablename__ = "index_currency_weights"
+
+    index_key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    weights_json: Mapped[dict] = mapped_column(JSON)
+    #: Country -> weight from the same holdings file (the ETF page's
+    #: geographic breakdown); null for rows refreshed before 0120.
+    country_weights_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    as_of: Mapped[date] = mapped_column(Date)
+    source: Mapped[str] = mapped_column(String(200))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class FundamentalsSnapshot(Base):
+    """One dated copy of a symbol's cached fundamentals.
+
+    ``fundamentals`` keeps only the latest values per ticker. This table is
+    written once per (symbol, fetch day) and never updated, so a later model
+    can join what was known on a date (plan 2026-11-11, ML spec v2).
+    """
+
+    __tablename__ = "fundamentals_snapshots"
+    __table_args__ = (
+        UniqueConstraint("symbol", "snapshot_date", name="uq_fundamentals_snapshot"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    #: UTC day the values were fetched, not the day they were copied.
+    snapshot_date: Mapped[date] = mapped_column(Date, index=True)
+    data_json: Mapped[str] = mapped_column(Text, default="{}")
+    source: Mapped[str] = mapped_column(String(40), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class FetchMiss(Base):
+    """A symbol the providers could not serve, remembered across restarts.
+
+    A German ETF no provider has cost 3 s per try and was retried on every
+    Discover run (624 s of the 2026-11-11 run). ``misses`` counts the distinct
+    days it failed, which sets how long the next try waits.
+    """
+
+    __tablename__ = "fetch_misses"
+
+    symbol: Mapped[str] = mapped_column(String(32), primary_key=True)
+    misses: Mapped[int] = mapped_column(default=1)
+    last_miss: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    message: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+
+class AnalystEstimateSnapshot(Base):
+    """One day's analyst consensus EPS for a symbol's current fiscal year.
+
+    Yahoo's EPS trend: today's consensus and what it was 7, 30, 60 and 90
+    days earlier. The 30-day change is Discover's live estimate-revision
+    signal (``data_backbone.analyst_estimates``); the stored days are the
+    point-in-time history the WRDS IBES extract no longer provides.
+    """
+
+    __tablename__ = "analyst_estimate_snapshots"
+    __table_args__ = (
+        UniqueConstraint("symbol", "snapshot_date", "period", name="uq_analyst_estimate_snapshot"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    snapshot_date: Mapped[date] = mapped_column(Date, index=True)
+    period: Mapped[str] = mapped_column(String(8), default="0y")
+    eps_current: Mapped[float | None] = mapped_column(Float, nullable=True)
+    eps_7d_ago: Mapped[float | None] = mapped_column(Float, nullable=True)
+    eps_30d_ago: Mapped[float | None] = mapped_column(Float, nullable=True)
+    eps_60d_ago: Mapped[float | None] = mapped_column(Float, nullable=True)
+    eps_90d_ago: Mapped[float | None] = mapped_column(Float, nullable=True)
+    analysts: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    source: Mapped[str] = mapped_column(String(40), default="yfinance_eps_trend")
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class Fundamental(Base):
+    __tablename__ = "fundamentals"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    ticker: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    data_json: Mapped[str] = mapped_column(Text, default="{}")
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    source: Mapped[str] = mapped_column(String(40), default="manual")
+    stale: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class MacroIndicator(Base):
+    __tablename__ = "macro_indicators"
+    __table_args__ = (UniqueConstraint("name", "date", "source", name="uq_macro_name_date_source"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    name: Mapped[str] = mapped_column(String(120), index=True)
+    value: Mapped[Decimal] = mapped_column(Numeric(20, 6))
+    date: Mapped[date] = mapped_column(Date, index=True)
+    source: Mapped[str] = mapped_column(String(40))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    stale: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class DataQualityEvent(Base):
+    __tablename__ = "data_quality_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    provider: Mapped[str] = mapped_column(String(40), index=True)
+    symbol: Mapped[str | None] = mapped_column(String(32), index=True)
+    isin: Mapped[str | None] = mapped_column(String(12), index=True)
+    severity: Mapped[str] = mapped_column(String(24), default="warning")
+    message: Mapped[str] = mapped_column(Text)
+    meta_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class BarSeriesMeta(Base):
+    """Which provider a symbol's stored daily bars come from (plan 2026-10-12, D1).
+
+    One series, one provider: incremental ingestion asks only the pinned
+    provider, and a provider change goes through
+    ``DataIngester.repull_series``, which replaces the whole window. Before
+    the pin, a fallback from Twelve Data (raw closes) to yfinance (adjusted)
+    spliced SPY, URTH and VGK on 2021-10-13 (+7 %, +9 %, +19 % jumps).
+    ``quarantine_reason`` set (``split_unadjusted``) keeps the symbol out of
+    Discover until a re-pull clears it.
+    """
+
+    __tablename__ = "bar_series_meta"
+
+    symbol: Mapped[str] = mapped_column(String(32), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(40))
+    adjusted: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_full_repull_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    quarantine_reason: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class BarQuarantine(Base):
+    """A provider bar the ingest guard kept out of ``bar_prices`` (D2).
+
+    ``reason``: ``non_session``, ``spike_reversal``, ``split_signature`` or
+    ``provider_scale``. A second provider confirming the close within 1 %
+    releases the bar (``resolution="confirmed:<provider>"``).
+    """
+
+    __tablename__ = "bar_quarantine"
+    __table_args__ = (UniqueConstraint("symbol", "ts", "provider", name="uq_bar_quarantine_symbol_ts_provider"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=False))
+    open: Mapped[float | None] = mapped_column(Float, nullable=True)
+    high: Mapped[float | None] = mapped_column(Float, nullable=True)
+    low: Mapped[float | None] = mapped_column(Float, nullable=True)
+    close: Mapped[float] = mapped_column(Float)
+    provider: Mapped[str] = mapped_column(String(40))
+    reason: Mapped[str] = mapped_column(String(40))
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolution: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class IndexUniverseMember(Base):
+    """One constituent of an equity index, as its tracking fund publishes it.
+
+    Filled weekly from the SPDR MSCI World holdings file
+    (``foundation.index_universe``): the ISIN, name, country, currency and GICS
+    classification come from the file, the Yahoo ``symbol`` from an OpenFIGI
+    mapping of the ISIN to its home listing. ``symbol_ok`` is cleared when
+    Yahoo has no prices for the mapped symbol, and such rows stay out of the
+    Discover universe. The table holds current members only.
+    """
+
+    __tablename__ = "index_universe_members"
+
+    index_key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    isin: Mapped[str] = mapped_column(String(12), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200))
+    country: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    sector: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    weight: Mapped[float | None] = mapped_column(Float, nullable=True)
+    as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    symbol: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    #: "known" (an existing ticker for the ISIN) or "openfigi".
+    symbol_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    symbol_ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    mapped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class AnalystConsensusCache(Base):
+    """The last price-target consensus fetched for a symbol (provider payload).
+
+    A Discover run reads it when fresh instead of asking Yahoo again; the
+    nightly universe prefetch keeps it fresh for every universe name.
+    """
+
+    __tablename__ = "analyst_consensus_cache"
+
+    symbol: Mapped[str] = mapped_column(String(32), primary_key=True)
+    payload_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

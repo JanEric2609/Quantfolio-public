@@ -1,0 +1,42 @@
+name: Bug report
+description: Something does not work as described.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not paste real account data, IBANs, tokens, API keys or broker exports.** Replace them with made-up values.
+        Security problems go through the Security tab (Report a vulnerability), not an issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to …
+        2. Click …
+        3. See …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The commit you run (`git rev-parse --short HEAD`).
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Brokers / sync, Tax cockpit, Plan / This month, Discover / research, Advisor / paper portfolios, Quant Lab, Budget, Settings / Control Center, Deployment, Other]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log lines, with anything personal removed.
+      render: text

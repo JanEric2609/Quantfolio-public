@@ -1,0 +1,1 @@
+import { useMutation } from "@tanstack/react-query"; import { api } from "../../../lib/api"; export const useExperimentRun=()=>useMutation({mutationFn:(id:string)=>api<any>(`/api/quant/experiments/${id}/run`,{method:"POST",body:"{}"})});

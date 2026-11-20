@@ -1,0 +1,11 @@
+# ~scalable-cli-user/.config/scalable-cli/config.toml
+# Owned by scalable-cli-user, mode 0600.
+
+[auth]
+# Session in a file under the CLI user's home (the server has no desktop keyring).
+session_backend = "file"
+
+[trade_controls]
+# An empty list refuses every order locally. Quantfolio checks this through
+# `sc capabilities` before each sync and stops if it is not empty.
+allowed_isins = []

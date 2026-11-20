@@ -1,0 +1,93 @@
+"""API tests for portfolio endpoints."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.foundation.core.db import Base, get_db
+from app.foundation.models.entities import Holding, Portfolio, User
+from app.foundation.auth import current_user
+
+
+@pytest.fixture
+def db():
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+    yield session
+    session.close()
+
+
+@pytest.fixture
+def client(db):
+    from app.main import app
+
+    user = User(username="null-avg-buy-api", password_hash="hash")
+    db.add(user)
+    db.commit()
+
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[current_user] = lambda: user
+    yield TestClient(app, raise_server_exceptions=False), user
+    app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(current_user, None)
+
+
+def test_get_holdings_returns_null_avg_buy_price_when_unknown(client, db):
+    tc, user = client
+    portfolio = Portfolio(user_id=user.id, name="Main")
+    db.add(portfolio)
+    db.commit()
+    db.add(
+        Holding(
+            portfolio_id=portfolio.id,
+            isin="IE00B4L5Y983",
+            ticker="IWDA",
+            name="iShares Core MSCI World",
+            asset_type="etf",
+            quantity=Decimal("120.5"),
+            avg_buy_price=None,
+            source="dkb_sync",
+        )
+    )
+    db.commit()
+
+    response = tc.get("/api/portfolio/holdings")
+    assert response.status_code == 200
+    body = response.json()
+    holding = next(h for h in body if h["isin"] == "IE00B4L5Y983")
+    assert holding["avg_buy_price"] is None
+
+
+def test_a_second_holding_with_the_same_isin_is_refused_not_a_crash(client, db):
+    tc, _ = client
+    body = {"isin": "IE00B4L5Y983", "name": "iShares Core MSCI World", "quantity": 3.0, "avg_buy_price": 3.0}
+    first = tc.post("/api/portfolio/holdings", json=body)
+    assert first.status_code == 200
+    assert tc.post("/api/portfolio/holdings", json=body).status_code == 409
+
+    other = tc.post("/api/portfolio/holdings", json={**body, "isin": "IE00BK5BQT80"}).json()
+    moved = tc.put(f"/api/portfolio/holdings/{other['id']}", json=body)
+    assert moved.status_code == 409
+    # Saving a holding under its own ISIN is fine.
+    assert tc.put(f"/api/portfolio/holdings/{first.json()['id']}", json={**body, "quantity": 4.0}).status_code == 200
+
+
+def test_a_repeated_asset_class_in_target_allocation_is_refused_not_a_crash(client):
+    """Found by the API fuzzer: two "cash" rows hit the unique key and returned 500."""
+    tc, _user = client
+    body = [{"asset_type": "cash", "target_pct": 0.0}, {"asset_type": "cash", "target_pct": 100.0}]
+    resp = tc.put("/api/portfolio/target-allocation", json=body)
+    assert resp.status_code == 400
+    ok = tc.put("/api/portfolio/target-allocation", json=[{"asset_type": "cash", "target_pct": 100.0}])
+    assert ok.status_code == 200

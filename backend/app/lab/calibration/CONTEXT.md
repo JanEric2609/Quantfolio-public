@@ -1,0 +1,33 @@
+# Context: lab/calibration
+
+## Responsibility
+
+Measures the trust tests (ADR 0018 and its amendment of 2026-10-14) on
+simulated daily series: the false-alarm rate over 20 years, the years to a
+verdict per edge and noise, and the smallest edge a verdict can find in 5 and
+10 years. Plan 2026-10-14, WP-D2. Not a trial: it makes no return claim and
+never touches the trial ledger.
+
+## Public surface
+
+`harness.py`: `TestSpec`, `e_paths` (the aGRAPA bettor across paths, the same
+algebra as `foundation.forecast_verification.e_process_bernoulli`),
+`crossing_days`, `simulate` (iid normal, t(4)-GARCH(1,1), AR(1) 0.15,
+two-regime noise, F1-style overlapping membership), `type_i_error`,
+`time_to_verdict`, `minimum_detectable_edge`, and `MODELS` (the noise models
+by name).
+
+`noise_study.py`: the outcome-blind noise of candidate test designs on real
+prices (random picks and scores, and the live runs' weights measured only on
+the year before each issue); `scripts/run_noise_study.py` loads the closes.
+It chose the `selection_w` and `ranking_ef` designs (ADR 0018, amendment of
+2026-11-08) and uses the same weights as the ledger
+(`foundation/evidence_weights.py`).
+
+## Invariants
+
+- Reads nothing from `decision`: the test constants come in as `TestSpec`s;
+  `scripts/run_calibration.py` builds them from `decision.verification.daily_tests`.
+- Seeded; NumPy only; no I/O.
+- A new experiment is registered only if this harness shows it can reach a
+  verdict in under 10 years at a plausible edge (plan WP-D2).

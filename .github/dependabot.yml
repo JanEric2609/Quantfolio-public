@@ -1,0 +1,54 @@
+# Dependabot auto-updates — see https://docs.github.com/en/code-security/dependabot
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - frontend
+    groups:
+      react:
+        patterns:
+          - "react*"
+          - "@types/react*"
+      radix:
+        patterns:
+          - "@radix-ui/*"
+      testing:
+        patterns:
+          - "@testing-library/*"
+          - "vitest"
+          - "@vitest/*"
+          - "jsdom"
+
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - backend
+    groups:
+      ml:
+        patterns:
+          - "scikit-learn*"
+          - "torch*"
+          - "lightgbm*"
+          - "xgboost*"
+      quant:
+        patterns:
+          - "numpy*"
+          - "pandas*"
+          - "scipy*"
+          - "skfolio*"

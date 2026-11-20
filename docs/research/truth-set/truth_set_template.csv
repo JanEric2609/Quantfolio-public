@@ -1,0 +1,6 @@
+ticker,issuer_type,period_end,period_months,currency,ebitda,eps,total_debt,total_cash,source_page
+# One row per issuer, keyed by hand from the issuer's own annual or half-year report. Delete these comment lines.
+# issuer_type: half_year_reporter | large_minorities | bank | plain  (need one of each of the first three, seven more plain)
+# Amounts in the report currency, in full units (not millions). Leave a cell empty if the report does not state it.
+# source_page: report name and page, so a disagreement can be re-checked.
+WKL.AS,half_year_reporter,,6,EUR,,,,,

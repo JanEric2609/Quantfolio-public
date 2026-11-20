@@ -1,0 +1,152 @@
+"""Generic live-broker tables (Scalable Capital and Trading 212; the next broker lands here too).
+
+DKB keeps its own ``dkb_*`` tables; every broker added after it lands here, so
+readers go through ``app.foundation.live_positions`` instead of learning one
+more table per broker.
+"""
+from __future__ import annotations
+
+from datetime import date, datetime
+from decimal import Decimal
+
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint, text
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.foundation.core.db_base import Base
+from ._core import now_utc, uuid_pk
+
+
+class BrokerPosition(Base):
+    """One security position at a synced broker account (read-only mirror)."""
+
+    __tablename__ = "broker_positions"
+    __table_args__ = (
+        UniqueConstraint("connected_account_id", "isin", name="uq_broker_positions_account_isin"),
+        Index("ix_broker_positions_user_source", "user_id", "source"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    connected_account_id: Mapped[str] = mapped_column(
+        ForeignKey("connected_accounts.id", ondelete="CASCADE"), index=True
+    )
+    source: Mapped[str] = mapped_column(String(32), index=True)
+    isin: Mapped[str] = mapped_column(String(12), index=True)
+    ticker: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    security_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(20, 8))
+    pending_quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    avg_buy_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    current_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    current_value: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), default="EUR")
+    price_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    price_outdated: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_synced: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
+
+class BrokerSyncLog(Base):
+    """One broker sync run: when, how it ended and what it wrote."""
+
+    __tablename__ = "broker_sync_logs"
+    __table_args__ = (
+        Index("ix_broker_sync_logs_user_source_started", "user_id", "source", "started_at"),
+        # One running sync per broker, enforced by the database: two requests
+        # (API and worker, or two clicks) cannot both get past the check.
+        Index(
+            "uq_broker_sync_logs_one_running", "source", unique=True,
+            sqlite_where=text("state = 'running'"), postgresql_where=text("state = 'running'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(String(32))
+    trigger: Mapped[str] = mapped_column(String(16), default="manual")  # manual|scheduled
+    state: Mapped[str] = mapped_column(String(16), default="running")  # running|success|warning|error
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    message: Mapped[str] = mapped_column(Text, default="")
+    counts_json: Mapped[str] = mapped_column(Text, default="{}")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BrokerPie(Base):
+    """One Trading 212 pie as last read (read-only mirror; the pie endpoints are deprecated).
+
+    Replaced on every successful read of the pies; on a failed read the last
+    good snapshot stays, with its ``synced_at``.
+    """
+
+    __tablename__ = "broker_pies"
+    __table_args__ = (
+        UniqueConstraint("user_id", "source", "external_id", name="uq_broker_pies_user_source_ext"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    connected_account_id: Mapped[str | None] = mapped_column(
+        ForeignKey("connected_accounts.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    source: Mapped[str] = mapped_column(String(32))
+    external_id: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(120))
+    status: Mapped[str | None] = mapped_column(String(16), nullable=True)  # AHEAD | ON_TRACK | BEHIND
+    cash: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    invested: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    value: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    result: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    result_pct: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    dividends_gained: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    dividends_reinvested: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    dividends_in_cash: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    dividend_action: Mapped[str | None] = mapped_column(String(24), nullable=True)  # REINVEST | TO_ACCOUNT_CASH
+    goal: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    instruments_json: Mapped[str] = mapped_column(Text, default="[]")
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class BrokerInstrument(Base):
+    """One line a broker offers (Trading 212's instrument list), shared by every user.
+
+    An ISIN can have several lines, one per venue and currency (``EUNLd_EQ``
+    on Xetra in EUR, ``IWDAl_EQ`` in London in USD). Replaced as a whole on
+    each refresh; ``synced_at`` says how old the list is.
+    """
+
+    __tablename__ = "broker_instruments"
+    __table_args__ = (
+        UniqueConstraint("source", "ticker", name="uq_broker_instruments_source_ticker"),
+        Index("ix_broker_instruments_source_isin", "source", "isin"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    source: Mapped[str] = mapped_column(String(32))
+    ticker: Mapped[str] = mapped_column(String(40))
+    isin: Mapped[str] = mapped_column(String(12))
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    type: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class VenueInstrument(Base):
+    """One instrument a German venue lists (Xetra, Börse Frankfurt), by ISIN.
+
+    From Deutsche Börse's "all tradable instruments" files. A listing there is
+    the nearest checkable proxy for a Scalable line (gettex and EIX publish no
+    list). Replaced per venue on each refresh; ``as_of`` is the file's date.
+    """
+
+    __tablename__ = "venue_instruments"
+
+    venue: Mapped[str] = mapped_column(String(16), primary_key=True)
+    isin: Mapped[str] = mapped_column(String(12), primary_key=True)
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    as_of: Mapped[date | None] = mapped_column(Date, nullable=True)

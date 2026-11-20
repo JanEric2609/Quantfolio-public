@@ -1,0 +1,22 @@
+name: Accessibility barrier
+description: Something you cannot use with your keyboard, screen reader, zoom or device.
+labels: ["accessibility", "bug"]
+body:
+  - type: input
+    id: page
+    attributes:
+      label: Page
+      placeholder: e.g. Portfolio → Holdings
+    validations:
+      required: true
+  - type: textarea
+    id: barrier
+    attributes:
+      label: What you tried and what happened
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: Browser, device and assistive technology
+      placeholder: e.g. Firefox 140, NVDA 2026.1, Windows 11

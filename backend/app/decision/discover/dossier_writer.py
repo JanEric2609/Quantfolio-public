@@ -1,0 +1,2292 @@
+"""LLM-powered dossier writer. Generates structured §5 JSON via single-pass LLM call with deterministic fallback."""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import re
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
+
+from pydantic import BaseModel, Field, ValidationError
+from sqlalchemy.orm import Session
+
+from app.foundation.models.entities import NewsItem, Recommendation, RecommendationDossier
+from app.decision.discover.candidate_gate import (
+    UNPROVEN_VERDICT,
+    _resolve_cohort_instrument_type,
+    discover_verdict,
+    evaluate_track_record,
+)
+from app.decision.discover.composite import ic_signal_usable
+from app.decision.discover.config import DEFAULT_PROMPT_TEMPLATE
+from app.decision.discover.corporate_action import STALE_RATIO_KEYS, corporate_action_text
+from app.decision.discover.data_quality import BOOK_EQUITY_CONCERN, data_quality_score
+from app.foundation.fundamentals_context import growth_basis
+from app.decision.discover.dossier_facts import (
+    SLOT,
+    SLOT_RULES,
+    Fact,
+    allowed_digit_terms,
+    build_facts,
+    facts_prompt,
+    render,
+)
+from app.decision.discover.ledger import DEFAULT_HORIZON_DAYS
+from app.decision.discover.listing import listing_currency
+from app.decision.discover.thesis_checks import (
+    DIVERSIFIER_MAX_CORRELATION,
+    MIN_CLUSTER_BUYERS,
+    check_thesis,
+)
+from app.foundation.expected_return import (
+    EQUITY_PREMIUM_OVER_CASH,
+    credibility_weight,
+    equilibrium_prior,
+    select_return_anchor,
+)
+from app.foundation.expected_return_blocks import building_block_er
+from app.decision.discover import blm
+from app.foundation.return_band import compute_return_band
+from app.foundation.settings import (
+    FALLBACK_RISK_FREE_RATE,
+    get_public_settings,
+    get_risk_free_rate,
+    resolve_llm_base_url,
+    resolve_llm_model,
+)
+from app.foundation.llm.structured import (
+    STRUCTURED_JSON_SAMPLING,
+    build_retry_messages,
+    parse_structured_completion,
+    unusable_reason,
+)
+from app.decision.llm_portfolio.review import _local_llm_sync
+from app.foundation.text_safety import ascii_safe
+
+logger = logging.getLogger(__name__)
+
+_MAX_JSON_RETRIES = 2
+# How long a proven Discover idea waits for a decision before it lapses.
+DISCOVER_DECISION_DAYS = 14
+
+# Bounds the two unbounded fields in the schema. A grammar constrains
+# *structure*, not *termination* — inside an unbounded `"thesis": "…"` every
+# repeated token is still legal JSON, so without a maxLength a runaway
+# completion burns the whole token budget and the JSON never closes (the same
+# failure class fixed for the advisor decision call in PRs #195-197).
+_MAX_THESIS_CHARS = 600
+_MAX_RISK_CHARS = 160
+_MAX_RISKS = 6
+
+_COMPLETION_TOKENS = 1024
+#: The prompt asks for at most this many characters (the schema keeps 600 as a net).
+_PROMPT_THESIS_CHARS = 450
+#: Dossier horizon unless the prompt config sets ``horizon_months``.
+DEFAULT_DOSSIER_HORIZON_MONTHS = 6
+#: Content-check retries before the deterministic template (D7: one retry).
+_MAX_CONTENT_RETRIES = 1
+
+
+def slots_enabled() -> bool:
+    """Figures written by code (``dossier_facts``); ``DISCOVER_DOSSIER_SLOTS=0`` restores the old prompt."""
+    return os.getenv("DISCOVER_DOSSIER_SLOTS", "1").strip().lower() not in ("0", "false", "no", "off")
+
+#: Rules appended to every dossier request in code, so they hold whatever
+#: prompt template is stored.
+_THESIS_RULES = (
+    "Rules for thesis and key_risks:\n"
+    f"- thesis: at most 3 complete sentences and {_PROMPT_THESIS_CHARS} characters; end with a full stop.\n"
+    "- Use only numbers that appear above. Do not invent figures, multiples, targets or consensus values.\n"
+    "- Each claim rests on a figure or fact above; no stock phrases such as \"mean reversion potential\" "
+    "or \"momentum drives value\".\n"
+    "- Do not describe interest-rate moves (hikes, cuts, tightening, easing) unless the Macro facts above "
+    "show that direction.\n"
+    "- Direction and horizon are fixed by the system (above); do not argue the opposite stance.\n"
+    "- The investor holds EUR. Mention currency risk only if the listing or reporting currency is not EUR.\n"
+    "- Name every figure in plain words, never by its field name. The only momentum figure is 12-1 month (never "
+    "call it 1-month, 3-month or 12-month); the momentum rank is a percentile, not a return; correlation and beta "
+    "are different figures; debt-to-equity is in percent and below 100 % is not high; a past drawdown is not a "
+    "limit.\n"
+    "- Call momentum strong only near the top of the candidates, and a position a diversifier only at a low "
+    "correlation with the portfolio. One insider buying is not a cluster. Name a fund's holdings only from the "
+    "holdings given.\n"
+    "- key_risks are risks to the investment. A missing data feed is not one; leave those out. Write no codes "
+    "with underscores.\n"
+    "- English only.\n"
+)
+
+# How much of a rejected completion is quoted back on a retry, so echoing one
+# runaway answer cannot push the next attempt past the context window.
+_RETRY_EXCERPT_CHARS = 800
+
+DOSSIER_JSON_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        # direction, horizon_months and conviction are set by the system after
+        # validation (plan 2026-10-12, D7); asking the model for a conviction it
+        # never keeps only spent tokens (plan 2026-10-14, E4).
+        # minLength closes the same gap fixed in advisor/llm_decision.py's
+        # thesis field (audit-fixes-2026-08 todo 6): without it, the grammar
+        # has no reason to refuse "" for a required string field.
+        "thesis": {"type": "string", "minLength": 8, "maxLength": _MAX_THESIS_CHARS},
+        "key_risks": {
+            "type": "array",
+            "maxItems": _MAX_RISKS,
+            "items": {"type": "string", "minLength": 4, "maxLength": _MAX_RISK_CHARS},
+        },
+    },
+    # Neither expected_return nor expected_return_range is part of the schema.
+    #
+    # expected_return_range was removed for the same reason, plus its own: the
+    # LLM's range was rendered directly beside the anchored, 0.3-dampened,
+    # +/-25-clamped expected_return, so the point estimate could sit *outside*
+    # its own printed interval (a 20% 3y CAGR over 6 months prints "+3.0%
+    # (8.0-15.0)"). Repairing the range would have meant inventing a band
+    # width with nothing to calibrate it against, and the measured coverage of
+    # LLM-produced intervals does not support keeping it: FermiEval (2025)
+    # found nominal 99% intervals covering ~65% of the time, and
+    # QuantSightBench (2026), on quantitative forecasting with prediction
+    # intervals specifically, found no model reaching its target coverage.
+    # If a band is wanted later, the honest source is the Monte Carlo p5/p95
+    # already written by advisor/cycle.py, not the model's own guess.
+    #
+    # expected_return is computed
+    # deterministically from signal_breakdown.expected_return_anchor_pct (see
+    # write_dossier below), never trusted from the LLM. The model's job is to
+    # justify or critique that anchor in `thesis`, not invent its own number
+    # (prod incident: XEON.DE, the LLM echoed a 3-year CAGR nearly verbatim as
+    # a 3-month forecast — see docs/archive/plans/unified-portfolio-engine-implementation.md
+    # Phase 3).
+    "required": [
+        "thesis", "key_risks",
+    ],
+}
+
+
+class DossierOutputModel(BaseModel):
+    # Set by the system after validation (deterministic_direction, the
+    # configured horizon); whatever the model sends here is overwritten.
+    direction: Literal["long", "short", "neutral"] = "neutral"
+    conviction: float  # 0-1
+    horizon_months: int = 6  # 1-12
+    # min_length matches DOSSIER_JSON_SCHEMA's thesis/key_risks minLength
+    # (audit-fixes-2026-08 todo 6): _coerce_dossier fills a genuinely-missing
+    # thesis with "" so pydantic sees a value at all, and this constraint is
+    # what turns that into a ValidationError -> retry/fallback instead of a
+    # silently-persisted blank-justification dossier (see _try_parse_json's
+    # docstring for the exact incident this was already guarding against at
+    # the marker-field level).
+    thesis: str = Field(min_length=8)
+    key_risks: list[str]
+    signal_breakdown: dict  # passed in input, echoed back
+    estimate: bool = True
+    not_financial_advice: bool = True
+
+
+SKILL_HORIZON_CEILING_YEARS = 100
+
+
+def skill_horizon(tracking_error: Any, benchmark: Any) -> dict[str, Any] | None:
+    """Years of live data a t of 2 needs at this tracking error: (2 * TE / alpha)^2.
+
+    Evaluated at alpha = 1 % and 2 % a year. None without a tracking error.
+    """
+    if not isinstance(tracking_error, (int, float)) or tracking_error <= 0:
+        return None
+    te = float(tracking_error)
+    years = {f"alpha_{int(a * 100)}pct": round((2.0 * te / a) ** 2, 1) for a in (0.01, 0.02)}
+
+    def about(value: float) -> str:
+        # A figure this rough has no decimals; "657.9 years" only sounded measured.
+        if value >= SKILL_HORIZON_CEILING_YEARS:
+            return f"more than {SKILL_HORIZON_CEILING_YEARS} years"
+        return f"about {value:.0f} years" if value >= 10 else f"about {value:g} years"
+
+    return {
+        "tracking_error": round(te, 4),
+        "benchmark": benchmark,
+        "basis": "weekly active returns, last 2 years",
+        "years": years,
+        "text": (
+            f"At this tracking error ({te:.0%}/yr), a 2 %/yr edge needs {about(years['alpha_2pct'])} "
+            f"of live data to show, a 1 %/yr edge {about(years['alpha_1pct'])}."
+        ),
+    }
+
+
+def deterministic_direction(expected_return_pct: float | None, estr_pct: float | None, verdict: str) -> str:
+    """``long`` when the system's expected return beats €STR over the horizon and
+    the verdict is not HOLD; otherwise ``neutral``. Never ``short``: long-only (D7)."""
+    if expected_return_pct is None or str(verdict).upper() == "HOLD":
+        return "neutral"
+    return "long" if float(expected_return_pct) > float(estr_pct or 0.0) else "neutral"
+
+
+def estr_over_horizon_pct(db: Session | None, horizon_months: int) -> float | None:
+    """€STR (latest fixing) accrued over the horizon, in percent; None when unknown."""
+    if db is None:
+        return None
+    try:
+        from app.foundation.estr import stored_fixings
+
+        fixings = stored_fixings(db, start=datetime.now(UTC).date() - timedelta(days=20))
+    except Exception:  # noqa: BLE001
+        logger.debug("stored estr fixings unavailable", exc_info=True)
+        return None
+    if not fixings:
+        return None
+    return round(fixings[-1][1] * horizon_months / 12.0, 3)
+
+
+def _regime_text(db: Session, regime_state: Any) -> str:
+    """The regime as a model's state with its reliability, never as a fact (D9)."""
+    label = str(regime_state or "").strip()
+    reliability = None
+    label_source = None
+    try:
+        from app.foundation.data_backbone.regime_store import RegimeStore
+
+        snap = RegimeStore(db).get_latest_snapshot(source="jump")
+        if snap:
+            label = label or str(snap.get("label") or "")
+            score = snap.get("score")
+            reliability = float(score) if isinstance(score, (int, float)) else None
+            label_source = (snap.get("payload") or {}).get("label_source")
+    except Exception:  # noqa: BLE001 - context only
+        logger.debug("dossier: regime snapshot unavailable", exc_info=True)
+    if not label:
+        return "Regime model: unavailable"
+    rel = f" (reliability {reliability:.0%})" if reliability is not None else ""
+    carried = " (label carried over after a model refit)" if label_source == "carried_after_refit" else ""
+    return f"Regime model: {label}{rel}{carried}. A model state, not a fact: do not state it as the market's condition"
+
+
+def _macro_facts(db: Session) -> dict[str, Any] | None:
+    """The WP8 macro block; None when nothing is stored (rate words are then refused)."""
+    try:
+        from app.foundation.euro_macro import macro_fact_block
+
+        block = macro_fact_block(db)
+    except Exception:  # noqa: BLE001
+        logger.debug("dossier: macro block unavailable", exc_info=True)
+        return None
+    if not any(block.get(k) for k in ("ecb_deposit_rate", "fed_funds_upper", "hicp_euro_area")):
+        return None
+    return block
+
+
+def _fetch_fundamentals(symbol: str, db: Session) -> dict[str, Any] | None:
+    """Fetch latest fundamental metrics for *symbol* via the provider chain."""
+    try:
+        from app.foundation.market import fundamentals as market_fundamentals
+
+        result = market_fundamentals(db, symbol)
+        data = result.get("data") or {}
+        if not isinstance(data, dict) or not data:
+            logger.debug("_fetch_fundamentals: no valid dict data for %s", symbol)
+            return None
+
+        def _as_float(key: str) -> float | None:
+            val = data.get(key)
+            if val is None or val == "":
+                return None
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                return None
+
+        roe = _as_float("roe")
+        pb = _as_float("pb_ratio")
+        forward_pe = _as_float("forward_pe")
+        fundamentals = {
+            # Labelled by source field: pe_ratio is trailing everywhere it comes from.
+            "pe": _as_float("pe_ratio"),
+            "pe_basis": "trailing",
+            "forward_pe": forward_pe,
+            "pb": pb,
+            # Above 100 % or with negative equity ROE is not meaningful (D8);
+            # the score keeps its own clip. (JPM-style 200-631 % were shown raw.)
+            "roe": "n/m" if roe is not None and (roe > 1.0 or (pb is not None and pb < 0)) else roe,
+            "de_ratio": _as_float("debt_equity"),
+            "market_cap": _as_float("market_cap"),
+            "revenue_growth": _as_float("revenue_growth"),
+            # One quarter (yfinance) or twelve months (Finnhub) against a year earlier.
+            "growth_basis": growth_basis(data, result.get("source")),
+            # 3 or 6: SITC (1308.HK) reports half-years and was told "latest
+            # quarter" (run b5a132a4, 2026-11-19) because this key was dropped.
+            "period_months": data.get("period_months"),
+            # ADR 0014 §6: ground the equity branch of the dossier prompt in
+            # sector/industry rather than leaving the LLM to infer them.
+            "sector": data.get("sector"),
+            "industry": data.get("industry"),
+            "reporting_currency": data.get("financial_currency") or data.get("financialCurrency")
+            or data.get("reporting_currency"),
+            "source": result.get("source", "unknown"),
+            "stale": bool(result.get("stale", True)),
+        }
+        logger.debug("_fetch_fundamentals: fetched for %s from %s", symbol, fundamentals["source"])
+        return fundamentals
+    except Exception as exc:
+        logger.warning("_fetch_fundamentals: failed for %s: %s", symbol, exc)
+        return None
+
+
+def _fetch_sentiment(symbol: str, db: Session) -> dict[str, Any]:
+    """Return recent news sentiment metrics for *symbol* from the NewsItem table."""
+    from datetime import UTC, datetime, timedelta
+
+    neutral = {
+        "news_sentiment": 0.5,
+        "social_mentions": 0,
+        "sentiment_trend": "stable",
+    }
+
+    try:
+        since = datetime.now(UTC) - timedelta(days=30)
+        rows = (
+            db.query(NewsItem)
+            .filter(NewsItem.ticker == symbol.upper(), NewsItem.published_at >= since)
+            .order_by(NewsItem.published_at.desc())
+            .limit(50)
+            .all()
+        )
+        if not rows:
+            logger.debug("_fetch_sentiment: no news rows for %s", symbol)
+            return neutral
+
+        from app.foundation.sentiment import has_real_sentiment, tone_unit
+
+        unit, scored = tone_unit(rows)
+        if unit is None:
+            # Under three FinBERT-scored articles there is no tone to report.
+            return {**neutral, "social_mentions": scored}
+        sentiment = unit
+
+        # Rising/falling: tone of the newer half against the older half.
+        real = [r for r in rows if has_real_sentiment(r)]
+        half = len(real) // 2
+        first_unit, _ = tone_unit(real[:half]) if half >= 3 else (None, 0)
+        second_unit, _ = tone_unit(real[half:]) if len(real) - half >= 3 else (None, 0)
+        trend = "stable"
+        if first_unit is not None and second_unit is not None:
+            # rows are newest first: real[:half] is the newer half
+            if first_unit > second_unit + 0.1:
+                trend = "rising"
+            elif second_unit > first_unit + 0.1:
+                trend = "falling"
+
+        logger.debug("_fetch_sentiment: %s mentions=%d sentiment=%.2f trend=%s", symbol, len(rows), sentiment, trend)
+        return {
+            "news_sentiment": round(sentiment, 4),
+            "social_mentions": scored,
+            "sentiment_trend": trend,
+        }
+    except Exception as exc:
+        logger.warning("_fetch_sentiment: failed for %s: %s", symbol, exc)
+        return neutral
+
+
+def _as_dict(val: Any) -> dict[str, Any]:
+    return val if isinstance(val, dict) else {}
+
+
+_SHORT_HISTORY_PROMPT_REWORD = (
+    "short_history (DATA COVERAGE gap: our price database's records for this "
+    "ticker start later than our lookback window — this says nothing about "
+    "when the underlying fund/company itself launched; do not state or imply "
+    "an inception/founding date from this flag)"
+)
+
+
+#: Raw concern codes the model copied into key_risks word for word on 2026-11-05.
+_CONCERN_PROMPT_REWORDS = {
+    "alphacrafter_no_validated_factors": "(data note, not a risk) no validated alpha factors in this run",
+    "insider_data_unavailable": "(data note, not a risk) no insider-trading data for this name in this run",
+    "ml_signal_unavailable": "(data note, not a risk) no ML signal in this run",
+    "estimate_data_unavailable": "(data note, not a risk) no estimate-revision data for this name in this run",
+    "analyst_unavailable": "(data note, not a risk) no analyst consensus for this name in this run",
+    "fundamentals_unavailable": "(data note, not a risk) no fundamentals for this name in this run",
+    "sentiment_unavailable": "(data note, not a risk) no news sentiment for this name in this run",
+    "revenue_growth_unreliable": "(data note, not a risk) the provider's revenue growth is unreliable and was dropped",
+    "book_equity_near_zero": (
+        "book equity is near zero after buybacks or losses, so P/B, ROE and debt/equity are not meaningful "
+        "and are not given; do not cite them"
+    ),
+}
+
+
+def _number_or_none(value: Any) -> float | None:
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+#: A count of buyers, whatever the name says: "cluster" made one buyer read as a group (KMI, 2026-11-07).
+_INSIDER_BUYER_KEYS = frozenset({"cluster_buy_score", "insider_cluster_buy_score"})
+
+
+def _reword_concerns_for_prompt(value: Any) -> Any:
+    """Deep-copy *value*, rewording the bare ``"short_history"`` concern token.
+
+    ADR 0014 §6: the raw ``scores`` dict (serialized verbatim into the
+    prompt) carries a bare ``"short_history"`` string inside various nested
+    ``concerns`` lists (app.decision.discover.pipeline's coverage/span/length
+    gate). With no framing, the LLM free-associated "young fund" from that
+    token alone — the exact defect behind IS3S.DE-style dossiers describing a
+    data-coverage gap as if it were the fund's founding date. This walks the
+    whole structure (concerns can appear at several nesting levels) rather
+    than special-casing one known path, so it can't miss a location.
+    """
+    if isinstance(value, list):
+        return [
+            _SHORT_HISTORY_PROMPT_REWORD if v == "short_history"
+            else _CONCERN_PROMPT_REWORDS[v] if isinstance(v, str) and v in _CONCERN_PROMPT_REWORDS
+            else _reword_concerns_for_prompt(v)
+            for v in value
+        ]
+    if isinstance(value, dict):
+        # regime_affinity is the same 1.0 for every candidate, and the model
+        # sold it as "strong regime affinity"; data_quality is for the reader.
+        # trailing_1m_annualized_return read -94 % to +439 % on 2026-11-07 and the
+        # model kept quoting it by its code; the anchor line names it when it is used.
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            if k in ("regime_affinity", "data_quality", "trailing_1m_annualized_return"):
+                continue
+            # The facts name one market beta, the weekly one; the daily one beside it
+            # came back as a second beta in the same dossier (IS3S.DE 0.88 and 1.12, 2026-11-08).
+            if k == "market_beta" and isinstance(value.get("market_beta_weekly"), (int, float)):
+                continue
+            if k == "revenue_growth" and isinstance(v, (int, float)):
+                # A fraction here came back as "0.83 revenue growth" (NVDA, 2026-11-07).
+                out["revenue_growth_pct"] = round(v * 100.0, 1)
+            elif k in _INSIDER_BUYER_KEYS:
+                out["insider_buyers_30d"] = v
+            else:
+                out[k] = _reword_concerns_for_prompt(v)
+        return out
+    return value
+
+
+def _gather_instrument_facts(
+    db: Session, symbol: str, isin: str | None, instrument_type: str, fundamentals: dict[str, Any]
+) -> dict[str, Any]:
+    """Ground facts for the dossier prompt, branched on instrument_type.
+
+    ADR 0014 §6: the prompt used to carry only symbol/ISIN/scores — no
+    holdings, tracked index, inception date, sector, or factor mandate — so
+    the LLM guessed style from a ticker and a trailing return (and guessed
+    wrong: a Value ETF called "growth"). This gathers what's actually
+    knowable and computes style deterministically; it never fabricates a
+    placeholder, only omits what a best-effort lookup couldn't find.
+
+    Best-effort throughout: any lookup failure degrades to an absent field,
+    never raises — a data-source outage must not block dossier generation.
+    """
+    from app.decision.discover.style_classifier import classify_style
+    from app.foundation.etf_lookup import get_etf_profile
+    from app.foundation.providers.registry import build_provider_registry
+
+    listing_ccy: str | None = None
+    try:
+        from app.foundation.data_backbone.listing_currency import resolve_currency
+
+        listing_ccy = resolve_currency(db, symbol)
+    except Exception:  # noqa: BLE001 - best effort
+        listing_ccy = None
+    if instrument_type not in ("etf", "fund"):
+        return {
+            "instrument_type": instrument_type,
+            "sector": fundamentals.get("sector"),
+            "industry": fundamentals.get("industry"),
+            "listing_currency": listing_ccy,
+            "reporting_currency": fundamentals.get("reporting_currency"),
+            "investor_currency": "EUR",
+        }
+
+    if isin:
+        try:
+            from app.foundation.asset_enrichment import upsert_asset_by_isin
+
+            upsert_asset_by_isin(db, isin)
+        except Exception as exc:
+            logger.debug("_gather_instrument_facts: asset enrichment failed for %s: %s", isin, exc)
+
+    holdings: list[dict[str, Any]] = []
+    try:
+        profile = get_etf_profile(db, symbol)
+        if profile:
+            holdings = profile.get("top_holdings") or []
+    except Exception as exc:
+        logger.debug("_gather_instrument_facts: get_etf_profile failed for %s: %s", symbol, exc)
+
+    index_name: str | None = None
+    inception_date: str | None = None
+    try:
+        info_result = build_provider_registry(db).get_etf_info(symbol)
+        if info_result.get("ok"):
+            info_data = info_result.get("data") or {}
+            if isinstance(info_data, list) and info_data:
+                info_data = info_data[0]
+            if isinstance(info_data, dict):
+                index_name = info_data.get("index") or info_data.get("tracked_index") or info_data.get("category")
+                inception_date = info_data.get("inception_date") or info_data.get("fund_inception_date")
+    except Exception as exc:
+        logger.debug("_gather_instrument_facts: get_etf_info failed for %s: %s", symbol, exc)
+
+    style = classify_style(instrument_type, holdings=holdings, index_name=index_name)
+
+    return {
+        "instrument_type": instrument_type,
+        "top_holdings": holdings[:10],
+        "tracked_index": index_name,
+        "inception_date": inception_date,
+        "style": style,
+        "listing_currency": listing_ccy,
+        "investor_currency": "EUR",
+    }
+
+
+_ANCHOR_KIND_TEXT: dict[str, str] = {
+    "trailing_3y_annualized_return": "trailing 3-year annualized return",
+    "momentum_12_1m": "12-1 month momentum (return from 12 months ago to 1 month ago)",
+    "trailing_1m_annualized_return": "trailing 1-month annualized return",
+    "building_blocks_credibility": "building-block estimate (dividend yield + trend earnings growth)",
+    "bl_posterior": "Black-Litterman posterior",
+}
+
+
+def _pct(value: Any, digits: int = 1) -> str:
+    return f"{float(value):+.{digits}f}%" if isinstance(value, (int, float)) else "n/a"
+
+
+FULL_ANCHOR_YEARS = 2.9
+
+
+def _grounding_prompt_lines(scores: dict[str, Any], annual: dict[str, Any]) -> str:
+    """Plain-language facts the thesis must not contradict (ADR 0017).
+
+    BBVA.MC audit (2026-09-26): the prompt carried
+    ``expected_return_anchor_pct=59.8`` without saying what kind of figure it
+    was, so the model called the 3-year CAGR "12-1 month momentum" (which
+    happened to be 60.9%). It cited a multi-factor regression loading (1.33)
+    as the market beta, and it could not see which inputs drove the score.
+    Each line here states one of those facts explicitly.
+    """
+    lines: list[str] = []
+    mom = _as_dict(scores.get("momentum_quality"))
+    components = _as_dict(annual.get("components"))
+    kind = annual.get("anchor_kind")
+
+    if kind in ("trailing_3y_annualized_return", "momentum_12_1m", "trailing_1m_annualized_return"):
+        lines.append(
+            f"Expected-return anchor: {_pct(components.get('anchor_pct'))}/yr is the "
+            f"{_ANCHOR_KIND_TEXT[kind]} — backward-looking, not a forecast. Refer to it by "
+            "exactly this name."
+        )
+        lines.append(
+            "System forward estimate (annual, before scaling to horizon_months): "
+            f"{_pct(components.get('er_annual_pct'))} = a prior of "
+            f"{_pct(components.get('prior_pct'))} (cash {_pct(components.get('risk_free_pct'), 2)} + "
+            f"adjusted beta {components.get('beta') if components.get('beta') is not None else 'n/a'} x "
+            f"equity premium {_pct(components.get('equity_premium_pct'))}) + "
+            f"{float(components.get('credibility_weight') or 0.0):.1%} of the anchor's gap to it. "
+            "Critique this estimate, not the raw anchor."
+        )
+    elif kind in _ANCHOR_KIND_TEXT:
+        lines.append(
+            f"System forward estimate (annual): {_pct(components.get('er_annual_pct'))}, a "
+            f"{_ANCHOR_KIND_TEXT[kind]}."
+        )
+
+    # Prod check 2026-10-26: "momentum (1.33x)" for a +133 % return, "momentum
+    # (0.91)" for the rank and "52.6 % momentum rank" for a return. Return and
+    # rank are named side by side so neither stands in for the other.
+    if isinstance(mom.get("momentum_12_1m"), (int, float)):
+        rank = mom.get("momentum_rank")
+        rank_text = (
+            f"; its momentum rank is {float(rank):.2f}, the percentile of that return among this run's "
+            "candidates (0-1, the composite's momentum input)"
+            if isinstance(rank, (int, float)) else ""
+        )
+        separate = " (a separate figure from the anchor)" if kind != "momentum_12_1m" else ""
+        lines.append(
+            f"12-1 month momentum{separate}: a {_pct(mom['momentum_12_1m'] * 100)} price return{rank_text}. "
+            "Write the return as a percentage and the rank as a percentile; never write either as a "
+            "multiple such as 1.33x."
+        )
+
+    fit = _as_dict(scores.get("portfolio_fit"))
+    if isinstance(fit.get("correlation"), (int, float)):
+        weighting = {
+            "market_value": "each position weighted by its market value",
+            "value": "each position weighted by its market value",
+            "equal": "positions weighted equally",
+        }.get(str(fit.get("weight_basis")), "positions weighted by value")
+        weeks = f", {fit['correlation_weeks']} weeks" if fit.get("correlation_weeks") else ""
+        fit_score = fit.get("fit_score")
+        fit_text = (
+            f" Fit score {float(fit_score):.2f} (0-1, higher = adds more diversification)."
+            if isinstance(fit_score, (int, float)) else ""
+        )
+        lines.append(
+            f"Portfolio fit: weekly-return correlation {float(fit['correlation']):.2f} with the investor's "
+            f"current portfolio ({weighting}{weeks}). It is a correlation to that portfolio, not to an index, "
+            f"a benchmark or 'equities', and says nothing about value investing.{fit_text}"
+        )
+
+    inputs = scores.get("composite_inputs")
+    if isinstance(inputs, list) and inputs:
+        drivers = "; ".join(
+            f"{row.get('signal')} {float(row.get('score', 0.0)):.2f} x {float(row.get('weight', 0.0)):.2f}"
+            f" = {float(row.get('contribution', 0.0)):.3f}"
+            for row in inputs
+            if isinstance(row, dict)
+        )
+        lines.append(
+            f"Composite score drivers (signal score x applied weight = contribution): {drivers}. "
+            "Signal scores are 0-1 scores or ranks, not returns."
+        )
+
+    quant = _as_dict(scores.get("quant_signals"))
+    beta_weekly = quant.get("market_beta_weekly")
+    beta_daily = quant.get("market_beta")
+    benchmark = quant.get("benchmark") or "its benchmark"
+    if isinstance(beta_weekly, (int, float)) or isinstance(beta_daily, (int, float)):
+        beta_text = (
+            f"{beta_weekly:.2f} (weekly returns vs {benchmark}, 2 years)"
+            if isinstance(beta_weekly, (int, float))
+            else f"{beta_daily:.2f} (daily returns vs {benchmark}, 1 year)"
+        )
+        lines.append(
+            f"Market beta: {beta_text}. This is the only market beta; factor_betas are loadings "
+            "from a multi-factor regression and must not be cited as market beta."
+        )
+
+    sf = _as_dict(scores.get("sentiment_fundamentals"))
+    if sf.get("analyst_estimate_score") is not None:
+        target_text = (
+            f"{sf.get('analyst_target_kind') or 'median'} price target {sf['analyst_target']} "
+            f"({_pct((sf.get('analyst_upside') or 0.0) * 100)} vs current price)"
+            if sf.get("analyst_target") is not None
+            else "no price target"
+        )
+        source = str(sf.get("analyst_source") or "provider").split("_")[0].title()
+        as_of = f" as of {sf['analyst_as_of']}" if sf.get("analyst_as_of") else ""
+        lines.append(
+            f"Analyst consensus ({source} consensus{as_of}): {target_text}, rating "
+            f"{sf.get('analyst_recommendation') or 'n/a'}, {sf.get('analyst_count') or 'unknown number of'} analysts."
+        )
+    elif "analyst_unavailable" in (sf.get("concerns") or []):
+        lines.append("Analyst consensus: unavailable for this run — do not assume it is neutral or positive.")
+
+    earnings_line = _earnings_text(sf)
+    if earnings_line and _earnings_is_near(sf):
+        lines.append(
+            f"Earnings: {earnings_line}. The price usually moves several times a normal day's range on the report; "
+            "name it as event risk in key_risks."
+        )
+    elif earnings_line:
+        lines.append(f"Earnings: {earnings_line}. That is too far off to be a key risk; leave it out of key_risks.")
+
+    buyers = _as_dict(scores.get("insider_signal")).get("cluster_buy_score")
+    if isinstance(buyers, (int, float)) and 0 < buyers < MIN_CLUSTER_BUYERS:
+        lines.append("One insider bought in the last 30 days; that is one buyer, not a cluster.")
+
+    correlation = _as_dict(scores.get("portfolio_fit")).get("correlation")
+    if isinstance(correlation, (int, float)) and correlation >= DIVERSIFIER_MAX_CORRELATION:
+        lines.append(
+            f"Weekly correlation with the portfolio is {correlation:.2f}: this does not diversify the portfolio; "
+            "do not say it does."
+        )
+
+    fall = mom.get("fall_from_3m_high")
+    if isinstance(fall, (int, float)) and fall >= RECENT_FALL_LIMIT:
+        lines.append(
+            f"Latest closing price is {fall * 100:.1f}% below the highest close of the last 3 months. The 12-1 "
+            "month momentum skips the latest month and does not show this; say so if you cite momentum."
+        )
+
+    jump = _jump_text(mom)
+    if jump:
+        lines.append(
+            f"One day, {jump} Momentum that comes from one jump tends not to continue; say so if you cite momentum."
+        )
+
+    return "".join(f"{line}\n" for line in lines)
+
+
+EARNINGS_IMMINENT_DAYS = 1
+#: A report further off than this is no key risk: over a 6-month horizon every
+#: stock reports, and 81 days away read as a warning on KMI (2026-11-07).
+EARNINGS_RISK_DAYS = 30
+#: A fall from the 3-month high from which it is worth a line.
+RECENT_FALL_LIMIT = 0.15
+def _jump_text(mom: dict[str, Any]) -> str | None:
+    """'One day gave much of the momentum', when the momentum stage says so; None otherwise."""
+    share, day, gain = mom.get("largest_day_share"), mom.get("largest_day_date"), mom.get("largest_day_return")
+    if mom.get("jump_driven") is not True or not isinstance(share, (int, float)) or not isinstance(gain, (int, float)):
+        return None
+    return f"{day} ({gain * 100:+.1f}%) gave {share * 100:.0f}% of the 12-1 month return."
+
+
+_EARNINGS_HOURS = {"bmo": "before the open", "amc": "after the close", "dmh": "during market hours"}
+
+
+def _earnings_is_near(sf: dict[str, Any]) -> bool:
+    days = sf.get("days_to_earnings")
+    return isinstance(days, int) and 0 <= days <= EARNINGS_RISK_DAYS
+
+
+def _filings_text(db: Session, symbol: str) -> str | None:
+    """Material 8-Ks of the last 30 days in plain words (US listings only), or None."""
+    try:
+        from app.foundation.data_engineering.sec_8k import recent_material_text
+
+        return recent_material_text(db, symbol)
+    except Exception:  # noqa: BLE001 - a missing table or bad row must not stop a dossier
+        logger.debug("dossier: 8-K lookup failed for %s", symbol, exc_info=True)
+        return None
+
+
+def _earnings_text(sf: dict[str, Any]) -> str | None:
+    """The next earnings report as a noun phrase from attach_earnings_calendar's fields, or None."""
+    report_day = sf.get("next_earnings_date")
+    days = sf.get("days_to_earnings")
+    if not isinstance(report_day, str) or not isinstance(days, int) or days < 0:
+        return None
+    window_end = sf.get("earnings_date_to")
+    when = f"{report_day} to {window_end} (not confirmed)" if isinstance(window_end, str) else report_day
+    hour = _EARNINGS_HOURS.get(str(sf.get("earnings_hour")))
+    # A noun phrase, so a sentence can cite it: as a sentence ("Next earnings
+    # report: 2026-11-11, 1 days from now, so ...") the model spliced it into
+    # "Upcoming results in Next earnings report: ..." (ABN, run 57c8f8b8).
+    in_days = "today" if days == 0 else f"in {days} day{'s' if days != 1 else ''}"
+    head = f"the next earnings report on {when}{', ' + hour if hour else ''}"
+    if days <= EARNINGS_IMMINENT_DAYS:
+        # CI reported on its 2026-11-05 run date: the score could not see the results.
+        return f"{head} ({in_days}; the price and analyst targets used here may predate it)"
+    return f"{head} ({in_days})"
+
+
+def write_dossier(
+    db: Session,
+    candidate: dict[str, Any] | Any,
+    profile: dict[str, Any],
+    prompt_config: dict | None = None,
+    skip_llm: bool = False,
+    config_id: str | None = None,
+    track_record_cache: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Generate a recommendation dossier via a single-pass structured JSON LLM call.
+
+    Args:
+        db: Database session
+        candidate: DiscoverCandidate as dict (symbol, isin, scores, tradeable)
+        profile: User profile snapshot
+        prompt_config: Optional dict with ``system_prompt``, ``temperature``,
+            ``max_tokens``.  Falls back to the built-in hardcoded defaults.
+        skip_llm: When True, go straight to the deterministic template
+            (used by the orchestrator's circuit breaker after repeated
+            LLM failures).
+        config_id: The active ``signal_weights`` DiscoveryConfig.id for this
+            run, recorded with the prediction.
+        track_record_cache: Optional cache shared across a run's candidates,
+            keyed by instrument_type (the track-record cohort), so a run
+            queries the gate once per instrument type.
+
+    Returns:
+        Dict with dossier_id, recommendation_id, dossier, and generated_by
+        ("llm" or "fallback") keys; fallback dossiers carry a
+        ``fallback_reason``.
+    """
+    symbol = candidate["symbol"] if isinstance(candidate, dict) else getattr(candidate, "symbol", "")
+    raw_scores = candidate.get("scores_json", "{}") if isinstance(candidate, dict) else getattr(candidate, "scores_json", "{}")
+    if isinstance(raw_scores, str):
+        try:
+            scores = json.loads(raw_scores)
+        except Exception:
+            scores = {}
+    elif isinstance(raw_scores, dict):
+        scores = raw_scores
+    else:
+        scores = {}
+
+    raw_tradeable = candidate.get("tradeable_json", "{}") if isinstance(candidate, dict) else getattr(candidate, "tradeable_json", "{}")
+    if isinstance(raw_tradeable, str):
+        try:
+            tradeable = json.loads(raw_tradeable)
+        except Exception:
+            tradeable = {}
+    elif isinstance(raw_tradeable, dict):
+        tradeable = raw_tradeable
+    else:
+        tradeable = {}
+
+    scores = _as_dict(scores)
+    tradeable = _as_dict(tradeable)
+
+    fundamentals = _fetch_fundamentals(symbol, db) or {}
+    fundamentals = _as_dict(fundamentals)
+    sentiment = _fetch_sentiment(symbol, db)
+    sentiment = _as_dict(sentiment)
+
+    composite_score = scores.get("composite", 0.0)
+    alpha_miner_raw = _as_dict(scores.get("alpha_miner"))
+    alpha_screener_raw = _as_dict(scores.get("alpha_screener"))
+    portfolio_fit_raw = _as_dict(scores.get("portfolio_fit"))
+    quant_signals_raw = _as_dict(scores.get("quant_signals"))
+    backtest_raw = _as_dict(scores.get("backtest_vs_benchmark"))
+    mom_raw = _as_dict(scores.get("momentum_quality"))
+    sf_scores = _as_dict(scores.get("sentiment_fundamentals"))
+    corporate_action = sf_scores.get("corporate_action")
+    if corporate_action:
+        # A split or spin-off after the last report (corporate_action.py): the
+        # reported-figure ratios describe the company before it.
+        for key in (*STALE_RATIO_KEYS, "forward_pe"):
+            if key in fundamentals:
+                fundamentals[key] = None
+    if sf_scores:
+        # The pipeline's checked figures win over the raw re-fetch above: it
+        # drops a bank's revenue growth (gross interest income) and fills a
+        # missing sector, and the prompt showed the raw 25 % for HSBA.L anyway
+        # (prod check 2026-10-26).
+        fundamentals["revenue_growth"] = sf_scores.get("revenue_growth")
+        for key in ("sector", "industry"):
+            if not fundamentals.get(key) and sf_scores.get(key):
+                fundamentals[key] = sf_scores[key]
+        if BOOK_EQUITY_CONCERN in (sf_scores.get("concerns") or []):
+            # Not shown either: the prompt would otherwise narrate a P/B of 2936.
+            for key in ("pb_ratio", "roe", "debt_equity"):
+                fundamentals.pop(key, None)
+    ml_scores = _as_dict(scores.get("ml_signal"))
+    ml_regime_context = _as_dict(ml_scores.get("regime_context"))
+    estimate_revision_scores = _as_dict(scores.get("estimate_revision_signal"))
+    insider_scores = _as_dict(scores.get("insider_signal"))
+
+    icir = alpha_miner_raw.get("icir")
+    regime_state = alpha_screener_raw.get("regime_label")
+
+    # Quant-derived point estimate the LLM's thesis must justify or critique,
+    # rather than inventing its own expected_return from the qualitative
+    # thesis alone (see select_return_anchor's docstring for why money-market
+    # instruments prefer a short trailing window over the equity-shaped 3y
+    # CAGR default — the XEON.DE incident). This is always a BACKWARD-looking
+    # (realized) figure, not a forecast; the anchor_kind is surfaced to the
+    # LLM prompt and the UI so it's never presented as a forward return for
+    # the dossier's horizon_months without qualification.
+    instrument_type = quant_signals_raw.get("instrument_type", "equity")
+
+    # Track B1/B2: the cohort track-record gate. It withholds an "unproven"
+    # cohort (Recommendation.approval_state) and is the only way to a BUY
+    # verdict (candidate_gate.discover_verdict).
+    if track_record_cache is not None and instrument_type in track_record_cache:
+        track_record_gate = track_record_cache[instrument_type]
+    else:
+        gate_user = profile.get("user_id")
+        track_record_gate = evaluate_track_record(
+            db, instrument_type, user_id=gate_user if gate_user and gate_user != "unknown" else None,
+        )
+        if track_record_cache is not None:
+            track_record_cache[instrument_type] = track_record_gate
+
+    anchor = select_return_anchor(
+        instrument_type,
+        {
+            "trailing_3y_annualized_return": backtest_raw.get("candidate_return_annual"),
+            "trailing_1m_annualized_return": mom_raw.get("trailing_1m_annualized_return"),
+            "momentum_12_1m": mom_raw.get("momentum_12_1m"),
+        },
+    )
+    expected_return_anchor_pct = round(anchor["value"] * 100, 1) if anchor else None
+
+    miner_scores = alpha_miner_raw
+
+    # Mirror composite.py's derive_signals_from_scores availability checks
+    # (docs/archive/audits/.../2026-08-28-discovery-pipeline-review.md Fix E): that
+    # module already drops fundamentals/analyst/sentiment/ic_icir from the
+    # weighted composite when there's no genuine underlying evidence, rather
+    # than defaulting to a neutral 0.5/0.0 and weighting it in as if it were
+    # real-but-uninformative. This dict must use the SAME availability tests
+    # or the "unavailable" signal reappears here as a 0.50/0.00 placeholder
+    # even though composite.py correctly ignored it.
+    has_fundamentals_data = any(
+        sf_scores.get(k) is not None
+        for k in ("pe", "pb", "roe", "de_ratio", "market_cap", "revenue_growth")
+    )
+    has_sentiment_data = (sf_scores.get("social_mentions") or 0) > 0
+    has_ic_data = ic_signal_usable(miner_scores)
+    has_estimate_data = (
+        estimate_revision_scores.get("sue") is not None
+        or estimate_revision_scores.get("revision_momentum") is not None
+    )
+    has_insider_data = insider_scores.get("cluster_buy_score") is not None
+
+    signal_breakdown = {
+        "composite_score": composite_score,
+        "regime_state": regime_state,
+        "portfolio_context": portfolio_fit_raw.get("fit_score"),
+        "expected_return_anchor_pct": expected_return_anchor_pct,
+        # Persisted so a resolved DiscoveryPrediction row (features_json
+        # mirrors this dict, see predictor.store_prediction) can later be
+        # grouped by instrument_type for the per-class MZ-slope fitting path
+        # (get_dynamic_shrinkage_factor, F1/F16 Workstream 7).
+        "instrument_type": instrument_type,
+    }
+    recency_penalty = _as_dict(scores.get("recency_penalty"))
+    if recency_penalty:
+        # Transparency for the exponential-decay recency penalty (pipeline.py
+        # _apply_recency_penalty): re-suggesting a ticker shortly after a
+        # prior recommendation now costs composite score unless it's an ETF
+        # or has improved since. Surfaced here rather than only
+        # baked silently into composite_score so the dossier explains WHY a
+        # familiar name scored lower than last time.
+        signal_breakdown["recency_penalty_applied"] = recency_penalty.get("penalty_fraction", 0.0)
+        signal_breakdown["days_since_last_recommended"] = recency_penalty.get("days_since_last")
+        if recency_penalty.get("exempt_reason"):
+            signal_breakdown["recency_penalty_exempt_reason"] = recency_penalty["exempt_reason"]
+    if has_ic_data:
+        signal_breakdown["factor_exposure"] = miner_scores.get("exposure_score")
+        signal_breakdown["factor_exposures"] = miner_scores.get("factors")
+        signal_breakdown["ic"] = miner_scores.get("ic")
+        signal_breakdown["icir"] = icir
+    if has_fundamentals_data and not corporate_action:
+        # After a split or spin-off the score rests on the hidden ratios.
+        signal_breakdown["fundamentals"] = sf_scores.get("fundamentals_score")
+    if sf_scores.get("analyst_estimate_score") is not None:
+        # Same gate as composite.py: shown only when real consensus data
+        # exists, never as a 0.50 placeholder.
+        signal_breakdown["analyst_consensus"] = sf_scores.get("analyst_estimate_score")
+    if quant_signals_raw.get("market_beta_weekly") is not None:
+        signal_breakdown["market_beta_weekly"] = quant_signals_raw.get("market_beta_weekly")
+    if has_sentiment_data:
+        signal_breakdown["sentiment"] = sf_scores.get("sentiment_score")
+    if ml_scores.get("prediction") is not None:
+        signal_breakdown["ml_signal"] = ml_scores.get("prediction")
+    if has_estimate_data:
+        signal_breakdown["estimate_sue"] = estimate_revision_scores.get("sue")
+        signal_breakdown["estimate_revision_momentum"] = estimate_revision_scores.get("revision_momentum")
+        signal_breakdown["estimate_dispersion"] = estimate_revision_scores.get("dispersion")
+    if has_insider_data:
+        signal_breakdown["insider_cluster_buy_score"] = insider_scores.get("cluster_buy_score")
+        signal_breakdown["insider_net_flow_usd"] = insider_scores.get("net_insider_flow_usd")
+
+    annual_estimate = _resolve_annual_estimate(
+        db,
+        profile.get("user_id", "unknown"),
+        instrument_type,
+        scores,
+        symbol,
+        signal_breakdown=signal_breakdown,
+    )
+    if annual_estimate.get("anchor_kind"):
+        signal_breakdown["expected_return_anchor_kind"] = annual_estimate["anchor_kind"]
+
+    evaluated_signals = {k: v for k, v in signal_breakdown.items() if v is not None}
+    grounding_lines = _grounding_prompt_lines(scores, annual_estimate)
+    if (
+        annual_estimate.get("anchor_kind") == "trailing_3y_annualized_return"
+        and isinstance(backtest_raw.get("candidate_return_years"), (int, float))
+        and backtest_raw["candidate_return_years"] < FULL_ANCHOR_YEARS
+    ):
+        # GEV's "3-year" return on 2026-11-05 covered 2.6 years.
+        grounding_lines += (
+            f"The trailing return covers only {backtest_raw['candidate_return_years']} years of history, "
+            "not 3; say so if you cite it.\n"
+        )
+
+    candidate_isin = candidate.get("isin") if isinstance(candidate, dict) else getattr(candidate, "isin", None)
+    instrument_facts = _gather_instrument_facts(db, symbol, candidate_isin, instrument_type, fundamentals)
+
+    instrument_facts_lines = ""
+    if instrument_type in ("etf", "fund"):
+        style = instrument_facts.get("style") or {}
+        style_text = style.get("style") or "not established (insufficient evidence — do not guess)"
+        instrument_facts_lines = (
+            f"Holdings (top 10): {json.dumps(instrument_facts.get('top_holdings') or [])}\n"
+            f"Tracked index: {instrument_facts.get('tracked_index') or 'N/A'}\n"
+            f"Inception date: {instrument_facts.get('inception_date') or 'N/A'}\n"
+            f"Style (established fact from holdings/mandate — do not re-derive or contradict): {style_text}\n"
+            f"Listing currency: {instrument_facts.get('listing_currency') or 'N/A'}; investor currency: EUR\n"
+        )
+    else:
+        instrument_facts_lines = (
+            f"Sector: {instrument_facts.get('sector') or 'N/A'}\n"
+            f"Industry: {instrument_facts.get('industry') or 'N/A'}\n"
+            f"Listing currency: {instrument_facts.get('listing_currency') or 'N/A'}; "
+            f"reporting currency: {instrument_facts.get('reporting_currency') or 'N/A'}; investor currency: EUR\n"
+        )
+
+    # Deterministic fields (D7): the model narrates them, it does not choose them.
+    horizon_months = int((prompt_config or {}).get("horizon_months") or DEFAULT_DOSSIER_HORIZON_MONTHS)
+    horizon_months = max(1, min(12, horizon_months))
+    resolved = _resolve_expected_return(
+        db,
+        profile.get("user_id", "unknown"),
+        instrument_type,
+        scores,
+        horizon_months,
+        symbol,
+        signal_breakdown=signal_breakdown,
+        annual=annual_estimate,
+    )
+    verdict = discover_verdict(track_record_gate)
+    cash_pct = estr_over_horizon_pct(db, horizon_months)
+    direction = deterministic_direction(resolved["expected_return_pct"], cash_pct, verdict)
+    macro = _macro_facts(db)
+
+    system_prompt: str
+    if prompt_config and "system_prompt" in prompt_config:
+        system_prompt = prompt_config["system_prompt"]
+    else:
+        system_prompt = DEFAULT_PROMPT_TEMPLATE["system_prompt"]
+
+    context = (
+        f"Candidate: {symbol} ({candidate.get('name') or 'Unknown'})\n"
+        f"ISIN: {candidate.get('isin') or 'N/A'}\n"
+        f"Source: {candidate.get('source')}\n"
+        f"Composite score: {composite_score}\n"
+        f"ICIR: {icir}\n"
+        f"{_regime_text(db, regime_state)}\n"
+        f"ML signal regime context: {json.dumps(ml_regime_context)}\n"
+        f"Quantitative scores: {json.dumps(_reword_concerns_for_prompt(scores))}\n"
+        f"{instrument_facts_lines}"
+        f"Fundamentals: {json.dumps(_reword_concerns_for_prompt(fundamentals))}\n"
+        f"Sentiment: {json.dumps(sentiment)}\n"
+        f"Tradeability: {json.dumps(tradeable)}\n"
+        f"Signal breakdown (evaluated signals): {json.dumps(_reword_concerns_for_prompt(evaluated_signals))}\n"
+        f"{grounding_lines}"
+        f"User profile: {json.dumps(profile)}\n"
+        f"Macro facts: {json.dumps(macro) if macro else 'unavailable'}\n"
+        f"Ticker: write it exactly as {symbol.split('.')[0].upper()}.\n"
+        f"Direction (fixed by the system): {direction}. Horizon: {horizon_months} months. "
+        f"System expected return over the horizon: {resolved['expected_return_pct']} %.\n"
+        f"\n{_THESIS_RULES}"
+        "\nGenerate a research hypothesis as structured JSON matching the schema."
+    )
+
+    filings_text = None if instrument_type in ("etf", "fund") else _filings_text(db, symbol)
+    if filings_text:
+        context = context.replace(
+            "Macro facts: ", f"Company filings: {filings_text}\nMacro facts: ", 1,
+        )
+
+    slot_facts: list[Fact] | None = None
+    digit_terms: list[str] = []
+    if slots_enabled():
+        slot_facts = build_facts(
+            scores,
+            annual=annual_estimate,
+            expected_return_pct=resolved["expected_return_pct"],
+            horizon_months=horizon_months,
+            fundamentals=fundamentals,
+            macro=macro,
+            cash_pct=cash_pct,
+            earnings_text=_earnings_text(sf_scores),
+            earnings_near=_earnings_is_near(sf_scores),
+            is_fund=instrument_type in ("etf", "fund"),
+            recent_fall_limit=RECENT_FALL_LIMIT,
+            filings_text=filings_text,
+            corporate_action_text=corporate_action_text(corporate_action),
+        )
+        candidate_name = candidate.get("name") if isinstance(candidate, dict) else getattr(candidate, "name", None)
+        digit_terms = allowed_digit_terms(
+            symbol, candidate_name, instrument_facts.get("tracked_index"), instrument_facts.get("sector"),
+            instrument_facts.get("industry"),
+        )
+        context = _slot_context(
+            symbol, candidate, candidate_name, slot_facts, instrument_type, instrument_facts,
+            regime_text=_regime_text(db, regime_state), direction=direction,
+        )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": context},
+    ]
+
+    quality_score = data_quality_score(
+        _as_dict(scores.get("history_ingest")).get("coverage"), scores.get("data_quality"),
+    )
+    anchor_years = backtest_raw.get("candidate_return_years")
+
+    final_dossier: dict[str, Any] | None = None
+    generated_by = "llm"
+    fallback_reason: str | None = None
+
+    if skip_llm:
+        generated_by = "fallback"
+        fallback_reason = "llm_skipped: circuit breaker open after repeated LLM failures"
+        final_dossier = deterministic_template(
+            candidate, scores, signal_breakdown, db, profile.get("user_id"), annual=annual_estimate,
+            direction=direction, horizon_months=horizon_months,
+        )
+    else:
+        base_messages = list(messages)
+        attempt_messages = list(messages)
+        last_error: str | None = None
+        telemetry: dict[str, Any] = {}
+        content_rejections: list[str] = []
+        for attempt in range(_MAX_JSON_RETRIES + 1):
+            telemetry.clear()
+            try:
+                raw = _local_llm_sync(
+                    db, attempt_messages, timeout_s=120.0,
+                    json_schema=DOSSIER_JSON_SCHEMA,
+                    sampling=STRUCTURED_JSON_SAMPLING,
+                    max_tokens=_COMPLETION_TOKENS,
+                    telemetry=telemetry,
+                )
+            except Exception as exc:
+                logger.warning("LLM call failed for %s: %s", symbol, exc)
+                last_error = f"llm_error: {exc}"
+                break
+
+            parsed = _try_parse_json(raw)
+            content_problems: list[str] = []
+            if parsed is not None:
+                try:
+                    validated = DossierOutputModel.model_validate(_coerce_dossier(parsed))
+                    candidate_dossier = validated.model_dump()
+                    slot_problems: list[str] = []
+                    thesis_keys: set[str] = set()
+                    if slot_facts is not None:
+                        thesis_keys = set(SLOT.findall(candidate_dossier.get("thesis") or ""))
+                        candidate_dossier["thesis"], slot_problems = render(
+                            candidate_dossier.get("thesis") or "", slot_facts, digit_terms,
+                        )
+                        rendered_risks = []
+                        seen_risk_keys: list[frozenset[str]] = []
+                        for risk in candidate_dossier.get("key_risks") or []:
+                            # Two risks citing the same figures say one thing (IS3N, XDEM, FIX):
+                            # de-duplicate on the keys, not on the wording.
+                            risk_keys = frozenset(SLOT.findall(str(risk)))
+                            if risk_keys and any(risk_keys <= seen for seen in seen_risk_keys):
+                                continue
+                            text, risk_problems = render(str(risk), slot_facts, digit_terms)
+                            if text and not risk_problems:
+                                rendered_risks.append(text)
+                                if risk_keys:
+                                    seen_risk_keys.append(risk_keys)
+                        candidate_dossier["key_risks"] = rendered_risks
+                        if slot_problems:
+                            logger.info("Dossier for %s: sentences dropped: %s", symbol, "; ".join(slot_problems))
+                    check = check_thesis(
+                        candidate_dossier.get("thesis") or "",
+                        list(candidate_dossier.get("key_risks") or []),
+                        facts_text=context,
+                        macro=macro,
+                        direction=direction,
+                        symbol=symbol,
+                        momentum_rank=mom_raw.get("momentum_rank"),
+                        correlation=portfolio_fit_raw.get("correlation"),
+                        is_fund=instrument_type in ("etf", "fund"),
+                        de_ratio=_number_or_none(sf_scores.get("de_ratio")),
+                        insider_buyers=_number_or_none(insider_scores.get("cluster_buy_score")),
+                    )
+                    if not check.ok and slot_problems:
+                        # Say why sentences went: a thesis emptied by its own figures is
+                        # not "truncated", and the rejection rate is counted per reason.
+                        if check.reason == "truncated":
+                            check.reason = "own_figures"
+                        check.problems = [*slot_problems, *check.problems]
+                    if (
+                        check.ok and slot_facts is not None and len(thesis_keys) == 1
+                        and len([s for s in re.split(r"(?<=[.!?])\s+", check.thesis.strip()) if s]) < 2
+                    ):
+                        # One sentence resting on one fact (CA.PA, XDEM, MTDR) is a slogan, not a thesis:
+                        # two grounded reasons or retry. (No key at all is the legacy plain-text path.)
+                        check.reason = "one_reason"
+                        check.problems = [f"the thesis rests on {len(thesis_keys)} fact(s); cite at least two"]
+                    if check.ok:
+                        candidate_dossier["thesis"] = check.thesis
+                        # The data's own risks stay in, whatever the LLM wrote
+                        # (plan 2026-10-14, M3).
+                        earnings, data_risks = deterministic_risks(scores, signal_breakdown)
+                        candidate_dossier["key_risks"] = (
+                            merge_risks(
+                                [*earnings, *data_risks],
+                                without_false_listing_risk(symbol, list(check.key_risks)),
+                                drop_earnings=not earnings,
+                            )
+                            or [_MARKET_RISK]
+                        )[:_MAX_RISKS]
+                        final_dossier = candidate_dossier
+                        break
+                    content_rejections.append(check.reason or "invalid")
+                    content_problems = check.problems
+                    last_error = f"{check.reason}: {'; '.join(check.problems)}"
+                    logger.info(
+                        "Dossier thesis for %s rejected: %s; text: %s",
+                        symbol, last_error, (candidate_dossier.get("thesis") or "")[:400],
+                    )
+                    if len(content_rejections) > _MAX_CONTENT_RETRIES:
+                        break
+                except ValidationError as exc:
+                    logger.warning("Dossier validation failed for %s: %s", symbol, exc)
+                    last_error = "llm_invalid: response failed schema validation"
+            else:
+                reason = unusable_reason(raw, telemetry)
+                logger.warning("LLM returned unparseable JSON for %s: %s", symbol, reason)
+                last_error = f"llm_unparseable: {reason}"
+
+            if attempt < _MAX_JSON_RETRIES:
+                # Rebuilt from the base, carrying only an excerpt of the
+                # rejected completion — appending each attempt to a growing
+                # transcript is how one runaway answer makes every remaining
+                # retry fail too, since llama-server runs with
+                # ``--no-context-shift``.
+                instruction = (
+                    f"That response was unusable: {last_error}. Reply with exactly "
+                    "one JSON object, no markdown, no text outside the object. Keep "
+                    f"thesis under {_PROMPT_THESIS_CHARS} characters so the object "
+                    "closes inside the token budget."
+                )
+                if content_problems:
+                    instruction += " Fix these problems: " + "; ".join(content_problems) + "."
+                attempt_messages = build_retry_messages(
+                    base_messages, raw, instruction, excerpt_chars=_RETRY_EXCERPT_CHARS
+                )
+
+        if final_dossier is None:
+            generated_by = "fallback"
+            # A content rejection is stored as its bare reason code
+            # (truncated / script / ungrounded_number / macro / contradiction)
+            # so the rejection rate per rule can be counted.
+            fallback_reason = (
+                content_rejections[-1] if content_rejections
+                else last_error or "llm_invalid: response failed schema validation"
+            )
+            final_dossier = deterministic_template(
+                candidate, scores, signal_breakdown, db, profile.get("user_id"), annual=annual_estimate,
+                direction=direction, horizon_months=horizon_months,
+            )
+        elif content_rejections:
+            final_dossier["content_retries"] = content_rejections
+
+    assert final_dossier is not None
+    # expected_return is always computed here, from the quant anchor — never
+    # trusted from the LLM (which no longer produces it at all; its schema
+    # dropped the field, see DOSSIER_JSON_SCHEMA above). Both the LLM and
+    # deterministic-fallback paths resolve it through the single dispatcher
+    # below, so there is exactly one place expected_return (and its PRIIPs
+    # uncertainty band) is derived.
+    # (resolved once, before the LLM call, over the fixed horizon.)
+    final_dossier["direction"] = direction
+    final_dossier["horizon_months"] = horizon_months
+    # UI honesty (plan 2026-10-12, WP13).
+    final_dossier["skill_horizon"] = skill_horizon(
+        backtest_raw.get("tracking_error_weekly_2y"), backtest_raw.get("benchmark"),
+    )
+    final_dossier["recommendation_label"] = (
+        "Rule, not a forecast" if instrument_type in ("etf", "fund", "bond", "money_market")
+        else "Shadow — not a recommendation"
+    )
+    final_dossier["expected_return"] = resolved["expected_return_pct"]
+    final_dossier["expected_return_components"] = resolved["components"]
+    # Every composite input with its applied weight and contribution
+    # (pipeline.run_candidate_pipeline), so the dossier shows what actually
+    # drove the score rather than a hand-picked subset of inputs.
+    composite_inputs = scores.get("composite_inputs")
+    final_dossier["composite_breakdown"] = composite_inputs if isinstance(composite_inputs, list) else None
+    # The breakdown adds up to the score before the recency penalty: say how
+    # the two connect (Discover audit, 2026-11-06: ROST summed to 0.613, scored 0.539).
+    final_dossier["composite_raw"] = scores.get("composite_raw")
+    final_dossier["recency_penalty"] = recency_penalty or None
+    final_dossier["lane"] = scores.get("lane")
+    # What past picks of this kind actually did, in place of a conviction read as a probability (WP12a).
+    try:
+        from app.decision.discover.calibrator import outcome_band
+
+        band_user = profile.get("user_id")
+        if band_user and band_user != "unknown":
+            final_dossier["outcome_band"] = outcome_band(
+                db, band_user, "fund" if instrument_type in ("etf", "fund", "bond", "money_market") else "stock",
+            )
+    except Exception:  # noqa: BLE001 - the band is context, never a reason to lose a dossier
+        logger.debug("outcome_band failed for %s", symbol, exc_info=True)
+    final_dossier["lane_rank"] = scores.get("lane_rank")
+    final_dossier["data_quality"] = _as_dict(scores.get("data_quality")) or None
+    final_dossier["expected_return_anchor_years"] = (
+        anchor_years if resolved["anchor_kind"] == "trailing_3y_annualized_return" else None
+    )
+    final_dossier["scoring_note"] = (
+        f"The track record scores this estimate restated over {DEFAULT_HORIZON_DAYS} trading days. "
+        f"The {horizon_months}-month outcome is recorded in the trust ledger after 126 trading days."
+    )
+    final_dossier["signal_breakdown"] = signal_breakdown
+    # Non-directional macro/volatility regime context (authoritative substitute
+    # signal for passive ETFs whose directional ML model is unavailable by design).
+    final_dossier["regime_context"] = ml_regime_context or None
+    final_dossier["expected_return_anchor_kind"] = resolved["anchor_kind"]
+    if resolved["band"] is not None:
+        final_dossier["expected_return_band"] = resolved["band"]
+    final_dossier["data_quality_score"] = quality_score
+    # Provenance: the UI must be able to distinguish a genuine LLM thesis
+    # from the deterministic quant template.
+    final_dossier["generated_by"] = generated_by
+    # Which prompt wrote the text: figures by code (dossier_facts) or the old free text.
+    final_dossier["text_mode"] = "figures_by_code" if slot_facts is not None else "free_text"
+    if fallback_reason:
+        final_dossier["fallback_reason"] = fallback_reason
+
+    # Pipeline composite is the canonical conviction source — overwrite the LLM
+    # value so dossier_json and the RecommendationDossier column are always in sync.
+    scores_val = scores.get("composite", 0.0)
+    conviction = float(scores_val) if isinstance(scores_val, (int, float)) else 0.0
+    final_dossier["conviction"] = conviction
+
+    final_dossier = _ascii_safe_dict(final_dossier)
+
+    # ------------------------------------------------------------------
+    # Persist RecommendationDossier + Recommendation
+    # ------------------------------------------------------------------
+    dossier_id = str(__import__("uuid").uuid4())
+    rec_id = str(__import__("uuid").uuid4())
+
+    try:
+        profile_user_id = profile.get("user_id")
+        dossier_row = RecommendationDossier(
+            id=dossier_id,
+            user_id=profile_user_id if profile_user_id and profile_user_id != "unknown" else None,
+            conviction=conviction,
+            dossier_json=json.dumps(final_dossier),
+            attribution_run_id=None,
+            mc_run_id=None,
+            goal_ids=None,
+            aspect_ids=None,
+        )
+        db.add(dossier_row)
+
+        rec_row = Recommendation(
+            id=rec_id,
+            user_id=profile.get("user_id", "unknown"),
+            ticker=symbol,
+            # Evidence, not a score level: see candidate_gate.discover_verdict.
+            verdict=verdict,
+            confidence=__import__("decimal").Decimal(str(min(conviction, 1.0))),
+            payload_json=json.dumps({
+                "dossier_id": dossier_id,
+                "candidate": candidate,
+                "track_record_gate": track_record_gate,
+            }),
+            backtest_json="{}",
+            mode="discover",
+            data_quality_score=__import__("decimal").Decimal(str(quality_score)),
+            risk_score=__import__("decimal").Decimal(str(_as_dict(scores.get("momentum_quality")).get("volatility_6m", 0.5))),
+            portfolio_fit_score=(
+                None if (fit_value := _as_dict(scores.get("portfolio_fit")).get("fit_score")) is None
+                else __import__("decimal").Decimal(str(fit_value))
+            ),
+            # Only a proven track record puts a Discover idea in front of the
+            # owner as a decision. Anything else (unproven, insufficient_data,
+            # missing gate) stays as a "draft": the row is kept and Discover
+            # shows it as research, but it never reaches the review inbox.
+            approval_state=(
+                "approved_candidate" if _as_dict(track_record_gate).get("status") == "proven" else "draft"
+            ),
+            # An undecided idea goes stale; the inbox stops counting it then.
+            recommendation_expiry=datetime.now(UTC) + timedelta(days=DISCOVER_DECISION_DAYS),
+        )
+        db.add(rec_row)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "dossier_id": dossier_id,
+        "recommendation_id": rec_id,
+        "dossier": final_dossier,
+        "generated_by": generated_by,
+        "fallback_reason": fallback_reason,
+        "direction": direction,
+        # The horizon-free estimate, so the prediction ledger can restate it
+        # over its own horizon (see expected_return_over_trading_days).
+        "annual_estimate": {
+            k: annual_estimate.get(k) for k in ("prior_annual", "tilt_annual", "anchor_kind")
+        },
+    }
+
+
+# Per-instrument_type shrinkage constants (F1/F16). A money-market anchor is
+# a short-term policy rate (ESTR/EONIA-pegged) that persists near-
+# mechanically month to month, so a shallow shrink preserves most of the
+# signal; equity/etf/bond trailing returns exhibit mean reversion (a large
+# trailing CAGR is a rally unlikely to repeat at the same pace) and momentum
+# decay over a 6-12mo horizon (Moskowitz, Ooi & Pedersen, JFE 2012), so
+# they're shrunk much harder. Hardcoded now per user decision;
+# MZ_MIN_ROWS_BY_TYPE gates a dynamic per-class fit
+# (get_dynamic_shrinkage_factor) that supersedes this once enough resolved
+# data with expected_return exists for that class.
+#
+# Since ADR 0017 these are the CAP on the weight given to the anchor's gap
+# to the market-implied prior, not a shrink toward zero. For non-cash
+# classes the weight actually applied is usually the smaller,
+# volatility-aware expected_return.credibility_weight.
+SHRINKAGE_BY_INSTRUMENT_TYPE: dict[str, float] = {
+    "money_market": 0.90,
+    "equity": 0.10,
+    "etf": 0.10,
+    "bond": 0.10,
+}
+DEFAULT_SHRINKAGE = 0.10
+
+# Minimum resolved-with-expected_return rows per instrument_type before the
+# dynamic MZ-slope fit takes over from the hardcoded constant above. The
+# cash-attractor audit's simulation found the standard error unacceptably
+# wide even at n=22 pooled across all types — a per-class fit needs its own
+# bar, kept equal to the former pooled calibrator's min_rows=20 only until real
+# per-class volume data justifies raising it independently per class.
+MZ_MIN_ROWS_BY_TYPE: dict[str, int] = {
+    "money_market": 20,
+    "equity": 20,
+    "etf": 20,
+    "bond": 20,
+}
+
+
+def get_dynamic_shrinkage_factor(db: Session, user_id: str, instrument_type: str) -> float:
+    """Per-instrument_type shrinkage factor: a dynamic MZ-slope fit against
+    resolved predictions when enough data exists, else the hardcoded
+    :data:`SHRINKAGE_BY_INSTRUMENT_TYPE` constant.
+
+    Dormant by design (per user decision "hardcode now AND build the fitting
+    path"): only ~1 of 22 resolved ``DiscoveryPrediction`` rows had
+    ``expected_return`` set as of the cash-attractor audit (see Workstream 1's
+    F3 fix, which is what makes this column start filling in going forward),
+    so this essentially always returns the hardcoded fallback today. It
+    activates automatically, with no further wiring needed, once a class
+    accumulates ``MZ_MIN_ROWS_BY_TYPE`` resolved rows with ``expected_return``
+    set — reuses :func:`app.foundation.quant_metrics.compute_mincer_zarnowitz`,
+    the correct OLS regression (unlike ``discover/scoring.py:_compute_mincer``,
+    which is Platt scaling on sign only, see F14).
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from app.foundation.models.entities import DiscoveryPrediction
+    from app.foundation.quant_metrics import compute_mincer_zarnowitz
+
+    fallback = SHRINKAGE_BY_INSTRUMENT_TYPE.get(instrument_type, DEFAULT_SHRINKAGE)
+    min_rows = MZ_MIN_ROWS_BY_TYPE.get(instrument_type, 20)
+
+    cutoff = datetime.now(UTC) - timedelta(days=365)
+    rows = (
+        db.query(DiscoveryPrediction)
+        .filter(
+            DiscoveryPrediction.user_id == user_id,
+            DiscoveryPrediction.outcome_status == "resolved",
+            DiscoveryPrediction.predicted_at >= cutoff,
+            DiscoveryPrediction.expected_return.isnot(None),
+            DiscoveryPrediction.realised_return.isnot(None),
+        )
+        .all()
+    )
+    # Only Discover's own rows: the advisor cycle writes to the same ledger,
+    # but its expected_return is a Monte Carlo p50, a different estimator
+    # whose calibration says nothing about this one. Discover rows carry
+    # the type under signal_breakdown.quant_signals, not at the top level
+    # this used to read, so no row ever matched and the fit never activated.
+    matching = [
+        r for r in rows
+        if isinstance(_as_dict(_as_dict(r.features_json).get("signal_breakdown")).get("quant_signals"), dict)
+        and _resolve_cohort_instrument_type(r.features_json) == instrument_type
+    ]
+    if len(matching) < min_rows:
+        return fallback
+
+    pairs = [
+        (float(r.expected_return), float(r.realised_return))
+        for r in matching
+        if r.expected_return is not None and r.realised_return is not None
+    ]
+    slope, _r2 = compute_mincer_zarnowitz(pairs)
+    if slope is None:
+        return fallback
+    # A fitted slope outside [0, 1] would mean an inverted or amplifying
+    # relationship — clamp to preserve "shrink, never amplify" even from a
+    # noisy dynamic fit. (The slope is fitted on final estimates, which since
+    # ADR 0017 include the market-implied prior; using it as the cap on the
+    # tilt is an approximation until enough outcomes resolve to fit the
+    # tilt separately.)
+    return max(0.0, min(1.0, slope))
+
+
+def _dampen_trailing_return_for_forward_estimate(
+    anchor_pct: float | None,
+    horizon_months: int,
+    anchor_kind: str | None = None,
+    shrinkage_factor: float = DEFAULT_SHRINKAGE,
+) -> float | None:
+    """Convert a backward-looking trailing return into a conservative forward estimate.
+
+    ``anchor_pct`` (3y annualized CAGR, or 12-1m momentum as fallback) is
+    realized historical performance, not a forecast — echoing it verbatim
+    produced dossiers claiming e.g. a +60% forward return on a 6-month
+    horizon for a stock whose actual analyst consensus implied ~10% upside
+    (BBVA.MC prod audit, Aug 2026). Shrink toward zero and scale to the
+    horizon so the fallback template never restates a multi-year rally as a
+    near-term forecast.
+
+    ``shrinkage_factor`` replaces the old flat ``0.3`` constant — callers
+    resolve it per instrument_type (:data:`SHRINKAGE_BY_INSTRUMENT_TYPE` or
+    :func:`get_dynamic_shrinkage_factor`) since a money-market anchor and an
+    equity anchor carry very different amounts of forward-looking signal.
+
+    The two trailing-return anchors are already annualized rates, so scaling
+    by ``horizon_months / 12`` is coherent — a longer horizon compounds more
+    of the same rate. ``momentum_12_1m`` is different: Jegadeesh-Titman 12-1
+    momentum predicts the *next one month*, not a rate that keeps compounding
+    (Moskowitz, Ooi & Pedersen, JFE 2012, find the effect decays over
+    roughly a year and can partially reverse beyond that). Scaling it up
+    with a longer stated horizon get the sign of the horizon adjustment
+    backwards, so its effective horizon is capped at one month regardless of
+    the dossier's stated horizon (docs/archive/plans/momentum-anchor-horizon-issue.md).
+    """
+    if anchor_pct is None:
+        return None
+    if anchor_kind == "momentum_12_1m":
+        horizon_fraction = 1.0 / 12.0
+    else:
+        horizon_fraction = max(horizon_months, 1) / 12.0
+    dampened = anchor_pct * shrinkage_factor * horizon_fraction
+    return round(max(-25.0, min(25.0, dampened)), 1)
+
+
+# Registered values of the ``er_mode`` public-settings rollback key (M5 ladder).
+# "blocks"/"bl" are FUTURE modes (Options 1/2) — registered so flipping the key
+# rolls forward/back without a deploy; unknown or missing values normalize to
+# "trailing".
+_ER_MODES = ("trailing", "blocks", "bl")
+
+
+def _try_building_block_er(
+    db: Session, symbol: str, instrument_type: str, scores: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Fetch building-block inputs and run the pure estimator; None on any failure.
+
+    CAPE inputs are None until a macro feed exists (term degrades to 0.0 with a
+    ``cape_unavailable`` concern). The money-market current yield uses the
+    trailing_1m annualized reading as a documented proxy — the same
+    short-window policy-rate signal the XEON.DE analysis validated
+    (expected_return.py docstring).
+    """
+    try:
+        from app.foundation.market import fundamentals as market_fundamentals
+
+        data = (market_fundamentals(db, symbol) or {}).get("data") or {}
+        result = building_block_er(
+            instrument_type,
+            data,
+            cape_ratio=None,
+            market_avg_cape=None,
+            current_yield_annual=(scores.get("momentum_quality") or {}).get(
+                "trailing_1m_annualized_return"
+            ),
+        )
+        logger.debug("building-block ER for %s: %s", symbol, result)
+        return result
+    except Exception as exc:
+        logger.warning("building-block ER failed for %s: %s", symbol, exc)
+        return None
+
+
+def _llm_view(db: Session, symbol: str) -> tuple[float, float] | None:
+    """Sync seam over blm.multi_query_confidence: (mean view, variance) or None.
+
+    None means "no usable view" — either no LLM endpoint configured, the query
+    machinery failed, or every query failed. blm.multi_query_confidence itself
+    returns None on all-queries-failed (ADR 0014 §5 — it used to return the
+    sentinel ``(0.0, 1.0)``, indistinguishable from a genuine near-zero,
+    high-variance forecast), so this just passes that through. Tests
+    monkeypatch this function directly.
+    """
+    endpoint = resolve_llm_base_url(db)
+    if not endpoint:
+        return None
+    try:
+        result = asyncio.run(
+            blm.multi_query_confidence(symbol, llm_endpoint=endpoint, llm_model=resolve_llm_model(db))
+        )
+    except Exception as exc:
+        logger.warning("BLM view query failed for %s: %s", symbol, exc)
+        return None
+    if result is None:
+        logger.info("no usable BLM view for %s (all queries failed)", symbol)
+        return None
+    return result
+
+
+def _try_bl_er(
+    db: Session, symbol: str, instrument_type: str, scores: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Black-Litterman posterior annual ER for the candidate; None on any gap.
+
+    Scope-locked 2-asset universe [candidate, region benchmark] with equal
+    w_mkt (documented approximation absent market-cap data); Σ from the joint
+    empirical covariance of both series (annualized, quant_optim pattern);
+    one absolute view on the candidate: Q = clamp(mean, ±1)·0.25 (conservative
+    mapping to the dossier's ±25pp display scale), confidence = 1 − variance.
+    Any failure degrades the caller to the trailing anchor — an LLM outage must
+    never break dossier generation.
+    """
+    try:
+        view = _llm_view(db, symbol)
+        if view is None:
+            return None
+        mean_view, variance = view
+
+        from app.decision.discover.pipeline import _pick_benchmark
+
+        benchmark = _pick_benchmark(symbol, instrument_type == "etf")
+        if benchmark is None or instrument_type in ("bond", "money_market"):
+            return None
+        days = 365 * 3 + 30
+
+        import numpy as np
+        import pandas as pd
+
+        def _frame(rows: list[dict[str, Any]]) -> pd.DataFrame:
+            df = pd.DataFrame(rows).dropna(subset=["close"]).sort_values("date")
+            return df.assign(date=pd.to_datetime(df["date"]))
+
+        cand_df = _frame(market_history_rows(db, symbol, days))
+        bench_df = _frame(market_history_rows(db, benchmark, days))
+        if cand_df.empty or bench_df.empty:
+            return None
+        merged = pd.merge(
+            cand_df[["date", "close"]],
+            bench_df[["date", "close"]],
+            on="date",
+            suffixes=("_c", "_b"),
+        )
+        if len(merged) < 250:
+            return None
+        # filter, not [["close_c","close_b"]]: pandas-stubs types list-getitem
+        # as Series|DataFrame → Series.cov(other) looks required-arg. Columns
+        # guaranteed by merge suffixes.
+        rets = merged.filter(items=["close_c", "close_b"]).pct_change().dropna()
+        sigma = rets.cov().values * 252.0
+
+        w_mkt = np.array([0.5, 0.5])
+        pi = blm.compute_equilibrium_returns(sigma, w_mkt)
+        confidence = max(0.0, min(1.0, 1.0 - min(variance, 1.0)))
+        q_annual = max(-1.0, min(1.0, mean_view)) * 0.25
+        mu_posterior, _post_cov = blm.blm_posterior_proportional(
+            pi, sigma, {0: q_annual}, {0: confidence}
+        )
+        return {"er_annual": float(mu_posterior[0]), "benchmark": benchmark}
+    except Exception as exc:
+        logger.warning("BL anchor failed for %s: %s", symbol, exc)
+        return None
+
+
+def market_history_rows(db: Session, symbol: str, days: int) -> list[dict[str, Any]]:
+    """Cache-only price history rows (no synchronous provider fetch).
+
+    Thin indirection so tests can stub price access without patching
+    app.foundation.market internals; mirrors return_band.py's allow_live=False
+    rationale for multi-symbol request paths.
+    """
+    from app.foundation.market import history as market_history
+
+    return market_history(db, symbol, days=days, allow_live=False)
+
+
+def _no_estimate(anchor_kind: str | None = None) -> dict[str, Any]:
+    return {
+        "anchor_kind": anchor_kind,
+        "prior_annual": None,
+        "tilt_annual": None,
+        "band_mode": None,
+        "components": None,
+    }
+
+
+def _resolve_annual_estimate(
+    db: Session | None,
+    user_id: str | None,
+    instrument_type: str,
+    scores: dict[str, Any],
+    symbol: str,
+    *,
+    signal_breakdown: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Horizon-independent half of the expected-return dispatcher.
+
+    Resolved once per dossier, before the LLM call, so the prompt can state
+    the anchor's kind and the system's forward estimate (the thesis used to
+    call a 3-year CAGR "12-1 month momentum" because the prompt never said
+    which it was — BBVA.MC audit, 2026-09-26). :func:`_resolve_expected_return`
+    turns it into the horizon-specific point estimate and band.
+
+    Returns ``{"anchor_kind", "prior_annual", "tilt_annual", "band_mode",
+    "components"}``; the annual forward estimate is ``prior_annual +
+    tilt_annual``. ``prior_annual`` is None when no anchor exists (no data is
+    not a flat return).
+
+    trailing mode (ADR 0017): ``prior`` is the market-implied return
+    (:func:`equilibrium_prior`: cash rate + Blume-adjusted weekly beta x
+    equity premium). The tilt is a :func:`credibility_weight` share of the
+    anchor's gap to that prior, capped by the per-class shrinkage (or the
+    fitted MZ slope). Trailing returns used to be shrunk toward 0%, which put
+    low-return LONG picks below the cash rate. blocks/bl modes are already
+    forward estimates: the whole value is the "prior", with no tilt.
+    """
+    er_mode = "trailing"
+    if db is not None:
+        raw_mode = get_public_settings(db).get("er_mode")
+        if raw_mode in _ER_MODES:
+            er_mode = raw_mode
+    if er_mode != "trailing":
+        logger.debug("er_mode=%s active for %s", er_mode, symbol)
+
+    blocks = None
+    if er_mode == "blocks" and db is not None:
+        blocks = _try_building_block_er(db, symbol, instrument_type, scores)
+
+    bl_result = None
+    if blocks is None and er_mode == "bl" and db is not None:
+        bl_result = _try_bl_er(db, symbol, instrument_type, scores)
+
+    for kind, result in (("bl_posterior", bl_result), ("building_blocks_credibility", blocks)):
+        if db is not None and result is not None and result.get("er_annual") is not None:
+            er_annual = float(result["er_annual"])
+            return {
+                "anchor_kind": kind,
+                "prior_annual": er_annual,
+                "tilt_annual": 0.0,
+                "band_mode": "annual",
+                "components": {"er_annual_pct": round(er_annual * 100.0, 2)},
+            }
+    # blocks/bl failure (missing data, no usable LLM view) degrades to the
+    # trailing path below rather than emitting an empty estimate.
+
+    bt = _as_dict(scores.get("backtest_vs_benchmark"))
+    mom = _as_dict(scores.get("momentum_quality"))
+    anchor = select_return_anchor(
+        instrument_type,
+        {
+            "trailing_3y_annualized_return": bt.get("candidate_return_annual"),
+            "trailing_1m_annualized_return": mom.get("trailing_1m_annualized_return"),
+            "momentum_12_1m": mom.get("momentum_12_1m"),
+        },
+    )
+    if anchor is not None:
+        anchor_value = float(anchor["value"])
+        anchor_kind: str | None = anchor["method"]
+    elif signal_breakdown is not None and signal_breakdown.get("expected_return_anchor_pct") is not None:
+        anchor_value = float(signal_breakdown["expected_return_anchor_pct"]) / 100.0
+        anchor_kind = signal_breakdown.get("expected_return_anchor_kind")
+    else:
+        return _no_estimate()
+
+    if db is not None and user_id is not None:
+        cap = get_dynamic_shrinkage_factor(db, user_id, instrument_type)
+    else:
+        cap = SHRINKAGE_BY_INSTRUMENT_TYPE.get(instrument_type, DEFAULT_SHRINKAGE)
+
+    risk_free = get_risk_free_rate(db) if db is not None else FALLBACK_RISK_FREE_RATE
+    quant = _as_dict(scores.get("quant_signals"))
+    beta_raw, beta_source = None, None
+    # A bond fund's market_beta_weekly is measured against a bond index; the
+    # prior multiplies the beta by the equity premium, so it takes the beta
+    # against MSCI World instead (missing: no equity premium at all).
+    beta_keys: tuple[tuple[str, str], ...] = (("market_beta_weekly", "weekly"), ("market_beta", "daily"))
+    if instrument_type == "bond":
+        beta_keys = (("equity_beta_weekly", "weekly vs EUNL.DE"),)
+    for key, source in beta_keys:
+        value = quant.get(key)
+        if isinstance(value, (int, float)):
+            beta_raw, beta_source = float(value), source
+            break
+    prior, beta_used = equilibrium_prior(instrument_type, risk_free, beta_raw)
+
+    if instrument_type == "money_market":
+        # A money-market anchor is the policy rate itself; its persistence
+        # is mechanical, not a noisy mean estimate, so the class constant
+        # applies directly.
+        weight = cap
+    elif anchor_kind == "momentum_12_1m":
+        weight = credibility_weight(mom.get("volatility_6m"), 11.0 / 12.0, cap)
+    elif anchor_kind == "trailing_3y_annualized_return":
+        weight = credibility_weight(
+            bt.get("candidate_volatility_annual"), bt.get("window_years") or 3.0, cap,
+        )
+    else:
+        weight = cap
+    tilt = weight * (anchor_value - prior)
+
+    return {
+        "anchor_kind": anchor_kind,
+        "prior_annual": prior,
+        "tilt_annual": tilt,
+        "band_mode": "total",
+        "components": {
+            "anchor_pct": round(anchor_value * 100.0, 2),
+            "risk_free_pct": round(risk_free * 100.0, 2),
+            "beta": round(beta_used, 3) if beta_used is not None else None,
+            "beta_raw": round(beta_raw, 3) if beta_raw is not None else None,
+            "beta_source": beta_source,
+            "equity_premium_pct": round(EQUITY_PREMIUM_OVER_CASH * 100.0, 2),
+            "prior_pct": round(prior * 100.0, 2),
+            "credibility_weight": round(weight, 4),
+            "tilt_pct": round(tilt * 100.0, 2),
+            "er_annual_pct": round((prior + tilt) * 100.0, 2),
+        },
+    }
+
+
+def _expected_return_for_horizon(annual: dict[str, Any], horizon_months: int) -> float | None:
+    """Percent point estimate over *horizon_months*, clamped to ±25, 1dp.
+
+    Linear in the horizon, like the pre-ADR-0017 dampening (the
+    characterization tests pin that). The prior compounds over the stated
+    horizon; a momentum_12_1m tilt is capped at one month regardless of it
+    (docs/archive/plans/momentum-anchor-horizon-issue.md).
+    """
+    prior = annual.get("prior_annual")
+    tilt = annual.get("tilt_annual")
+    if prior is None or tilt is None:
+        return None
+    horizon_fraction = max(horizon_months, 1) / 12.0
+    tilt_fraction = 1.0 / 12.0 if annual.get("anchor_kind") == "momentum_12_1m" else horizon_fraction
+    pct = 100.0 * (prior * horizon_fraction + tilt * tilt_fraction)
+    return round(max(-25.0, min(25.0, pct)), 1)
+
+
+def expected_return_over_trading_days(annual: dict[str, Any] | None, trading_days: int) -> float | None:
+    """The annual estimate restated as a fraction over *trading_days*.
+
+    This is the prediction ledger's unit: ``DiscoveryPrediction.realised_return``
+    is the fraction the price moved over the ledger horizon (21 trading
+    days by default), and the Mincer-Zarnowitz fit in
+    :func:`get_dynamic_shrinkage_factor` regresses one on the other. The
+    dossier's own ``expected_return`` is a percent over the LLM-chosen
+    ``horizon_months`` (1-12), so it cannot go into the ledger as is.
+    Scaling is linear and the momentum tilt is capped at one month, as in
+    :func:`_expected_return_for_horizon`.
+    """
+    if not annual:
+        return None
+    prior = annual.get("prior_annual")
+    tilt = annual.get("tilt_annual")
+    if prior is None or tilt is None:
+        return None
+    years = max(trading_days, 1) / 252.0
+    tilt_years = min(years, 1.0 / 12.0) if annual.get("anchor_kind") == "momentum_12_1m" else years
+    return float(prior) * years + float(tilt) * tilt_years
+
+
+def ledger_return_range(
+    db: Session | None,
+    symbol: str,
+    expected_return: float | None,
+    trading_days: int,
+) -> tuple[float | None, float | None]:
+    """P10/P90 of the total return over the ledger horizon, or ``(None, None)``.
+
+    The dossier already prints a PRIIPs-style block-bootstrap band
+    (:func:`compute_return_band`) over its own ``horizon_months``; the ledger
+    needs the same band over *trading_days*, centred on the ledger's own point
+    estimate (:func:`expected_return_over_trading_days`), so the range can later
+    be scored for coverage ("7 of 10 outcomes inside the 80 % range").
+
+    Only the block-bootstrap band is stored. The short-history GBM fallback is
+    not centred on the estimate, so it would not be the range the estimate was
+    stated with; such rows keep NULL and simply do not enter the coverage score.
+    """
+    if db is None or expected_return is None or expected_return <= -1.0:
+        return None, None
+    band = compute_return_band(
+        db,
+        symbol,
+        1,
+        0.0,
+        horizon_steps=trading_days,
+        target_total=float(expected_return),
+    )
+    if not band or band.get("method") != "block_bootstrap":
+        return None, None
+    return float(band["p10"]), float(band["p90"])
+
+
+def _resolve_expected_return(
+    db: Session | None,
+    user_id: str | None,
+    instrument_type: str,
+    scores: dict[str, Any],
+    horizon_months: int,
+    symbol: str,
+    *,
+    signal_breakdown: dict[str, Any] | None = None,
+    annual: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Single code path for the dossier expected-return point estimate + band.
+
+    Both call sites (write_dossier's post-LLM overwrite and the
+    deterministic_template fallback) MUST route through here so the LLM and
+    fallback paths stay provably identical (M5 Option 0, discover-maths audit
+    A8/F14). *annual* is the already-resolved :func:`_resolve_annual_estimate`
+    result (write_dossier resolves it before the LLM call); when omitted it is
+    resolved here.
+
+    ``signal_breakdown`` carries the alternative anchor source for direct
+    deterministic_template calls whose ``scores`` lack anchor candidates
+    (characterization-pinned contract).
+
+    Returns ``{"expected_return_pct": float|None, "anchor_kind": str|None,
+    "band": dict|None, "components": dict|None}``; ``band`` is None whenever
+    there is no db session, no anchor, or band computation failed open.
+    """
+    if annual is None:
+        annual = _resolve_annual_estimate(
+            db, user_id, instrument_type, scores, symbol, signal_breakdown=signal_breakdown,
+        )
+    expected_return_pct = _expected_return_for_horizon(annual, horizon_months)
+
+    band = None
+    if db is not None and expected_return_pct is not None:
+        if annual.get("band_mode") == "annual":
+            # blocks/bl: the estimate is already a forward annual rate.
+            band = compute_return_band(db, symbol, horizon_months, float(annual["prior_annual"]))
+        else:
+            # O1 (discover-maths fix session): center the band on the point
+            # estimate, not the raw backward-looking anchor. Invert the band's
+            # geometric horizon conversion: find the annual rate whose h-month
+            # TOTAL equals the estimate, so compute_return_band's
+            # ``(1+anchor)^(h/12)-1`` recentering lands the median on it.
+            total = expected_return_pct / 100.0
+            assert total > -1.0  # the ±25pp clamp guarantees this
+            h = max(horizon_months, 1)
+            anchor_equiv = (1.0 + total) ** (12.0 / h) - 1.0
+            band = compute_return_band(db, symbol, horizon_months, anchor_equiv)
+
+    return {
+        "expected_return_pct": expected_return_pct,
+        "anchor_kind": annual.get("anchor_kind"),
+        "band": band,
+        "components": annual.get("components"),
+    }
+
+
+RISK_DRAWDOWN_LIMIT = 0.30
+RISK_VOLATILITY_LIMIT = 0.60
+#: Net insider selling over the 90-day window, as a share of market value, from
+#: which it is worth a line. A judgement, not a tested signal.
+INSIDER_SELLING_RISK_SHARE = 0.0025
+_MARKET_RISK = "Market risk: broad equity drawdowns affect the position."
+_EARNINGS_EVENT = re.compile(
+    r"\bearnings\b[^.]*\b(?:report|event|release|announcement|date|call)\b|\b(?:upcoming|next)\b[^.]*\bearnings\b|"
+    r"\bevent risk\b[^.]*\bearnings\b|\bearnings on \d",
+    re.I,
+)
+_LISTING_CURRENCY_RISK = re.compile(r"\blisting currency\b|\b(?:currency|fx)\b[^.]*\blisting\b|\blisting\b[^.]*\b(?:currency|fx)\b", re.I)
+_DRAWDOWN_RISK = re.compile(r"\bdrawdown\b", re.I)
+# With a figure, and not a currency's: "FX volatility" is another risk.
+_VOLATILITY_RISK = re.compile(r"(?<!fx )(?<!currency )\bvolatility\b(?:[^.]|\.\d)*?(?<=\d)\s?%", re.I)
+
+
+def _usd_amount(value: float) -> str:
+    if value >= 1e9:
+        return f"${value / 1e9:.2f}bn"
+    return f"${value / 1e6:.1f}m"
+
+
+def deterministic_risks(
+    scores: dict[str, Any], signal_breakdown: dict[str, Any],
+) -> tuple[list[str], list[str]]:
+    """The risks the data shows, whoever writes the dossier: (earnings, the rest).
+
+    The earnings event leads the list. Insider and IBES lines are ticker-matched,
+    not gvkey-verified (see the pit_panel_joins module docstring), so the
+    caveat is spelled out.
+    """
+    earnings: list[str] = []
+    sf = _as_dict(scores.get("sentiment_fundamentals"))
+    earnings_line = _earnings_text(sf)
+    if earnings_line and _earnings_is_near(sf):
+        earnings.append(f"Earnings event: {earnings_line[:1].upper()}{earnings_line[1:]}.")
+    rest: list[str] = []
+    drawdown = _as_dict(scores.get("verification_gate")).get("max_drawdown")
+    if isinstance(drawdown, (int, float)) and drawdown > RISK_DRAWDOWN_LIMIT:
+        rest.append(
+            f"Drawdown: fell {drawdown:.1%} peak to trough in the window measured, past the "
+            f"{RISK_DRAWDOWN_LIMIT:.0%} the quality check allows."
+        )
+    volatility = _as_dict(scores.get("verification_gate")).get("volatility")
+    if isinstance(volatility, (int, float)) and volatility > RISK_VOLATILITY_LIMIT:
+        rest.append(
+            f"Volatility: {volatility:.1%} a year, past the {RISK_VOLATILITY_LIMIT:.0%} the quality check allows."
+        )
+    fall = _as_dict(scores.get("momentum_quality")).get("fall_from_3m_high")
+    if isinstance(fall, (int, float)) and fall >= RECENT_FALL_LIMIT:
+        rest.append(f"Recent fall: the latest close is {fall:.1%} below the highest close of the last 3 months.")
+    jump = _jump_text(_as_dict(scores.get("momentum_quality")))
+    if jump:
+        rest.append(f"One-day jump: {jump}")
+    correlation = _as_dict(scores.get("portfolio_fit")).get("correlation")
+    if isinstance(correlation, (int, float)) and correlation >= DIVERSIFIER_MAX_CORRELATION:
+        rest.append(f"Overlap: a weekly correlation of {correlation:.2f} with the portfolio adds little diversification.")
+    # Insider buying is evidence for a long position, not a risk to it (ADM's
+    # first "risk" in run 57c8f8b8); the buyers are among the facts already.
+    flow = _as_dict(scores.get("insider_signal")).get("net_insider_flow_usd")
+    market_cap = sf.get("market_cap")
+    if (
+        isinstance(flow, (int, float)) and isinstance(market_cap, (int, float)) and market_cap > 0
+        and -flow / market_cap >= INSIDER_SELLING_RISK_SHARE
+    ):
+        rest.append(
+            f"Insider selling: a net {_usd_amount(-flow)} sold in the trailing 90 days, {-flow / market_cap:.2%} of "
+            "market value (SEC filings, best-effort ticker match; routine and planned trades left out)."
+        )
+    sue = signal_breakdown.get("estimate_sue")
+    if sue is not None and abs(sue) >= 1.0:
+        beat = "beat" if sue > 0 else "missed"
+        rest.append(
+            f"Analyst estimates: most recent reported earnings {beat} consensus by "
+            f"{abs(sue):.2f} standardized units (IBES, best-effort ticker match)."
+        )
+    return earnings, rest
+
+
+def without_false_listing_risk(symbol: str, risks: list[str]) -> list[str]:
+    """A euro listing has no listing-currency risk: ABI.BR carried one in run dd3fe7b9.
+
+    What a fund holds abroad is another matter, and such a line stays.
+    """
+    if listing_currency(symbol) != "EUR":
+        return risks
+    return [r for r in risks if not _LISTING_CURRENCY_RISK.search(r)]
+
+
+def merge_risks(required: list[str], written: list[Any], *, drop_earnings: bool = False) -> list[str]:
+    """``required`` first, then the writer's own risks not already covered
+    (compared on the first 40 characters, case-insensitive; every line about
+    the earnings event, a drawdown or a stated volatility counts as one risk
+    however it is worded). ``drop_earnings`` also leaves out the writer's lines about the
+    report date, when the data shows none near enough to matter."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for risk in [*required, *(str(r) for r in written if r)]:
+        is_earnings = bool(_EARNINGS_EVENT.search(risk))
+        if is_earnings and drop_earnings:
+            continue
+        if is_earnings:
+            key = "earnings event"
+        elif _DRAWDOWN_RISK.search(risk):
+            key = "drawdown"
+        elif _VOLATILITY_RISK.search(risk):
+            key = "volatility"
+        else:
+            key = risk.strip().lower()[:40]
+        if key and key not in seen:
+            seen.add(key)
+            out.append(risk)
+    return out
+
+
+def _slot_context(
+    symbol: str,
+    candidate: Any,
+    name: str | None,
+    facts: list[Fact],
+    instrument_type: str,
+    instrument_facts: dict[str, Any],
+    *,
+    regime_text: str,
+    direction: str,
+) -> str:
+    """The user message in slot mode: words and keyed facts, no raw score dumps.
+
+    The JSON dumps of the old prompt are where the model found figures to copy
+    under the wrong name (TRV's "-$68.8 million"); every figure now reaches it
+    as a keyed phrase written by :mod:`dossier_facts`.
+    """
+    isin = candidate.get("isin") if isinstance(candidate, dict) else getattr(candidate, "isin", None)
+    keys = {f.key for f in facts}
+    if instrument_type in ("etf", "fund"):
+        holdings = [
+            str(h.get("name") or h.get("ticker"))
+            for h in (instrument_facts.get("top_holdings") or [])
+            if isinstance(h, dict) and (h.get("name") or h.get("ticker"))
+        ]
+        style = (instrument_facts.get("style") or {}).get("style")
+        described = (
+            f"Fund. Largest holdings: {', '.join(holdings) if holdings else 'not given (name none)'}\n"
+            f"Tracked index: {instrument_facts.get('tracked_index') or 'not given'}\n"
+            f"Style: {style or 'not established (do not guess)'}\n"
+            f"Listing currency: {instrument_facts.get('listing_currency') or 'not given'}; investor currency: EUR\n"
+        )
+    else:
+        described = (
+            f"Sector: {instrument_facts.get('sector') or 'not given'}\n"
+            f"Industry: {instrument_facts.get('industry') or 'not given'}\n"
+            f"Listing currency: {instrument_facts.get('listing_currency') or 'not given'}; reporting currency: "
+            f"{instrument_facts.get('reporting_currency') or 'not given'}; investor currency: EUR\n"
+        )
+    notes: list[str] = []
+    if "earnings" in keys and "too far off" not in next(f.text for f in facts if f.key == "earnings"):
+        notes.append("Name {earnings} in key_risks as event risk.")
+    return (
+        f"Candidate: {symbol} ({name or 'Unknown'})\n"
+        f"ISIN: {isin or 'not given'}\n"
+        f"{described}"
+        f"{regime_text}\n"
+        f"{facts_prompt(facts)}"
+        + "".join(f"{n}\n" for n in notes)
+        + f"Ticker: write it exactly as {symbol.split('.')[0].upper()}.\n"
+        f"Direction (fixed by the system): {direction}. Horizon: {{horizon}}. "
+        "System expected return over the horizon: {expected_return}.\n"
+        f"\n{SLOT_RULES}"
+        "\nGenerate a research hypothesis as structured JSON matching the schema."
+    )
+
+
+def _template_thesis(symbol: str, scores: dict[str, Any], expected_return: Any, horizon_months: int) -> str:
+    """What the data says, in sentences that cannot be wrong: the template's thesis."""
+    mom = _as_dict(scores.get("momentum_quality"))
+    fit = _as_dict(scores.get("portfolio_fit"))
+    quant = _as_dict(scores.get("quant_signals"))
+    sentences: list[str] = []
+    momentum = mom.get("momentum_12_1m")
+    if isinstance(momentum, (int, float)):
+        rank = mom.get("momentum_rank")
+        rank_text = f", at percentile {rank * 100:.0f} of the candidates" if isinstance(rank, (int, float)) else ""
+        sentences.append(f"{symbol} returned {momentum * 100:+.1f}% over the 12-1 month window{rank_text}.")
+    correlation = fit.get("correlation")
+    beta = quant.get("market_beta_weekly")
+    if isinstance(correlation, (int, float)) and isinstance(beta, (int, float)):
+        sentences.append(f"Its weekly correlation with the portfolio is {correlation:.2f} and its market beta {beta:.2f}.")
+    elif isinstance(correlation, (int, float)):
+        sentences.append(f"Its weekly correlation with the portfolio is {correlation:.2f}.")
+    if isinstance(expected_return, (int, float)):
+        sentences.append(f"The system's estimate over {horizon_months} months is {expected_return:+.1f}%.")
+    if not sentences:
+        return f"Quantitative assessment of {symbol} based on pipeline scores."
+    return " ".join([*sentences, "This summary comes straight from the data, without a written analysis."])
+
+
+def deterministic_template(
+    candidate: dict[str, Any],
+    scores: dict[str, Any],
+    signal_breakdown: dict[str, Any],
+    db: Session | None = None,
+    user_id: str | None = None,
+    annual: dict[str, Any] | None = None,
+    *,
+    direction: str | None = None,
+    horizon_months: int = DEFAULT_DOSSIER_HORIZON_MONTHS,
+) -> dict[str, Any]:
+    """Create a §5 dossier without LLM when LLM is unavailable or max retries exceeded.
+
+    ``db``/``user_id`` are optional so this stays callable without a session
+    (e.g. in tests); when omitted, the hardcoded
+    :data:`SHRINKAGE_BY_INSTRUMENT_TYPE` constant is used directly instead of
+    attempting the dynamic per-class fit.
+    """
+    composite = scores.get("composite", 0.0)
+    symbol = candidate["symbol"]
+    instrument_type = signal_breakdown.get("instrument_type", "equity")
+    resolved = _resolve_expected_return(
+        db,
+        user_id,
+        instrument_type,
+        scores,
+        horizon_months,
+        symbol,
+        signal_breakdown=signal_breakdown,
+        annual=annual,
+    )
+    earnings, data_risks = deterministic_risks(scores, signal_breakdown)
+    is_fund = instrument_type in ("etf", "fund")
+    key_risks = [
+        *earnings,
+        _MARKET_RISK,
+        *(
+            ["Currency risk: non-EUR denominated assets carry FX exposure."]
+            if listing_currency(symbol) != "EUR" else []
+        ),
+        # A fund is many names; the overlap with the portfolio, if any, is among the data's risks.
+        *([] if is_fund else ["Concentration risk: single-name exposure may exceed diversification targets."]),
+        *data_risks,
+    ]
+
+    dossier = {
+        "direction": direction if direction is not None else deterministic_direction(
+            resolved["expected_return_pct"], None, UNPROVEN_VERDICT,
+        ),
+        "conviction": composite,
+        "horizon_months": horizon_months,
+        "expected_return": resolved["expected_return_pct"],
+        "thesis": _template_thesis(symbol, scores, resolved["expected_return_pct"], horizon_months),
+        "key_risks": key_risks,
+        "signal_breakdown": signal_breakdown,
+        "estimate": True,
+        "not_financial_advice": True,
+    }
+    if resolved["band"] is not None:
+        dossier["expected_return_band"] = resolved["band"]
+    return dossier
+
+
+# A parsed object must carry at least one of these to count as an LLM dossier
+# rather than an arbitrary object lifted out of surrounding prose. Deliberately
+# the *substantive* fields only: `estimate`/`not_financial_advice` are boilerplate
+# and `conviction` is overwritten from the pipeline composite regardless.
+_DOSSIER_MARKER_FIELDS = frozenset({"thesis", "key_risks", "direction", "signal_breakdown"})
+
+
+def _try_parse_json(raw: str) -> dict[str, Any] | None:
+    """Best-effort JSON extraction from raw LLM output.
+
+    Handles a code-fenced object and, via the shared structured-completion
+    parser, an object with prose wrapped around it (a preamble the grammar
+    never constrained because the server failed open on the schema). There is
+    no top-level array field to salvage a truncated tail from here — the
+    dossier object's own fields (``thesis``, ``key_risks``) are what a cut-off
+    completion leaves incomplete, not a repeated-element array — so a
+    truncated completion still surfaces as unparseable and falls through to
+    the deterministic template rather than a fabricated partial dossier.
+
+    The parsed object must actually look like a dossier. The embedded-object
+    extractor will happily lift the first ``{…}`` out of *any* prose, and
+    ``_coerce_dossier`` then fills in every required field — so a refusal such
+    as ``I cannot analyse this candidate. {"error": "insufficient data"}``
+    validated cleanly and was persisted as ``generated_by="llm"`` with an empty
+    thesis, no ``fallback_reason``, and an expected_return attached as if
+    analysis backed it. Requiring at least one substantive dossier field keeps
+    that on the deterministic-fallback path, where it belongs.
+    """
+    parsed, _how = parse_structured_completion(raw, "key_risks")
+    if parsed is None:
+        return None
+    if not _DOSSIER_MARKER_FIELDS & parsed.keys():
+        return None
+    return parsed
+
+
+def _coerce_dossier(raw: dict[str, Any]) -> dict[str, Any]:
+    """Fill missing dossier fields so pydantic validation may pass next round."""
+    direction = str(raw.get("direction", "neutral")).lower()
+    if direction not in {"long", "short", "neutral"}:
+        direction = "neutral"
+    raw["direction"] = direction
+    raw.setdefault("conviction", 0.5)
+    raw.setdefault("horizon_months", DEFAULT_DOSSIER_HORIZON_MONTHS)
+    raw.setdefault("thesis", "")
+    raw.setdefault("key_risks", [])
+    raw.setdefault("signal_breakdown", {})
+    raw.setdefault("estimate", True)
+    raw.setdefault("not_financial_advice", True)
+    return raw
+
+
+def _ascii_safe_dict(obj: Any) -> Any:
+    """Recursively apply ascii_safe to all string values in a dict/list."""
+    if isinstance(obj, dict):
+        return {k: _ascii_safe_dict(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_ascii_safe_dict(v) for v in obj]
+    if isinstance(obj, str):
+        return ascii_safe(obj)
+    return obj

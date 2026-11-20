@@ -1,0 +1,40 @@
+{
+ "date": "2026-10-15",
+ "paths": 20000,
+ "looks": [
+  [
+   63,
+   3.0
+  ],
+  [
+   126,
+   2.3
+  ],
+  [
+   252,
+   1.8
+  ]
+ ],
+ "models": {
+  "iid_normal": {
+   "first_look": 0.0196,
+   "any_look": 0.0486
+  },
+  "t4_garch": {
+   "first_look": 0.02,
+   "any_look": 0.06135
+  },
+  "ar1_0.15": {
+   "first_look": 0.0584,
+   "any_look": 0.1992
+  },
+  "regime_switching": {
+   "first_look": 0.02475,
+   "any_look": 0.0833
+  },
+  "overlap_21d": {
+   "first_look": 0.5259,
+   "any_look": 0.99155
+  }
+ }
+}

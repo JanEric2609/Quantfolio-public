@@ -1,0 +1,1 @@
+import { useQuery } from "@tanstack/react-query"; import { api, type QuantPortfolioSummary } from "../../../lib/api"; export const useQuantSummary=()=>useQuery({queryKey:["quant","portfolio","summary"],queryFn:()=>api<QuantPortfolioSummary>("/api/quant/portfolio/summary")});

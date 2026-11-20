@@ -1,0 +1,729 @@
+"""The pre-registered calendar-time tests (ADR 0018 §2, §4, §7).
+
+Reads the frozen ``trust_daily_active_returns`` series (``daily_ledger.py``)
+and answers, per family:
+
+* **F1 ideas** (primary, drives the headline): do Discover's picks, held as
+  issued, beat the passive core ETF?
+* **F2 ranking** (primary, its own row): does the composite sort winners from
+  losers among every scored stock?
+* **F3 advisor** (secondary): do the advisor's directional calls beat the ETF?
+
+Each family tests skill and harm with e-BH at 5 % (K = 2, so one rejection
+needs e >= 40). The observation of day *s* is clipped to +-:data:`CLIP` and bet
+on with the aGRAPA bettor of ``foundation.forecast_verification`` (pseudo-
+variance :data:`PRIOR_VAR`, bet cap ``0.75 / p0``). Only days on or after
+:data:`PRIMARY_TEST_START` enter an e-value; earlier rows are shown as "before
+pre-registration". A day with nothing open carries no bet and is skipped.
+
+Every constant here is fixed by the ADR. Changing one is an amendment that
+must say what had been observed when it was made.
+
+Shown next to the test, never instead of it:
+
+* the posterior of the mean daily active return (prior N(0, tau^2), tau =
+  0.5 % per 21 days, HAC likelihood) with a tau sensitivity strip;
+* the simulated "time to know" (10/50/90 %) at stated assumptions. Measured
+  values (the series' own standard deviation, after :data:`MIN_DAYS_FOR_STATE`
+  days) feed only this forecast, never the test.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from datetime import date
+from typing import Any
+
+import numpy as np
+from sqlalchemy.orm import Session
+
+from app.decision.verification.daily_ledger import (
+    MANDATE_SERIES,
+    SERIES,
+    SERIES_ADVISOR,
+    SERIES_IDEAS,
+    SERIES_RANKING,
+    SERIES_RANKING_EF,
+    SERIES_SELECTION,
+    SERIES_SELECTION_W,
+    mandate_starts,
+)
+from app.foundation import forecast_verification as fv
+from app.lab.forward_lab import robustness_checks
+from app.foundation.models.entities import TrustDailyActiveReturn
+
+#: First day an observation may enter an e-value (ADR 0018, amendment of
+#: 2026-10-12: the first trading day after the release and the paper reset).
+PRIMARY_TEST_START = date(2026, 10, 15)
+#: Reference daily standard deviation: 5 % per 21 days.
+SIGMA_REF = 0.05 / math.sqrt(21)
+#: Clip before betting: 4.5 x SIGMA_REF, rounded to 5 %.
+CLIP = 0.05
+#: aGRAPA pseudo-variance on the [0, 1] scale: (SIGMA_REF / 2 CLIP)^2, rounded.
+PRIOR_VAR = 0.0121
+#: Bet cap as a share of 1 / p0: every factor stays >= 0.25.
+BET_CAP = 0.75
+FDR_LEVEL = 0.05
+#: Hypotheses per family: skill and harm.
+FAMILY_K = 2
+THRESHOLD = FAMILY_K / FDR_LEVEL
+#: Trading days before a state other than "too early" (and before the
+#: series' measured standard deviation replaces SIGMA_REF in the forecast).
+MIN_DAYS_FOR_STATE = 63
+#: Days the lag-1 autocorrelation is measured on, once (ADR 0018 §4, amended).
+AR1_CHECK_DAYS = 63
+AR1_FLAG = 0.15
+#: Posterior prior scale, per 21 trading days, and the sensitivity strip.
+TAU_21D = 0.005
+TAU_GRID_21D = (0.0025, 0.005, 0.01, 0.02)
+HORIZON_DAYS = 21
+TRADING_DAYS_PER_YEAR = 252
+WITHIN_YEARS = (5, 10, 20)
+#: Most points returned for the e-value chart.
+_MAX_PATH_POINTS = 260
+
+
+@dataclass(frozen=True)
+class Family:
+    key: str
+    series: str
+    role: str  # "primary" | "secondary"
+    question: str
+    #: First day an observation enters the e-values, the clip and the reference noise.
+    start: date = PRIMARY_TEST_START
+    clip: float = CLIP
+    sigma_ref: float = SIGMA_REF
+
+
+# ---------------------------------------------------------------------------
+# The lower-noise designs (ADR 0018, amendment of 2026-11-08). Chosen from the
+# outcome-blind noise study (docs/research/calibration/noise-study-2026-11-08.json:
+# random picks and scores, and the real runs' weights measured only on the
+# year before each issue), fixed before any value of these series was computed.
+# ---------------------------------------------------------------------------
+
+#: First day an observation of selection_w or ranking_ef enters an e-value:
+#: the first trading day after the amendment was merged.
+V2_TEST_START = date(2026, 11, 9)
+#: selection_w: 2.0 % per 21 days (between the study's 1.5 % scaled from the
+#: frozen 2.3 % and its 2.5 % for one run alone).
+SELECTION_W_SIGMA_REF = 0.020 / math.sqrt(21)
+#: ranking_ef: 2.1 % per 21 days (the study's 2.4 % for one run times the
+#: live ranking series' ratio of 0.86 for overlapping runs).
+RANKING_EF_SIGMA_REF = 0.021 / math.sqrt(21)
+#: 4.5 x the reference noise, rounded: 2 % a day for both.
+V2_CLIP = 0.02
+SELECTION_W_QUESTION = (
+    "Do Discover's picks beat the most similar stocks it could have picked instead "
+    "(same run, same sector, nearest in beta, volatility and momentum)?"
+)
+RANKING_EF_QUESTION = (
+    "Does Discover's score sort winners from losers, measured with the least noisy portfolio "
+    "that has the same exposure to the score?"
+)
+
+
+FAMILIES = (
+    # F1 is an alarm since the amendment of 2026-10-14 (§6): it can catch harm
+    # or a large edge; the headline comes from S and U (``alarm_only``).
+    Family("F1", SERIES_IDEAS, "primary", "Do Discover's picks, held as issued, beat your passive core ETF?"),
+    # The rank-weighted ranking test is secondary since the amendment of
+    # 2026-11-08: RANKING_EFFICIENT below asks its question with less noise.
+    Family("F2", SERIES_RANKING, "secondary", "Does Discover's score sort winners from losers among every scored stock?"),
+    Family("F3", SERIES_ADVISOR, "secondary", "Do the advisor's directional calls beat your passive core ETF?"),
+)
+RANKING_EFFICIENT = Family(
+    "F2", SERIES_RANKING_EF, "primary", RANKING_EF_QUESTION,
+    start=V2_TEST_START, clip=V2_CLIP, sigma_ref=RANKING_EF_SIGMA_REF,
+)
+
+#: Assumed edges for the "time to know" forecast. Ideas and advisor: mean
+#: active return per 21 days with a 5 % basket noise. Ranking: a rank IC per
+#: run with an IC standard deviation of 0.12 (the historical model's IC was
+#: 0.07). These are planning numbers, not measurements.
+EDGE_GRID_21D = (0.005, 0.01, 0.02)
+EDGE_DEFAULT_21D = 0.01
+BASKET_SD_21D = 0.05
+IC_GRID = (0.02, 0.04, 0.07)
+IC_DEFAULT = 0.07
+IC_SD = 0.12
+
+
+def _sharpe_daily(series: str, assumption: float, sd_daily: float) -> float:
+    if series == SERIES_RANKING:
+        return assumption / IC_SD / math.sqrt(HORIZON_DAYS)
+    return (assumption / HORIZON_DAYS) / sd_daily
+
+
+def _years(days: int | None) -> float | None:
+    return None if days is None else days / TRADING_DAYS_PER_YEAR
+
+
+def _forecast(series: str, sd_daily: float, measured_sd: bool, clip: float = CLIP) -> dict[str, Any]:
+    within = tuple(y * TRADING_DAYS_PER_YEAR for y in WITHIN_YEARS)
+    if series == SERIES_RANKING:
+        grid, default, unit = IC_GRID, IC_DEFAULT, "rank_ic"
+        sd = sd_daily
+    elif series == SERIES_RANKING_EF:
+        # Its own reference noise until measured; the edge is the portfolio's excess per 21 days.
+        grid, default, unit = EDGE_GRID_21D, EDGE_DEFAULT_21D, "excess_per_21d"
+        sd = sd_daily
+    else:
+        grid, default, unit = EDGE_GRID_21D, EDGE_DEFAULT_21D, "excess_per_21d"
+        # Without a measured series the basket noise sets the daily scale.
+        sd = sd_daily if measured_sd else BASKET_SD_21D / math.sqrt(HORIZON_DAYS)
+    # Rounded so the cached simulation is reused while the measured value drifts.
+    sd = max(round(sd, 4), 0.0001)
+
+    def run(assumption: float) -> fv.DaysToVerdict:
+        return fv.days_to_verdict(
+            round(_sharpe_daily(series, assumption, sd), 6), sd, clip, THRESHOLD,
+            prior_var=PRIOR_VAR, cap_factor=BET_CAP, within=within,
+        )
+
+    main = run(default)
+    return {
+        "assumption_unit": unit,
+        "assumption": default,
+        "ic_sd": IC_SD if series == SERIES_RANKING else None,
+        "basket_sd_21d": None if series in (SERIES_RANKING, SERIES_RANKING_EF) or measured_sd else BASKET_SD_21D,
+        "sd_daily": sd,
+        "sd_measured": measured_sd,
+        "q10_days": main.q10,
+        "q50_days": main.q50,
+        "q90_days": main.q90,
+        "q10_years": _years(main.q10),
+        "q50_years": _years(main.q50),
+        "q90_years": _years(main.q90),
+        "max_days": main.n_max,
+        "p_within": [
+            {"years": y, "p": main.p_within[y * TRADING_DAYS_PER_YEAR]} for y in WITHIN_YEARS
+        ],
+        "grid": [
+            {"assumption": a, "q50_days": (r := run(a)).q50, "q50_years": _years(r.q50)} for a in grid
+        ],
+    }
+
+
+def _posterior(values: list[float]) -> dict[str, Any] | None:
+    """Posterior of the mean active return, in units per 21 trading days."""
+    n = len(values)
+    lag = fv.newey_west_lag(n)
+    # Below MIN_DAYS_FOR_STATE the sample variance is too unstable to trust a
+    # small one: the reference noise sets a floor on the standard error.
+    floor = SIGMA_REF / math.sqrt(n) if 0 < n < MIN_DAYS_FOR_STATE else 0.0
+
+    def post(tau_21d: float) -> fv.Posterior | None:
+        return fv.normal_posterior(values, tau_21d / HORIZON_DAYS, lag, se_floor=floor)
+
+    main = post(TAU_21D)
+    if main is None:
+        return None
+    k = HORIZON_DAYS
+    return {
+        "tau_21d": TAU_21D,
+        "n": n,
+        "sample_mean_21d": main.sample_mean * k,
+        "sample_se_21d": main.sample_se * k,
+        "shrinkage": main.shrinkage,
+        "mean_21d": main.mean * k,
+        "ci_low_21d": main.ci_low * k,
+        "ci_high_21d": main.ci_high * k,
+        "p_positive": main.p_positive,
+        "sensitivity": [
+            {"tau_21d": tau, "p_positive": p.p_positive, "mean_21d": p.mean * k}
+            for tau in TAU_GRID_21D
+            if (p := post(tau)) is not None
+        ],
+    }
+
+
+def _thin(days: list[date], skill: np.ndarray, harm: np.ndarray) -> list[dict[str, Any]]:
+    n = len(days)
+    if n == 0:
+        return []
+    step = max(1, math.ceil(n / _MAX_PATH_POINTS))
+    idx = list(range(0, n, step))
+    if idx[-1] != n - 1:
+        idx.append(n - 1)
+    return [{"day": days[i].isoformat(), "e_skill": float(skill[i]), "e_harm": float(harm[i])} for i in idx]
+
+
+def _state(n_days: int, skill: bool, harm: bool) -> str:
+    if harm:
+        return "harm"
+    if skill:
+        return "skill"
+    return "too_early" if n_days < MIN_DAYS_FOR_STATE else "no_evidence"
+
+
+# ---------------------------------------------------------------------------
+# Selection (S), futility (U) and mandate futility (M): ADR 0018 amendment of
+# 2026-10-14, §1-§5. Fixed before any of these values was computed.
+# ---------------------------------------------------------------------------
+
+#: S and U: the measured matched-control noise, 2.3 % per 21 days.
+SELECTION_SIGMA_REF = 0.023 / math.sqrt(21)
+#: 4.5 x SELECTION_SIGMA_REF, rounded.
+SELECTION_CLIP = 0.0225
+#: U's margin: 0.4 % per 21 days net of costs = 0.6 % gross (two 10 bp half-
+#: spreads per 21-day turnover; Prime fees negligible; no tax under the NV).
+FUTILITY_DELTA_21D = 0.006
+#: One hypothesis: a rejection needs e >= 1 / alpha.
+FUTILITY_THRESHOLD = 1.0 / FDR_LEVEL
+#: M: what active management must add, 0.2 % per 21 days net.
+MANDATE_DELTA_21D = 0.002
+#: M: sigma_ref is measured on these first observed days, then the test starts.
+MANDATE_SIGMA_DAYS = 63
+# A sleeve whose active return never moved in its first 63 days (it held the
+# benchmark) would get sigma = 0 and so no test at all; it is tested at this floor
+# instead (0.1 % per 21 days).
+MANDATE_SIGMA_FLOOR = 0.001 / math.sqrt(21)
+#: Clip as a multiple of the reference noise, as everywhere.
+CLIP_SIGMAS = 4.5
+#: ADR 0018 §11, the noise check: (observed days, VR(21) cutoff) per look. A
+#: failed look is final; sized on the 2026-10-14 harness (about 5 % of clean
+#: series fail at any look, 99 % of overlap_21d series do).
+NOISE_CHECK_LOOKS = ((63, 3.0), (126, 2.3), (252, 1.8))
+SELECTION_QUESTION = "Do Discover's picks beat the stocks it could have picked instead (same run, same sector)?"
+FUTILITY_QUESTION = "Is the picks' selection edge too small to pay for trading them?"
+
+
+def _observed(
+    rows: list[TrustDailyActiveReturn], start: date = PRIMARY_TEST_START,
+) -> tuple[list[date], list[float], int]:
+    """(days, values, days before *start*) of the observed rows from *start*."""
+    rows = sorted(rows, key=lambda r: r.day)
+    obs = [r for r in rows if r.value is not None and r.n_open > 0]
+    live = [r for r in obs if r.day >= start]
+    return [r.day for r in live], [float(r.value) for r in live if r.value is not None], len(obs) - len(live)
+
+
+def _bet(values: list[float], clip: float, shift: float = 0.0) -> tuple[fv.EProcess, fv.EProcess]:
+    """(skill, harm) e-processes on ``clip(x - shift)`` mapped to [0, 1]."""
+    x = np.clip(np.asarray(values, dtype=float) - shift, -clip, clip)
+    y = (x + clip) / (2.0 * clip)
+    return (
+        fv.e_process_bernoulli(y, 0.5, PRIOR_VAR, cap_factor=BET_CAP),
+        fv.e_process_bernoulli(1.0 - y, 0.5, PRIOR_VAR, cap_factor=BET_CAP),
+    )
+
+
+def noise_check(values: list[float]) -> dict[str, Any]:
+    """ADR 0018 §11: VR(21) of the first *n* observed values at each look in :data:`NOISE_CHECK_LOOKS`.
+
+    ``status`` is ``pending`` before the first look, ``passing`` while the
+    looks reached so far are within their cutoffs, ``passed`` after all of
+    them and ``failed`` from the first look above its cutoff on.
+    """
+    looks = []
+    failed_at: int | None = None
+    for days, cutoff in NOISE_CHECK_LOOKS:
+        vr = fv.variance_ratio(values[:days], HORIZON_DAYS) if len(values) >= days else None
+        failed = vr is not None and vr > cutoff
+        if failed and failed_at is None:
+            failed_at = days
+        looks.append({"day": days, "cutoff": cutoff, "vr": vr, "failed": failed})
+    reached = [lk for lk in looks if lk["vr"] is not None]
+    if failed_at is not None:
+        status = "failed"
+    elif len(reached) == len(looks):
+        status = "passed"
+    else:
+        status = "passing" if reached else "pending"
+    return {"status": status, "failed_at_day": failed_at, "looks": looks}
+
+
+def selection_result(
+    rows: list[TrustDailyActiveReturn],
+    *,
+    series: str = SERIES_SELECTION,
+    start: date = PRIMARY_TEST_START,
+    sigma_ref: float = SELECTION_SIGMA_REF,
+    clip: float = SELECTION_CLIP,
+    question: str = SELECTION_QUESTION,
+) -> dict[str, Any]:
+    """S (skill and harm, K = 2) and U (futility, K = 1) on a selection series.
+
+    The defaults are the frozen ``selection`` series of 2026-10-14;
+    :func:`selection_weighted_result` passes the 2026-11-08 design's.
+    """
+    days, values, n_pre = _observed(rows, start)
+    n = len(values)
+    delta_d = FUTILITY_DELTA_21D / HORIZON_DAYS
+    skill, harm = _bet(values, clip)
+    _, futile = _bet(values, clip, shift=delta_d)
+    rejected = fv.e_bh([skill.final, harm.final], FDR_LEVEL)
+    futility = futile.final >= FUTILITY_THRESHOLD
+    noise = noise_check(values)
+    if noise["status"] == "failed":
+        state = "not_valid"
+    elif rejected[1]:
+        state = "harm"
+    elif rejected[0]:
+        state = "skill"
+    elif futility:
+        state = "not_worth_following"
+    else:
+        state = "too_early" if n < MIN_DAYS_FOR_STATE else "no_evidence"
+    ci = fv.mean_ci_hac(values, fv.newey_west_lag(n), 0.9) if values else None
+    fallback = [int((r.detail_json or {}).get("n_fallback") or 0) for r in rows if r.day >= start]
+    measured = n >= MIN_DAYS_FOR_STATE
+    sd = float(np.std(values, ddof=1)) if measured else sigma_ref
+    rho1 = fv.lag1_autocorrelation(values[:AR1_CHECK_DAYS]) if n >= AR1_CHECK_DAYS else None
+    return {
+        "family": "S",
+        "series": series,
+        # The frozen design is secondary since the amendment of 2026-11-08.
+        "role": "primary" if series == SERIES_SELECTION_W else "secondary",
+        "question": question,
+        "futility_question": FUTILITY_QUESTION,
+        "start": start.isoformat(),
+        "n_days": n,
+        "n_days_pre_registration": n_pre,
+        "first_day": days[0].isoformat() if days else None,
+        "mean_21d": float(np.mean(values)) * HORIZON_DAYS if values else None,
+        "mean_ci_21d": [ci[0] * HORIZON_DAYS, ci[1] * HORIZON_DAYS] if ci else None,
+        "sd_daily": float(np.std(values, ddof=1)) if n >= 2 else None,
+        "clip": clip,
+        "sigma_ref": sigma_ref,
+        "e_skill": skill.final,
+        "e_harm": harm.final,
+        "e_futility": futile.final,
+        "threshold": THRESHOLD,
+        "futility_threshold": FUTILITY_THRESHOLD,
+        "futility_delta_21d": FUTILITY_DELTA_21D,
+        "n_fallback_days": sum(1 for f in fallback if f > 0),
+        "rho1": rho1,
+        "rho1_flag": rho1 is not None and abs(rho1) > AR1_FLAG,
+        "state": state,
+        # A verdict before the day-252 look has passed is provisional (§11).
+        "provisional": state in ("skill", "harm", "not_worth_following") and noise["status"] != "passed",
+        "noise_check": noise,
+        "path": _thin(days, skill.path, harm.path),
+        "time_to_know": time_to_know_grid(sd, clip, measured),
+    }
+
+
+def selection_weighted_result(rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
+    """S and U on ``selection_w``, the primary selection design since 2026-11-08, with its robustness checks."""
+    result = selection_result(
+        rows, series=SERIES_SELECTION_W, start=V2_TEST_START, sigma_ref=SELECTION_W_SIGMA_REF,
+        clip=V2_CLIP, question=SELECTION_W_QUESTION,
+    )
+    _days, values, _before = _observed(rows, V2_TEST_START)
+    result["robustness"] = None
+    if len(values) > BUY_ROBUSTNESS_MIN_DAYS:
+        # Shown beside the verdict, not a guard: the BUY rule stays as pre-registered.
+        result["robustness"] = robustness_checks(
+            values, 1.0 / BUY_EVIDENCE_ALPHA, clip=V2_CLIP, seed=len(values),
+        ).as_dict()
+    return result
+
+
+def mandate_results(
+    by_series: dict[str, list[TrustDailyActiveReturn]],
+    starts: dict[str, date] | None = None,
+) -> list[dict[str, Any]]:
+    """M: futility per mandate sleeve, e-BH over the two (K = 2).
+
+    ``starts`` holds each sleeve's current inception day: a reset starts a new
+    run, and only that run's days are tested (the ledger keeps the old ones).
+    """
+    delta_d = MANDATE_DELTA_21D / HORIZON_DAYS
+    out: list[dict[str, Any]] = []
+    for series, mandate in MANDATE_SERIES.items():
+        start = (starts or {}).get(series)
+        rows = [r for r in by_series.get(series, []) if start is None or r.day > start]
+        days, values, _ = _observed(rows)
+        sigma = (
+            max(float(np.std(values[:MANDATE_SIGMA_DAYS], ddof=1)), MANDATE_SIGMA_FLOOR)
+            if len(values) > MANDATE_SIGMA_DAYS else None
+        )
+        tested = values[MANDATE_SIGMA_DAYS:] if sigma else []
+        clip = CLIP_SIGMAS * sigma if sigma else None
+        e = _bet(tested, clip, shift=delta_d)[1].final if clip and tested else 1.0
+        out.append({
+            "series": series,
+            "mandate": mandate,
+            "noise_check": noise_check(values),
+            "n_days": len(values),
+            "n_tested_days": len(tested),
+            "sigma_ref_daily": sigma,
+            "clip": clip,
+            "mean_21d": float(np.mean(values)) * HORIZON_DAYS if values else None,
+            "e_futility": e,
+            "delta_21d": MANDATE_DELTA_21D,
+        })
+    # A series whose noise check failed enters e-BH with no evidence (§11).
+    rejected = fv.e_bh(
+        [1.0 if m["noise_check"]["status"] == "failed" else m["e_futility"] for m in out], FDR_LEVEL
+    )
+    for m, r in zip(out, rejected):
+        status = m["noise_check"]["status"]
+        m["threshold"] = THRESHOLD
+        # A mandate retires only after its series has passed all three looks.
+        m["retire"] = bool(r) and status == "passed"
+        if status == "failed":
+            m["state"] = "not_valid"
+        elif r:
+            m["state"] = "retire" if m["retire"] else "retire_pending"
+        else:
+            m["state"] = "too_early" if m["n_tested_days"] == 0 else "no_evidence"
+    return out
+
+
+def time_to_know_grid(sd_daily: float, clip: float, measured: bool) -> dict[str, Any]:
+    """Median years to a verdict at edges of 0.25 / 0.5 / 1 % per 21 days (amendment §10)."""
+    within = tuple(y * TRADING_DAYS_PER_YEAR for y in WITHIN_YEARS)
+    sd = max(round(sd_daily, 4), 0.0001)
+    grid = []
+    for edge in TIME_GRID_21D:
+        r = fv.days_to_verdict(
+            round((edge / HORIZON_DAYS) / sd, 6), sd, clip, THRESHOLD,
+            prior_var=PRIOR_VAR, cap_factor=BET_CAP, within=within,
+        )
+        years = _years(r.q50)
+        grid.append({
+            "edge_21d": edge,
+            "q50_years": years,
+            "beyond_40y": years is None or years > GRID_MAX_YEARS,
+        })
+    return {"sd_daily": sd, "sd_measured": measured, "grid": grid}
+
+
+#: Edges of the time-to-know grid, per 21 days; longer than this reads "> 40 years".
+TIME_GRID_21D = (0.0025, 0.005, 0.01)
+GRID_MAX_YEARS = 40
+
+
+def series_result(family: Family, rows: list[TrustDailyActiveReturn]) -> dict[str, Any]:
+    """Test, posterior and forecast for one family from its frozen rows."""
+    rows = sorted(rows, key=lambda r: r.day)
+    pre = [r for r in rows if r.day < family.start]
+    live = [r for r in rows if r.day >= family.start]
+    observed = [r for r in live if r.value is not None and r.n_open > 0]
+    values = [float(r.value) for r in observed if r.value is not None]
+    days = [r.day for r in observed]
+    n = len(values)
+    clip = family.clip
+
+    y = (np.clip(np.asarray(values, dtype=float), -clip, clip) + clip) / (2.0 * clip)
+    skill = fv.e_process_bernoulli(y, 0.5, PRIOR_VAR, cap_factor=BET_CAP)
+    harm = fv.e_process_bernoulli(1.0 - y, 0.5, PRIOR_VAR, cap_factor=BET_CAP)
+    rejected = fv.e_bh([skill.final, harm.final], FDR_LEVEL)
+    state = _state(n, rejected[0], rejected[1])
+
+    sd_measured = n >= MIN_DAYS_FOR_STATE
+    sd = float(np.std(values, ddof=1)) if sd_measured else family.sigma_ref
+    if not sd > 0:
+        sd, sd_measured = family.sigma_ref, False
+    ci = fv.mean_ci_hac(values, fv.newey_west_lag(n), 0.9) if values else None
+    rho1 = fv.lag1_autocorrelation(values[:AR1_CHECK_DAYS]) if n >= AR1_CHECK_DAYS else None
+    pre_values = [float(r.value) for r in pre if r.value is not None and r.n_open > 0]
+    clipped = int(np.sum(np.abs(np.asarray(values)) > clip)) if values else 0
+    return {
+        "family": family.key,
+        "series": family.series,
+        "role": family.role,
+        "alarm_only": family.series == SERIES_IDEAS,
+        "question": family.question,
+        "start": family.start.isoformat(),
+        "n_days": n,
+        "n_empty_days": sum(1 for r in live if r.value is None or r.n_open == 0),
+        "n_stale_days": sum(1 for r in observed if r.n_stale > 0),
+        "n_clipped": clipped,
+        "first_day": days[0].isoformat() if days else None,
+        "last_day": live[-1].day.isoformat() if live else None,
+        "mean_open": float(np.mean([r.n_open for r in observed])) if observed else None,
+        "mean_21d": float(np.mean(values)) * HORIZON_DAYS if values else None,
+        "mean_ci_21d": [ci[0] * HORIZON_DAYS, ci[1] * HORIZON_DAYS] if ci else None,
+        "sd_daily": float(np.std(values, ddof=1)) if n >= 2 else None,
+        "e_skill": skill.final,
+        "e_harm": harm.final,
+        "e_skill_peak": skill.max_value,
+        "e_harm_peak": harm.max_value,
+        "threshold": THRESHOLD,
+        "n_tests": FAMILY_K,
+        "state": state,
+        "rho1": rho1,
+        "rho1_flag": rho1 is not None and abs(rho1) > AR1_FLAG,
+        "pre_registration": {
+            "n_days": len(pre_values),
+            "mean_21d": float(np.mean(pre_values)) * HORIZON_DAYS if pre_values else None,
+        },
+        "path": _thin(days, skill.path, harm.path),
+        "posterior": _posterior(values),
+        "time_to_know": _forecast(family.series, sd, sd_measured, clip),
+    }
+
+
+def paired_comparison(
+    ideas: list[TrustDailyActiveReturn], advisor: list[TrustDailyActiveReturn]
+) -> dict[str, Any]:
+    """Advisor against Discover on the days both had open calls (ADR 0018 Phase 3).
+
+    Both series are active returns against the same passive core, so their
+    daily difference is the advisor's return over Discover's picks with the
+    benchmark cancelled. Descriptive only: no e-value, no threshold, no state.
+    The advisor is a paper-only research loop and F1 stays the headline.
+    """
+
+    def observed(rows: list[TrustDailyActiveReturn]) -> dict[date, float]:
+        return {r.day: float(r.value) for r in rows if r.value is not None and r.n_open > 0}
+
+    a, b = observed(advisor), observed(ideas)
+    common = sorted(d for d in a.keys() & b.keys() if d >= PRIMARY_TEST_START)
+    n_pre = sum(1 for d in a.keys() & b.keys() if d < PRIMARY_TEST_START)
+    diffs = [a[d] - b[d] for d in common]
+    n = len(diffs)
+    ci = fv.mean_ci_hac(diffs, fv.newey_west_lag(n), 0.9) if diffs else None
+    cumulative = np.cumsum(diffs) if diffs else np.array([])
+    step = max(1, math.ceil(n / _MAX_PATH_POINTS)) if n else 1
+    idx = list(range(0, n, step))
+    if n and idx[-1] != n - 1:
+        idx.append(n - 1)
+    return {
+        "question": "Did the advisor's paper calls beat Discover's picks on the days both were open?",
+        "start": PRIMARY_TEST_START.isoformat(),
+        "n_days": n,
+        "n_days_pre_registration": n_pre,
+        "n_days_advisor_only": sum(1 for d in a if d >= PRIMARY_TEST_START and d not in b),
+        "n_days_ideas_only": sum(1 for d in b if d >= PRIMARY_TEST_START and d not in a),
+        "mean_21d": float(np.mean(diffs)) * HORIZON_DAYS if diffs else None,
+        "mean_ci_21d": [ci[0] * HORIZON_DAYS, ci[1] * HORIZON_DAYS] if ci else None,
+        "share_advisor_ahead": float(np.mean([x > 0 for x in diffs])) if diffs else None,
+        "enough_days": n >= MIN_DAYS_FOR_STATE,
+        "path": [{"day": common[i].isoformat(), "cumulative": float(cumulative[i])} for i in idx],
+    }
+
+
+def build_daily_tests(db: Session, user_id: str) -> dict[str, Any]:
+    """Every family's result for one user, plus the fixed test settings."""
+    rows = (
+        db.query(TrustDailyActiveReturn)
+        .filter(TrustDailyActiveReturn.user_id == user_id, TrustDailyActiveReturn.series.in_(SERIES))
+        .all()
+    )
+    by_series: dict[str, list[TrustDailyActiveReturn]] = {s: [] for s in SERIES}
+    for r in rows:
+        by_series[r.series].append(r)
+    return {
+        "start": PRIMARY_TEST_START.isoformat(),
+        "clip": CLIP,
+        "sigma_ref": SIGMA_REF,
+        "prior_var": PRIOR_VAR,
+        "bet_cap": BET_CAP,
+        "fdr_level": FDR_LEVEL,
+        "threshold": THRESHOLD,
+        "min_days_for_state": MIN_DAYS_FOR_STATE,
+        "horizon_days": HORIZON_DAYS,
+        "families": [series_result(f, by_series[f.series]) for f in FAMILIES],
+        "selection": selection_result(by_series[SERIES_SELECTION]),
+        "selection_weighted": selection_weighted_result(by_series[SERIES_SELECTION_W]),
+        "ranking_efficient": series_result(RANKING_EFFICIENT, by_series[SERIES_RANKING_EF]),
+        "mandates": mandate_results(by_series, mandate_starts(db, user_id)),
+        "paired": paired_comparison(by_series[SERIES_IDEAS], by_series[SERIES_ADVISOR]),
+    }
+
+
+#: Where the weekly ledger job stores :func:`buy_gate_evidence` per user for the
+#: Discover BUY gate (internal state in ``app_settings``, no catalog entry):
+#: discover may not import this package (decision-loop independence).
+BUY_GATE_SETTING_KEY = "trust_buy_gate_json"
+#: The BUY gate's level: the owner's 1 % (2026-09-29), so the skill e-value must reach 100.
+BUY_EVIDENCE_ALPHA = 0.01
+#: The BUY gate waits for the noise check's second look (ADR 0018 §11). In
+#: 2,000 simulated 20-year null paths (amendment of 2026-11-08, §4) a false
+#: BUY slipped past the noise check in 8.1 % of overlap_21d paths when BUY could
+#: come from day 63, 3.7 % from day 126; 1.9 % / 1.8 % under AR(1) 0.15 and
+#: 0.3 % on iid noise either way.
+BUY_MIN_DAYS = NOISE_CHECK_LOOKS[1][0]
+#: Observed days before the robustness checks run (plan 2026-11-09, §4): a
+#: block bootstrap of fewer days says little.
+BUY_ROBUSTNESS_MIN_DAYS = 63
+
+
+def buy_gate_evidence(db: Session, user_id: str | None) -> dict[str, Any]:
+    """What the Discover BUY gate reads (ADR 0018, amendment of 2026-11-08, §4).
+
+    ``proven`` when ``selection_w``'s skill e-value has reached
+    ``1 / BUY_EVIDENCE_ALPHA`` after at least :data:`BUY_MIN_DAYS` observed
+    days, and no guard has fired: the selection harm rejection, the futility
+    rejection, a failed noise check, or F1's harm rejection against the
+    passive core. Otherwise ``insufficient_data`` (no observed day yet) or
+    ``unproven``.
+    """
+    query = db.query(TrustDailyActiveReturn).filter(
+        TrustDailyActiveReturn.series.in_((SERIES_SELECTION_W, SERIES_IDEAS)),
+    )
+    if user_id:
+        query = query.filter(TrustDailyActiveReturn.user_id == user_id)
+    rows = query.all()
+    sel = selection_weighted_result([r for r in rows if r.series == SERIES_SELECTION_W])
+    f1 = series_result(FAMILIES[0], [r for r in rows if r.series == SERIES_IDEAS])
+    threshold = 1.0 / BUY_EVIDENCE_ALPHA
+    guards = {
+        "selection_harm": sel["state"] == "harm",
+        "not_worth_following": sel["state"] == "not_worth_following",
+        "noise_check_failed": sel["noise_check"]["status"] == "failed",
+        "f1_harm": f1["state"] == "harm",
+    }
+    if sel["n_days"] == 0:
+        status = "insufficient_data"
+    elif sel["e_skill"] >= threshold and sel["n_days"] >= BUY_MIN_DAYS and not any(guards.values()):
+        status = "proven"
+    else:
+        status = "unproven"
+    return {
+        "status": status,
+        "series": SERIES_SELECTION_W,
+        "computed_on": date.today().isoformat(),
+        "start": sel["start"],
+        "n_days": sel["n_days"],
+        "min_days": BUY_MIN_DAYS,
+        "e_skill": sel["e_skill"],
+        "evidence_threshold": threshold,
+        "mean_21d": sel["mean_21d"],
+        "state": sel["state"],
+        "guards": guards,
+        "time_to_know": sel["time_to_know"],
+        "robustness": sel["robustness"],
+    }
+
+
+def store_buy_gate_evidence(db: Session, user_ids: list[str]) -> dict[str, str]:
+    """Write :func:`buy_gate_evidence` for each user under :data:`BUY_GATE_SETTING_KEY`; the caller commits."""
+    from app.foundation.settings import get_setting_row, upsert_public_settings
+
+    stored = get_setting_row(db, BUY_GATE_SETTING_KEY)
+    out = dict(stored) if isinstance(stored, dict) else {}
+    for user_id in user_ids:
+        out[user_id] = buy_gate_evidence(db, user_id)
+    upsert_public_settings(db, {BUY_GATE_SETTING_KEY: out})
+    return {u: out[u]["status"] for u in user_ids}
+
+
+__all__ = [
+    "BUY_EVIDENCE_ALPHA",
+    "BUY_GATE_SETTING_KEY",
+    "BUY_MIN_DAYS",
+    "CLIP",
+    "FAMILIES",
+    "RANKING_EFFICIENT",
+    "V2_TEST_START",
+    "buy_gate_evidence",
+    "MIN_DAYS_FOR_STATE",
+    "NOISE_CHECK_LOOKS",
+    "PRIMARY_TEST_START",
+    "THRESHOLD",
+    "build_daily_tests",
+    "mandate_results",
+    "noise_check",
+    "paired_comparison",
+    "selection_result",
+    "selection_weighted_result",
+    "series_result",
+    "store_buy_gate_evidence",
+    "time_to_know_grid",
+]

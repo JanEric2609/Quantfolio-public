@@ -1,0 +1,1 @@
+import { useQuery } from "@tanstack/react-query"; import { api } from "../../../lib/api"; export const useGoalPortfolio=(goalId:string|null)=>useQuery({queryKey:["quant","goals",goalId,"portfolio"],queryFn:()=>api<any>(`/api/quant/goals/${goalId}/portfolio`),enabled:!!goalId});

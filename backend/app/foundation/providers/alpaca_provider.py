@@ -1,0 +1,261 @@
+from __future__ import annotations
+
+import logging
+import math
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
+from typing import Any, cast
+
+import httpx
+
+from app.foundation.providers.base import MarketDataProvider, provider_result
+from app.foundation.providers.utils import is_us_listing, strip_exchange_suffix
+
+logger = logging.getLogger(__name__)
+
+
+class AlpacaProvider(MarketDataProvider):
+    """US equities market data provider backed by Alpaca Markets data API.
+
+    Requires both an API key and a secret key; enabled only when both are set.
+    Alpaca covers US-listed equities only — exchange suffixes are stripped
+    before issuing requests.
+    """
+
+    name = "alpaca"
+    capabilities = {"get_quote", "get_history"}
+
+    def __init__(self, api_key: str | None, api_secret: str | None, *, enabled: bool = True):
+        super().__init__(enabled=enabled and bool(api_key) and bool(api_secret))
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.base_url = "https://data.alpaca.markets/v2"
+
+    def status(self) -> dict[str, Any]:
+        configured = bool(self.api_key) and bool(self.api_secret)
+        return {
+            "provider": self.name,
+            "enabled": self.enabled,
+            "available": configured,
+            "message": "Alpaca API key and secret configured." if configured else "Alpaca API key/secret is not configured.",
+        }
+
+    def get_quote(self, symbol: str) -> dict[str, Any]:
+        if not self.enabled or not self.api_key or not self.api_secret:
+            return self.unavailable("quote", "Alpaca API key/secret is not configured.")
+        if not is_us_listing(symbol):
+            # Stripping the suffix risks matching an unrelated US ticker
+            # (SHEL.AS → SHEL) and returning the wrong price.
+            return self.unavailable("quote", f"Alpaca covers US listings only; skipping {symbol}.", reason="not_applicable")
+        try:
+            normalized = strip_exchange_suffix(symbol)
+            data = self._get(f"/stocks/{normalized}/quotes/latest")
+            quote = data.get("quote") if isinstance(data, dict) else None
+            if not isinstance(quote, dict):
+                return self.unavailable("quote", f"Alpaca returned no quote for {normalized}.")
+            ap = _float(quote.get("ap"))
+            bp = _float(quote.get("bp"))
+            if ap is None or bp is None or ap <= 0 or bp <= 0:
+                return self.unavailable("quote", f"Alpaca returned no usable quote for {normalized}.")
+            # Use the midpoint of bid/ask as the "close" price.
+            close = (Decimal(str(ap)) + Decimal(str(bp))) / Decimal("2")
+            as_of = _parse_iso(quote.get("t")) or datetime.now(UTC)
+            return provider_result(
+                self.name,
+                ok=True,
+                data={
+                    "symbol": symbol.upper(),
+                    "date": as_of.date(),
+                    "open": None,
+                    "high": None,
+                    "low": None,
+                    "close": close,
+                    "volume": None,
+                    "ask": Decimal(str(ap)),
+                    "bid": Decimal(str(bp)),
+                    "source": self.name,
+                },
+                as_of=as_of,
+                confidence=0.7,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Alpaca get_quote failed for %s: %s", symbol, exc)
+            return self.unavailable("quote", str(exc))
+
+    def get_history(
+        self,
+        symbol: str,
+        start: str | None = None,
+        end: str | None = None,
+        days: int | None = None,
+    ) -> dict[str, Any]:
+        if not self.enabled or not self.api_key or not self.api_secret:
+            return self.unavailable("history", "Alpaca API key/secret is not configured.")
+        if not is_us_listing(symbol):
+            return self.unavailable("history", f"Alpaca covers US listings only; skipping {symbol}.", reason="not_applicable")
+        try:
+            normalized = strip_exchange_suffix(symbol)
+            # Alpaca's default `adjustment=raw` stores unadjusted closes; a
+            # stored series must be total return (plan 2026-10-12, D1).
+            params: dict[str, Any] = {"timeframe": "1Day", "adjustment": "all"}
+            if not start and days:
+                # Without `start` Alpaca answers from the start of the current
+                # day (two bars). Trading days -> calendar days, plus holidays.
+                start = (datetime.now(UTC).date() - timedelta(days=math.ceil(days * 1.6))).isoformat()
+            if start:
+                params["start"] = start
+            if end:
+                params["end"] = end
+            params["limit"] = 10000
+            bars: list[Any] | None = None
+            for _page in range(50):
+                data = self._get(f"/stocks/{normalized}/bars", params=params)
+                page = data.get("bars") if isinstance(data, dict) else None
+                if not isinstance(page, list):
+                    break
+                bars = [*(bars or []), *page]
+                token = data.get("next_page_token") if isinstance(data, dict) else None
+                if not token:
+                    break
+                params["page_token"] = token
+            if bars is None:
+                return self.unavailable("history", f"Alpaca returned no bars for {normalized}.")
+            rows: list[dict[str, Any]] = []
+            for bar in bars:
+                if not isinstance(bar, dict):
+                    continue
+                as_of = _parse_iso(bar.get("t"))
+                rows.append(
+                    {
+                        "date": as_of.date() if as_of else None,
+                        "open": _decimal(bar.get("o")),
+                        "high": _decimal(bar.get("h")),
+                        "low": _decimal(bar.get("l")),
+                        "close": _decimal(bar.get("c")),
+                        "volume": _decimal(bar.get("v")),
+                        "source": self.name,
+                    }
+                )
+            rows, cut = cut_at_listing_gap(rows)
+            if days and len(rows) > days:
+                rows = rows[-days:]
+            if not rows:
+                return self.unavailable("history", f"Alpaca returned empty bars for {normalized}.")
+            return provider_result(
+                self.name,
+                ok=True,
+                data=rows,
+                as_of=datetime.now(UTC),
+                confidence=0.75 if len(rows) >= 252 else 0.55,
+                warnings=[
+                    *([] if len(rows) >= 252 else ["Less than one year of Alpaca history is available."]),
+                    *([f"Alpaca history cut at a gap of {cut} days: an earlier company may have used this ticker."] if cut else []),
+                ],
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Alpaca get_history failed for %s: %s", symbol, exc)
+            return self.unavailable("history", str(exc))
+
+    def get_closes_multi(
+        self, symbols: list[str], start: str, end: str | None = None, *, feed: str = "sip",
+    ) -> dict[str, dict[str, float]]:
+        """``{symbol: {YYYY-MM-DD: adjusted close}}`` for many US symbols in few calls.
+
+        One request covers up to ``_MULTI_BATCH`` symbols and pages through
+        ``next_page_token``; the free plan allows 200 calls a minute, so the
+        whole US universe over a couple of weeks is a handful of calls. Keys
+        are the symbols as passed. Raises ``ValueError`` on an HTTP error, so
+        a caller can retry with ``feed="iex"`` when SIP history is refused.
+        """
+        if not self.enabled:
+            raise ValueError("Alpaca API key/secret is not configured.")
+        by_plain = {strip_exchange_suffix(s): s for s in symbols if is_us_listing(s)}
+        out: dict[str, dict[str, float]] = {}
+        plain = sorted(by_plain)
+        for i in range(0, len(plain), self._MULTI_BATCH):
+            batch = plain[i : i + self._MULTI_BATCH]
+            params: dict[str, Any] = {
+                "symbols": ",".join(batch), "timeframe": "1Day", "adjustment": "all",
+                "feed": feed, "start": start, "limit": 10000,
+            }
+            if end:
+                params["end"] = end
+            for _page in range(50):
+                data = self._get("/stocks/bars", params=params)
+                for sym, bars in (data.get("bars") or {}).items():
+                    target = out.setdefault(str(by_plain.get(str(sym)) or sym), {})
+                    for bar in bars or []:
+                        as_of = _parse_iso(bar.get("t"))
+                        close = _float(bar.get("c"))
+                        if as_of is not None and close is not None and close > 0:
+                            target[as_of.date().isoformat()] = close
+                token = data.get("next_page_token")
+                if not token:
+                    break
+                params["page_token"] = token
+        return out
+
+    _MULTI_BATCH = 100
+
+    def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        # `self.enabled` is only true when both api_key and api_secret are set,
+        # so headers will always carry non-empty strings here.
+        headers = cast(
+            dict[str, str],
+            {
+                "APCA-API-KEY-ID": self.api_key or "",
+                "APCA-API-SECRET-KEY": self.api_secret or "",
+            },
+        )
+        with httpx.Client(timeout=15) as client:
+            response = client.get(f"{self.base_url}{path}", headers=headers, params=params or {})
+            if response.status_code >= 400:
+                # Never re-raise httpx's default error: even though the API
+                # key/secret travel via headers (not the URL) here, keep the
+                # sanitized-error shape used across providers so this stays
+                # safe if the auth mechanism ever changes.
+                raise ValueError(f"Alpaca HTTP {response.status_code} for {path}")
+            return response.json()
+
+
+#: Alpaca keys bars by ticker, so a reused ticker joins two companies (docs/research/2026-11-12-alpaca-reused-tickers.md).
+LISTING_GAP_DAYS = 60
+
+
+def cut_at_listing_gap(rows: list[dict[str, Any]], gap_days: int = LISTING_GAP_DAYS) -> tuple[list[dict[str, Any]], int]:
+    """Keep only the segment after the last gap of ``gap_days`` or more calendar days. Returns (rows, gap found or 0)."""
+    dated = [r for r in rows if r.get("date") is not None]
+    cut_at, found = 0, 0
+    for i in range(1, len(dated)):
+        gap = (dated[i]["date"] - dated[i - 1]["date"]).days
+        if gap >= gap_days:
+            cut_at, found = i, gap
+    return (dated[cut_at:] if found else rows), found
+
+
+def _float(value: Any) -> float | None:
+    if value in (None, "", "None"):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _decimal(value: Any) -> Decimal | None:
+    if value in (None, "", "None"):
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        # Alpaca timestamps are ISO 8601 in UTC, e.g. "2024-05-01T13:30:00Z".
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None

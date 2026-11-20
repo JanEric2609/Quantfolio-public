@@ -1,0 +1,204 @@
+"""Time-weighted unit value of the real book: flows are never return."""
+from datetime import date, timedelta
+from decimal import Decimal
+from unittest.mock import patch
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.foundation import book_performance
+from app.foundation.core.db import Base
+from app.foundation.models.entities import BookPositionSnapshot, User
+
+
+def _memory_db():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+
+
+D0 = date.today() - timedelta(days=10)
+
+
+def _day(i: int) -> str:
+    return (D0 + timedelta(days=i)).isoformat()
+
+
+def _snap(db, user, i, qty, source="dkb"):
+    db.add(BookPositionSnapshot(
+        user_id=user.id, snapshot_date=D0 + timedelta(days=i), source=source, account_id="a1",
+        isin="IE00B4L5Y983", ticker="EUNL.DE", name="MSCI World", quantity=Decimal(str(qty)), currency="EUR",
+    ))
+
+
+def _run(db, user, prices, bench=None):
+    def closes(_db, symbol, days=730, **kw):
+        return bench if symbol == "BENCH" else prices
+    with patch("app.foundation.eur_prices.eur_closes", side_effect=closes):
+        return book_performance.compute_book_performance(db, user.id, benchmark="BENCH")
+
+
+def test_a_savings_plan_purchase_is_a_flow_not_return():
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    # 10 units, price 100 -> 110 -> 110; on day 2 ten more units are bought.
+    _snap(db, user, 0, 10)
+    _snap(db, user, 2, 20)
+    db.commit()
+    prices = {_day(0): 100.0, _day(1): 110.0, _day(2): 110.0}
+    perf = _run(db, user, prices, bench={_day(0): 50.0, _day(1): 55.0, _day(2): 55.0})
+    assert perf["available"]
+    assert perf["twr"] == pytest.approx(0.10)  # only the 100 -> 110 move
+    assert perf["value_end_eur"] == pytest.approx(2200.0)
+    assert perf["net_contributions_eur"] == pytest.approx(1100.0)
+    assert perf["benchmark_return"] == pytest.approx(0.10)
+    # Naive value growth would read 2200 / 1000 - 1 = 120 %.
+    assert perf["series"][-1]["net_flow"] == pytest.approx(1100.0)
+
+
+def test_irr_matches_the_flows():
+    flows = [(date(2025, 1, 1), -1000.0), (date(2026, 1, 1), 1100.0)]
+    assert book_performance.xirr(flows) == pytest.approx(0.10, abs=1e-9)
+    assert book_performance.xirr([(date(2025, 1, 1), -1.0)]) is None
+
+
+def test_no_snapshots_is_unavailable():
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    perf = book_performance.compute_book_performance(db, user.id)
+    assert perf["available"] is False and "snapshot" in perf["reason"]
+
+
+def test_two_brokers_sum_per_isin():
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    _snap(db, user, 0, 10, source="dkb")
+    _snap(db, user, 0, 5, source="scalable")
+    db.commit()
+    perf = _run(db, user, {_day(0): 100.0, _day(1): 90.0}, bench={})
+    assert perf["value_start_eur"] == pytest.approx(1500.0)
+    assert perf["twr"] == pytest.approx(-0.10)
+
+
+def _dividend(db, user, i, amount, isin="IE00B4L5Y983"):
+    from app.foundation.models.entities import TaxLedgerEvent
+    d = D0 + timedelta(days=i)
+    db.add(TaxLedgerEvent(user_id=user.id, tax_year=d.year, event_date=d, event_type="dividend", isin=isin,
+                          gross_eur=Decimal(str(amount))))
+
+
+def test_dividend_counts_once_in_twr_and_once_in_irr():
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    _snap(db, user, 0, 10)
+    _dividend(db, user, 1, 50)
+    _dividend(db, user, 1, 999, isin="US0000000000")  # a fund this book never held
+    db.commit()
+    perf = _run(db, user, {_day(0): 100.0, _day(1): 100.0}, bench={})
+    assert perf["twr"] == pytest.approx(0.05)  # 50 on 1,000
+    # The dividend leaves the book as cash: a -50 flow, so contributions are -50, once.
+    assert perf["net_contributions_eur"] == pytest.approx(-50.0)
+
+
+def test_weekend_dividend_lands_on_the_next_priced_day():
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    _snap(db, user, 0, 10)
+    _snap(db, user, 3, 10)
+    _dividend(db, user, 1, 30)  # day 1 has no price and no snapshot
+    db.commit()
+    perf = _run(db, user, {_day(0): 100.0, _day(3): 100.0}, bench={})
+    assert perf["twr"] == pytest.approx(0.03)
+
+
+def test_a_broker_appearing_later_is_a_flow_not_return():
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    _snap(db, user, 0, 10, source="dkb")
+    _snap(db, user, 1, 10, source="dkb")
+    _snap(db, user, 1, 5, source="scalable")
+    db.commit()
+    perf = _run(db, user, {_day(0): 100.0, _day(1): 100.0}, bench={})
+    assert perf["twr"] == pytest.approx(0.0)
+    assert perf["net_contributions_eur"] == pytest.approx(500.0)
+
+
+def test_end_cuts_the_series_and_ignores_a_fund_bought_later():
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    _snap(db, user, 0, 10)
+    _snap(db, user, 3, 10)
+    # Bought on day 5, after the end: it has no price at all.
+    db.add(BookPositionSnapshot(
+        user_id=user.id, snapshot_date=D0 + timedelta(days=5), source="dkb", account_id="a1",
+        isin="IE0000000001", ticker=None, name="New fund", quantity=Decimal("1"), currency="EUR",
+    ))
+    db.commit()
+    prices = {_day(i): 100.0 + i for i in range(7)}
+
+    def closes(_db, symbol, days=730, **kw):
+        return prices if symbol == "EUNL.DE" else {}
+    with patch("app.foundation.eur_prices.eur_closes", side_effect=closes), \
+            patch("app.foundation.portfolio.isin_resolver._try_resolve_isin", return_value=None):
+        whole = book_performance.compute_book_performance(db, user.id, benchmark="BENCH")
+        cut = book_performance.compute_book_performance(db, user.id, benchmark="BENCH", end=D0 + timedelta(days=3))
+    assert whole["unpriced"] == ["IE0000000001"]
+    assert cut["unpriced"] == [] and cut["end"] == _day(3)
+    assert cut["twr"] == pytest.approx(103.0 / 100.0 - 1.0)
+
+
+def test_dividend_counts_what_reached_the_account_not_the_gross():
+    from app.foundation.models.entities import TaxLedgerEvent
+
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    _snap(db, user, 0, 10)
+    d = D0 + timedelta(days=1)
+    db.add(TaxLedgerEvent(user_id=user.id, tax_year=d.year, event_date=d, event_type="dividend",
+                          isin="IE00B4L5Y983", gross_eur=Decimal("100"), withheld_eur=Decimal("26.375"),
+                          foreign_wht_eur=Decimal("15")))
+    db.commit()
+    perf = _run(db, user, {_day(0): 100.0, _day(1): 100.0}, bench={})
+    assert perf["twr"] == pytest.approx(0.05862, abs=1e-4)      # 58.625 on 1,000, not 100
+
+
+def test_one_missing_price_costs_one_day_not_two(monkeypatch):
+    db = _memory_db()
+    user = User(username="u", password_hash="x")
+    db.add(user)
+    db.commit()
+    for i in (0, 1, 2, 3):
+        _snap(db, user, i, 10)
+        db.add(BookPositionSnapshot(
+            user_id=user.id, snapshot_date=D0 + timedelta(days=i), source="dkb", account_id="a2",
+            isin="IE00BK5BQT80", ticker="VWCE.DE", name="FTSE All-World", quantity=Decimal("10"), currency="EUR"))
+    db.commit()
+    monkeypatch.setattr(book_performance, "MAX_PRICE_CARRY_DAYS", 0)
+    a = {_day(0): 100.0, _day(1): 100.0, _day(2): 100.0, _day(3): 110.0}
+    b = {_day(0): 100.0, _day(1): 100.0, _day(3): 100.0}          # no price on day 2
+
+    def closes(_db, symbol, days=730, **kw):
+        return {} if symbol == "BENCH" else (a if symbol == "EUNL.DE" else b)
+
+    with patch("app.foundation.eur_prices.eur_closes", side_effect=closes):
+        perf = book_performance.compute_book_performance(db, user.id, benchmark="BENCH")
+    assert perf["twr"] == pytest.approx(0.05)       # 2,000 on day 1 -> 2,100 on day 3
+    assert perf["days_without_full_prices"] == 1

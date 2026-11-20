@@ -1,0 +1,202 @@
+import logging
+from typing import Any
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlalchemy.orm import Session
+from starlette.requests import Request
+
+from app.foundation.core.db import get_db
+from app.foundation.core.security import limiter
+from app.foundation.llm.base import LlmUnavailableError
+from app.foundation.models.entities import (
+    AnalysisReport,
+    User,
+)
+from app.foundation.schemas import (
+    BacktestRequest,
+    ObsidianQueryRequest,
+    RecommendationGenerateRequest,
+    RecommendationGenerateResult,
+    RecommendationPayload,
+    ReportCreateRequest,
+    ReportOut,
+)
+from app.decision.ai import (
+    build_analysis_context,
+    configured_llm,
+    generate_recommendations_for_user,
+    persist_recommendation,
+    record_recommendation_attempt,
+    recommendation_messages,
+    strip_unverifiable_evidence,
+)
+from app.foundation.auth import current_user
+from app.foundation import obsidian as obsidian_service
+from app.foundation.backtest_strategy import run_strategy_backtest_cached
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/ai", tags=["ai"])
+
+
+@router.post("/analyse-report", response_model=RecommendationPayload)
+def analyse_report(payload: BacktestRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> RecommendationPayload:
+    backtest = run_strategy_backtest_cached(db, payload.ticker, payload.strategy, payload.start, payload.end, payload.params)
+    context = build_analysis_context(db, user.id, payload.ticker, backtest)
+    try:
+        recommendation = configured_llm(db).structured_chat_with_repair(
+            recommendation_messages(payload.ticker, "mid", context),
+            RecommendationPayload,
+        )
+    except Exception as exc:
+        record_recommendation_attempt(
+            db,
+            user.id,
+            ticker=payload.ticker,
+            horizon="mid",
+            status="failed",
+            error_message=str(exc),
+            debug={"source": "analyse-report", "strategy": payload.strategy},
+        )
+        raise _llm_recommendation_error(exc) from exc
+    recommendation.evidence = strip_unverifiable_evidence(recommendation.evidence, context)
+    persist_recommendation(db, user.id, recommendation, backtest)
+    record_recommendation_attempt(db, user.id, ticker=payload.ticker, horizon="mid", status="saved")
+    return recommendation
+
+
+@router.post("/reports", response_model=ReportOut)
+def create_report(payload: ReportCreateRequest, db: Session = Depends(get_db), user: User = Depends(current_user)) -> ReportOut:
+    report = AnalysisReport(user_id=user.id, **payload.model_dump())
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    return ReportOut.model_validate(report)
+
+
+@router.post("/reports/upload", response_model=ReportOut)
+async def upload_report(
+    ticker: str | None = None,
+    horizon: str = "mid",
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> ReportOut:
+    if not file.filename or not file.filename.lower().endswith((".md", ".txt")):
+        raise HTTPException(status_code=400, detail="Only .md and .txt TradingAgents reports are supported.")
+    raw = await file.read()
+    if len(raw) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Report upload is limited to 2 MB.")
+    try:
+        content = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Report must be UTF-8 text.") from exc
+    payload = ReportCreateRequest(
+        title=file.filename,
+        ticker=ticker,
+        horizon=horizon,  # type: ignore[arg-type]
+        content=content,
+        source="upload",
+    )
+    return create_report(payload, db, user)
+
+
+@router.get("/reports", response_model=list[ReportOut])
+def reports(db: Session = Depends(get_db), user: User = Depends(current_user)) -> list[ReportOut]:
+    rows = (
+        db.query(AnalysisReport)
+        .filter(AnalysisReport.user_id == user.id)
+        .order_by(AnalysisReport.created_at.desc())
+        .all()
+    )
+    return [ReportOut.model_validate(r) for r in rows]
+
+
+@router.post("/reports/{report_id}/analyse", response_model=RecommendationPayload)
+def analyse_saved_report(report_id: str, db: Session = Depends(get_db), user: User = Depends(current_user)) -> RecommendationPayload:
+    report = db.get(AnalysisReport, report_id)
+    if report is None or report.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Report not found")
+    ticker = report.ticker or _infer_ticker(report.content)
+    backtest = run_strategy_backtest_cached(db, ticker, "buy_hold")
+    context = build_analysis_context(db, user.id, ticker, backtest)
+    try:
+        recommendation = configured_llm(db).structured_chat_with_repair(
+            recommendation_messages(ticker, report.horizon, context, report.content),
+            RecommendationPayload,
+        )
+    except Exception as exc:
+        record_recommendation_attempt(
+            db,
+            user.id,
+            ticker=ticker,
+            horizon=report.horizon,
+            status="failed",
+            error_message=str(exc),
+            debug={"source": "saved-report", "report_id": report.id},
+        )
+        raise _llm_recommendation_error(exc) from exc
+    recommendation.evidence = strip_unverifiable_evidence(recommendation.evidence, context)
+    persist_recommendation(db, user.id, recommendation, backtest)
+    record_recommendation_attempt(db, user.id, ticker=ticker, horizon=report.horizon, status="saved")
+    return recommendation
+
+
+@router.post("/recommendations/generate", response_model=RecommendationGenerateResult)
+@limiter.limit("3/hour")
+def generate_recommendations(
+    request: Request,
+    payload: RecommendationGenerateRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> RecommendationGenerateResult:
+    result = generate_recommendations_for_user(
+        db, user.id,
+        universe=payload.universe,
+        limit=payload.limit,
+        mode=payload.mode or ("short_term" if payload.horizon == "short" else "long_term"),
+        horizon=payload.horizon,
+    )
+    created = result.get("created", [])
+    failed = result.get("failed", [])
+    message = (
+        f"Saved {len(created)} recommendation(s) for human review."
+        if created
+        else "No recommendations were saved because scoring could not build enough context for any candidate."
+    )
+    return RecommendationGenerateResult(created=created, failed=failed, message=message)
+
+
+@router.get("/context/obsidian/status")
+def obsidian_status(db: Session = Depends(get_db), _user: User = Depends(current_user)) -> dict[str, Any]:
+    return obsidian_service.obsidian_status(db)
+
+
+@router.post("/context/obsidian/query")
+def obsidian_query(payload: ObsidianQueryRequest, db: Session = Depends(get_db), _user: User = Depends(current_user)) -> dict[str, Any]:
+    return obsidian_service.query_obsidian(db, payload.query, payload.limit)
+
+
+def _infer_ticker(content: str) -> str:
+    words = [word.strip(" ,.;:()[]{}") for word in content.split()]
+    for word in words:
+        if 2 <= len(word) <= 12 and any(ch.isalpha() for ch in word) and word.upper() == word:
+            return word
+    return "EUNL.DE"
+
+
+def _llm_recommendation_error(exc: Exception) -> Exception:
+    # An unreachable model keeps its own type: the app answers it with the
+    # common 503 "llm_unavailable", which tells the user what to fix.
+    if isinstance(exc, LlmUnavailableError):
+        return exc
+    # The cause (endpoint URL, provider response, schema-validation dump) stays on
+    # the server: it is logged here and stored on the RecommendationAttempt row.
+    logger.warning("LLM recommendation failed: %s", exc, exc_info=exc)
+    return HTTPException(
+        status_code=503,
+        detail={
+            "message": "The configured LLM could not return a valid recommendation. "
+            "No fallback recommendation was saved. Details are in the server log.",
+        },
+    )

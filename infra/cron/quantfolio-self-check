@@ -1,0 +1,8 @@
+# Daily self-check on the app LXC; installed to /etc/cron.d by update-app.sh.
+# Runs outside the worker (so a dead worker is reported) as the quantfolio
+# user with the service's environment, like the `qf` helper. Problems go to
+# Telegram every day until fixed; on Mondays an "all fine" line confirms the
+# check itself still runs.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+0 6 * * * root systemd-run --quiet --wait --pipe --collect --unit=quantfolio-self-check --uid=quantfolio --gid=quantfolio -p EnvironmentFile=/opt/quantfolio/.env -p WorkingDirectory=/opt/quantfolio/backend /opt/quantfolio/backend/.venv/bin/python -m app.foundation.self_check >> /var/log/quantfolio-self-check.log 2>&1

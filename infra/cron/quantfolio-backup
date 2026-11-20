@@ -1,0 +1,6 @@
+# Nightly database backup on the app LXC; installed to /etc/cron.d by update-app.sh.
+# The daily self-check reads /var/lib/quantfolio-backup/status.json and alerts
+# when the last good dump is older than 36 hours.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+15 2 * * * root /bin/bash /opt/quantfolio/infra/scripts/backup-db.sh >> /var/log/quantfolio-backup.log 2>&1

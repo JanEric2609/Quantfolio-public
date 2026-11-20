@@ -1,0 +1,1287 @@
+{
+  "buffer_empty": {
+    "GET /buffer (empty)": {
+      "avg_daily_spend": 0.0,
+      "buffer_amount": 0.0,
+      "buffer_days": null
+    }
+  },
+  "buffer_filled": {
+    "GET /buffer": {
+      "avg_daily_spend": 0.9444444444444444,
+      "buffer_amount": 107.5,
+      "buffer_days": 113.82352941176471
+    }
+  },
+  "cashflow_empty": {
+    "GET /cashflow (empty)": [
+      {
+        "income": 0.0,
+        "month": "2025-09",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2025-10",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2025-11",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2025-12",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2026-01",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2026-02",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2026-03",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2026-04",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2026-05",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2026-06",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2026-07",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2026-08",
+        "spend": 0.0
+      }
+    ]
+  },
+  "cashflow_filled": {
+    "GET /cashflow": [
+      {
+        "income": 0.0,
+        "month": "2025-09",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2025-10",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2025-11",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2025-12",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2026-01",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2026-02",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2026-03",
+        "spend": 19.99
+      },
+      {
+        "income": 0.0,
+        "month": "2026-04",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2026-05",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2026-06",
+        "spend": 0.0
+      },
+      {
+        "income": 0.0,
+        "month": "2026-07",
+        "spend": 0.0
+      },
+      {
+        "income": 2500.0,
+        "month": "2026-08",
+        "spend": 85.0
+      }
+    ]
+  },
+  "categories_create": {
+    "POST /categories": {
+      "color": "#EF4444",
+      "icon": "gamepad",
+      "id": "51fed0e5-8762-4e62-bf7d-19666a918100",
+      "name": "Hobby",
+      "target_amount": null,
+      "target_date": null,
+      "type": "expense",
+      "user_id": "bud-user"
+    }
+  },
+  "categories_delete": {
+    "DELETE /categories/{id}": {
+      "message": "Category deleted"
+    }
+  },
+  "categories_list": {
+    "GET /categories": [
+      {
+        "color": "#FB923C",
+        "icon": "utensils",
+        "id": "aa5c4026-97c5-4276-822c-6e6fe3acd392",
+        "name": "Eating Out",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#A78BFA",
+        "icon": "graduation-cap",
+        "id": "667cf802-6b04-43ac-963d-bee1acbe7051",
+        "name": "Education",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#3B82F6",
+        "icon": "shopping-cart",
+        "id": "bud-cat-groceries",
+        "name": "Groceries",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#FB7185",
+        "icon": "heart-pulse",
+        "id": "baa5715e-ea6f-47e5-994b-e486400dd741",
+        "name": "Health",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#60A5FA",
+        "icon": "home",
+        "id": "5d8f164b-81e1-471c-95c7-92c884145958",
+        "name": "Housing/Rent",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#22C55E",
+        "icon": "banknote",
+        "id": "bud-cat-income",
+        "name": "Income",
+        "target_amount": null,
+        "target_date": null,
+        "type": "income",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#F59E0B",
+        "icon": "laptop",
+        "id": "bud-cat-laptop",
+        "name": "Laptop Fund",
+        "target_amount": 1200.0,
+        "target_date": "2027-01-01",
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#94A3B8",
+        "icon": "more-horizontal",
+        "id": "5fbe8eb3-a5f5-4c88-bc08-68d4a873d886",
+        "name": "Miscellaneous",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#F472B6",
+        "icon": "party-popper",
+        "id": "08d6bd75-a9a9-4061-89f8-671492d4f052",
+        "name": "Social & Entertainment",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#C084FC",
+        "icon": "repeat",
+        "id": "68362ab7-e5a1-48fe-9f21-338442191632",
+        "name": "Subscriptions",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#38BDF8",
+        "icon": "car",
+        "id": "800d9c9d-12b7-40b7-aaac-6cc851df3a1c",
+        "name": "Transport",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#8B5CF6",
+        "icon": "plane",
+        "id": "bud-cat-travel",
+        "name": "Travel",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#22C55E",
+        "icon": "bolt",
+        "id": "a8cabd21-8bed-42c1-9b17-f62ce93955af",
+        "name": "Utilities",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      }
+    ]
+  },
+  "categories_seed": {
+    "POST /categories/seed": [
+      {
+        "color": "#FB923C",
+        "icon": "utensils",
+        "id": "01b65069-c17d-4598-8a19-5af686645a80",
+        "name": "Eating Out",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#A78BFA",
+        "icon": "graduation-cap",
+        "id": "184c1c64-9b08-4cc2-83ef-401c1170c5cb",
+        "name": "Education",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#3B82F6",
+        "icon": "shopping-cart",
+        "id": "bud-cat-groceries",
+        "name": "Groceries",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#FB7185",
+        "icon": "heart-pulse",
+        "id": "03a65a71-264c-4860-b577-33c17e5d261b",
+        "name": "Health",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#60A5FA",
+        "icon": "home",
+        "id": "a050a60d-67c1-4fb3-a3a8-86011d08535c",
+        "name": "Housing/Rent",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#22C55E",
+        "icon": "banknote",
+        "id": "bud-cat-income",
+        "name": "Income",
+        "target_amount": null,
+        "target_date": null,
+        "type": "income",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#F59E0B",
+        "icon": "laptop",
+        "id": "bud-cat-laptop",
+        "name": "Laptop Fund",
+        "target_amount": 1200.0,
+        "target_date": "2027-01-01",
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#94A3B8",
+        "icon": "more-horizontal",
+        "id": "5b8731ef-d9ef-4e22-aee2-7f828b59cc39",
+        "name": "Miscellaneous",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#F472B6",
+        "icon": "party-popper",
+        "id": "5d19a8fc-d71a-466d-9816-6edf8ea01dd2",
+        "name": "Social & Entertainment",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#C084FC",
+        "icon": "repeat",
+        "id": "44ff7a42-129c-4122-86c0-fc5586a5b3e8",
+        "name": "Subscriptions",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#38BDF8",
+        "icon": "car",
+        "id": "34800574-c47d-488c-b988-180df012527b",
+        "name": "Transport",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#8B5CF6",
+        "icon": "plane",
+        "id": "bud-cat-travel",
+        "name": "Travel",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      },
+      {
+        "color": "#22C55E",
+        "icon": "bolt",
+        "id": "a03372b3-6b08-41ab-80ee-3b1a3b4e0448",
+        "name": "Utilities",
+        "target_amount": null,
+        "target_date": null,
+        "type": "expense",
+        "user_id": "bud-user"
+      }
+    ]
+  },
+  "categories_update": {
+    "PUT /categories/{id}": {
+      "color": "#8B5CF6",
+      "icon": "plane",
+      "id": "bud-cat-travel",
+      "name": "Vacation",
+      "target_amount": null,
+      "target_date": null,
+      "type": "expense",
+      "user_id": "bud-user"
+    }
+  },
+  "categorize_run_empty": {
+    "POST /categorize/run (empty)": {
+      "llm_categorized": 0,
+      "rule_categorized": 0
+    }
+  },
+  "categorize_run_rule_hit": {
+    "POST /categorize/run": {
+      "llm_categorized": 0,
+      "rule_categorized": 1
+    }
+  },
+  "envelopes_cover": {
+    "POST /envelopes/cover": {
+      "amount": 30.0,
+      "from_category_id": "bud-cat-groceries",
+      "from_remaining_budgeted": 120.0,
+      "to_category_id": "bud-cat-travel",
+      "to_remaining_budgeted": 30.0
+    }
+  },
+  "envelopes_get": {
+    "GET /envelopes": {
+      "envelopes": [
+        {
+          "budgeted": 150.0,
+          "category_id": "bud-cat-groceries",
+          "category_name": "Groceries",
+          "color": "#3B82F6",
+          "goal": null,
+          "icon": "shopping-cart",
+          "overspent": false,
+          "remaining": 107.5,
+          "spent": 42.5
+        },
+        {
+          "budgeted": 100.0,
+          "category_id": "bud-cat-laptop",
+          "category_name": "Laptop Fund",
+          "color": "#F59E0B",
+          "goal": {
+            "progress": 100.0,
+            "required_monthly": 183.33333333333334,
+            "target_amount": 1200.0,
+            "target_date": "2027-01-01"
+          },
+          "icon": "laptop",
+          "overspent": false,
+          "remaining": 100.0,
+          "spent": 0.0
+        },
+        {
+          "budgeted": 0.0,
+          "category_id": "bud-cat-travel",
+          "category_name": "Travel",
+          "color": "#8B5CF6",
+          "goal": null,
+          "icon": "plane",
+          "overspent": false,
+          "remaining": 0.0,
+          "spent": 0.0
+        }
+      ],
+      "money_to_budget": 2500.0
+    }
+  },
+  "envelopes_get_empty": {
+    "GET /envelopes (empty)": {
+      "envelopes": [],
+      "money_to_budget": 0.0
+    }
+  },
+  "envelopes_history": {
+    "GET /envelopes/history": [
+      {
+        "category_id": "bud-cat-groceries",
+        "category_name": "Groceries",
+        "color": "#3B82F6",
+        "consistently_over": false,
+        "consistently_under": false,
+        "months": [
+          {
+            "budgeted": 0.0,
+            "month": 6,
+            "over": 0.0,
+            "spent": 0.0,
+            "year": 2026
+          },
+          {
+            "budgeted": 0.0,
+            "month": 7,
+            "over": 0.0,
+            "spent": 0.0,
+            "year": 2026
+          },
+          {
+            "budgeted": 150.0,
+            "month": 8,
+            "over": -107.5,
+            "spent": 42.5,
+            "year": 2026
+          }
+        ],
+        "months_over_budget": 0,
+        "months_with_budget": 1
+      },
+      {
+        "category_id": "bud-cat-laptop",
+        "category_name": "Laptop Fund",
+        "color": "#F59E0B",
+        "consistently_over": false,
+        "consistently_under": false,
+        "months": [
+          {
+            "budgeted": 0.0,
+            "month": 6,
+            "over": 0.0,
+            "spent": 0.0,
+            "year": 2026
+          },
+          {
+            "budgeted": 0.0,
+            "month": 7,
+            "over": 0.0,
+            "spent": 0.0,
+            "year": 2026
+          },
+          {
+            "budgeted": 100.0,
+            "month": 8,
+            "over": -100.0,
+            "spent": 0.0,
+            "year": 2026
+          }
+        ],
+        "months_over_budget": 0,
+        "months_with_budget": 1
+      },
+      {
+        "category_id": "bud-cat-travel",
+        "category_name": "Travel",
+        "color": "#8B5CF6",
+        "consistently_over": false,
+        "consistently_under": false,
+        "months": [
+          {
+            "budgeted": 0.0,
+            "month": 6,
+            "over": 0.0,
+            "spent": 0.0,
+            "year": 2026
+          },
+          {
+            "budgeted": 0.0,
+            "month": 7,
+            "over": 0.0,
+            "spent": 0.0,
+            "year": 2026
+          },
+          {
+            "budgeted": 0.0,
+            "month": 8,
+            "over": 0.0,
+            "spent": 0.0,
+            "year": 2026
+          }
+        ],
+        "months_over_budget": 0,
+        "months_with_budget": 0
+      }
+    ]
+  },
+  "envelopes_put": {
+    "PUT /envelopes/{category_id}": {
+      "budgeted_amount": 120.0,
+      "category_id": "bud-cat-travel",
+      "month": 8,
+      "year": 2026
+    }
+  },
+  "expenses_create": {
+    "POST /expenses": {
+      "account_name": null,
+      "amount": "33.300000",
+      "category_id": "bud-cat-groceries",
+      "currency": "EUR",
+      "date": "2026-08-10",
+      "description": "B\u00e4ckerei",
+      "id": "11b3df29-6ad8-4526-ae01-ad4f9cef33b8",
+      "notes": null,
+      "source": "manual"
+    }
+  },
+  "expenses_delete": {
+    "DELETE /expenses/{id}": {
+      "message": "Expense deleted"
+    }
+  },
+  "expenses_list_empty": {
+    "GET /expenses (empty)": []
+  },
+  "expenses_list_filled": {
+    "GET /expenses": [
+      {
+        "account_name": null,
+        "amount": "-42.500000",
+        "category_id": "bud-cat-groceries",
+        "currency": "EUR",
+        "date": "2026-08-03",
+        "description": "REWE Filiale 400",
+        "id": "bud-exp-rewe-synced",
+        "notes": null,
+        "source": "dkb_auto"
+      },
+      {
+        "account_name": null,
+        "amount": "-42.500000",
+        "category_id": null,
+        "currency": "EUR",
+        "date": "2026-08-02",
+        "description": "REWE Markt",
+        "id": "bud-exp-rewe-manual",
+        "notes": null,
+        "source": "manual"
+      },
+      {
+        "account_name": null,
+        "amount": "2500.000000",
+        "category_id": "bud-cat-income",
+        "currency": "EUR",
+        "date": "2026-08-01",
+        "description": "Job Gehalt August",
+        "id": "bud-exp-income",
+        "notes": null,
+        "source": "manual"
+      },
+      {
+        "account_name": null,
+        "amount": "-19.990000",
+        "category_id": "bud-cat-groceries",
+        "currency": "EUR",
+        "date": "2026-03-15",
+        "description": "Book Store",
+        "id": "bud-exp-book",
+        "notes": null,
+        "source": "manual"
+      }
+    ]
+  },
+  "expenses_update": {
+    "PUT /expenses/{id}": {
+      "account_name": null,
+      "amount": "-24.990000",
+      "category_id": "bud-cat-groceries",
+      "currency": "EUR",
+      "date": "2026-03-15",
+      "description": "Book Store II",
+      "id": "bud-exp-book",
+      "notes": "updated",
+      "source": "manual"
+    }
+  },
+  "income_sources_create": {
+    "POST /income-sources": {
+      "active": true,
+      "amount": 450.0,
+      "cadence": "monthly",
+      "currency": "EUR",
+      "id": "6db19ba0-a9c5-4bda-b8ea-42d2e6d60bcf",
+      "name": "BAf\u00f6G",
+      "next_date": "2026-09-01",
+      "user_id": "bud-user"
+    }
+  },
+  "income_sources_delete": {
+    "DELETE /income-sources/{id}": {
+      "message": "Income source deleted"
+    }
+  },
+  "income_sources_list": {
+    "GET /income-sources": [
+      {
+        "active": true,
+        "amount": 2500.0,
+        "cadence": "monthly",
+        "currency": "EUR",
+        "id": "bud-inc-job",
+        "name": "Job",
+        "next_date": "2026-09-01",
+        "user_id": "bud-user"
+      },
+      {
+        "active": false,
+        "amount": 200.0,
+        "cadence": "monthly",
+        "currency": "EUR",
+        "id": "bud-inc-parents",
+        "name": "Parents",
+        "next_date": "2026-09-01",
+        "user_id": "bud-user"
+      }
+    ]
+  },
+  "income_sources_list_empty": {
+    "GET /income-sources (empty)": []
+  },
+  "income_sources_update": {
+    "PUT /income-sources/{id}": {
+      "active": true,
+      "amount": 2600.0,
+      "cadence": "monthly",
+      "currency": "EUR",
+      "id": "bud-inc-job",
+      "name": "Job",
+      "next_date": "2026-09-01",
+      "user_id": "bud-user"
+    }
+  },
+  "invoices_create": {
+    "POST /invoices": {
+      "amount": 19.99,
+      "currency": "EUR",
+      "due_date": "2026-09-15",
+      "id": "28256669-886e-4896-bbb0-99c90beea7fe",
+      "issuer": "Mobile Carrier",
+      "notes": null,
+      "paid": false,
+      "user_id": "bud-user"
+    }
+  },
+  "invoices_delete": {
+    "DELETE /invoices/{id}": {
+      "message": "Invoice deleted"
+    }
+  },
+  "invoices_list": {
+    "GET /invoices": [
+      {
+        "amount": 89.0,
+        "currency": "EUR",
+        "due_date": "2026-08-25",
+        "id": "bud-inv-power",
+        "issuer": "Power Company",
+        "notes": null,
+        "paid": false,
+        "user_id": "bud-user"
+      },
+      {
+        "amount": 39.99,
+        "currency": "EUR",
+        "due_date": "2026-07-01",
+        "id": "bud-inv-net",
+        "issuer": "Internet",
+        "notes": null,
+        "paid": true,
+        "user_id": "bud-user"
+      }
+    ]
+  },
+  "invoices_list_empty": {
+    "GET /invoices (empty)": []
+  },
+  "invoices_mark_paid": {
+    "POST /invoices/{id}/mark-paid": {
+      "amount": 89.0,
+      "currency": "EUR",
+      "due_date": "2026-08-25",
+      "id": "bud-inv-power",
+      "issuer": "Power Company",
+      "notes": null,
+      "paid": true,
+      "user_id": "bud-user"
+    }
+  },
+  "invoices_mark_unpaid": {
+    "POST /invoices/{id}/mark-unpaid": {
+      "amount": 39.99,
+      "currency": "EUR",
+      "due_date": "2026-07-01",
+      "id": "bud-inv-net",
+      "issuer": "Internet",
+      "notes": null,
+      "paid": false,
+      "user_id": "bud-user"
+    }
+  },
+  "invoices_update": {
+    "PUT /invoices/{id}": {
+      "amount": 95.5,
+      "currency": "EUR",
+      "due_date": "2026-08-25",
+      "id": "bud-inv-power",
+      "issuer": "Power Company",
+      "notes": "hike",
+      "paid": false,
+      "user_id": "bud-user"
+    }
+  },
+  "review_empty": {
+    "GET /review (empty month)": {
+      "month": 1,
+      "potential_duplicates": [],
+      "sinking_funds": [
+        {
+          "category_id": "bud-cat-laptop",
+          "category_name": "Laptop Fund",
+          "progress": 0.0,
+          "required_monthly": 48.0,
+          "target_amount": 1200.0,
+          "target_date": "2027-01-01"
+        }
+      ],
+      "uncategorized_expenses": [],
+      "year": 2025
+    }
+  },
+  "review_filled": {
+    "GET /review": {
+      "month": 8,
+      "potential_duplicates": [
+        {
+          "amount": 42.5,
+          "manual_date": "2026-08-02",
+          "manual_description": "REWE Markt",
+          "manual_expense_id": "bud-exp-rewe-manual",
+          "synced_date": "2026-08-03",
+          "synced_description": "REWE Filiale 400",
+          "synced_expense_id": "bud-exp-rewe-synced"
+        }
+      ],
+      "sinking_funds": [
+        {
+          "category_id": "bud-cat-laptop",
+          "category_name": "Laptop Fund",
+          "progress": 100.0,
+          "required_monthly": 183.33333333333334,
+          "target_amount": 1200.0,
+          "target_date": "2027-01-01"
+        }
+      ],
+      "uncategorized_expenses": [
+        {
+          "amount": -42.5,
+          "currency": "EUR",
+          "date": "2026-08-02",
+          "description": "REWE Markt",
+          "id": "bud-exp-rewe-manual",
+          "notes": null,
+          "source": "manual"
+        }
+      ],
+      "year": 2026
+    }
+  },
+  "rules_create": {
+    "POST /rules": {
+      "category_id": null,
+      "created_at": "2026-08-24T19:07:32.971576",
+      "id": "e8d6d180-7f0a-4124-85b5-367c0115aa24",
+      "match_type": "contains",
+      "pattern": "AMAZON PRIME",
+      "priority": 20,
+      "source": "user",
+      "user_id": "bud-user"
+    }
+  },
+  "rules_delete": {
+    "DELETE /rules/{id}": {
+      "message": "Rule deleted"
+    }
+  },
+  "rules_list": {
+    "GET /rules": [
+      {
+        "category_id": "bud-cat-groceries",
+        "created_at": "2026-08-24T19:07:33.092490",
+        "id": "bud-rule-user",
+        "match_type": "contains",
+        "pattern": "SPOTIFY",
+        "priority": 5,
+        "source": "user",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "bud-cat-income",
+        "created_at": "2026-08-24T19:07:33.098373",
+        "id": "e24f1cd6-a8ff-456c-96db-d01340840b7e",
+        "match_type": "contains",
+        "pattern": "GEHALT",
+        "priority": 5,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "bud-cat-income",
+        "created_at": "2026-08-24T19:07:33.098376",
+        "id": "49a0bc11-e97e-4518-bef8-bc3bdf8b5c1b",
+        "match_type": "contains",
+        "pattern": "LOHN",
+        "priority": 5,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "bud-cat-groceries",
+        "created_at": "2026-08-24T19:07:33.098322",
+        "id": "9ee9c751-669e-4c7c-ae7c-4661b4684a1e",
+        "match_type": "contains",
+        "pattern": "REWE",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "bud-cat-groceries",
+        "created_at": "2026-08-24T19:07:33.098328",
+        "id": "7f982acc-02c2-4cf7-8510-25a50ca849fe",
+        "match_type": "contains",
+        "pattern": "EDEKA",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "bud-cat-groceries",
+        "created_at": "2026-08-24T19:07:33.098331",
+        "id": "25f77c54-aed4-4e67-a641-0620f5f56028",
+        "match_type": "contains",
+        "pattern": "ALDI",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "bud-cat-groceries",
+        "created_at": "2026-08-24T19:07:33.098334",
+        "id": "1a5b304b-7510-49c9-b4e5-5c9f9ab2e986",
+        "match_type": "contains",
+        "pattern": "LIDL",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "4774f948-237f-4bf3-80d3-dda4927bfde1",
+        "created_at": "2026-08-24T19:07:33.098337",
+        "id": "99f30d0e-d355-407e-8f12-8865d4f1da9b",
+        "match_type": "contains",
+        "pattern": "DB BAHN",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "4774f948-237f-4bf3-80d3-dda4927bfde1",
+        "created_at": "2026-08-24T19:07:33.098341",
+        "id": "c97a542a-bdc5-47f5-a7af-8d6bf32e8930",
+        "match_type": "contains",
+        "pattern": "DEUTSCHE BAHN",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "4774f948-237f-4bf3-80d3-dda4927bfde1",
+        "created_at": "2026-08-24T19:07:33.098344",
+        "id": "0173d762-8bfc-4b16-b756-08add60ca96a",
+        "match_type": "contains",
+        "pattern": "ARAL",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "4774f948-237f-4bf3-80d3-dda4927bfde1",
+        "created_at": "2026-08-24T19:07:33.098347",
+        "id": "5cb8b209-0b38-429b-85ae-615f59e8ef26",
+        "match_type": "contains",
+        "pattern": "SHELL",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "c9a2df6e-22c6-4fa5-ad0a-557d643dc33f",
+        "created_at": "2026-08-24T19:07:33.098350",
+        "id": "360bf9d1-1d53-4e47-8800-364806a996b6",
+        "match_type": "contains",
+        "pattern": "TELEKOM",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "c9a2df6e-22c6-4fa5-ad0a-557d643dc33f",
+        "created_at": "2026-08-24T19:07:33.098353",
+        "id": "04bac22c-3fd3-466b-8cf4-dd7b07f48a0e",
+        "match_type": "contains",
+        "pattern": "VODAFONE",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "c9a2df6e-22c6-4fa5-ad0a-557d643dc33f",
+        "created_at": "2026-08-24T19:07:33.098356",
+        "id": "c66ba28e-633e-4022-b1aa-42e882c65702",
+        "match_type": "contains",
+        "pattern": "O2",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "0d4d939a-db99-4627-af50-59ef404468f9",
+        "created_at": "2026-08-24T19:07:33.098359",
+        "id": "de50ecce-ee6f-4c1d-bc80-05c7a3c56646",
+        "match_type": "contains",
+        "pattern": "NETFLIX",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "0d4d939a-db99-4627-af50-59ef404468f9",
+        "created_at": "2026-08-24T19:07:33.098362",
+        "id": "87374eca-08a1-4a4c-ba8c-2871701cf3c7",
+        "match_type": "contains",
+        "pattern": "SPOTIFY",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "c9a2df6e-22c6-4fa5-ad0a-557d643dc33f",
+        "created_at": "2026-08-24T19:07:33.098365",
+        "id": "9dfce11a-3fe9-44a6-a50d-e8cbf4cf2f30",
+        "match_type": "contains",
+        "pattern": "STADTWERKE",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "c9a2df6e-22c6-4fa5-ad0a-557d643dc33f",
+        "created_at": "2026-08-24T19:07:33.098368",
+        "id": "769f1326-f9a6-4bfc-a3f5-4944250c6fcf",
+        "match_type": "contains",
+        "pattern": "E.ON",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      },
+      {
+        "category_id": "c9a2df6e-22c6-4fa5-ad0a-557d643dc33f",
+        "created_at": "2026-08-24T19:07:33.098370",
+        "id": "9555d705-ffc4-40ae-a856-50719879b7e1",
+        "match_type": "contains",
+        "pattern": "EON",
+        "priority": 10,
+        "source": "system",
+        "user_id": "bud-user"
+      }
+    ]
+  },
+  "sankey_empty": {
+    "GET /reports/sankey (no data for year)": {
+      "links": [],
+      "total_expense": 0.0,
+      "total_income": 0.0,
+      "year": 1999
+    }
+  },
+  "sankey_filled": {
+    "GET /reports/sankey": {
+      "links": [
+        {
+          "source": "Job",
+          "target": "Income",
+          "value": 2500.0
+        },
+        {
+          "source": "Income",
+          "target": "Groceries",
+          "value": 62.49
+        },
+        {
+          "source": "Groceries",
+          "target": "REWE Filiale 400 \u00b7 Groceries",
+          "value": 42.5
+        },
+        {
+          "source": "Groceries",
+          "target": "Book Store \u00b7 Groceries",
+          "value": 19.99
+        },
+        {
+          "source": "Income",
+          "target": "Uncategorized",
+          "value": 42.5
+        },
+        {
+          "source": "Uncategorized",
+          "target": "REWE Markt \u00b7 Uncategorized",
+          "value": 42.5
+        }
+      ],
+      "total_expense": 104.99,
+      "total_income": 2500.0,
+      "year": 2026
+    }
+  },
+  "subscriptions_create": {
+    "POST /subscriptions": {
+      "active": true,
+      "amount": 10.99,
+      "billing_cycle": "monthly",
+      "category_id": "bud-cat-groceries",
+      "currency": "EUR",
+      "id": "a0e89336-8f26-4ae0-a5f9-630f132295c3",
+      "logo_url": null,
+      "name": "Spotify",
+      "next_due_date": "2026-09-01",
+      "notes": null,
+      "payment_method": "Visa",
+      "user_id": "bud-user"
+    }
+  },
+  "subscriptions_delete": {
+    "DELETE /subscriptions/{id}": {
+      "message": "Subscription deleted"
+    }
+  },
+  "subscriptions_list": {
+    "GET /subscriptions": [
+      {
+        "active": true,
+        "amount": 13.99,
+        "billing_cycle": "monthly",
+        "category_id": "bud-cat-groceries",
+        "currency": "EUR",
+        "id": "bud-sub-netflix",
+        "logo_url": null,
+        "name": "Netflix",
+        "next_due_date": "2026-08-20",
+        "notes": "streaming",
+        "payment_method": "Visa",
+        "user_id": "bud-user"
+      },
+      {
+        "active": false,
+        "amount": 29.9,
+        "billing_cycle": "quarterly",
+        "category_id": null,
+        "currency": "EUR",
+        "id": "bud-sub-gym",
+        "logo_url": null,
+        "name": "Old Gym",
+        "next_due_date": "2026-01-10",
+        "notes": null,
+        "payment_method": null,
+        "user_id": "bud-user"
+      }
+    ]
+  },
+  "subscriptions_list_empty": {
+    "GET /subscriptions (empty)": []
+  },
+  "subscriptions_mark_paid": {
+    "POST /subscriptions/{id}/mark-paid": {
+      "active": true,
+      "amount": 13.99,
+      "billing_cycle": "monthly",
+      "category_id": "bud-cat-groceries",
+      "currency": "EUR",
+      "id": "bud-sub-netflix",
+      "logo_url": null,
+      "name": "Netflix",
+      "next_due_date": "2026-08-20",
+      "notes": "streaming",
+      "payment_method": "Visa",
+      "user_id": "bud-user"
+    }
+  },
+  "subscriptions_update": {
+    "PUT /subscriptions/{id}": {
+      "active": true,
+      "amount": 17.99,
+      "billing_cycle": "monthly",
+      "category_id": "bud-cat-groceries",
+      "currency": "EUR",
+      "id": "bud-sub-netflix",
+      "logo_url": null,
+      "name": "Netflix Premium",
+      "next_due_date": "2026-08-20",
+      "notes": "upgraded",
+      "payment_method": "Visa",
+      "user_id": "bud-user"
+    }
+  },
+  "suggestions_empty": {
+    "GET /subscriptions/suggestions (empty)": []
+  },
+  "suggestions_hit": {
+    "GET /subscriptions/suggestions": [
+      {
+        "amount": 10.99,
+        "billing_cycle": "monthly",
+        "currency": "EUR",
+        "name": "Spotify Premium",
+        "next_due_date": "2026-08-29",
+        "occurrences": 2,
+        "source": "recurring_expense"
+      }
+    ]
+  },
+  "summary_empty": {
+    "GET /summary (empty)": {
+      "active_subscription_run_rate": 0.0,
+      "currency": "EUR",
+      "expense_count": 0,
+      "income": 0.0,
+      "investable_surplus_estimate": 0.0,
+      "month": 8,
+      "net_income": 0.0,
+      "open_invoice_count": 0,
+      "open_invoice_total": 0.0,
+      "spent": 0.0,
+      "year": 2026
+    }
+  },
+  "summary_filled": {
+    "GET /summary": {
+      "active_subscription_run_rate": 13.99,
+      "currency": "EUR",
+      "expense_count": 3,
+      "income": 2500.0,
+      "investable_surplus_estimate": 2415.0,
+      "month": 8,
+      "net_income": 2415.0,
+      "open_invoice_count": 1,
+      "open_invoice_total": 89.0,
+      "spent": 85.0,
+      "year": 2026
+    }
+  }
+}

@@ -1,0 +1,1 @@
+import { useQuery } from "@tanstack/react-query"; import { api } from "../../../lib/api"; export const useQuantFactors=()=>useQuery({queryKey:["quant","factors"],queryFn:()=>api<any>("/api/quant/factors/attribution")});

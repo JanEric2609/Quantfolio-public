@@ -1,0 +1,409 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, master]
+    paths-ignore:
+      - 'docs/**'
+      # The API contract snapshot is code: a change to it alone must still run the contract gate.
+      - '!docs/api/**'
+      - 'infra/**'
+      - '*.md'
+      - '.github/dependabot.yml'
+      - '.github/workflows/pullfrog.yml'
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - 'docs/**'
+      # The API contract snapshot is code: a change to it alone must still run the contract gate.
+      - '!docs/api/**'
+      - 'infra/**'
+      - '*.md'
+      - '.github/dependabot.yml'
+      - '.github/workflows/pullfrog.yml'
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  # ── Detect what changed ──────────────────────────────────────────────
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'docs/api/**'
+              - '.github/workflows/ci.yml'
+            frontend:
+              - 'frontend/**'
+              - '.github/workflows/ci.yml'
+
+  # ── Backend lint + tests + coverage ──────────────────────────────────
+  backend:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Prod runs TimescaleDB + pgvector; the live migration test
+        # (tests/test_migrations.py) needs both extensions.
+        image: timescale/timescaledb-ha:pg16
+        env:
+          POSTGRES_DB: quantfolio
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # diff-cover compares against the base branch
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/pip install -e ".[dev]"
+
+      - name: Lint with Ruff
+        working-directory: backend
+        run: .venv/bin/ruff check app/
+
+      - name: Enforce import contracts (import-linter)
+        working-directory: backend
+        run: .venv/bin/lint-imports
+
+      - name: Check for new import cycles (grimp)
+        working-directory: backend
+        run: .venv/bin/python scripts/check_no_new_cycles.py
+
+      - name: Broad exception handlers may only shrink
+        working-directory: backend
+        run: .venv/bin/python scripts/check_broad_excepts.py
+
+      - name: Every test asserts something
+        working-directory: backend
+        run: .venv/bin/python scripts/check_tests_assert.py
+
+      - name: Run migrations (SQLite)
+        working-directory: backend
+        run: |
+          DATABASE_URL="sqlite:///ci_test.db" .venv/bin/alembic upgrade head
+          rm -f ci_test.db
+
+      - name: Migration downgrade path (up, back to the base of the recent chain, up again)
+        working-directory: backend
+        run: |
+          export DATABASE_URL="sqlite:///ci_downgrade.db"
+          .venv/bin/alembic upgrade head
+          .venv/bin/alembic downgrade 0105_add_fk_indexes
+          .venv/bin/alembic upgrade head
+          rm -f ci_downgrade.db
+
+      - name: Run backend tests with coverage
+        working-directory: backend
+        env:
+          DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/quantfolio"
+        run: .venv/bin/pytest -n auto --cov=app --cov-report=term-missing --cov-report=html --cov-report=xml --timeout=120 -q -rs --junitxml=junit.xml
+
+      - name: Skips are the expected ones
+        working-directory: backend
+        run: .venv/bin/python scripts/check_skips.py junit.xml
+
+      - name: Coverage of the changed lines (diff-cover, 80 %)
+        if: ${{ github.event_name == 'pull_request' }}
+        working-directory: backend
+        run: .venv/bin/diff-cover coverage.xml --compare-branch=origin/${{ github.base_ref }} --fail-under=80
+
+      - name: Upload backend coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        # Informational only: a full artifact quota must not fail a green run.
+        continue-on-error: true
+        with:
+          name: coverage-backend
+          path: backend/htmlcov/
+
+  # ── Backend type-check (separate job for parallelism) ─────────────────
+  type-check-backend:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/pip install -e ".[dev]"
+
+      - name: Type-check with pyright
+        working-directory: backend
+        run: .venv/bin/pyright app/
+
+  # ── API contract gate: openapi.json snapshot + oasdiff breaking changes ──
+  api-contract:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/pip install -e ".[dev]"
+
+      - name: Preserve committed API contract as diff base
+        run: cp docs/api/openapi.json openapi-base.json
+
+      - name: Regenerate OpenAPI snapshot from HEAD
+        working-directory: backend
+        env:
+          DATABASE_URL: "sqlite:///:memory:"
+        run: .venv/bin/python scripts/export_openapi.py
+
+      - name: Fail on breaking API changes (oasdiff, ERR severity)
+        uses: oasdiff/oasdiff-action/breaking@v0
+        with:
+          base: openapi-base.json
+          revision: docs/api/openapi.json
+          fail-on: ERR
+          review: false
+
+  # ── API security scan: Schemathesis against the app in-process ────────
+  # Every operation from the OpenAPI schema, without a session (must answer
+  # 401/403/422, never 5xx) and with an admin session (generated input
+  # reaches the handlers; outbound network is blocked). See
+  # backend/tests/test_api_security.py. Replaces the APIsec SaaS template,
+  # which cannot reach an API that is never exposed to the internet.
+  api-security-scan:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+          # The lock as constraints: the scan runs the versions prod and the
+          # local gate run. Floating ones broke it silently once (FastAPI 0.143
+          # nests included routers; schemathesis 4.31 collected no cases).
+          # torch is left out, the CPU wheel above stands.
+          grep -v '^torch==' requirements.lock > /tmp/constraints.txt
+          .venv/bin/pip install -e ".[dev]" -c /tmp/constraints.txt
+
+      - name: Unauthenticated and authenticated API fuzz
+        working-directory: backend
+        env:
+          DATABASE_URL: "sqlite:///:memory:"
+          SCHEMATHESIS: "1"
+        # A fresh network namespace has no route out, so no handler under
+        # test can reach a provider (yfinance goes through libcurl, which a
+        # patched socket would not stop). Unprivileged when the runner allows
+        # user namespaces, else via sudo, back to the runner user inside. The
+        # test fails on its own if the network is still reachable.
+        run: |
+          if unshare -rn true 2>/dev/null; then
+            isolate="unshare -rn"
+          else
+            # sudo resets the environment, so hand the scan's variables on.
+            isolate="sudo unshare --net -- sudo -u $USER env PATH=$PATH HOME=$HOME SCHEMATHESIS=$SCHEMATHESIS DATABASE_URL=$DATABASE_URL"
+          fi
+          echo "isolation: $isolate"
+          set -o pipefail
+          $isolate .venv/bin/pytest tests/test_api_contract_schemathesis.py tests/test_api_security.py \
+            -q -n 4 -p no:cacheprovider --timeout=180 | tee /tmp/scan.out
+          # A scan that collects no cases passes; it must not.
+          passed=$(grep -oE '[0-9]+ passed' /tmp/scan.out | tail -1 | cut -d' ' -f1)
+          if [ "${passed:-0}" -lt 600 ]; then
+            echo "::error::only ${passed:-0} scan cases ran (expected ~760)"; exit 1
+          fi
+
+  # ── Browser smoke test: every page, desktop and phone ────────────────
+  # frontend/e2e/run-smoke.sh: a fresh database with one admin, the real API
+  # and the production build, then Playwright opens every page in
+  # frontend/e2e/pages.ts and fails on a crash, an uncaught error, a missing
+  # h1 or a 5xx. Runs in a network namespace with only loopback (like the API
+  # scan), so pages are exercised the way they behave with providers down.
+  e2e-smoke:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu
+          grep -v '^torch==' requirements.lock > /tmp/constraints.txt
+          .venv/bin/pip install -e ".[dev]" -c /tmp/constraints.txt
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies and the browser
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Build the frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Open every page (no outbound network)
+        run: |
+          sudo unshare --net -- bash -c "ip link set lo up && exec sudo -u $USER env PATH=$PATH HOME=$HOME CI=1 SMOKE_SKIP_BUILD=1 bash frontend/e2e/run-smoke.sh"
+
+      - name: Upload the Playwright report
+        uses: actions/upload-artifact@v4
+        if: failure()
+        continue-on-error: true
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7
+
+  # ── Frontend type-check + tests + coverage + build ───────────────────
+  frontend:
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: TypeScript type-check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Run frontend tests with coverage
+        working-directory: frontend
+        run: npx vitest run --coverage
+
+      - name: Production build
+        working-directory: frontend
+        run: npm run build
+
+      - name: Security audit
+        working-directory: frontend
+        run: |
+          # Scoped to production dependencies — dev-only build tooling (e.g. vite-plugin-pwa's
+          # workbox-build -> ejs -> jake -> filelist -> minimatch -> brace-expansion chain) never
+          # ships to users, so it's excluded via --omit=dev rather than gating the build on it.
+          npm audit --omit=dev --json > audit.json || true
+          # Accepted exception: react-router / react-router-dom GHSA-qwww-vcr4-c8h2 (RSC-mode
+          # CSRF bypass). This app is a client-only Vite SPA using createBrowserRouter — it never
+          # runs RSC mode, so the vulnerable code path is unreachable. No non-breaking upstream
+          # fix exists yet (patched only outside the 7.12.0-8.2.0 range via a downgrade below our
+          # declared ^7.18.0). Re-evaluate when react-router publishes a patched 7.x/8.x release.
+          UNACCEPTED=$(jq -r '.vulnerabilities | to_entries | map(select(.key != "react-router" and .key != "react-router-dom")) | length' audit.json)
+          if [ "$UNACCEPTED" -gt 0 ]; then
+            echo "New high-severity vulnerabilities found beyond the accepted react-router exception:"
+            jq -r '.vulnerabilities | to_entries | map(select(.key != "react-router" and .key != "react-router-dom")) | .[].key' audit.json
+            exit 1
+          fi
+          echo "No unaccepted high-severity vulnerabilities in production dependencies."
+
+      - name: Upload frontend coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        # Informational only: a full artifact quota must not fail a green run.
+        continue-on-error: true
+        with:
+          name: coverage-frontend
+          path: frontend/coverage/
