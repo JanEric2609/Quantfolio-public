@@ -191,8 +191,8 @@ def _stopped(position: DeskPosition, price: Decimal) -> bool:
     return price <= stop if position.direction == "long" else price >= stop
 
 
-def manage(db: Session, cli: ScalableCli, now: datetime, underlyings: dict[str, Underlying]) -> list[
-        tuple[DeskPosition, str]]:
+def manage(db: Session, cli: ScalableCli, now: datetime, underlyings: dict[str, Underlying],
+           errors: list[str] | None = None) -> list[tuple[DeskPosition, str]]:
     """Close open paper CFDs at the exit time, at the stop, on a halt, or when the price is lost."""
     closed: list[tuple[DeskPosition, str]] = []
     halted = service.is_halted(db)
@@ -201,7 +201,7 @@ def manage(db: Session, cli: ScalableCli, now: datetime, underlyings: dict[str, 
     for p in rows:
         # Only a fresh price moves the stop and resets the quote-lost clock (a frozen proxy quote is None).
         price = service.underlying_price(db, cli, service.underlying_of(p, underlyings.get(p.underlying_isin)),
-                                         now=now)
+                                         now=now, errors=errors)
         if price is not None and price > 0:
             p.last_bid, p.last_quote_at = price, now.astimezone(UTC)
         exit_at = service._aware(p.max_exit_at)

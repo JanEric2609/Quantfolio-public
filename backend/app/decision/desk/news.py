@@ -70,6 +70,8 @@ def headlines(db: Session, cli: ScalableCli, underlying: Underlying, since: date
         isin = underlying.proxy_isin or underlying.isin
         return [{"id": n["id"], "title": n["title"]} for n in market.get_security_news(cli, isin)
                 if not _older_than(n.get("published"), since)]
+    except market.WrapperOutdated:
+        raise  # not a news problem: the monitor reports it
     except (ScalableError, ValueError, httpx.HTTPError) as exc:  # httpx: Alpaca timeouts and refused connections
         logger.info("desk news fetch failed: %s", type(exc).__name__)
         return []

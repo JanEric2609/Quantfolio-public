@@ -147,10 +147,12 @@ def test_control_center_desk_items(monkeypatch):
                                 "desk_health_json": {"wrapper_outdated": True, "macro_years": [2026]}})
     items = _ids(db)
     assert items["desk-halted"]["severity"] == "warning" and items["desk-wrapper"]["severity"] == "warning"
-    ledger.append_event(db, "external_trade", "paper", {"ledger_id": "1"})
+    ledger.append_event(db, "external_trade", "paper", {"ledger_id": "1", "date": datetime.now(UTC).date().isoformat()})
+    ledger.append_event(db, "external_trade", "paper", {"ledger_id": "0", "date": "2025-03-01"})  # an old trade
     db.commit()
     assert _ids(db)["desk-external"]["severity"] == "info"
-    row = db.query(DeskEvent).one()
+    assert "1 real trade(s)" in _ids(db)["desk-external"]["detail"]
+    row = db.query(DeskEvent).filter(DeskEvent.seq == 2).one()  # the newest row: checked on every call
     row.payload = "{}"
     db.commit()
     assert _ids(db)["desk-chain-broken"]["severity"] == "error"

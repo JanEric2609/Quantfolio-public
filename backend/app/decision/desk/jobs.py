@@ -31,6 +31,9 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
     from .signals import index_momentum
     from .underlyings import ALIASES, Underlying
 
+    # The live tick re-reads the clock for each quote age and fill (its sc reads take seconds each);
+    # a given *now* (tests, replays) is used throughout.
+    clock = _wall_clock if now is None else None
     now = now or datetime.now(UTC)
     local = now.astimezone(cal.BERLIN)
     if local.weekday() > 4 or not (8 <= local.hour < 22):
@@ -45,29 +48,34 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
     try:
         cli = cli or scalable_service.make_cli(db)
         underlyings: dict[str, Underlying] = {u.isin: u for u in ALIASES.values()}
-        for p in db.query(DeskPosition).filter(DeskPosition.status == "open").all():
+        open_rows = db.query(DeskPosition).filter(DeskPosition.status == "open").all()
+        for p in open_rows:
             underlyings.setdefault(p.underlying_isin, service.underlying_of(p))  # a US stock is XNYS
+        errors: list[str] = []
         # Stops, horizons and knock-outs first: they must not depend on the index rule's reads succeeding.
         expired = service.expire_proposals(db, now)
-        closed = service.manage_open_positions(db, cli, now, underlyings)
+        closed = service.manage_open_positions(db, cli, now, underlyings, errors)
         for position, reason in closed:
             outbox.append(f"Desk paper exit ({reason}), net {position.net_eur} EUR:\n"
                           + instrument.order_line(position, "Sell", position.exit_price))
-        for position, reason in cfd.manage(db, cli, now, underlyings):
+        for position, reason in cfd.manage(db, cli, now, underlyings, errors):
             outbox.append(cfd.close_message(position, reason))
             closed.append((position, reason))
         opened: list[str] = []
-        errors: list[str] = []
-        fired = index_momentum.fire_due_signals(db, owner.id, cli, now, opened, errors) \
+        fired = index_momentum.fire_due_signals(db, owner.id, cli, now, opened, errors, clock) \
             if not service.is_halted(db) else []
         seen = _news_check(db, cli, now, underlyings, outbox) if now.minute % 5 == 0 else 0
-        # A read the index rule could not make (an expired session, the sync holding the lock) no longer
-        # fails the tick; it is still logged once per new code and shown as the desk's last error.
+        # A read that failed (an expired session, the sync holding the lock) no longer fails the tick; it
+        # is logged once per new code and shown as the desk's last error. An outdated wrapper raises
+        # (below); the flag is cleared only by a tick that made wrapper reads, not by an idle one.
         last_error = errors[-1] if errors else None
         if last_error and service.health(db).get("last_error") != last_error:
             append_event(db, "error", service.MODE, {"code": last_error}, now=now)
-        service.set_health(db, last_tick_at=now.isoformat(), wrapper_outdated=False, last_error=last_error,
-                           macro_years=sorted(cal.MACRO_EVENTS_BY_YEAR))
+        fields: dict[str, Any] = {"last_tick_at": now.isoformat(), "last_error": last_error,
+                                  "macro_years": sorted(cal.MACRO_EVENTS_BY_YEAR)}
+        if open_rows or fired or errors:
+            fields["wrapper_outdated"] = False
+        service.set_health(db, **fields)
         db.commit()
         if fired:
             # Built after the commit: the CFD line reads index history, whose cache write commits, and a
@@ -86,6 +94,10 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
             append_event(db, "error", service.MODE, {"code": exc.code}, now=now)
         service.set_health(db, last_error=exc.code, last_tick_at=now.isoformat())
         return {"skipped": exc.code}
+
+
+def _wall_clock() -> datetime:
+    return datetime.now(UTC)
 
 
 def _announce_fills(db: Any, now: datetime, position_ids: list[str]) -> list[str]:

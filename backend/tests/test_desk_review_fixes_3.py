@@ -145,7 +145,7 @@ def test_an_spx_short_knockout_reads_spys_highs_since_the_fill(monkeypatch):
                      last_quote_at=at.astimezone(UTC), max_exit_at=(at + timedelta(hours=5)).astimezone(UTC))
     db.add(p)
     db.flush()
-    ref = service.barrier_in_reference(p, "0.05")
+    ref = service.barrier_in_reference("short", Decimal("600"), "0.05")
     assert ref == Decimal("630")  # SPY units, not 6,300 index points
     append_event(db, "fill", service.MODE, {"barrier_ref": str(ref)}, p.id, now=at)
     t = at + timedelta(minutes=30)

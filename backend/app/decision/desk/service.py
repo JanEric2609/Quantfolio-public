@@ -126,17 +126,25 @@ def underlying_of(position: DeskPosition, known: Underlying | None = None) -> Un
                       bool(position.liquid))
 
 
+def _error_code(exc: BaseException) -> str:
+    return str(getattr(exc, "code", None) or type(exc).__name__)[:60]
+
+
 #: A reference price older than this is not used (no CFD fill, stop or exit at it, no knock-out read).
 REF_MAX_AGE_S = LIMITS.max_quote_age_s
 
 
-def underlying_price(db: Session, cli: ScalableCli, u: Underlying, *, now: datetime) -> Decimal | None:
+def underlying_price(db: Session, cli: ScalableCli, u: Underlying, *, now: datetime,
+                     errors: list[str] | None = None) -> Decimal | None:
     """A fresh reference price for the underlying, or ``None``: Alpaca for the US indices, else an ETF
     proxy or the line itself on sc. An outdated quote, or one older than ``REF_MAX_AGE_S`` at *now*, is
     ``None``: a frozen price must not move stops, fill a CFD or reset the quote-lost clock.
 
     The price is in the proxy's own units (the DAX ETF in EUR, SPY in USD, a US stock's gettex line in
-    EUR), never index points: compare it only with levels converted by :func:`barrier_in_reference`."""
+    EUR), never index points: compare it only with levels converted by :func:`barrier_in_reference`.
+
+    An outdated wrapper propagates (the tick fails and says so); any other failed read is ``None`` and
+    its code goes to *errors*, so the monitor can show why prices are missing."""
     try:
         if u.alpaca_symbol:
             provider = news.alpaca_for(db)
@@ -156,8 +164,12 @@ def underlying_price(db: Session, cli: ScalableCli, u: Underlying, *, now: datet
         if q is None or q.outdated or _quote_age(now, q.ts_utc) > REF_MAX_AGE_S:
             return None
         return q.mid
+    except market.WrapperOutdated:
+        raise
     except (ScalableError, ValueError, KeyError, TypeError, ArithmeticError, httpx.HTTPError) as exc:
         logger.info("desk underlying read failed: %s", type(exc).__name__)
+        if errors is not None:
+            errors.append(_error_code(exc))
         return None
 
 
@@ -173,6 +185,8 @@ def underlying_sigma(db: Session, cli: ScalableCli, u: Underlying) -> Decimal | 
             return daily_sigma([r["close"] for r in rows if r.get("close")])
         points = market.get_chart(cli, u.proxy_isin or u.isin, "3m")
         return daily_sigma(last_close_per_day(points))
+    except market.WrapperOutdated:
+        raise
     except (ScalableError, ValueError, KeyError, TypeError, ArithmeticError, httpx.HTTPError) as exc:
         logger.info("desk underlying read failed: %s", type(exc).__name__)
         return None
@@ -228,6 +242,15 @@ def propose(
         append_event(db, "guard_verdict", MODE, {**base, "ok": False, "reasons": ["no_candidate"]}, now=now)
         return ProposalResult(None, "no_candidate", selection_size=selection.searched)
 
+    # A knock-out's barrier in the reference price's units, from the listing's distance and a reference
+    # price read in the same snapshot (the distance is only true for the level it was measured at).
+    underlying_ref = barrier_ref = None
+    if product_type == "knockout":
+        underlying_ref = underlying_price(db, cli, underlying, now=now)
+        barrier_ref = barrier_in_reference(direction, underlying_ref, chosen.barrier_distance)
+        if barrier_ref is None:  # a knock-out the desk could not watch for its barrier is not proposed
+            append_event(db, "guard_verdict", MODE, {**base, "ok": False, "reasons": [NO_REFERENCE]}, now=now)
+            return ProposalResult(None, NO_REFERENCE, selection_size=selection.searched)
     window_end = max_exit_at or cal.max_exit_at(now, days=horizon_days)
     if window_end <= now:
         # "today" after 21:30 (or any horizon on a flat-by day): the position would close at the next tick.
@@ -265,16 +288,23 @@ def propose(
     db.flush()
     if not verdict.paper_ok:
         position.status = "rejected"
-        append_event(db, "proposal", MODE, {**_proposal_payload(position, chosen, sizing, verdict), "rejected": True},
-                     position.id, now=now)
+        append_event(db, "proposal", MODE, {**_proposal_payload(position, chosen, sizing, verdict), "rejected": True,
+                                            **_ref_payload(underlying_ref, barrier_ref)}, position.id, now=now)
         return ProposalResult(position, ",".join(verdict.paper_reasons))
     nonce = secrets.token_urlsafe(8)
     headlines = news.headlines(db, cli, underlying, now - timedelta(hours=24), symbol)
     now = clock() if clock else now  # the tap window starts when the proposal goes out
     append_event(db, "proposal", MODE, {
-        **_proposal_payload(position, chosen, sizing, verdict), "nonce": nonce, "proposed_at": now.isoformat(),
+        **_proposal_payload(position, chosen, sizing, verdict), **_ref_payload(underlying_ref, barrier_ref),
+        "nonce": nonce, "proposed_at": now.isoformat(),
         "news_seen": [h["title"] for h in headlines[:5]], "earnings_in_window": "unknown" if earnings_known is None else earnings}, position.id, now=now)
     return ProposalResult(position, None, nonce, selection.searched, [h["title"] for h in headlines[:3]])
+
+
+def _ref_payload(underlying_ref: Decimal | None, barrier_ref: Decimal | None) -> dict[str, Any]:
+    if barrier_ref is None:
+        return {}
+    return {"underlying_ref": str(underlying_ref), "barrier_ref": str(barrier_ref)}
 
 
 def _proposal_payload(position: DeskPosition, c: Candidate, sizing, verdict: Verdict) -> dict[str, Any]:
@@ -371,6 +401,8 @@ def _sigma_from_stop(position: DeskPosition, old_ask: Decimal) -> Decimal:
 FILL_BLOCKING = frozenset({"halted", "after_cutoff", "outside_window", "underlying_closed", "too_small"})
 #: The position's latest exit is already past: it would close at the next tick for ``horizon``.
 EXIT_PASSED = "exit_time_passed"
+#: A knock-out whose underlying price could not be read: its barrier could not be watched.
+NO_REFERENCE = "no_reference_price"
 
 
 def open_position(db: Session, position: DeskPosition, quote: market.Quote, now: datetime,
@@ -408,12 +440,12 @@ def open_position(db: Session, position: DeskPosition, quote: market.Quote, now:
         position.max_exit_at = cal.max_exit_at(now)
     if underlying is not None and cli is not None:
         position.underlying_entry = underlying_price(db, cli, underlying, now=now)
-    barrier_ref = barrier_in_reference(position, (_latest_proposal(db, position.id) or {}).get("barrier_distance"))
+    barrier_ref = (_latest_proposal(db, position.id) or {}).get("barrier_ref")  # anchored at the proposal
     append_event(db, "fill", MODE, {
         "price": str(quote.ask), "bid": str(quote.bid), "units": units, "fee": str(LIMITS.fee_per_order),
         "would_take_live": verdict.ok, "live_reasons": list(verdict.reasons),
         "underlying_entry": None if position.underlying_entry is None else str(position.underlying_entry),
-        "barrier_ref": None if barrier_ref is None else str(barrier_ref)}, position.id, now=now)
+        "barrier_ref": barrier_ref}, position.id, now=now)
     append_event(db, "stop_set", MODE, {"stop": str(stop), "simulated": True,
                                         "max_exit_at": position.max_exit_at.isoformat()}, position.id, now=now)
     return ()
@@ -462,9 +494,12 @@ def expire_proposals(db: Session, now: datetime) -> int:
     return count
 
 
-def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyings: dict[str, Underlying]) -> list[
-        tuple[DeskPosition, str]]:
-    """Quote every open position once and apply ``check_exit``. Returns the positions closed this tick."""
+def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyings: dict[str, Underlying],
+                          errors: list[str] | None = None) -> list[tuple[DeskPosition, str]]:
+    """Quote every open position once and apply ``check_exit``. Returns the positions closed this tick.
+
+    An outdated wrapper propagates: no position is judged on reads that were never allowed. Any other
+    failed quote counts as no quote, and its code goes to *errors* (shown as the desk's last error)."""
     closed: list[tuple[DeskPosition, str]] = []
     halted = is_halted(db)
     rows = db.query(DeskPosition).filter(DeskPosition.status == "open", DeskPosition.mode == MODE,
@@ -473,8 +508,12 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
         quote = None
         try:
             quote = market.get_quote(cli, p.isin)
-        except ScalableError:
+        except market.WrapperOutdated:
+            raise
+        except ScalableError as exc:
             quote = None
+            if errors is not None:
+                errors.append(_error_code(exc))
         fresh = quote is not None and not quote.outdated and _quote_age(now, quote.ts_utc) <= LIMITS.max_quote_age_s
         bid = quote.bid if fresh and quote else None
         if bid is not None:
@@ -497,16 +536,17 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
     return closed
 
 
-def barrier_in_reference(position: DeskPosition, distance: Any) -> Decimal | None:
+def barrier_in_reference(direction: str, reference: Decimal | None, distance: Any) -> Decimal | None:
     """The knock-out barrier in the reference price's own units, or ``None``.
 
     The issuer's barrier is in the underlying's points and currency (DAX 19,000 points, a US stock in
     USD); the reference the desk can read is a proxy (the DAX ETF at 200 EUR, SPY, a US stock's EUR line).
     The listing's distance to the barrier is a fraction of the underlying's level, so the same fraction
-    of the proxy's price at the fill is the barrier in the proxy's units. What it leaves out: the
-    proxy's tracking drift and, for a US stock's EUR line, the EUR/USD move since the fill (a two-day
-    hold: tenths of a percent against a barrier at least 3 daily sigmas away)."""
-    if position.product_type != "knockout" or distance in (None, "") or not position.underlying_entry:
+    of the proxy's price *read in the same snapshot* is the barrier in the proxy's units; that level is
+    then fixed, like the barrier itself. What it leaves out: the proxy's tracking drift and, for a US
+    stock's EUR line, the EUR/USD move since the proposal (a two-day hold: tenths of a percent against a
+    barrier at least 3 daily sigmas away)."""
+    if distance in (None, "") or not reference:
         return None
     try:
         d = abs(Decimal(str(distance)))
@@ -514,8 +554,8 @@ def barrier_in_reference(position: DeskPosition, distance: Any) -> Decimal | Non
         return None
     if not (0 < d < 1):
         return None
-    entry = Decimal(position.underlying_entry)
-    return (entry * (1 - d) if position.direction == "long" else entry * (1 + d)).quantize(Decimal("0.000001"))
+    ref = Decimal(reference)
+    return (ref * (1 - d) if direction == "long" else ref * (1 + d)).quantize(Decimal("0.000001"))
 
 
 def _barrier_ref_of(db: Session, p: DeskPosition) -> Decimal | None:
@@ -537,6 +577,8 @@ def reference_path(db: Session, cli: ScalableCli, u: Underlying, since: datetime
                 out += [Decimal(v) for v in (bar.get("l"), bar.get("h")) if v is not None]
             return out
         return [mid for ts, mid in market.get_chart(cli, u.proxy_isin or u.isin, "7d") if since <= ts <= now]
+    except market.WrapperOutdated:
+        raise
     except (ScalableError, ValueError, KeyError, TypeError, ArithmeticError, httpx.HTTPError) as exc:
         logger.info("desk underlying path read failed: %s", type(exc).__name__)
         return []

@@ -55,8 +55,10 @@ def handle_idea(db: Session, account: Any, chat_id: str, text: str) -> None:
         outcome = owner_calls.start_idea(db, account.user_id, idea, scalable_service.make_cli(db),
                                          datetime.now(UTC), clock=_wall_clock)
     except market.WrapperOutdated:
+        db.rollback()  # a half-built idea (one product proposed, the other failed) is never stored
         return _say(db, chat_id, "The sc wrapper needs install.sh again before the desk can read quotes.")
     except ScalableError as exc:
+        db.rollback()
         return _say(db, chat_id, f"Could not read the market: {exc.code}.")
     db.commit()
     if outcome.error or outcome.underlying is None:
@@ -74,6 +76,8 @@ def handle_take(db: Session, account: Any, chat_id: str, data: str) -> str:
     if len(parts) != 4:
         return "Bad button."
     position = db.get(DeskPosition, parts[2])
+    if position is not None and position.user_id != account.user_id:
+        return "Unknown proposal."  # another account's button (as the API's take answers 404)
     # The position's own underlying (an index alias, or the stock on its own exchange: a US stock is XNYS).
     underlying = service.underlying_of(position) if position else None
     try:

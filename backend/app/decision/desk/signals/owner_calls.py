@@ -94,6 +94,7 @@ REASON_TEXT = {
     "event_block_macro": "a central-bank or macro release falls inside the holding time",
     "no_candidate": "no product with a fresh quote and a tight enough spread",
     "no_volatility": "the underlying's volatility could not be read",
+    "no_reference_price": "the underlying's price could not be read, so the knock-out barrier could not be watched",
     "underlying_closed": "the underlying's own exchange is closed",
     "outside_window": "outside the desk's trading hours (08:05-21:45 Berlin)",
     "after_cutoff": "past the 21:30 cut-off before a weekend or holiday",

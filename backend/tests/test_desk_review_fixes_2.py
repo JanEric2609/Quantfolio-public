@@ -209,7 +209,7 @@ def test_a_us_stock_keeps_its_exchange_in_taps_and_ticks(monkeypatch):
     monkeypatch.setattr("app.foundation.scalable.service.make_cli", lambda db_: None)
     telegram.handle_take(db, SimpleNamespace(user_id=user.id), "1", f"desk:take:{proposed.id}:n")
 
-    def manage(db_, cli, now, underlyings):
+    def manage(db_, cli, now, underlyings, errors=None):
         seen.append(underlyings[US_STOCK.isin].exchange)
         return []
 

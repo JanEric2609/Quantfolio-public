@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -142,14 +143,17 @@ def _already_fired(db: Session, signal_key: str) -> bool:
 
 
 def fire_due_signals(db: Session, user_id: str, cli: ScalableCli, now: datetime,
-                     opened: list[str] | None = None, errors: list[str] | None = None) -> list[str]:
+                     opened: list[str] | None = None, errors: list[str] | None = None,
+                     clock: Callable[[], datetime] | None = None) -> list[str]:
     """Open this minute's paper positions (one per product type) for every index whose entry time has come.
 
     Each index runs in its own savepoint: a failed read (Alpaca, or any sc error such as the 6-hourly
     sync holding the session lock) rolls back that index only, and is retried next minute inside the
     fire window; on the window's last minute it is logged as a ``no_data`` day. An outdated wrapper is
     not a per-index failure and propagates. *opened* collects the ids of the positions opened, so the
-    caller announces exactly this tick's fills; *errors* collects the failed reads' codes (health)."""
+    caller announces exactly this tick's fills; *errors* collects the failed reads' codes (health).
+    *clock* (the live monitor: the wall clock) re-reads the time for each quote age and fill, since one
+    tick's sc reads take seconds each; without it *now* is used throughout (tests)."""
     fired: list[str] = []
     day = now.astimezone(UTC).date()
     for plan in plans_for_day(day) + plans_for_day(day - timedelta(days=1)):
@@ -161,7 +165,7 @@ def fire_due_signals(db: Session, user_id: str, cli: ScalableCli, now: datetime,
         ids: list[str] = []
         try:
             with db.begin_nested():
-                did_fire = _fire_plan(db, user_id, cli, plan, key, now, ids)
+                did_fire = _fire_plan(db, user_id, cli, plan, key, now, ids, clock)
         except market.WrapperOutdated:
             raise
         except (DataUnavailable, ScalableError) as exc:
@@ -182,7 +186,7 @@ def fire_due_signals(db: Session, user_id: str, cli: ScalableCli, now: datetime,
 
 
 def _fire_plan(db: Session, user_id: str, cli: ScalableCli, plan: Plan, key: str, now: datetime,
-               ids: list[str]) -> bool:
+               ids: list[str], clock: Callable[[], datetime] | None = None) -> bool:
     """One index's signal: logged as skipped, or fired with its knock-out, warrant and CFD."""
     skip = skip_reason(plan)
     r1 = None if skip else compute_r1(db, cli, plan)
@@ -196,12 +200,13 @@ def _fire_plan(db: Session, user_id: str, cli: ScalableCli, plan: Plan, key: str
     for product_type in PRODUCT_TYPES:
         result = service.propose(
             db, user_id, signal="index_momentum", underlying=plan.underlying, direction=direction,
-            product_type=product_type, cli=cli, now=now, max_exit_at=plan.exit_at)
+            product_type=product_type, cli=cli, now=clock() if clock else now, max_exit_at=plan.exit_at, clock=clock)
         if result.position is not None and result.position.status == "proposed":
-            if service.open_directly(db, result.position, cli, now, plan.underlying):
+            if service.open_directly(db, result.position, cli, clock() if clock else now, plan.underlying):
                 ids.append(result.position.id)
     # The same signal as a manual Trading 212 CFD (cell index_momentum:cfd, paper-scored).
-    position = cfd.open_signal(db, user_id, plan.key, plan.underlying, direction, plan.exit_at, cli, now)
+    position = cfd.open_signal(db, user_id, plan.key, plan.underlying, direction, plan.exit_at, cli,
+                               clock() if clock else now)
     if position is not None:
         ids.append(position.id)
     return True

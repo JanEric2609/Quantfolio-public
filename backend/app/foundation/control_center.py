@@ -76,6 +76,14 @@ def _page(group: str, connection: str | None = None) -> str:
     return f"{href}?connection={connection}" if connection else href
 
 
+def _payload(raw: str | None) -> dict[str, Any]:
+    try:
+        value = json.loads(raw or "{}")
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def _parse_dt(value: Any) -> datetime | None:
     if not value:
         return None
@@ -192,8 +200,10 @@ def _desk_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
                 items.append(AttentionItem("desk-quote-lost", "warning", "Open paper position without a fresh quote",
                                            f"{len(stale)} position(s) have had no quote for 10 minutes.", href,
                                            "Open the desk"))
-        recent = db.query(DeskEvent).filter(DeskEvent.kind == "external_trade",
-                                            DeskEvent.created_at >= now - timedelta(days=7)).count()
+        # By the trade's own date, not when it was logged: the first reconcile logs every past trade at once.
+        week_ago = (now - timedelta(days=7)).date().isoformat()
+        recent = sum(1 for (payload,) in db.query(DeskEvent.payload).filter(DeskEvent.kind == "external_trade")
+                     if str(_payload(payload).get("date") or "") >= week_ago)
         if recent:
             items.append(AttentionItem("desk-external", "info", "Derivative trades made outside the desk",
                                        f"{recent} real trade(s) in the last 7 days were logged and are scored "

@@ -129,8 +129,10 @@ def submit_idea(db: Session, user_id: str, text: str) -> dict[str, Any]:
     try:
         outcome = owner_calls.start_idea(db, user_id, idea, _cli(db), datetime.now(UTC), clock=_wall_clock)
     except market.WrapperOutdated as exc:
+        db.rollback()  # a half-built idea is never stored
         raise DeskActionError(409, "wrapper_outdated: run infra/scalable/install.sh again") from exc
     except ScalableError as exc:
+        db.rollback()
         raise DeskActionError(502, f"Could not read the market: {exc.code}") from exc
     db.commit()
     if outcome.error:
