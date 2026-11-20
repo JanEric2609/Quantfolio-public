@@ -101,7 +101,8 @@ deploy, so migration 0157 itself gains the new columns and table; nothing regist
    has no CFD endpoint, so the desk sends a Telegram line at entry ("CFD signal: BUY US 500 now") and at exit
    ("CLOSE your US 500 position now") and scores the trade on paper at the underlying's reference price.
    The cost model is frozen in the spec: an assumed round-trip spread (DAX, SPX, NDX 2 bp; ES50 4 bp) and
-   Trading 212's 0.5 % currency fee on the result of a USD index; no order fee; no overnight financing (closed
+   Trading 212's 0.5 % FX fee on the result of a USD index (its fee page lists "FX fee: 0.5%" without saying on
+   what; charging it on the converted result is our assumption); no order fee; no overnight financing (closed
    three minutes before the close). Size: 5 EUR loss on a one-sigma adverse move, at most 1,000 EUR exposure;
    simulated stop one daily sigma away. `would_take_live` is always False: no automated CFD path can exist.
    The pre-registration becomes version 2 with five cells, Holm across five.
@@ -134,3 +135,7 @@ deploy, so migration 0157 itself gains the new columns and table; nothing regist
    Spread check by the owner, 2026-11-20 20:06 Berlin (a -2 % day; Xetra already closed): USA500 0.55 points
    (0.8 bp), TECH100 1.71 (0.7 bp), GER40 3.2 (1.3 bp), EU50 2.4 (4.0 bp). The registered 2 / 2 / 2 / 4 bp are
    at or above every reading, so they stay: the margin also covers the minute or two a manual order takes.
+   Web check the same day: Trading 212's help centre lists commission "Free", "FX fee: 0.5%", overnight
+   interest at 22:00 GMT (21:00 in summer time) Monday to Thursday (after the desk's exits), and "77% of
+   retail investor accounts lose money when trading CFDs with this provider". Scalable lists gettex at
+   07:30-23:00 and derivatives "generally" 08:00-22:00; SEC's fair-access limit is 10 requests a second.

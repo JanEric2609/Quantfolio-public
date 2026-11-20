@@ -8,7 +8,8 @@ Pricing. The entry and exit are the underlying's reference price (SPY or QQQ
 on Alpaca, the Xetra ETF proxy on sc) at the signal minute; Trading 212's own
 CFD quote is not readable. Costs are fixed in the pre-registered spec: the
 assumed round-trip spread in basis points of the exposure, plus Trading 212's
-0.5 % currency fee on the result of a USD index. No order fee, and no
+0.5 % FX fee, charged here on the result of a USD index (its fee page gives no basis: our assumption).
+No order fee, and no
 overnight financing: the position is closed three minutes before the close.
 
 Size. The EUR exposure loses ``max_loss_per_trade`` (5 EUR) on a one-sigma
