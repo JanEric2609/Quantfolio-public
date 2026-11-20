@@ -99,7 +99,7 @@ def fetch_feed(url: str, *, timeout: int = FEED_TIMEOUT) -> dict[str, Any]:
         url, resolved_ip = validate_outbound_url(url, allow_private=False)
     except ValueError as exc:
         logger.warning("SSRF blocked for RSS feed %s: %s", url, exc)
-        return {"ok": False, "items": [], "feed_title": "", "error": f"URL validation failed: {exc}", "cached": False}
+        return {"ok": False, "items": [], "feed_title": "", "error": "URL validation failed: not a public http(s) address", "cached": False}
 
     try:
         # Pin the actual connection to the IP address we just validated —
@@ -117,7 +117,7 @@ def fetch_feed(url: str, *, timeout: int = FEED_TIMEOUT) -> dict[str, Any]:
         resp.raise_for_status()
     except Exception as exc:
         logger.warning("Failed to fetch RSS feed %s: %s", url, exc)
-        return {"ok": False, "items": [], "feed_title": "", "error": str(exc), "cached": False}
+        return {"ok": False, "items": [], "feed_title": "", "error": f"Fetch failed ({type(exc).__name__}); details are in the server log", "cached": False}
 
     return parse_feed_xml(resp.text, url)
 
@@ -134,7 +134,7 @@ def parse_feed_xml(xml_text: str, source_url: str = "") -> dict[str, Any]:
         root = DefusedTree.fromstring(xml_text)
     except DefusedTree.ParseError as exc:
         logger.warning("Failed to parse RSS XML from %s: %s", source_url, exc)
-        return {"ok": False, "items": [], "feed_title": "", "error": f"XML parse error: {exc}", "cached": False}
+        return {"ok": False, "items": [], "feed_title": "", "error": "XML parse error: the response is not a valid RSS/Atom document", "cached": False}
 
     # Detect feed format
     ns = {"atom": "http://www.w3.org/2005/Atom"}
@@ -237,7 +237,8 @@ def fetch_all_feeds(db=None) -> dict[str, Any]:
                 else:
                     errors.append(f"{url}: {result.get('error', 'Unknown error')}")
             except Exception as exc:
-                errors.append(f"{url}: {exc}")
+                logger.warning("RSS feed %s failed: %s", url, exc)
+                errors.append(f"{url}: {type(exc).__name__}")
 
         for future in not_done:
             url = futures[future]

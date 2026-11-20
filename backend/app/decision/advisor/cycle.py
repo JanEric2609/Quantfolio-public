@@ -686,11 +686,12 @@ def _execute_planned(
             None,
         )
     except ValueError as exc:
-        # Insufficient cash/holdings — an honest skip, not a crash.
+        # Usually insufficient cash/holdings, but also an invalid quantity, price or fee:
+        # an honest skip, not a crash. The cause is in the log line below.
         logger.warning(
             "advisor cycle: trade %s %s rejected: %s", planned.side, planned.decision.ticker, exc
         )
-        return None, f"{planned.side} rejected: {exc}"
+        return None, f"{planned.side} rejected; details are in the server log"
 
 
 def _record_cycle(

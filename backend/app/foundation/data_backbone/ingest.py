@@ -610,12 +610,12 @@ class DataIngester:
                 provider=provider,
                 capability="bar_prices",
                 ok=False,
-                message=f"schema_error: {e}",
+                message=f"schema_error: {type(e).__name__}",
             )
             return {
                 "success": False,
                 "symbol": symbol,
-                "message": str(e),
+                "message": f"schema error ({type(e).__name__}); details are in the server log",
                 "error_type": "schema",
             }
         except Exception as e:
@@ -628,12 +628,12 @@ class DataIngester:
                 provider=provider,
                 capability="bar_prices",
                 ok=False,
-                message=str(e),
+                message=f"provider_error: {type(e).__name__}",
             )
             return {
                 "success": False,
                 "symbol": symbol,
-                "message": str(e),
+                "message": f"provider error ({type(e).__name__}); details are in the server log",
                 "error_type": "provider",
             }
 
@@ -764,7 +764,7 @@ class DataIngester:
                 self.db.rollback()
             except Exception:
                 pass
-            return {"success": False, "symbol": symbol, "message": str(e), "repull": True}
+            return {"success": False, "symbol": symbol, "message": f"repull failed ({type(e).__name__})", "repull": True}
         if verdict == "real_move":
             logger.warning("bar_guard: %s real_move kept: %s", symbol, guarded.split_days)
         elif unadjusted:
@@ -931,7 +931,7 @@ class DataIngester:
             return {"added": added, "since": since.isoformat()}
         except Exception as exc:  # noqa: BLE001 - the FRED rows must still commit
             logger.warning("macro backfill: VIX index fill failed: %s", exc)
-            return {"added": 0, "error": str(exc)}
+            return {"added": 0, "error": f"VIX fill failed ({type(exc).__name__})"}
 
     def ingest_macro_indicators(self, series_ids: list[str] | None = None) -> dict[str, Any]:
         """Ingest macro indicators from FRED, ECB, Bundesbank.
@@ -1037,7 +1037,7 @@ class DataIngester:
             except Exception as e:
                 logger.error(f"Error in macro backfill transaction: {e}")
                 self.db.rollback()
-                result[actual_source] = {"success": False, "error": str(e)}
+                result[actual_source] = {"success": False, "error": f"macro backfill failed ({type(e).__name__})"}
 
             return result
 
@@ -1099,7 +1099,7 @@ class DataIngester:
             except Exception as e:
                 logger.error(f"Error in macro ingest transaction: {e}")
                 self.db.rollback()
-                result[actual_source] = {"success": False, "error": str(e)}
+                result[actual_source] = {"success": False, "error": f"macro ingest failed ({type(e).__name__})"}
         else:
             result[actual_source] = {"success": False, "error": fred_result.get("error")}
 
