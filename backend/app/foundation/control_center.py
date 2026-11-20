@@ -168,6 +168,20 @@ def _desk_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
             items.append(AttentionItem("desk-wrapper", "warning", "Scalable wrapper lacks the desk reads",
                                        "Run infra/scalable/install.sh as root so the wrapper allows quote, "
                                        "derivatives search, chart and security-news.", href, "Open the desk"))
+        if isinstance(health, dict) and health.get("last_error") and not health.get("wrapper_outdated"):
+            items.append(AttentionItem("desk-read-failing", "warning", "Desk market reads are failing",
+                                       f"The last read ended with '{health['last_error']}'. The desk retries every "
+                                       "minute and still checks exits; an expired Scalable login needs a new login "
+                                       "in Banks & brokers.", href, "Open the desk"))
+        # Without an Alpaca key the stream never starts ("no_key"): that is the Alpaca connection's item.
+        stream = get_setting_row(db, "desk_news_stream_json") or {}
+        stream_at = _parse_dt(stream.get("news_stream_at")) if isinstance(stream, dict) else None
+        if (isinstance(stream, dict) and stream.get("news_stream") not in (None, "connected", "no_key")
+                and stream_at is not None and now - stream_at > timedelta(minutes=15)):
+            items.append(AttentionItem("desk-news-stream", "warning", "Live news stream is down",
+                                       f"Alpaca's news stream has been '{stream['news_stream']}' since "
+                                       f"{stream_at.astimezone(ZoneInfo('Europe/Berlin')):%H:%M} Berlin. It reconnects "
+                                       "on its own; check the Alpaca key if this stays.", href, "Open the desk"))
         local = now.astimezone(ZoneInfo("Europe/Berlin"))
         if local.weekday() < 5 and 8 <= local.hour < 22:
             cutoff = now - timedelta(minutes=10)

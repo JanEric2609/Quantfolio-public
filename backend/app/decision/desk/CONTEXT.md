@@ -25,6 +25,12 @@ user, no trade wrapper, no `trade` argv; the broker allow-lists stay read-only.
 | `instrument.py` | Names the exact product: issuer name, ISIN/WKN, leverage and barrier or omega and strike, expiry, order line |
 | `telegram.py`, `jobs.py` | `/idea /desk /stop /close` + "Paper: take"; 1-minute monitor (exits first, then the index rule; each index in its own savepoint, so one failed read rolls back only that index; fills announced by the ids opened this tick), hourly reconcile, 1-minute news wire (a feed's first successful read is stored as `desk_news_wire_read_json`; only that read is a silent baseline) |
 
+## Where it shows
+
+- The Desk page (`/desk`), a research tool in the sidebar (shown with "Show research tools"), also in the command palette: limits, today's live-rehearsal counts, health (last check, failing reads, the news stream), ideas and taps, open positions with Close, recently closed exits with their reason in words, the scorecard, the news wire and the event log.
+- The Control Center's attention list (and the 06:00 Telegram self-check built from it): halt, broken chain, outdated wrapper, failing market reads, a news stream down for 15 minutes, positions without a quote, external trades.
+- Telegram: `/idea`, `/desk`, `/stop`, `/close`, the "Paper: take" button, exit and CFD messages, news alerts.
+
 ## Public surface
 
 The package root (`app.decision.desk`). A facade-only import-linter contract forbids deep imports from

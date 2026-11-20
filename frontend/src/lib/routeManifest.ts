@@ -66,7 +66,6 @@ export const ROUTE_ENTRIES: RouteEntry[] = [
     mobile: { slot: 3, label: "Holdings" },
     keywords: ["holdings", "positions", "performance", "risk", "accounts", "activity"],
   },
-  { id: "desk", to: "/desk", label: "Derivatives desk", icon: Gauge, group: "money", sidebar: false, keywords: ["knock-out", "warrant", "turbo", "paper", "idea", "derivatives"] },
   { id: "tax", to: "/tax", label: "Tax", icon: LandPlot, group: "money", keywords: ["tax cockpit", "kest", "vorabpauschale"] },
   {
     id: "budget", to: "/money/overview", label: "Budget", icon: CreditCard, group: "money",
@@ -96,6 +95,10 @@ export const ROUTE_ENTRIES: RouteEntry[] = [
     id: "strategy-lab", to: "/evidence", label: "Strategy lab", icon: FlaskConical, group: "tools", researchTool: true,
     match: isStrategyLabPath,
     keywords: ["evidence", "advisor", "mandates", "graduation", "capital ladder", "paper"],
+  },
+  {
+    id: "desk", to: "/desk", label: "Derivatives desk", icon: Gauge, group: "tools", researchTool: true,
+    keywords: ["knock-out", "warrant", "turbo", "cfd", "paper", "idea", "derivatives", "news wire"],
   },
   { id: "learn", to: "/learn", label: "Learn", icon: GraduationCap, group: "trust", keywords: ["tutorial", "teach", "how it works", "quiz"] },
   { id: "settings", to: "/settings", label: "Control Center", icon: Settings, group: "admin", keywords: ["settings", "connections", "status"] },

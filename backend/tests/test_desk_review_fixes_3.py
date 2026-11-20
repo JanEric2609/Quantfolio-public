@@ -422,3 +422,27 @@ def test_a_refused_idea_says_why_in_words_and_how_to_proceed():
     assert "add 'event'" in owner_calls.format_proposal(res, US_STOCK, "knockout")
     assert owner_calls.reason_text("spread_too_wide,quote_stale") == "the spread is too wide; the quote is too old"
     assert owner_calls.reason_text("brand_new_code") == "brand new code"
+
+
+def test_control_center_names_failing_desk_reads_and_a_long_dropped_stream():
+    from app.foundation.control_center import attention_items
+    from app.foundation.settings import upsert_public_settings
+
+    db = _memory_db()
+    make_user(db)
+
+    def ids():
+        return {i["id"] for i in attention_items(db)}
+
+    assert not {"desk-read-failing", "desk-news-stream"} & ids()
+    now = datetime.now(UTC)
+    upsert_public_settings(db, {"desk_health_json": {"last_error": "session_expired"},
+                                "desk_news_stream_json": {"news_stream": "closed",
+                                                          "news_stream_at": (now - timedelta(minutes=5)).isoformat()}})
+    assert "desk-read-failing" in ids() and "desk-news-stream" not in ids()  # a short drop reconnects
+    upsert_public_settings(db, {"desk_news_stream_json": {"news_stream": "closed",
+                                                          "news_stream_at": (now - timedelta(minutes=30)).isoformat()}})
+    assert "desk-news-stream" in ids()
+    upsert_public_settings(db, {"desk_news_stream_json": {"news_stream": "no_key",
+                                                          "news_stream_at": (now - timedelta(hours=3)).isoformat()}})
+    assert "desk-news-stream" not in ids()
