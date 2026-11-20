@@ -21,7 +21,6 @@ from . import cfd, service
 from .guard import DeskState
 from .limits import LIMITS
 from .signals import owner_calls
-from .underlyings import ALIASES, Underlying
 
 
 def _is_admin(db: Session, account: Any) -> bool:
@@ -32,13 +31,6 @@ def _is_admin(db: Session, account: Any) -> bool:
 def _say(db: Session, chat_id: str, text: str, markup: dict[str, Any] | None = None) -> None:
     telegram_bot.send_telegram_message(db, chat_id, text, markup) if markup else telegram_bot.send_telegram_message(
         db, chat_id, text)
-
-
-def _underlyings(db: Session) -> dict[str, Underlying]:
-    out = {u.isin: u for u in ALIASES.values()}
-    for p in db.query(DeskPosition).filter(DeskPosition.status == "open").all():
-        out.setdefault(p.underlying_isin, Underlying(p.underlying_isin, p.underlying_label, "XETR", p.liquid))
-    return out
 
 
 def handle_idea(db: Session, account: Any, chat_id: str, text: str) -> None:
@@ -74,7 +66,8 @@ def handle_take(db: Session, account: Any, chat_id: str, data: str) -> str:
         return "Bad button."
     cli = scalable_service.make_cli(db)
     position = db.get(DeskPosition, parts[2])
-    underlying = _underlyings(db).get(position.underlying_isin) if position else None
+    # The position's own underlying (an index alias, or the stock on its own exchange: a US stock is XNYS).
+    underlying = service.underlying_of(position) if position else None
     try:
         result = service.take(db, parts[2], parts[3], cli, datetime.now(UTC), underlying)
     except ScalableError as exc:
@@ -125,8 +118,7 @@ def handle_close(db: Session, account: Any, chat_id: str, text: str) -> None:
         return _say(db, chat_id, "No single open position with that id.")
     pos = matches[0]
     try:
-        ok = cfd.close_any(db, pos, scalable_service.make_cli(db), datetime.now(UTC),
-                                 _underlyings(db).get(pos.underlying_isin))
+        ok = cfd.close_any(db, pos, scalable_service.make_cli(db), datetime.now(UTC), service.underlying_of(pos))
     except ScalableError as exc:
         db.rollback()
         return _say(db, chat_id, f"Could not read the market: {exc.code}.")

@@ -102,7 +102,8 @@ def check_exit(position: Any, bid: Decimal | None, now: datetime, *, halted: boo
     ``stop``: the bid is at or under the stop. ``horizon``: past the latest exit. ``friday_cutoff`` /
     ``holiday_cutoff``: 21:30 Berlin on the last trading day before a weekend or a holiday.
     ``quote_lost``: no fresh quote for 10 minutes in trading hours (paper closes at the last bid).
-    ``owner_close`` is an explicit action, not a tick decision.
+    ``owner_close`` is an explicit action, not a tick decision; so is ``knock_out`` (no bid and the
+    underlying past the barrier: closed at 0 by the service, which can read the underlying).
     """
     if halted:
         return "halt"

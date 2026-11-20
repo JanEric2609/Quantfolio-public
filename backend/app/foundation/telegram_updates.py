@@ -108,6 +108,9 @@ def handle_callback_query(db: Session, query: dict[str, Any]) -> None:
     try:
         toast = handler(db, account, chat_id, data)
     except Exception as exc:
+        # A failed flush leaves the session unusable: without the rollback the answer below and the
+        # rest of this poll's updates would raise PendingRollbackError.
+        db.rollback()
         logger.error("Telegram callback failed: %s", type(exc).__name__, exc_info=True)
         toast = "Something went wrong."
     telegram_bot.answer_callback_query(db, callback_id, toast)
@@ -240,6 +243,7 @@ def poll_once(db: Session, *, long_poll_seconds: int = 20) -> int | None:
             if handle_update(db, update):
                 handled += 1
         except Exception as exc:
+            db.rollback()  # else every later update in this poll fails on the same broken session
             logger.error("Telegram update handling failed: %s", type(exc).__name__, exc_info=True)
     return handled
 

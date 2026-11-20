@@ -12,8 +12,8 @@ user, no trade wrapper, no `trade` argv; the broker allow-lists stay read-only.
 |---|---|
 | `limits.py` | Frozen `LIMITS` (code constants, pinned by a test, part of the pre-registration) |
 | `calendar.py` | Trading days, 21:30 Berlin cut-offs, `MACRO_EVENTS_BY_YEAR` (maintain each year) |
-| `guard.py` | Pure `check_entry` / `check_exit`; live-only caps vs reasons that stop a paper entry too |
-| `sizing.py` | Units and stop from the 5 EUR budget (both fees included) |
+| `guard.py` | Pure `check_entry` / `check_exit`; live-only caps vs reasons that stop a paper entry too. The service adds two exits the pure check cannot see: `knock_out` (no bid and the underlying past the barrier: closed at 0) and refusing a proposal or fill whose latest exit has passed (`exit_time_passed`) |
+| `sizing.py` | Units and stop from the 5 EUR budget (both fees included), against the whole pot: the pot already used is a live-only cap (`pot_exceeded`), paper is not shrunk by it |
 | `ledger.py` | Append-only hash-chained `desk_events` (verification lives in `foundation/desk_chain.py`) |
 | `products.py`, `underlyings.py` | Search, local filters, per-candidate quotes, ranking; the four index aliases |
 | `signals/` | `owner_calls` (`/idea`, tap) and `index_momentum` (frozen rule) |

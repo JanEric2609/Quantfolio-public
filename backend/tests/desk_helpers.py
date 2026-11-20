@@ -1,4 +1,6 @@
-"""Shared fixtures for the desk tests: a fake ``sc`` runner and fixed times. Fake IDs only."""
+"""Shared fixtures for the desk tests: a fake ``sc`` runner and fixed times. Fake IDs only.
+
+Each test file defines its own ``_memory_db()`` (AGENTS.md); nothing database-side is shared here."""
 from __future__ import annotations
 
 import json
@@ -7,11 +9,6 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from app.foundation.core.db import Base
 from app.foundation.scalable.cli import ScalableCli, ScalableCliConfig
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -19,12 +16,6 @@ DAX = "DE0008469008"
 DAX_ETF = "DE0005933931"
 # Wednesday, Xetra open, inside the trading window.
 NOW = datetime(2026, 11, 18, 11, 0, tzinfo=BERLIN)
-
-
-def memory_db():
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
 
 
 def make_user(db, role="admin", name="owner"):

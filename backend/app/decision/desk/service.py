@@ -184,9 +184,14 @@ def propose(
         append_event(db, "guard_verdict", MODE, {**base, "ok": False, "reasons": ["no_candidate"]}, now=now)
         return ProposalResult(None, "no_candidate", selection_size=selection.searched)
 
-    state = build_state(db, user_id, now)
-    sizing = size_position(chosen.ask, chosen.leverage_or_omega, sigma, LIMITS.pot - state.pot_used)
     window_end = max_exit_at or cal.max_exit_at(now, days=horizon_days)
+    if window_end <= now:
+        # "today" after 21:30 (or any horizon on a flat-by day): the position would close at the next tick.
+        append_event(db, "guard_verdict", MODE, {**base, "ok": False, "reasons": [EXIT_PASSED]}, now=now)
+        return ProposalResult(None, EXIT_PASSED, selection_size=selection.searched)
+    state = build_state(db, user_id, now)
+    # Paper is sized against the whole pot: the pot left over is a live-only cap (``pot_exceeded``).
+    sizing = size_position(chosen.ask, chosen.leverage_or_omega, sigma, LIMITS.pot)
     earnings = news.earnings_in_window(db, symbol, now.date(), window_end.date())
     macro = tuple(cal.macro_events_between(now.astimezone(cal.BERLIN).date(), window_end.date())) \
         if underlying.is_index else ()
@@ -280,9 +285,8 @@ def take(db: Session, position_id: str, nonce: str, cli: ScalableCli, now: datet
     old = Decimal(proposal["ask"])
     if abs(quote.ask / old - 1) > LIMITS.reask_move:
         new_nonce = secrets.token_urlsafe(8)
-        pot_left = LIMITS.pot - build_state(db, position.user_id, now).pot_used
         sizing = size_position(quote.ask, Decimal(position.leverage_or_omega or 1), _sigma_from_stop(position, old),
-                               pot_left)
+                               LIMITS.pot)
         if sizing.units < 1:
             position.status = "rejected"
             append_event(db, "tap", MODE, {"result": "refused", "nonce": nonce, "reason": "too_small",
@@ -315,6 +319,8 @@ def _sigma_from_stop(position: DeskPosition, old_ask: Decimal) -> Decimal:
 #: window, between the proposal and the tap, or the position holds no unit. Price and size were checked at the proposal (a
 #: re-ask re-sizes), so quote noise inside the 180 s window does not refuse a fill.
 FILL_BLOCKING = frozenset({"halted", "after_cutoff", "outside_window", "underlying_closed", "too_small"})
+#: The position's latest exit is already past: it would close at the next tick for ``horizon``.
+EXIT_PASSED = "exit_time_passed"
 
 
 def open_position(db: Session, position: DeskPosition, quote: market.Quote, now: datetime,
@@ -334,6 +340,9 @@ def open_position(db: Session, position: DeskPosition, quote: market.Quote, now:
         is_index=bool(underlying and underlying.is_index))
     verdict = check_entry(state, proposal, now)
     refused = tuple(r for r in verdict.reasons if r in FILL_BLOCKING)
+    max_exit = _aware(position.max_exit_at)
+    if max_exit is not None and max_exit <= now:
+        refused += (EXIT_PASSED,)
     if refused:
         position.status = "rejected"
         append_event(db, "error", MODE, {"code": "refused_at_fill", "reasons": list(refused)}, position.id, now=now)
@@ -417,15 +426,37 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
         bid = quote.bid if fresh and quote else None
         if bid is not None:
             p.last_bid, p.last_quote_at = bid, now.astimezone(UTC)
+        u = underlying_of(p, underlyings.get(p.underlying_isin))
+        if not bid:  # no quote, or a zero bid: a knock-out past its barrier is worth nothing
+            level = _knocked_out_at(db, cli, p, u)
+            if level is not None:
+                close_position(db, p, Decimal(0), "knock_out", now, level)
+                closed.append((p, "knock_out"))
+                continue
         reason = check_exit(p, bid, now, halted=halted)
         if reason is None:
             continue
         exit_bid = bid if bid is not None else Decimal(p.last_bid or 0)
         if exit_bid <= 0:
             continue
-        close_position(db, p, exit_bid, reason, now, underlying_price(db, cli, underlying_of(p, underlyings.get(p.underlying_isin))))
+        close_position(db, p, exit_bid, reason, now, underlying_price(db, cli, u))
         closed.append((p, reason))
     return closed
+
+
+def _knocked_out_at(db: Session, cli: ScalableCli, p: DeskPosition, u: Underlying) -> Decimal | None:
+    """The underlying's level when a knock-out's barrier has been crossed, else ``None``.
+
+    A knocked-out product has no bid; closing it at its last good bid would score a -100 % trade as a
+    small loss. Unknown barrier or price: ``None`` (the quote-lost rule still applies)."""
+    if p.product_type != "knockout" or p.barrier_or_strike is None:
+        return None
+    level = underlying_price(db, cli, u)
+    if level is None or level <= 0:
+        return None
+    barrier = Decimal(p.barrier_or_strike)
+    crossed = level <= barrier if p.direction == "long" else level >= barrier
+    return level if crossed else None
 
 
 def owner_close(db: Session, position: DeskPosition, cli: ScalableCli, now: datetime,
@@ -435,8 +466,13 @@ def owner_close(db: Session, position: DeskPosition, cli: ScalableCli, now: date
     if position.product_type == "cfd":
         return False  # a CFD closes through cfd.owner_close (no import back from here)
     quote = market.get_quote(cli, position.isin)
-    bid = quote.bid if quote else Decimal(position.last_bid or 0)
-    if bid <= 0:
-        return False
-    close_position(db, position, bid, "owner_close", now, underlying_price(db, cli, underlying_of(position, underlying)))
+    u = underlying_of(position, underlying)
+    fresh = quote is not None and not quote.outdated and _quote_age(now, quote.ts_utc) <= LIMITS.max_quote_age_s
+    if not (fresh and quote and quote.bid > 0):
+        level = _knocked_out_at(db, cli, position, u)
+        if level is not None:
+            close_position(db, position, Decimal(0), "knock_out", now, level)
+            return True
+        return False  # no fresh quote: the paper close would be at a stale price
+    close_position(db, position, quote.bid, "owner_close", now, underlying_price(db, cli, u))
     return True

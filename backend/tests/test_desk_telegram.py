@@ -3,7 +3,19 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
-from desk_helpers import DAX_ETF, NOW, FakeSc, daily_points, ko_item, make_user, memory_db, standard_handler
+from desk_helpers import DAX_ETF, NOW, FakeSc, daily_points, ko_item, make_user, standard_handler
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.foundation.core.db import Base
+
+
+def _memory_db():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+
 
 from app.decision.desk import register_desk_telegram, service
 from app.foundation import telegram_bot, telegram_updates
@@ -60,7 +72,7 @@ def _freeze(monkeypatch):
 
 
 def test_idea_sends_a_button_and_the_tap_fills(monkeypatch, bot):
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     _link(db, user)
     _freeze(monkeypatch)
@@ -82,7 +94,7 @@ def test_idea_sends_a_button_and_the_tap_fills(monkeypatch, bot):
 
 
 def test_idea_with_a_bad_command_or_a_halt_says_so(monkeypatch, bot):
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     _link(db, user)
     telegram_updates.handle_update(db, _msg("555", "/idea DAX sideways"))
@@ -93,7 +105,7 @@ def test_idea_with_a_bad_command_or_a_halt_says_so(monkeypatch, bot):
 
 
 def test_button_from_a_non_admin_or_unlinked_chat_is_refused(monkeypatch, bot):
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db, role="user", name="guest")
     _link(db, user, "777")
     telegram_updates.handle_update(db, {"callback_query": {"id": "cb2", "data": "desk:take:x:y",
@@ -105,7 +117,7 @@ def test_button_from_a_non_admin_or_unlinked_chat_is_refused(monkeypatch, bot):
 
 
 def test_non_admin_command_is_refused_and_unlinked_chat_never_reaches_the_desk(monkeypatch, bot):
-    db = memory_db()
+    db = _memory_db()
     guest = make_user(db, role="user", name="guest")
     _link(db, guest, "777")
     telegram_updates.handle_update(db, _msg("777", "/stop now"))
@@ -115,7 +127,7 @@ def test_non_admin_command_is_refused_and_unlinked_chat_never_reaches_the_desk(m
 
 
 def test_stop_halts_and_desk_reports_and_resume_is_app_only(monkeypatch, bot):
-    db = memory_db()
+    db = _memory_db()
     owner = make_user(db)
     _link(db, owner)
     telegram_updates.handle_update(db, _msg("555", "/stop news looks odd"))
@@ -127,7 +139,7 @@ def test_stop_halts_and_desk_reports_and_resume_is_app_only(monkeypatch, bot):
 
 
 def test_close_by_short_id(monkeypatch, bot):
-    db = memory_db()
+    db = _memory_db()
     owner = make_user(db)
     _link(db, owner)
     _sc(monkeypatch)
@@ -151,7 +163,7 @@ def test_sendmessage_and_getupdates_carry_markup_and_callback_updates(monkeypatc
         seen[method] = payload
         return []
 
-    db = memory_db()
+    db = _memory_db()
     monkeypatch.setattr(telegram_bot, "get_bot_token", lambda db: "t")
     monkeypatch.setattr(telegram_bot, "_call_api", fake_call)
     telegram_bot.get_updates(db, None, 1)

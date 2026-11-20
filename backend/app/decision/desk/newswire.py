@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -263,7 +264,7 @@ def holding_ciks(db: Session, watch: dict[str, str]) -> dict[str, str]:
         return _cik_cache["map"]
     try:
         mapping = cik_map(SecClient(user_agent(db)), symbols) if symbols else {}
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, KeyError, AttributeError, httpx.HTTPError) as exc:  # an httpx timeout is not an OSError
         logger.info("news wire: SEC ticker map failed: %s", type(exc).__name__)
         return _cik_cache["map"]
     _cik_cache.update(at=time.time(), map=mapping, key=key)
@@ -303,9 +304,22 @@ def poll_feeds(db: Session, user_id: str, now: datetime | None = None,
 
     asyncio.run(run())
     if now.astimezone(UTC).hour == 3 and now.minute == 0:
-        db.query(NewsWireItem).filter(NewsWireItem.received_at < now - RETENTION).delete()
-        db.commit()
+        prune(db, now)
     return counts
+
+
+def prune(db: Session, now: datetime) -> None:
+    """Drop items past the retention, but keep each source's newest row: an empty source reads as a
+    first read (stored as baseline, nothing sent), and a quiet month must not make SEC's next 8-K one."""
+    keep = []
+    for (source,) in db.query(NewsWireItem.source).distinct():
+        newest = db.query(NewsWireItem.id).filter(NewsWireItem.source == source) \
+            .order_by(NewsWireItem.received_at.desc()).first()
+        if newest is not None:
+            keep.append(newest[0])
+    db.query(NewsWireItem).filter(NewsWireItem.received_at < now - RETENTION,
+                                  NewsWireItem.id.notin_(keep)).delete(synchronize_session=False)
+    db.commit()
 
 
 # -- the Alpaca stream (one worker thread) -------------------------------------------------

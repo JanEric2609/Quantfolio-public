@@ -6,6 +6,10 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from desk_helpers import DAX_ETF, NOW, FakeSc, daily_points, ko_item, make_user, standard_handler
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.decision.desk import api_ops, jobs, news, newswire, service
 from app.decision.desk import calendar as cal
@@ -14,8 +18,15 @@ from app.decision.desk.ledger import append_event
 from app.decision.desk.signals import index_momentum, owner_calls
 from app.decision.desk.underlyings import ALIASES
 from app.foundation import news_wire
+from app.foundation.core.db import Base
 from app.foundation.models.entities import DeskEvent, DeskPosition, NewsWireItem
-from desk_helpers import DAX_ETF, NOW, FakeSc, daily_points, ko_item, make_user, memory_db, standard_handler
+
+
+def _memory_db():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +49,7 @@ def _setup(db):
 
 # 1. A failed tick sends nothing; the exit alert goes out once, after the commit that closes the position.
 def test_a_failed_tick_sends_no_exit_alert_and_the_next_tick_sends_it_once(monkeypatch):
-    db = memory_db()
+    db = _memory_db()
     user, sc = _setup(db)
     res = _idea(db, user, sc).proposals[0]
     service.take(db, res.position.id, res.nonce, sc.cli(), NOW + timedelta(seconds=10))
@@ -86,7 +97,7 @@ def test_a_network_error_reading_headlines_or_bars_is_caught(monkeypatch):
 
 
 def test_a_failed_price_read_retries_inside_the_window_then_logs_no_data(monkeypatch):
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
 
     def down(db, cli, plan):
@@ -113,7 +124,7 @@ def test_a_feed_timeout_is_a_value_error_so_the_other_feeds_still_run(monkeypatc
 
 # 3. "No fresh quote" can be retried with the same button.
 def test_a_tap_without_a_fresh_quote_can_be_retried_with_the_same_code():
-    db = memory_db()
+    db = _memory_db()
     user, sc = _setup(db)
     res = _idea(db, user, sc).proposals[0]
     no_quote = FakeSc(standard_handler({DAX_ETF: ("100", "100.1")}))
@@ -125,7 +136,7 @@ def test_a_tap_without_a_fresh_quote_can_be_retried_with_the_same_code():
 
 # 4. The event log shows the newest events.
 def test_latest_events_are_the_newest_in_ledger_order():
-    db = memory_db()
+    db = _memory_db()
     for i in range(5):
         append_event(db, "error", service.MODE, {"code": f"e{i}"}, now=NOW + timedelta(seconds=i))
     db.commit()
@@ -136,7 +147,7 @@ def test_latest_events_are_the_newest_in_ledger_order():
 
 # 6. A re-ask that leaves no unit refuses the fill.
 def test_a_reask_to_zero_units_is_refused_not_filled():
-    db = memory_db()
+    db = _memory_db()
     user, sc = _setup(db)
     res = _idea(db, user, sc).proposals[0]
     jump = FakeSc(standard_handler({"DE000KO000A1": ("99", "100"), DAX_ETF: ("100", "100.1")}))
@@ -178,7 +189,7 @@ def test_old_scalable_headlines_are_dropped(monkeypatch):
 
 # 10. One message per underlying, logged on every position.
 def test_desk_news_is_sent_once_per_underlying(monkeypatch):
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     dax = ALIASES["DAX"]
     for kind in ("knockout", "warrant", "cfd"):
@@ -196,7 +207,7 @@ def test_desk_news_is_sent_once_per_underlying(monkeypatch):
 
 # The news wire stores "sent" before it sends.
 def test_the_news_wire_commits_before_it_sends(monkeypatch):
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     states: list[str | None] = []
 

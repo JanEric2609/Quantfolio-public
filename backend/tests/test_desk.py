@@ -6,6 +6,19 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import pytest
+from desk_helpers import (
+    DAX,
+    DAX_ETF,
+    NOW,
+    FakeSc,
+    daily_points,
+    ko_item,
+    make_user,
+    standard_handler,
+)
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.decision.desk import calendar as cal
 from app.decision.desk import prereg, service
@@ -16,10 +29,21 @@ from app.decision.desk.products import select_product
 from app.decision.desk.scoring import Trade, holm, score_cell
 from app.decision.desk.signals import index_momentum, owner_calls
 from app.decision.desk.sizing import size_position, stop_fraction
-from app.decision.desk.underlyings import ALIASES, UnderlyingUnknown, daily_sigma, resolve_underlying
+from app.decision.desk.underlyings import (
+    ALIASES,
+    UnderlyingUnknown,
+    daily_sigma,
+    resolve_underlying,
+)
+from app.foundation.core.db import Base
 from app.foundation.models.entities import DeskEvent, DeskPosition, TrialLedgerEntry
 
-from desk_helpers import DAX, DAX_ETF, NOW, FakeSc, daily_points, ko_item, make_user, memory_db, standard_handler
+
+def _memory_db():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+
 
 UTC = ZoneInfo("UTC")
 
@@ -194,7 +218,7 @@ def test_sizing_formula_clamps_and_too_small():
 
 
 def test_ledger_chain_tamper_and_fork():
-    db = memory_db()
+    db = _memory_db()
     for i in range(3):
         append_event(db, "error", "paper", {"i": i}, now=NOW + timedelta(seconds=i))
     db.commit()
@@ -217,7 +241,7 @@ def test_ledger_chain_tamper_and_fork():
 
 
 def test_ledger_rejects_unknown_kind_and_is_ascii():
-    db = memory_db()
+    db = _memory_db()
     with pytest.raises(ValueError):
         append_event(db, "bogus", "paper", {})
     row = append_event(db, "error", "paper", {"name": "Straße €"}, now=NOW)
@@ -228,7 +252,7 @@ def test_ledger_rejects_unknown_kind_and_is_ascii():
 
 
 def test_underlying_resolution():
-    db = memory_db()
+    db = _memory_db()
     assert resolve_underlying(db, "dax").isin == DAX
     assert resolve_underlying(db, "DE000AAAAAA1").isin == "DE000AAAAAA1"
     with pytest.raises(UnderlyingUnknown):
@@ -328,7 +352,7 @@ def _setup_idea(db, quotes=None):
 
 
 def test_idea_proposes_then_tap_fills_at_a_fresh_quote_once():
-    db = memory_db()
+    db = _memory_db()
     user, sc = _setup_idea(db)
     outcome = owner_calls.start_idea(db, user.id, owner_calls.parse_idea("/idea DAX up today ko"), sc.cli(), NOW)
     db.commit()
@@ -350,7 +374,7 @@ def test_idea_proposes_then_tap_fills_at_a_fresh_quote_once():
 
 
 def test_tap_after_the_window_expires_and_wrong_nonce_is_unknown():
-    db = memory_db()
+    db = _memory_db()
     user, sc = _setup_idea(db)
     res = owner_calls.start_idea(db, user.id, owner_calls.parse_idea("/idea DAX up ko"), sc.cli(), NOW).proposals[0]
     db.commit()
@@ -360,7 +384,7 @@ def test_tap_after_the_window_expires_and_wrong_nonce_is_unknown():
 
 
 def test_a_halt_between_proposal_and_tap_refuses_the_fill():
-    db = memory_db()
+    db = _memory_db()
     user, sc = _setup_idea(db)
     outcome = owner_calls.start_idea(db, user.id, owner_calls.parse_idea("/idea DAX up ko"), sc.cli(), NOW)
     res = outcome.proposals[0]
@@ -375,7 +399,7 @@ def test_a_halt_between_proposal_and_tap_refuses_the_fill():
 
 
 def test_tap_reasks_when_the_ask_moved_more_than_one_percent():
-    db = memory_db()
+    db = _memory_db()
     user, sc = _setup_idea(db)
     res = owner_calls.start_idea(db, user.id, owner_calls.parse_idea("/idea DAX up ko"), sc.cli(), NOW).proposals[0]
     db.commit()
@@ -387,7 +411,7 @@ def test_tap_reasks_when_the_ask_moved_more_than_one_percent():
 
 
 def test_untapped_proposals_expire_and_do_not_count():
-    db = memory_db()
+    db = _memory_db()
     user, sc = _setup_idea(db)
     res = owner_calls.start_idea(db, user.id, owner_calls.parse_idea("/idea DAX up ko"), sc.cli(), NOW).proposals[0]
     db.commit()
@@ -397,7 +421,7 @@ def test_untapped_proposals_expire_and_do_not_count():
 
 
 def test_halt_blocks_a_new_idea_and_closes_open_positions():
-    db = memory_db()
+    db = _memory_db()
     user, sc = _setup_idea(db)
     res = owner_calls.start_idea(db, user.id, owner_calls.parse_idea("/idea DAX up ko"), sc.cli(), NOW).proposals[0]
     service.take(db, res.position.id, res.nonce, sc.cli(), NOW + timedelta(seconds=10))
@@ -411,7 +435,7 @@ def test_halt_blocks_a_new_idea_and_closes_open_positions():
 
 
 def test_a_stop_hit_closes_at_the_bid_with_both_fees():
-    db = memory_db()
+    db = _memory_db()
     user, sc = _setup_idea(db)
     res = owner_calls.start_idea(db, user.id, owner_calls.parse_idea("/idea DAX up ko"), sc.cli(), NOW).proposals[0]
     service.take(db, res.position.id, res.nonce, sc.cli(), NOW + timedelta(seconds=10))
@@ -425,7 +449,7 @@ def test_a_stop_hit_closes_at_the_bid_with_both_fees():
 
 
 def test_unknown_underlying_asks_for_the_isin():
-    db = memory_db()
+    db = _memory_db()
     user, sc = _setup_idea(db)
     out = owner_calls.start_idea(db, user.id, owner_calls.parse_idea("/idea ZZZZ up"), sc.cli(), NOW)
     assert out.error and "ISIN" in out.error and out.proposals == []
@@ -466,7 +490,7 @@ def test_skip_rules():
 
 
 def test_index_signal_fires_once_opens_both_products_and_skips_the_rest():
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     enter = index_momentum.plans_for_day(datetime(2026, 11, 18).date())[0].enter_at  # DAX 17:00 Berlin
     assert enter.astimezone(cal.BERLIN).hour == 17
@@ -543,7 +567,7 @@ def test_holm_ordering():
 
 
 def test_scorecard_counts_only_positions_after_registration():
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     reg = prereg.register(db, now=NOW)
     for i, offset in enumerate((-2, 1, 2)):
@@ -573,7 +597,7 @@ def test_prereg_hash_is_pinned():
 
 
 def test_prereg_registers_once_and_records_one_trial_per_cell():
-    db = memory_db()
+    db = _memory_db()
     prereg.register(db, now=NOW)
     prereg.register(db, now=NOW + timedelta(days=1))
     rows = db.query(TrialLedgerEntry).filter(TrialLedgerEntry.context == "desk").all()
@@ -589,7 +613,7 @@ def test_reconcile_logs_an_external_trade_once():
     from app.decision.desk.jobs import reconcile_external
     from app.foundation.models.entities import ActivityLedgerEntry, DerivativeTerms
 
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     db.add(DerivativeTerms(user_id=user.id, isin="DE000KO000A1", kind="put", strike=Decimal(1), ratio=Decimal(1),
                            expiry=NOW.date() + timedelta(days=30), underlying_symbol="X"))
@@ -610,7 +634,7 @@ def test_reconcile_logs_an_external_trade_once():
 def test_monitor_tick_skips_outside_hours_and_flags_an_outdated_wrapper():
     from app.decision.desk.jobs import monitor_tick
 
-    db = memory_db()
+    db = _memory_db()
     make_user(db)
     assert monitor_tick(db, datetime(2026, 11, 21, 11, tzinfo=cal.BERLIN))["skipped"] == "outside_hours"
     import subprocess
@@ -634,7 +658,7 @@ def test_monitor_tick_logs_a_scalable_error_once_not_every_minute():
     from app.decision.desk.jobs import monitor_tick
     from app.foundation.scalable.cli import ScalableCli, ScalableCliConfig
 
-    db = memory_db()
+    db = _memory_db()
     make_user(db)
 
     def expired(argv, **kw):

@@ -3,7 +3,19 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from desk_helpers import DAX_ETF, NOW, FakeSc, daily_points, ko_item, make_user, memory_db, standard_handler
+from desk_helpers import DAX_ETF, NOW, FakeSc, daily_points, ko_item, make_user, standard_handler
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.foundation.core.db import Base
+
+
+def _memory_db():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+
 from fastapi.testclient import TestClient
 
 from app.decision.desk import ledger, prereg
@@ -21,7 +33,7 @@ def api(monkeypatch):
 
     monkeypatch.setattr(news, "earnings_in_window", lambda *a, **k: False)
     monkeypatch.setattr(news, "alpaca_for", lambda db: None)
-    db = memory_db()
+    db = _memory_db()
     admin = make_user(db, "admin", "owner")
     guest = make_user(db, "user", "guest")
     state = {"user": admin}
@@ -128,7 +140,7 @@ def _ids(db, now=None):
 def test_control_center_desk_items(monkeypatch):
     from app.foundation.settings import upsert_public_settings
 
-    db = memory_db()
+    db = _memory_db()
     owner = make_user(db)
     assert _ids(db) == {}
     upsert_public_settings(db, {"desk_halt_json": {"halted": True, "reason": "x"},
@@ -157,7 +169,7 @@ def test_control_center_desk_items(monkeypatch):
 def test_control_center_macro_calendar_warning_only_in_december(monkeypatch):
     from app.foundation.settings import upsert_public_settings
 
-    db = memory_db()
+    db = _memory_db()
     make_user(db)
     upsert_public_settings(db, {"desk_health_json": {"macro_years": [2026]}})
 

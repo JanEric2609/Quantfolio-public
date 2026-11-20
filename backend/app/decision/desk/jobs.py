@@ -46,10 +46,8 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
         cli = cli or scalable_service.make_cli(db)
         underlyings: dict[str, Underlying] = {u.isin: u for u in ALIASES.values()}
         for p in db.query(DeskPosition).filter(DeskPosition.status == "open").all():
-            underlyings.setdefault(p.underlying_isin, Underlying(p.underlying_isin, p.underlying_label, "XETR", p.liquid))
+            underlyings.setdefault(p.underlying_isin, service.underlying_of(p))  # a US stock is XNYS
         fired = index_momentum.fire_due_signals(db, owner.id, cli, now) if not service.is_halted(db) else []
-        if fired:
-            outbox += _announce_fills(db, now)
         expired = service.expire_proposals(db, now)
         closed = service.manage_open_positions(db, cli, now, underlyings)
         for position, reason in closed:
@@ -62,6 +60,10 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
         service.set_health(db, last_tick_at=now.isoformat(), wrapper_outdated=False, last_error=None,
                            macro_years=sorted(cal.MACRO_EVENTS_BY_YEAR))
         db.commit()
+        if fired:
+            # Built after the commit: the CFD line reads index history, whose cache write commits, and a
+            # fill saved before a failed tick would never be announced (the signal counts as fired).
+            outbox = _announce_fills(db, now) + outbox
         for text in outbox:
             telegram.alert(db, owner.id, text)
         return {"fired": fired, "expired": expired, "closed": len(closed), "news": seen}

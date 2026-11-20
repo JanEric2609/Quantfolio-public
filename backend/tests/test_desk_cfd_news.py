@@ -6,16 +6,26 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import pytest
+from desk_helpers import DAX_ETF, NOW, FakeSc, daily_points, ko_item, make_user, standard_handler
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.decision.desk import cfd, instrument, newswire, prereg, scoring, service
 from app.decision.desk.products import wkn_of
 from app.decision.desk.signals import owner_calls
 from app.decision.desk.underlyings import ALIASES
 from app.foundation import news_wire
+from app.foundation.core.db import Base
 from app.foundation.models.entities import DeskEvent, DeskPosition, NewsWireItem
 from app.lab.desk_replay import Costs, Day, days_from_bars, evaluate, trade_results
 
-from desk_helpers import DAX_ETF, NOW, FakeSc, daily_points, ko_item, make_user, memory_db, standard_handler
+
+def _memory_db():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+
 
 UTC = ZoneInfo("UTC")
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -39,7 +49,7 @@ def test_wkn_only_for_german_isins():
 
 
 def test_proposal_names_the_exact_product_its_terms_and_the_order_line():
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     item = ko_item("DE000KO000A1", lev=4, distance=0.25)
     item["knockout_barrier"] = {"kind": "x", "value": 21500.5}
@@ -85,7 +95,7 @@ def _open_cfd(db, user, key="DAX", direction="long", now=NOW):
 
 
 def test_cfd_opens_at_the_reference_price_sized_by_sigma_and_is_never_live():
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     p, _ = _open_cfd(db, user)
     assert p.cell == "index_momentum:cfd" and p.status == "open" and p.would_take_live is False
@@ -100,7 +110,7 @@ def test_cfd_opens_at_the_reference_price_sized_by_sigma_and_is_never_live():
 
 
 def test_cfd_net_is_move_times_exposure_less_spread_and_the_usd_currency_fee():
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     p, _ = _open_cfd(db, user)
     exposure = p.entry_price * p.quantity
@@ -119,7 +129,7 @@ def test_cfd_net_is_move_times_exposure_less_spread_and_the_usd_currency_fee():
 
 
 def test_cfd_manage_closes_on_time_stop_and_halt_and_not_before():
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     p, sc = _open_cfd(db, user)
     assert cfd.manage(db, sc.cli(), NOW + timedelta(minutes=10), {}) == []
@@ -135,7 +145,7 @@ def test_cfd_manage_closes_on_time_stop_and_halt_and_not_before():
 
 
 def test_scalable_exit_management_ignores_cfds_and_owner_close_uses_the_reference_price():
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     p, sc = _open_cfd(db, user)
     assert service.manage_open_positions(db, sc.cli(), NOW + timedelta(hours=5), {}) == []
@@ -146,7 +156,7 @@ def test_scalable_exit_management_ignores_cfds_and_owner_close_uses_the_referenc
 
 
 def test_cfd_open_message_names_market_side_size_stop_and_exit(monkeypatch):
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     p, _ = _open_cfd(db, user, direction="short")
     monkeypatch.setattr(cfd, "_index_level", lambda db, t: Decimal("24000"))
@@ -157,7 +167,7 @@ def test_cfd_open_message_names_market_side_size_stop_and_exit(monkeypatch):
 
 
 def test_cfd_trades_score_in_their_own_cell():
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     prereg.register(db, now=NOW - timedelta(days=1))
     p, _ = _open_cfd(db, user)
@@ -203,7 +213,7 @@ R = newswire.Rating
 
 
 def test_relevance_and_alert_rules():
-    db = memory_db()
+    db = _memory_db()
     watch = {"NVDA": "holding:NVDA"}
     assert newswire.relevance(_item(), watch) == "holding:NVDA"
     assert newswire.relevance(_item(symbols=("AAPL",)), watch) == ""
@@ -246,7 +256,7 @@ def test_headline_is_fenced_as_untrusted():
 
 
 def test_ingest_stores_once_rates_and_sends(monkeypatch):
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     sent: list[str] = []
     monkeypatch.setattr("app.decision.desk.telegram.alert", lambda db, uid, text: sent.append(text))
@@ -266,7 +276,7 @@ def test_ingest_stores_once_rates_and_sends(monkeypatch):
 
 
 def test_poll_feeds_baselines_a_new_feed_then_sends_new_items(monkeypatch):
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     sent: list[str] = []
     monkeypatch.setattr("app.decision.desk.telegram.alert", lambda db, uid, text: sent.append(text))
@@ -314,7 +324,7 @@ def test_german_adhoc_items_carry_the_isin_and_match_a_holding_by_it(monkeypatch
 
     monkeypatch.setattr("app.foundation.live_positions.combined_positions",
                         lambda db, uid: [Pos("DE000BAY0017", None, "Bayer AG"), Pos("US67066G1040", "NVDA", "NVIDIA")])
-    db = memory_db()
+    db = _memory_db()
     user = make_user(db)
     watch = newswire.watchlist(db, user.id)
     assert watch["DE000BAY0017"] == "holding:Bayer AG" and watch["NVDA"] == watch["US67066G1040"] == "holding:NVDA"
