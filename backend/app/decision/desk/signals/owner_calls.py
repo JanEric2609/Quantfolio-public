@@ -85,11 +85,37 @@ def start_idea(db: Session, user_id: str, idea: Idea, cli: ScalableCli, now: dat
     return IdeaOutcome(results, underlying)
 
 
+#: Why nothing was proposed, as the owner reads it (Telegram and the Desk page). Unlisted codes are
+#: shown with spaces for underscores.
+REASON_TEXT = {
+    "exit_time_passed": "exit time passed: after 21:30 Berlin a 'today' idea would close at once; send 1d instead",
+    "earnings_unknown": "the earnings date could not be read; add 'event' to take it anyway",
+    "event_block_earnings": "earnings fall inside the holding time; add 'event' to accept that",
+    "event_block_macro": "a central-bank or macro release falls inside the holding time",
+    "no_candidate": "no product with a fresh quote and a tight enough spread",
+    "no_volatility": "the underlying's volatility could not be read",
+    "underlying_closed": "the underlying's own exchange is closed",
+    "outside_window": "outside the desk's trading hours (08:05-21:45 Berlin)",
+    "after_cutoff": "past the 21:30 cut-off before a weekend or holiday",
+    "spread_too_wide": "the spread is too wide",
+    "quote_stale": "the quote is too old",
+    "risk_over_limit": "the loss at the stop would exceed the per-trade limit",
+    "too_small": "not even one unit fits the limits",
+    "halted": "the desk is halted",
+}
+
+
+def reason_text(reason: str | None) -> str:
+    codes = [c for c in (reason or "").split(",") if c]
+    if not codes:
+        return "nothing to propose"
+    return "; ".join(REASON_TEXT.get(c, c.replace("_", " ")) for c in codes)
+
+
 def format_proposal(result: service.ProposalResult, underlying: Underlying, product_type: str = "") -> str:
     p = result.position
     if p is None or result.nonce is None:
-        why = (result.reason or "nothing to propose").replace("_", " ")
-        return f"{underlying.label} {product_type}: no proposal ({why})."
+        return f"{underlying.label} {product_type}: no proposal ({reason_text(result.reason)})."
     notional = (p.entry_price or 0) * (p.units or 0)
     lines = [
         f"PAPER idea: {underlying.label} {'up' if p.direction == 'long' else 'down'} via {p.product_type}",

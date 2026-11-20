@@ -20,6 +20,32 @@ const LIMIT_LABELS: [string, string][] = [
   ["spread_cap_other", "Spread cap, other"], ["max_quote_age_s", "Max quote age (s)"], ["tap_window_s", "Tap window (s)"],
 ];
 
+/** Why a paper position was closed, in words. */
+const EXIT_REASONS: Record<string, string> = {
+  stop: "Stop-loss reached",
+  knock_out: "Knocked out: the underlying touched the barrier (closed at 0)",
+  horizon: "Holding time over",
+  time: "Closing time (3 minutes before the close)",
+  friday_cutoff: "21:30 cut-off before the weekend",
+  holiday_cutoff: "21:30 cut-off before a holiday",
+  quote_lost: "No fresh price for 10 minutes (closed at the last good price)",
+  halt: "Desk halted",
+  owner_close: "Closed by you",
+};
+
+/** The desk's background health, as the monitor and the news stream report it. */
+function healthLines(health: Record<string, unknown> | undefined): string[] {
+  const out: string[] = [];
+  if (!health) return out;
+  if (typeof health.last_error === "string" && health.last_error) {
+    out.push(`Last market read failed (${health.last_error}). The desk retries every minute; exits are still checked.`);
+  }
+  if (typeof health.news_stream === "string" && health.news_stream !== "connected") {
+    out.push(`Live news stream: ${health.news_stream.replace(/_/g, " ")}. It reconnects on its own.`);
+  }
+  return out;
+}
+
 const fmt = (v: number | null | undefined, digits = 2) => (v == null ? "-" : v.toFixed(digits));
 
 /** Exactly what is held: the issuer's name, WKN (or ISIN) and the terms that decide the risk. */
@@ -84,6 +110,8 @@ export function DeskPage() {
   }
 
   const open = positions.filter((p) => p.status === "open");
+  const closed = positions.filter((p) => p.status === "closed" && p.exit_reason !== "external")
+    .sort((a, b) => (b.exit_at ?? "").localeCompare(a.exit_at ?? "")).slice(0, 10);
   const halted = status?.halt.halted ?? false;
 
   return (
@@ -123,6 +151,10 @@ export function DeskPage() {
                   ? <><CheckCircle2 className="size-4 text-green-500" aria-hidden /> Ledger chain verified</>
                   : <><OctagonX className="size-4 text-red-500" aria-hidden /> Ledger chain broken at event {status.chain.first_bad_seq}</>}
               </p>
+              {typeof status.health?.last_tick_at === "string" && (
+                <p className="text-text-secondary">Last check of open positions {formatDateTime(status.health.last_tick_at)}.</p>
+              )}
+              {healthLines(status.health).map((line) => <p key={line} className="text-amber-600">{line}</p>)}
               {status.health?.wrapper_outdated === true && (
                 <p className="text-amber-600">The Scalable wrapper needs install.sh again before the desk can read quotes.</p>
               )}
@@ -140,7 +172,10 @@ export function DeskPage() {
       <Card>
         <CardHeader>
           <CardTitle>New idea</CardTitle>
-          <CardDescription>Ticker or ISIN, up or down, optional: today or 1d (to the next trading day), ko, warrant, both, event. Confirm within 3 minutes.</CardDescription>
+          <CardDescription>
+            Ticker or ISIN, up or down, optional: today or 1d (held at most until 21:30 on the next trading day), ko, warrant, both,
+            and event (accept earnings in the holding time, or a US stock whose earnings date cannot be read). Confirm within 3 minutes of the proposal.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <form className="flex flex-wrap gap-2" onSubmit={(e) => {
@@ -191,6 +226,28 @@ export function DeskPage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Recently closed</CardTitle>
+          <CardDescription>The last ten paper exits and why they happened. A knock-out that touched its barrier counts as a total loss.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {closed.length === 0 ? <p className="text-sm text-text-secondary">Nothing closed yet.</p> : (
+            <table className="w-full text-sm">
+              <thead><tr className="text-left"><th>Product</th><th>Closed</th><th>Exit price</th><th>Net (EUR)</th><th>Why</th></tr></thead>
+              <tbody>{closed.map((p) => (
+                <tr key={p.id} className="border-t border-border/50">
+                  <td>{p.underlying} {p.direction} {p.product_type} <span className="text-text-secondary">{p.short_id}</span></td>
+                  <td>{p.exit_at ? formatDateTime(p.exit_at) : "-"}</td><td>{p.exit_price ?? "-"}</td>
+                  <td className={Number(p.net_eur ?? 0) < 0 ? "text-red-500" : "text-green-600"}>{p.net_eur ?? "-"}</td>
+                  <td>{EXIT_REASONS[p.exit_reason ?? ""] ?? (p.exit_reason ?? "-").replace(/_/g, " ")}</td>
+                </tr>))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
+
       {score && (
         <Card>
           <CardHeader>
@@ -222,7 +279,8 @@ export function DeskPage() {
         <CardHeader>
           <CardTitle>News wire</CardTitle>
           <CardDescription>
-            Alpaca stream, Fed, ECB and SEC 8-K, rated 0-3 by the local model. Information only: the desk never trades on news.
+            Alpaca stream, Fed, ECB, German ad-hoc disclosures, Handelsblatt and SEC 8-K filings of your holdings, rated 0-3 by the
+            local model. A feed's very first read is kept as the starting point without alerts. Information only: the desk never trades on news.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -233,7 +291,7 @@ export function DeskPage() {
                   <span className="text-xs text-text-secondary">
                     {n.received_at ? formatDateTime(n.received_at) : ""} {n.source}
                     {n.materiality == null ? "" : ` ${n.materiality}/3 ${n.direction ?? ""}`}
-                    {n.relevance ? ` ${n.relevance}` : ""}{n.alert === "sent" ? " sent" : ""}
+                    {n.relevance ? ` ${n.relevance}` : ""}{n.alert === "sent" ? " sent" : n.alert === "baseline" ? " (first read, not sent)" : ""}
                   </span>{" "}
                   {n.url ? <a href={n.url} target="_blank" rel="noreferrer noopener" className="underline">{n.headline}</a> : n.headline}
                 </li>

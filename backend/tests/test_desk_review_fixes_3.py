@@ -415,3 +415,10 @@ def test_a_us_stock_with_an_unreadable_earnings_calendar_is_blocked_unless_the_o
                    {"knockout": [_ko_listing(19000, 0.25, ALIASES["DAX"].isin)]})
     assert service.propose(db, user.id, signal="owner_call", underlying=ALIASES["DAX"], direction="long",
                            product_type="knockout", cli=dax.cli(), now=at).nonce
+
+
+def test_a_refused_idea_says_why_in_words_and_how_to_proceed():
+    res = service.ProposalResult(None, "earnings_unknown")
+    assert "add 'event'" in owner_calls.format_proposal(res, US_STOCK, "knockout")
+    assert owner_calls.reason_text("spread_too_wide,quote_stale") == "the spread is too wide; the quote is too old"
+    assert owner_calls.reason_text("brand_new_code") == "brand new code"

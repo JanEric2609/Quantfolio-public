@@ -60,3 +60,24 @@ describe("DeskPage close", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("DeskPage exits and health", () => {
+  it("names a knock-out exit and a failed market read in plain words", async () => {
+    const { vi } = await import("vitest");
+    const api = await import("../lib/api");
+    const ko = { id: "k1", short_id: "k1", status: "closed", underlying: "DAX", direction: "long", product_type: "knockout",
+      exit_reason: "knock_out", exit_price: "0", net_eur: "-11.98", exit_at: "2026-11-18T10:00:00Z" } as unknown as import("../lib/api").DeskPositionDto;
+    vi.spyOn(api, "getDeskPositions").mockResolvedValue([ko]);
+    vi.spyOn(api, "getDeskStatus").mockResolvedValue({
+      mode: "paper", banner: "", limits: {}, halt: { halted: false },
+      health: { last_error: "session_busy", news_stream: "closed", last_tick_at: "2026-11-18T10:01:00Z" },
+      usage_today: { entries: 0, max_entries: 3, loss: "0", daily_loss: "15", open_live: 0, max_open_live: 2, pot_used: "0", pot: "250" },
+      chain: { ok: true, first_bad_seq: null }, prereg_hash: "x", registered_at: null, macro_calendar_years: [],
+    } as unknown as import("../lib/api").DeskStatusDto);
+    render(<MemoryRouter><DeskPage /></MemoryRouter>);
+    expect(await screen.findByText(/Knocked out: the underlying touched the barrier/)).toBeInTheDocument();
+    expect(screen.getByText(/Last market read failed \(session_busy\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Live news stream: closed/)).toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+});
