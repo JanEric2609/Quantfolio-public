@@ -94,7 +94,7 @@ def test_cfd_opens_at_the_reference_price_sized_by_sigma_and_is_never_live():
     assert Decimal("250") < exposure <= cfd.MAX_EXPOSURE_EUR  # 5 EUR over a daily sigma near 1 %
     assert p.stop_price < p.entry_price and p.spread_pct == Decimal("0.0002")
     fill = json.loads(db.query(DeskEvent).filter(DeskEvent.kind == "fill").one().payload)
-    assert fill["manual"] is True and fill["market"] == "Germany 40"
+    assert fill["manual"] is True and fill["market"] == "Germany 40 (GER40)"
     # The live rehearsal never counts a CFD.
     assert service.build_state(db, user.id, NOW).open_live == 0
 
@@ -125,7 +125,7 @@ def test_cfd_manage_closes_on_time_stop_and_halt_and_not_before():
     assert cfd.manage(db, sc.cli(), NOW + timedelta(minutes=10), {}) == []
     closed = cfd.manage(db, sc.cli(), NOW + timedelta(minutes=27), {})
     assert [(c.id, r) for c, r in closed] == [(p.id, "time")]
-    assert "CLOSE your Germany 40 position now (3 minutes before the close)" in cfd.close_message(p, "time")
+    assert "CLOSE your Germany 40 (GER40) position now (3 minutes before the close)" in cfd.close_message(p, "time")
     q, _ = _open_cfd(db, user, now=NOW + timedelta(hours=1))
     low = FakeSc(standard_handler({DAX_ETF: ("90", "90")}, chart_pts=daily_points()))
     assert [r for _, r in cfd.manage(db, low.cli(), NOW + timedelta(hours=1, minutes=5), {})] == ["stop"]
@@ -151,8 +151,8 @@ def test_cfd_open_message_names_market_side_size_stop_and_exit(monkeypatch):
     p, _ = _open_cfd(db, user, direction="short")
     monkeypatch.setattr(cfd, "_index_level", lambda db, t: Decimal("24000"))
     text = cfd.open_message(db, p, "DAX", NOW)
-    assert text.startswith("CFD signal (manual, Trading 212): SELL Germany 40 now")
-    assert "EUR exposure, quantity about" in text and "Germany 40 near 24,000 EUR" in text
+    assert text.startswith("CFD signal (manual, Trading 212): SELL Germany 40 (GER40) now")
+    assert "EUR exposure, quantity about" in text and "Germany 40 (GER40) near 24,000 EUR" in text
     assert "Close at 11:27 Berlin" in text and "Most retail CFD accounts lose money" in text
 
 

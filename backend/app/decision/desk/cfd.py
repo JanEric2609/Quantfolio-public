@@ -43,10 +43,11 @@ FX_FEE = Decimal(SPEC["fx_fee_on_result"])
 MAX_EXPOSURE_EUR = Decimal(SPEC["max_exposure_eur"])
 #: The market's name in the Trading 212 app and the index ticker for its level (quantity hint).
 MARKETS: dict[str, tuple[str, str, str]] = {  # key -> (Trading 212 name, level ticker, currency)
-    "DAX": ("Germany 40", "^GDAXI", "EUR"),
-    "ES50": ("Europe 50", "^STOXX50E", "EUR"),
-    "SPX": ("US 500", "^GSPC", "USD"),
-    "NDX": ("US 100", "^NDX", "USD"),
+    # Names as the Trading 212 app shows them (checked 2026-11-20): search the ticker in brackets.
+    "DAX": ("Germany 40 (GER40)", "^GDAXI", "EUR"),
+    "ES50": ("EU 50 (EU50)", "^STOXX50E", "EUR"),
+    "SPX": ("USA 500 (USA500)", "^GSPC", "USD"),
+    "NDX": ("USA Tech 100 (TECH100)", "^NDX", "USD"),
 }
 
 

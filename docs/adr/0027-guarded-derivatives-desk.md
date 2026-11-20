@@ -130,3 +130,7 @@ deploy, so migration 0157 itself gains the new columns and table; nothing regist
    registered, unchanged, because changing the rule after seeing this would be a new trial. But the
    prior is now that every index-rule cell fails, the CFD one included; the owner should not trade the CFD
    signal with real money before its paper cell passes.
+
+   Spread check by the owner, 2026-11-20 20:06 Berlin (a -2 % day; Xetra already closed): USA500 0.55 points
+   (0.8 bp), TECH100 1.71 (0.7 bp), GER40 3.2 (1.3 bp), EU50 2.4 (4.0 bp). The registered 2 / 2 / 2 / 4 bp are
+   at or above every reading, so they stay: the margin also covers the minute or two a manual order takes.
