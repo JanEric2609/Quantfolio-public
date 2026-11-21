@@ -406,10 +406,18 @@ def take(db: Session, position_id: str, nonce: str, cli: ScalableCli, now: datet
          underlying: Underlying | None = None, clock: Callable[[], datetime] | None = None) -> TapResult:
     """A tap on "Paper: take": single-use nonce, 180 s window, fill at a fresh quote.
 
-    The position row is locked for the whole tap: two taps at once (Telegram and the page, or a
-    re-delivered callback) run one after the other, and the second sees the first's tap as used.
-    *clock* (live taps: the wall clock) is read again once the lock is held: a tap that waited for the
-    monitor's tick is judged (tap window, quote age, fill time) when it runs, not when it arrived."""
+    The network reads come first, without a lock: the product's quote and the underlying's price (an sc
+    read can wait up to two minutes for the session lock; the monitor's stops must not wait behind it).
+    Then the desk's write lock and the position row are taken for the rest: two taps at once (Telegram
+    and the page, or a re-delivered callback) run one after the other, and the second sees the first's
+    tap as used. Everything is re-checked under the lock. *clock* (live taps: the wall clock) is read
+    again then: the tap is judged (tap window, quote age, fill time) when it runs, not when it arrived."""
+    seen = db.get(DeskPosition, position_id)
+    quote: market.Quote | None = None
+    entry: Decimal | None = None
+    if seen is not None and seen.status == "proposed":
+        quote = market.get_quote(cli, seen.isin)
+        entry = underlying_price(db, cli, underlying_of(seen, underlying), now=clock() if clock else now)
     desk_write_lock(db)  # before the row lock: one lock order on every desk write path
     now = clock() if clock else now
     position = db.get(DeskPosition, position_id, with_for_update=True, populate_existing=True)
@@ -431,7 +439,6 @@ def take(db: Session, position_id: str, nonce: str, cli: ScalableCli, now: datet
         position.status = "expired"
         append_event(db, "tap", MODE, {"result": "expired", "nonce": nonce}, position_id, now=now)
         return TapResult("expired", position, message="Expired.")
-    quote = market.get_quote(cli, position.isin)
     if quote is None or quote.outdated or _quote_age(now, quote.ts_utc) > LIMITS.max_quote_age_s:
         append_event(db, "tap", MODE, {"result": "no_quote", "nonce": nonce}, position_id, now=now)
         return TapResult("no_quote", position, message="No fresh quote; try again.")
@@ -454,8 +461,9 @@ def take(db: Session, position_id: str, nonce: str, cli: ScalableCli, now: datet
                      position_id, now=now)
         return TapResult("reask", position, new_nonce, "The price moved; please confirm again.")
     append_event(db, "tap", MODE, {"result": "taken", "nonce": nonce}, position_id, now=now)
-    # cli is passed so the underlying's entry price is stored: the placebo needs the underlying move.
-    refused = open_position(db, position, quote, now, underlying_of(position, underlying), cli)
+    # The underlying's entry price (read above) is stored: the placebo needs the underlying move.
+    refused = open_position(db, position, quote, now, underlying_of(position, underlying), None,
+                            underlying_entry=entry)
     if refused:
         return TapResult("refused", position, message="Not filled: " + ", ".join(refused) + ".")
     return TapResult("filled", position, message="Paper position opened.")
@@ -660,9 +668,10 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
         reason = check_exit(p, bid, now, halted=halted)
         if reason is None:
             continue
-        if bid is None and reason != "quote_lost" and _quote_missing_for(p, now) < LIMITS.quote_lost_s:
+        if bid is None and reason != "quote_lost" and waits_for_price(p, now):
             # A halt, horizon or cut-off without a fresh bid waits for one (as quote_lost does) instead of
-            # closing at a bid that may be from last night; after 10 minutes it closes at the last bid.
+            # closing at a bid that may be from last night; after 10 minutes, or at the monitor's last tick
+            # of the day, it closes at the last bid.
             continue
         exit_bid = bid if bid is not None else Decimal(p.last_bid or 0)
         if exit_bid <= 0:
@@ -672,6 +681,19 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
         if close_position(db, p, price, reason, now, level):
             closed.append((p, reason))
     return closed
+
+
+#: The monitor's last tick of a day (it runs 08:00-21:59 Berlin): an exit still waiting for a fresh price
+#: closes then at the last one, rather than overnight at the next morning's.
+MONITOR_LAST_TICK = time(21, 59)
+
+
+def waits_for_price(p: DeskPosition, now: datetime) -> bool:
+    """True while an exit without a fresh price should wait for one: less than ``quote_lost_s`` without a
+    quote (counted inside today's window) and not yet the monitor's last tick of the day."""
+    if now.astimezone(cal.BERLIN).time() >= MONITOR_LAST_TICK:
+        return False
+    return _quote_missing_for(p, now) < LIMITS.quote_lost_s
 
 
 def _quote_missing_for(p: DeskPosition, now: datetime) -> float:

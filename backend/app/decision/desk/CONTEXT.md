@@ -52,8 +52,12 @@ every other context, with zero seeded exceptions.
 - The index rule reads every index (r1, both products with their fill quotes, the reference price, the
   CFD's) before its first write. A failed knock-out or warrant read is logged for that product
   (`read_failed`); the CFD, priced from the reference alone, still goes out.
-- A halt, horizon or cut-off exit without a fresh bid waits for one, up to the 10 minutes `quote_lost`
-  allows, before closing at the last bid.
+- A halt, horizon or cut-off exit without a fresh bid (Scalable products and CFDs) waits for one, up to the
+  10 minutes `quote_lost` allows or the monitor's last tick of the day (21:59), before closing at the last bid.
+- A tap reads the quote and the underlying's price before it takes the write lock, and re-checks
+  everything under it. The wrapper-outdated flag is cleared only by a tick whose sc reads went through.
+- The news stream's receive loop never waits on the model: a bounded queue (500) feeds one rating worker.
+- The Desk page's position list always holds every open position; logged external trades are left out of it.
 - A holding is watched by its ISIN, and by a ticker only when that is a US one (no suffix, or Trading 212's
   US line): `ALV.DE` is never matched by `ALV`.
 - Telegram's webhook answers at once and handles the update after the response; a re-delivered update id

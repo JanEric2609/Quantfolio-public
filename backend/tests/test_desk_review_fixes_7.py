@@ -61,9 +61,11 @@ def test_every_desk_write_path_takes_the_write_lock_before_a_position_row(monkey
     assert order[0] == "row" and order[1:3] == ["lock", "row"]
     order.clear()
     real_get = db.get
-    monkeypatch.setattr(db, "get", lambda *a, **k: order.append("row") or real_get(*a, **k))
+    monkeypatch.setattr(db, "get", lambda *a, **k: order.append("row" if k.get("with_for_update") else "read")
+                        or real_get(*a, **k))
     service.take(db, "missing", "n", None, NOW)
-    assert order[:2] == ["lock", "row"]
+    # A plain read (and the network reads) first, without a lock; the locking read after the write lock.
+    assert order[:3] == ["read", "lock", "row"]
 
 
 # -- the /code-review of fb54e3d: the write lock must not be held across network reads ----------------

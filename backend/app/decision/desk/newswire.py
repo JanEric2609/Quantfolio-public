@@ -421,6 +421,30 @@ def _set_stream_health(state: str, now: datetime | None = None) -> None:
         db.close()
 
 
+#: Items waiting for the model at most (the receive loop drops beyond this), and how long a closed stream
+#: waits for the queue to be rated before it reconnects.
+STREAM_QUEUE_MAX = 500
+STREAM_DRAIN_S = 60.0
+
+
+async def _ingest_worker(db: Session, user_id: str, queue: asyncio.Queue[news_wire.WireItem]) -> None:
+    """Rate and store the stream's items in order (the only user of *db* while the stream runs)."""
+    watch, watch_at = watchlist(db, user_id), time.monotonic()
+    db.commit()
+    while True:
+        item = await queue.get()
+        try:
+            if time.monotonic() - watch_at > WATCH_TTL_S:
+                watch, watch_at = watchlist(db, user_id), time.monotonic()
+                db.commit()
+            await ingest(db, user_id, item, watch)
+        except SQLAlchemyError as exc:
+            db.rollback()
+            logger.warning("news wire: store failed: %s", type(exc).__name__)
+        finally:
+            queue.task_done()
+
+
 async def _stream_once() -> str:
     """One connection's life: returns why it ended (the caller waits and reconnects)."""
     import websockets
@@ -432,17 +456,29 @@ async def _stream_once() -> str:
         user_id, creds = _owner_and_key(db)
         if user_id is None or creds is None:
             return "no_key"
-        watch, watch_at = watchlist(db, user_id), time.monotonic()
         db.commit()
-        # "connected" only once Alpaca accepted the login: a refused key must stay "refused".
-        async for item in news_wire.alpaca_stream(*creds, on_ready=lambda: _set_stream_health("connected")):
-            if time.monotonic() - watch_at > WATCH_TTL_S:
-                watch, watch_at = watchlist(db, user_id), time.monotonic()
-            try:
-                await ingest(db, user_id, item, watch)
-            except SQLAlchemyError as exc:
-                db.rollback()
-                logger.warning("news wire: store failed: %s", type(exc).__name__)
+        # The receive loop never waits on the local model: items go into a bounded queue that one worker
+        # rates and stores in order. A slow model fills the queue (the newest items are then dropped and
+        # counted) instead of stalling the websocket until its keepalive times out and the stream drops.
+        queue: asyncio.Queue[news_wire.WireItem] = asyncio.Queue(maxsize=STREAM_QUEUE_MAX)
+        worker = asyncio.create_task(_ingest_worker(db, user_id, queue))
+        dropped = 0
+        try:
+            # "connected" only once Alpaca accepted the login: a refused key must stay "refused".
+            async for item in news_wire.alpaca_stream(*creds, on_ready=lambda: _set_stream_health("connected")):
+                if worker.done():
+                    worker.result()  # the worker failed: raise its error, the caller reconnects
+                try:
+                    queue.put_nowait(item)
+                except asyncio.QueueFull:
+                    dropped += 1
+                    if dropped in (1, 100) or dropped % 1000 == 0:
+                        logger.warning("news wire: rating is behind, %d item(s) dropped", dropped)
+            await asyncio.wait_for(queue.join(), timeout=STREAM_DRAIN_S)  # rate what already arrived
+        except asyncio.TimeoutError:
+            logger.info("news wire: %d queued item(s) left unrated at the stream's end", queue.qsize())
+        finally:
+            worker.cancel()
         return "closed"
     except news_wire.StreamRefused:
         return "refused"

@@ -242,6 +242,8 @@ def manage(db: Session, cli: ScalableCli, now: datetime, underlyings: dict[str, 
             reason = "quote_lost"
         if reason is None:
             continue
+        if (price is None or price <= 0) and reason in ("halt", "time") and service.waits_for_price(p, now):
+            continue  # as the Scalable products: wait for a fresh price (10 minutes, or the day's last tick)
         px = price if price is not None and price > 0 else Decimal(p.last_bid or 0)
         if px <= 0:
             continue

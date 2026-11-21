@@ -56,7 +56,7 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
             telegram.alert(db, owner.id, text)
 
     try:
-        cli = cli or scalable_service.make_cli(db)
+        cli = _CountingCli(cli or scalable_service.make_cli(db))  # counts the sc reads that worked
         underlyings: dict[str, Underlying] = {u.isin: u for u in ALIASES.values()}
         open_rows = db.query(DeskPosition).filter(DeskPosition.status == "open").all()
         pending = db.query(DeskPosition).filter(DeskPosition.status == "proposed").all()
@@ -96,7 +96,7 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
             append_event(db, "error", service.MODE, {"code": last_error}, now=now)
         fields: dict[str, Any] = {"last_tick_at": now.isoformat(), "last_error": last_error,
                                   "macro_years": sorted(cal.MACRO_EVENTS_BY_YEAR)}
-        if open_rows or fired or errors:
+        if cli.reads_ok:  # only a tick whose sc reads went through shows the wrapper allows them
             fields["wrapper_outdated"] = False
         service.set_health(db, **fields)
         db.commit()
@@ -112,6 +112,22 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
             append_event(db, "error", service.MODE, {"code": exc.code}, now=now)
         service.set_health(db, last_error=exc.code, last_tick_at=now.isoformat())
         return {"skipped": exc.code}
+
+
+class _CountingCli:
+    """The tick's sc client, counting the reads that succeeded (``market`` calls ``cli.run``)."""
+
+    def __init__(self, cli: Any) -> None:
+        self._cli = cli
+        self.reads_ok = 0
+
+    def run(self, *args: str, **kwargs: Any) -> Any:
+        out = self._cli.run(*args, **kwargs)
+        self.reads_ok += 1
+        return out
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._cli, name)
 
 
 def _wall_clock() -> datetime:
@@ -224,8 +240,9 @@ def _known_security_types(db: Any, user_id: str) -> dict[str, str]:
 
 
 def _classify_unknown(db: Any, isins: list[str], types: dict[str, str], today: str) -> None:
-    """Ask sc's quote for the security type of up to ``MAX_TYPE_LOOKUPS`` ISINs; answers are cached. An ISIN
-    without a quote (delisted, no market at night) is marked ``?<date>`` and asked again the next day."""
+    """Ask sc's quote for the security type of up to ``MAX_TYPE_LOOKUPS`` ISINs; answers are cached. sc names
+    the type even without a bid or ask; an ISIN it does not know is marked ``?<date>`` and asked again the
+    next day."""
     from app.foundation.scalable import market
     from app.foundation.scalable import service as scalable_service
     from app.foundation.scalable.cli import ScalableError, ScalableUsageError
@@ -238,12 +255,12 @@ def _classify_unknown(db: Any, isins: list[str], types: dict[str, str], today: s
         cli = scalable_service.make_cli(db)
         for isin in isins[:MAX_TYPE_LOOKUPS]:
             try:
-                quote = market.get_quote(cli, isin)
+                kind = market.get_security_type(cli, isin)  # also without a bid or ask (knocked out, night)
             except ScalableUsageError as exc:
                 if isinstance(exc, market.WrapperOutdated):
                     raise
-                quote = None  # this ISIN only (refused as input): marked, the others are still asked
-            found[isin] = quote.security_type.upper() if quote is not None and quote.security_type else f"?{today}"
+                kind = None  # this ISIN only (refused as input): marked, the others are still asked
+            found[isin] = kind or f"?{today}"
     except ScalableError as exc:  # no session, the sync's lock, an old wrapper: the rest is tried next hour
         logger.info("desk reconcile: type lookup stopped: %s", exc.code)
     if found:

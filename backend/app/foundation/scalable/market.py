@@ -101,6 +101,15 @@ def get_quote(cli: ScalableCli, isin: str) -> Quote | None:
     return parse_quote(_run(cli, "broker", "quote", "--isin", isin))
 
 
+def get_security_type(cli: ScalableCli, isin: str) -> str | None:
+    """The instrument's security type from ``broker quote`` (``DERIVATIVE``, ``ETF`` ...), also when it
+    has no bid or ask (a knocked-out product, the night): ``get_quote`` drops such a quote whole."""
+    raw = _run(cli, "broker", "quote", "--isin", isin)
+    result = as_dict(raw.get("result")) if isinstance(raw.get("result"), dict) else raw
+    value = str(result.get("security_type") or "").strip().upper()
+    return value or None
+
+
 def _epoch_day(value: Any) -> date | None:
     raw = value.get("epoch_day") if isinstance(value, dict) else value
     if isinstance(raw, bool) or not isinstance(raw, int | float | str):

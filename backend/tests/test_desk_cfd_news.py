@@ -142,7 +142,9 @@ def test_cfd_manage_closes_on_time_stop_and_halt_and_not_before():
     assert [r for _, r in cfd.manage(db, low.cli(), at, {})] == ["stop"]
     h, _ = _open_cfd(db, user, now=NOW + timedelta(hours=2))
     service.set_halt(db, True, "test", "test")
-    assert [r for _, r in cfd.manage(db, sc.cli(), NOW + timedelta(hours=2, minutes=1), {})] == ["halt"]
+    halt_at = NOW + timedelta(hours=2, minutes=1)
+    fresh = FakeSc(standard_handler({DAX_ETF: ("100", "100")}, chart_pts=daily_points(), now=halt_at))
+    assert [r for _, r in cfd.manage(db, fresh.cli(), halt_at, {})] == ["halt"]
 
 
 def test_scalable_exit_management_ignores_cfds_and_owner_close_uses_the_reference_price():

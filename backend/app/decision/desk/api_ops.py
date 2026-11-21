@@ -64,10 +64,17 @@ def desk_status(db: Session, user_id: str) -> dict[str, Any]:
 
 
 def list_positions(db: Session, user_id: str, status: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+    """The owner's positions, newest first. Without *status*: every open one, then the newest *limit*
+    others, never the logged external trades (a first reconcile adds hundreds at once and would push open
+    positions, and their Close buttons, off the page; the scorecard counts them)."""
     query = db.query(DeskPosition).filter(DeskPosition.user_id == user_id)
     if status:
-        query = query.filter(DeskPosition.status == status)
-    return [position_dict(p) for p in query.order_by(DeskPosition.created_at.desc()).limit(limit)]
+        return [position_dict(p) for p in
+                query.filter(DeskPosition.status == status).order_by(DeskPosition.created_at.desc()).limit(limit)]
+    open_rows = query.filter(DeskPosition.status == "open").order_by(DeskPosition.created_at.desc()).all()
+    rest = query.filter(DeskPosition.status != "open", DeskPosition.signal != "external") \
+        .order_by(DeskPosition.created_at.desc()).limit(limit).all()
+    return [position_dict(p) for p in [*open_rows, *rest]]
 
 
 def list_events(db: Session, after_seq: int = 0, limit: int = 200, *, latest: bool = False) -> list[dict[str, Any]]:
