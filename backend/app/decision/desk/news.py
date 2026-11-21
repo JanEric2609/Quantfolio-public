@@ -59,8 +59,10 @@ def earnings_in_window(db: Session, symbol: str | None, start: date, end: date) 
 
 def headlines(db: Session, cli: ScalableCli, underlying: Underlying, since: datetime,
               symbol: str | None = None) -> list[dict[str, Any]]:
-    """Recent headlines as ``{"id", "title"}``; failures give an empty list (news is only a guard)."""
+    """Recent headlines as ``{"id", "title"}``; failures give an empty list (news is only a guard).
+    A US stock is asked of Alpaca by *symbol*, else by the underlying's own ticker."""
     try:
+        symbol = symbol or underlying.symbol
         sym = underlying.alpaca_symbol or (symbol if underlying.exchange == "XNYS" else None)
         if sym:
             provider = alpaca_for(db)

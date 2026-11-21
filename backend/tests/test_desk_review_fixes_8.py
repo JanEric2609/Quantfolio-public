@@ -20,6 +20,7 @@ from app.foundation.core.db import Base
 from app.foundation.models.entities import DeskEvent, DeskPosition
 from app.lab import desk_replay
 
+REAL_HEADLINES = news.headlines  # before the autouse fixture replaces it
 KO = "DE000KO000A1"
 WA = "DE000WA000A1"
 
@@ -179,10 +180,17 @@ def test_the_news_check_covers_a_proposal_and_uses_its_ticker(monkeypatch):
     db.commit()
     monkeypatch.setattr("app.decision.desk.underlyings.ticker_for_isin",
                         lambda db_, isin, uid=None: "NVDA" if isin == "US67066G1040" else None)
-    asked: list[str | None] = []
-    monkeypatch.setattr(news, "headlines", lambda db_, cli, u, since, symbol=None: asked.append(u.symbol) or [])
+    asked: list[list[str]] = []
+
+    class Alpaca:  # what the real headlines() asks Alpaca for (pullfrog: assert the query, not a field)
+        def get_news(self, symbols, since):
+            asked.append(list(symbols))
+            return []
+
+    monkeypatch.setattr(news, "headlines", REAL_HEADLINES)
+    monkeypatch.setattr(news, "alpaca_for", lambda db_: Alpaca())
     jobs.monitor_tick(db, tick, FakeSc(standard_handler({})).cli())
-    assert "NVDA" in asked
+    assert ["NVDA"] in asked
 
 
 # 7. The replay skips the days the live rule skips.
