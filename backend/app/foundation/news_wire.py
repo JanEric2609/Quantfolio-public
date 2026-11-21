@@ -69,12 +69,22 @@ class WireItem:
     cik: str | None = None
     items: tuple[str, ...] = field(default_factory=tuple)
 
+    def __post_init__(self) -> None:
+        # Feeds are outside input: only a web link is kept (it is shown as a link and sent to Telegram).
+        object.__setattr__(self, "url", web_url(self.url))
+
     @property
     def id(self) -> str:
         """``source:source_id``; a longer one (an article URL) is hashed, never cut, so two
         articles whose URLs share a long prefix stay two items."""
         raw = f"{self.source}:{self.source_id}"
         return raw if len(raw) <= 96 else f"{self.source}:h:{hashlib.sha256(self.source_id.encode()).hexdigest()}"
+
+
+def web_url(value: str | None) -> str | None:
+    """*value* when it is an http(s) URL, else ``None`` (no ``javascript:``/``data:`` links from a feed)."""
+    text = (value or "").strip()
+    return text[:400] if text.lower().startswith(("https://", "http://")) else None  # the column holds 400
 
 
 def _parse_time(raw: str | None) -> datetime | None:

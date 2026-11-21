@@ -9,8 +9,8 @@ import json
 import logging
 import secrets
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -216,6 +216,29 @@ def _quote_age(now: datetime, ts: datetime | None) -> float:
     return (now - ts).total_seconds() if ts else float("inf")
 
 
+@dataclass
+class PreparedProposal:
+    """Everything a proposal needs from the network, read before anything is written (see ``propose``)."""
+    user_id: str
+    signal: str
+    product_type: str
+    direction: str
+    underlying: Underlying
+    base: dict[str, Any]
+    now: datetime
+    clock: Callable[[], datetime] | None
+    sigma: Decimal | None = None
+    selection: Any = None
+    refusal: str | None = None  # why nothing is proposed (written as a guard verdict)
+    underlying_ref: Decimal | None = None
+    barrier_ref: Decimal | None = None
+    window_end: datetime | None = None
+    sizing: Any = None
+    verdict: Verdict | None = None
+    earnings_known: bool | None = None
+    headlines: list[dict[str, Any]] = field(default_factory=list)
+
+
 def propose(
     db: Session, user_id: str, *, signal: str, underlying: Underlying, direction: str, product_type: str,
     cli: ScalableCli, now: datetime, event_flag: bool = False, horizon_days: int = 1,
@@ -224,86 +247,121 @@ def propose(
 ) -> ProposalResult:
     """Pick a product, size it, run the guard and write the ledger. No fill happens here.
 
+    All market reads come first (:func:`prepare_proposal`), the ledger writes last
+    (:func:`record_proposal`): the first write takes the desk's write lock until the commit, and the
+    monitor's stops must not wait behind twenty sc calls.
+
     *symbol* (earnings calendar, US headlines) defaults to the underlying's own ticker, if known.
 
     *clock* (the owner's ideas: the wall clock) re-reads the time after the market reads, so quote ages
     are measured when the quotes are in and the 180 s tap window starts when the proposal is ready, not
     before twenty sc calls. Without it, *now* is used throughout (the index rule, tests)."""
+    prep = prepare_proposal(db, user_id, signal=signal, underlying=underlying, direction=direction,
+                            product_type=product_type, cli=cli, now=now, event_flag=event_flag,
+                            horizon_days=horizon_days, max_exit_at=max_exit_at, symbol=symbol, clock=clock)
+    return record_proposal(db, prep)
+
+
+def prepare_proposal(
+    db: Session, user_id: str, *, signal: str, underlying: Underlying, direction: str, product_type: str,
+    cli: ScalableCli, now: datetime, event_flag: bool = False, horizon_days: int = 1,
+    max_exit_at: datetime | None = None, symbol: str | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> PreparedProposal:
+    """The read half of :func:`propose`: volatility, product search and quotes, the reference price,
+    earnings, the guard verdict and headlines. Writes nothing."""
     symbol = symbol or underlying.symbol
-    sigma = underlying_sigma(db, cli, underlying)
     base = {"signal": signal, "underlying": underlying.isin, "direction": direction, "product_type": product_type}
+    prep = PreparedProposal(user_id, signal, product_type, direction, underlying, base, now, clock)
+    prep.sigma = sigma = underlying_sigma(db, cli, underlying)
     if sigma is None or sigma <= 0:
-        append_event(db, "guard_verdict", MODE, {**base, "ok": False, "reasons": ["no_volatility"]}, now=now)
-        return ProposalResult(None, "no_volatility")
-    selection = select_product(cli, underlying.isin, direction, product_type, now, sigma=sigma,
-                               liquid=underlying.liquid, clock=clock)
-    now = clock() if clock else now
-    append_event(db, "candidates", MODE, {
-        **base, "searched": selection.searched, "sigma": str(sigma),
-        "candidates": [c.as_json() for c in selection.candidates], "dropped": selection.dropped[:50]}, now=now)
+        prep.refusal = "no_volatility"
+        return prep
+    prep.selection = selection = select_product(cli, underlying.isin, direction, product_type, now, sigma=sigma,
+                                                liquid=underlying.liquid, clock=clock)
+    prep.now = now = clock() if clock else now
     chosen = selection.chosen
     if chosen is None:
-        append_event(db, "guard_verdict", MODE, {**base, "ok": False, "reasons": ["no_candidate"]}, now=now)
-        return ProposalResult(None, "no_candidate", selection_size=selection.searched)
-
+        prep.refusal = "no_candidate"
+        return prep
     # A knock-out's barrier in the reference price's units, from the listing's distance and a reference
     # price read in the same snapshot (the distance is only true for the level it was measured at).
     # Read for every product: the fill falls back to it when its own read fails (the placebo needs the move).
-    underlying_ref = underlying_price(db, cli, underlying, now=now)
-    barrier_ref = None
+    prep.underlying_ref = underlying_price(db, cli, underlying, now=now)
     if product_type == "knockout":
-        barrier_ref = barrier_in_reference(direction, underlying_ref, chosen.barrier_distance)
-        if barrier_ref is None:  # a knock-out the desk could not watch for its barrier is not proposed
-            append_event(db, "guard_verdict", MODE, {**base, "ok": False, "reasons": [NO_REFERENCE]}, now=now)
-            return ProposalResult(None, NO_REFERENCE, selection_size=selection.searched)
-    window_end = max_exit_at or cal.max_exit_at(now, days=horizon_days)
+        prep.barrier_ref = barrier_in_reference(direction, prep.underlying_ref, chosen.barrier_distance)
+        if prep.barrier_ref is None:  # a knock-out the desk could not watch for its barrier is not proposed
+            prep.refusal = NO_REFERENCE
+            return prep
+    prep.window_end = window_end = max_exit_at or cal.max_exit_at(now, days=horizon_days)
     if window_end <= now:
         # "today" after 21:30 (or any horizon on a flat-by day): the position would close at the next tick.
-        append_event(db, "guard_verdict", MODE, {**base, "ok": False, "reasons": [EXIT_PASSED]}, now=now)
-        return ProposalResult(None, EXIT_PASSED, selection_size=selection.searched)
+        prep.refusal = EXIT_PASSED
+        return prep
     state = build_state(db, user_id, now)
     # Paper is sized against the whole pot: the pot left over is a live-only cap (``pot_exceeded``).
-    sizing = size_position(chosen.ask, chosen.leverage_or_omega, sigma, LIMITS.pot)
-    earnings_known = news.earnings_in_window(db, symbol, now.date(), window_end.date())
-    earnings = bool(earnings_known)
+    prep.sizing = sizing = size_position(chosen.ask, chosen.leverage_or_omega, sigma, LIMITS.pot)
+    prep.earnings_known = news.earnings_in_window(db, symbol, now.date(), window_end.date())
     # A US stock whose earnings calendar cannot be read is not "no earnings" (``earnings_unknown``; the
     # owner's "event" accepts it). Other listings are not covered by the calendar (US only).
-    earnings_unknown = earnings_known is None and not underlying.is_index and underlying.exchange == "XNYS"
+    earnings_unknown = prep.earnings_known is None and not underlying.is_index and underlying.exchange == "XNYS"
     macro = tuple(cal.macro_events_between(now.astimezone(cal.BERLIN).date(), window_end.date())) \
         if underlying.is_index else ()
     proposal = Proposal(
         signal=signal, product_type=product_type, units=sizing.units, ask=chosen.ask, notional=sizing.notional,
         worst_case_loss=sizing.worst_case_loss, spread_pct=chosen.spread_pct, liquid=underlying.liquid,
         quote_age_s=chosen.quote_age_s, exchange=underlying.exchange, days_to_expiry=chosen.days_to_expiry,
-        earnings_in_window=earnings, earnings_unknown=earnings_unknown, event_flag=event_flag, macro_events=macro, is_index=underlying.is_index)
-    verdict = check_entry(state, proposal, now)
+        earnings_in_window=bool(prep.earnings_known), earnings_unknown=earnings_unknown, event_flag=event_flag,
+        macro_events=macro, is_index=underlying.is_index)
+    prep.verdict = check_entry(state, proposal, now)
+    if prep.verdict.paper_ok:
+        prep.headlines = news.headlines(db, cli, underlying, now - timedelta(hours=24), symbol)
+    return prep
+
+
+def record_proposal(db: Session, prep: PreparedProposal) -> ProposalResult:
+    """The write half of :func:`propose`: the ledger events and the position. Reads no market data."""
+    base, now, selection = prep.base, prep.now, prep.selection
+    if prep.refusal == "no_volatility":
+        append_event(db, "guard_verdict", MODE, {**base, "ok": False, "reasons": ["no_volatility"]}, now=now)
+        return ProposalResult(None, "no_volatility")
+    append_event(db, "candidates", MODE, {
+        **base, "searched": selection.searched, "sigma": str(prep.sigma),
+        "candidates": [c.as_json() for c in selection.candidates], "dropped": selection.dropped[:50]}, now=now)
+    if prep.refusal is not None:
+        append_event(db, "guard_verdict", MODE, {**base, "ok": False, "reasons": [prep.refusal]}, now=now)
+        return ProposalResult(None, prep.refusal, selection_size=selection.searched)
+    chosen, sizing, verdict = selection.chosen, prep.sizing, prep.verdict
+    assert chosen is not None and verdict is not None and prep.window_end is not None
     append_event(db, "guard_verdict", MODE, {
         **base, "isin": chosen.isin, "ok": verdict.ok, "paper_ok": verdict.paper_ok,
         "reasons": list(verdict.reasons), "units": sizing.units, "stop": str(sizing.stop_price)}, now=now)
-
     position = DeskPosition(
-        user_id=user_id, mode=MODE, cell=_cell(signal, product_type), signal=signal, product_type=product_type,
-        isin=chosen.isin, issuer=chosen.issuer, underlying_isin=underlying.isin, underlying_label=underlying.label,
-        direction=direction, liquid=underlying.liquid, leverage_or_omega=chosen.leverage_or_omega,
-        units=sizing.units, entry_price=chosen.ask, stop_price=sizing.stop_price, max_exit_at=window_end.astimezone(UTC),
-        spread_pct=chosen.spread_pct, status="proposed", would_take_live=False, prereg_hash=prereg.PREREG_HASH,
-        product_name=chosen.name[:120] or None, wkn=chosen.wkn, barrier_or_strike=chosen.barrier_or_strike,
-        expiry=chosen.expiry, created_at=now.astimezone(UTC))
+        user_id=prep.user_id, mode=MODE, cell=_cell(prep.signal, prep.product_type), signal=prep.signal,
+        product_type=prep.product_type, isin=chosen.isin, issuer=(chosen.issuer or "")[:32] or None,
+        underlying_isin=prep.underlying.isin, underlying_label=prep.underlying.label[:64],
+        direction=prep.direction, liquid=prep.underlying.liquid, leverage_or_omega=chosen.leverage_or_omega,
+        units=sizing.units, entry_price=chosen.ask, stop_price=sizing.stop_price,
+        max_exit_at=prep.window_end.astimezone(UTC), spread_pct=chosen.spread_pct, status="proposed",
+        would_take_live=False, prereg_hash=prereg.PREREG_HASH, product_name=chosen.name[:120] or None,
+        wkn=chosen.wkn, barrier_or_strike=chosen.barrier_or_strike, expiry=chosen.expiry,
+        created_at=now.astimezone(UTC))
     db.add(position)
     db.flush()
+    refs = _ref_payload(prep.underlying_ref, prep.barrier_ref)
     if not verdict.paper_ok:
         position.status = "rejected"
         append_event(db, "proposal", MODE, {**_proposal_payload(position, chosen, sizing, verdict), "rejected": True,
-                                            **_ref_payload(underlying_ref, barrier_ref)}, position.id, now=now)
+                                            **refs}, position.id, now=now)
         return ProposalResult(position, ",".join(verdict.paper_reasons))
     nonce = secrets.token_urlsafe(8)
-    headlines = news.headlines(db, cli, underlying, now - timedelta(hours=24), symbol)
-    now = clock() if clock else now  # the tap window starts when the proposal goes out
+    proposed_at = prep.clock() if prep.clock else now  # the tap window starts when the proposal goes out
+    earnings = "unknown" if prep.earnings_known is None else bool(prep.earnings_known)
     append_event(db, "proposal", MODE, {
-        **_proposal_payload(position, chosen, sizing, verdict), **_ref_payload(underlying_ref, barrier_ref),
-        "nonce": nonce, "proposed_at": now.isoformat(),
-        "news_seen": [h["title"] for h in headlines[:5]], "earnings_in_window": "unknown" if earnings_known is None else earnings}, position.id, now=now)
-    return ProposalResult(position, None, nonce, selection.searched, [h["title"] for h in headlines[:3]])
+        **_proposal_payload(position, chosen, sizing, verdict), **refs,
+        "nonce": nonce, "proposed_at": proposed_at.isoformat(),
+        "news_seen": [h["title"] for h in prep.headlines[:5]], "earnings_in_window": earnings}, position.id, now=now)
+    return ProposalResult(position, None, nonce, selection.searched, [h["title"] for h in prep.headlines[:3]])
 
 
 def _ref_payload(underlying_ref: Decimal | None, barrier_ref: Decimal | None) -> dict[str, Any]:
@@ -345,12 +403,15 @@ def _latest_proposal(db: Session, position_id: str) -> dict[str, Any] | None:
 
 
 def take(db: Session, position_id: str, nonce: str, cli: ScalableCli, now: datetime,
-         underlying: Underlying | None = None) -> TapResult:
+         underlying: Underlying | None = None, clock: Callable[[], datetime] | None = None) -> TapResult:
     """A tap on "Paper: take": single-use nonce, 180 s window, fill at a fresh quote.
 
     The position row is locked for the whole tap: two taps at once (Telegram and the page, or a
-    re-delivered callback) run one after the other, and the second sees the first's tap as used."""
+    re-delivered callback) run one after the other, and the second sees the first's tap as used.
+    *clock* (live taps: the wall clock) is read again once the lock is held: a tap that waited for the
+    monitor's tick is judged (tap window, quote age, fill time) when it runs, not when it arrived."""
     desk_write_lock(db)  # before the row lock: one lock order on every desk write path
+    now = clock() if clock else now
     position = db.get(DeskPosition, position_id, with_for_update=True, populate_existing=True)
     proposal = _latest_proposal(db, position_id) if position else None
     if position is None or proposal is None or proposal.get("nonce") != nonce:
@@ -515,26 +576,36 @@ def close_position(db: Session, position: DeskPosition, bid: Decimal, reason: st
     return True
 
 
+def _past_window(db: Session, p: DeskPosition, now: datetime) -> bool:
+    proposal = _latest_proposal(db, p.id)
+    return proposal is None or now - datetime.fromisoformat(proposal["proposed_at"]) > timedelta(
+        seconds=LIMITS.tap_window_s)
+
+
 def expire_proposals(db: Session, now: datetime) -> int:
-    """Expire proposals past the tap window. A proposal a tap is filling right now (its row locked by
-    ``take``) is skipped this tick, and the status changes only where it is still ``proposed``: a tap
-    that committed ``open`` (or a re-ask with a new window) is never overwritten with ``expired``."""
+    """Expire proposals past the tap window. The desk's write lock is taken only when one is due. A
+    proposal a tap is filling right now (its row locked by ``take``) is skipped this tick, and the status
+    changes only where it is still ``proposed``: a tap that committed ``open`` (or a re-ask with a new
+    window) is never overwritten with ``expired``."""
+    due = [p.id for p in db.query(DeskPosition).filter(DeskPosition.status == "proposed",
+                                                         DeskPosition.mode == MODE).all() if _past_window(db, p, now)]
+    if not due:
+        return 0
     count = 0
     desk_write_lock(db)  # before the row locks: one lock order on every desk write path
-    rows = db.query(DeskPosition).filter(DeskPosition.status == "proposed", DeskPosition.mode == MODE) \
-        .with_for_update(skip_locked=True).all()
+    rows = db.query(DeskPosition).filter(DeskPosition.id.in_(due), DeskPosition.status == "proposed") \
+        .with_for_update(skip_locked=True).populate_existing().all()
     for p in rows:
-        proposal = _latest_proposal(db, p.id)
-        if proposal is None or now - datetime.fromisoformat(proposal["proposed_at"]) > timedelta(
-                seconds=LIMITS.tap_window_s):
-            changed = db.query(DeskPosition).filter(DeskPosition.id == p.id, DeskPosition.status == "proposed") \
-                .update({DeskPosition.status: "expired"}, synchronize_session=False)
-            if changed != 1:
-                db.refresh(p)
-                continue
-            p.status = "expired"
-            append_event(db, "expired", MODE, {"reason": "no_tap"}, p.id, now=now)
-            count += 1
+        if not _past_window(db, p, now):  # re-asked while we looked
+            continue
+        changed = db.query(DeskPosition).filter(DeskPosition.id == p.id, DeskPosition.status == "proposed") \
+            .update({DeskPosition.status: "expired"}, synchronize_session=False)
+        if changed != 1:
+            db.refresh(p)
+            continue
+        p.status = "expired"
+        append_event(db, "expired", MODE, {"reason": "no_tap"}, p.id, now=now)
+        count += 1
     return count
 
 
@@ -543,8 +614,12 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
     """Quote every open position once and apply ``check_exit``. Returns the positions closed this tick.
 
     An outdated wrapper propagates: no position is judged on reads that were never allowed. Any other
-    failed quote counts as no quote, and its code goes to *errors* (shown as the desk's last error)."""
+    failed quote counts as no quote, and its code goes to *errors* (shown as the desk's last error).
+
+    Every read first, then the closes: a close takes the desk's write lock until the tick commits, and
+    the owner's taps and closes must not wait behind the other positions' quotes."""
     closed: list[tuple[DeskPosition, str]] = []
+    exits: list[tuple[DeskPosition, Decimal, str, Decimal | None]] = []
     halted = is_halted(db)
     rows = db.query(DeskPosition).filter(DeskPosition.status == "open", DeskPosition.mode == MODE,
                                          DeskPosition.product_type != "cfd").all()  # CFDs: cfd.manage
@@ -566,8 +641,7 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
         if not bid:  # no quote, or a zero bid: a knock-out past its barrier is worth nothing
             level = _knocked_out_at(db, cli, p, u, now)
             if level is not None:
-                if close_position(db, p, Decimal(0), "knock_out", now, level):
-                    closed.append((p, "knock_out"))
+                exits.append((p, Decimal(0), "knock_out", level))
                 continue
         reason = check_exit(p, bid, now, halted=halted)
         if reason is None:
@@ -575,7 +649,9 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
         exit_bid = bid if bid is not None else Decimal(p.last_bid or 0)
         if exit_bid <= 0:
             continue
-        if close_position(db, p, exit_bid, reason, now, underlying_exit_level(db, cli, u, now)):
+        exits.append((p, exit_bid, reason, underlying_exit_level(db, cli, u, now)))
+    for p, price, reason, level in exits:
+        if close_position(db, p, price, reason, now, level):
             closed.append((p, reason))
     return closed
 
@@ -634,6 +710,8 @@ def reference_path(db: Session, cli: ScalableCli, u: Underlying, since: datetime
                 return []
             out: list[Decimal] = []
             for bar in provider.get_intraday_bars(u.alpaca_symbol, "1Min", since, now):
+                if not _regular_us_session(bar["t"]):
+                    continue  # SPY's pre- and after-market prints: the index (the barrier's level) is not set then
                 fields = (bar.get("c"),) if closes else (bar.get("l"), bar.get("h"))
                 out += [Decimal(v) for v in fields if v is not None]
             return out
@@ -643,6 +721,12 @@ def reference_path(db: Session, cli: ScalableCli, u: Underlying, since: datetime
     except (ScalableError, ValueError, KeyError, TypeError, ArithmeticError, httpx.HTTPError) as exc:
         logger.info("desk underlying path read failed: %s", type(exc).__name__)
         return []
+
+
+def _regular_us_session(ts: datetime) -> bool:
+    """A bar starting inside NYSE's regular hours (09:30-16:00 New York), as ``compute_r1_us`` uses."""
+    local = ts.astimezone(cal.NEW_YORK)
+    return local.weekday() < 5 and time(9, 30) <= local.time() < time(16, 0)
 
 
 def _knocked_out_at(db: Session, cli: ScalableCli, p: DeskPosition, u: Underlying, now: datetime) -> Decimal | None:

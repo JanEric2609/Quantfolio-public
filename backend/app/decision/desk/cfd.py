@@ -205,8 +205,10 @@ def _stopped(position: DeskPosition, price: Decimal) -> bool:
 
 def manage(db: Session, cli: ScalableCli, now: datetime, underlyings: dict[str, Underlying],
            errors: list[str] | None = None) -> list[tuple[DeskPosition, str]]:
-    """Close open paper CFDs at the exit time, at the stop, on a halt, or when the price is lost."""
+    """Close open paper CFDs at the exit time, at the stop, on a halt, or when the price is lost.
+    Every price is read first, then the closes are written (as ``service.manage_open_positions``)."""
     closed: list[tuple[DeskPosition, str]] = []
+    exits: list[tuple[DeskPosition, Decimal, str]] = []
     halted = service.is_halted(db)
     rows = db.query(DeskPosition).filter(DeskPosition.status == "open", DeskPosition.mode == service.MODE,
                                          DeskPosition.product_type == "cfd").all()
@@ -232,6 +234,8 @@ def manage(db: Session, cli: ScalableCli, now: datetime, underlyings: dict[str, 
         px = price if price is not None and price > 0 else Decimal(p.last_bid or 0)
         if px <= 0:
             continue
+        exits.append((p, px, reason))
+    for p, px, reason in exits:
         if close(db, p, px, reason, now):
             closed.append((p, reason))
     return closed

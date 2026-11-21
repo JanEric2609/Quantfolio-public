@@ -295,7 +295,7 @@ export function DeskPage() {
                     {n.materiality == null ? "" : ` ${n.materiality}/3 ${n.direction ?? ""}`}
                     {n.relevance ? ` ${n.relevance}` : ""}{n.alert === "sent" ? " sent" : n.alert === "baseline" ? " (first read, not sent)" : ""}
                   </span>{" "}
-                  {n.url ? <a href={n.url} target="_blank" rel="noreferrer noopener" className="underline">{n.headline}</a> : n.headline}
+                  {n.url && /^https?:\/\//i.test(n.url) ? <a href={n.url} target="_blank" rel="noreferrer noopener" className="underline">{n.headline}</a> : n.headline}
                 </li>
               ))}
             </ul>

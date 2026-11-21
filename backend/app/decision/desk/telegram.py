@@ -82,7 +82,7 @@ def handle_take(db: Session, account: Any, chat_id: str, data: str) -> str:
     underlying = service.underlying_of(position) if position else None
     try:
         cli = scalable_service.make_cli(db)  # no Scalable session is a ScalableError too
-        result = service.take(db, parts[2], parts[3], cli, datetime.now(UTC), underlying)
+        result = service.take(db, parts[2], parts[3], cli, datetime.now(UTC), underlying, clock=_wall_clock)
     except ScalableError as exc:
         db.rollback()
         return f"Market read failed: {exc.code}"

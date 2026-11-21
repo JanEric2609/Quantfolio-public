@@ -44,9 +44,16 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
     if owner is None:
         return {"skipped": "no_admin"}
     prereg.register(db, now=now)
-    # Messages go out only after the tick's commit: a failed tick rolls back its closes, and an
-    # exit alert sent before that would be sent again when the next tick closes them for real.
+    # The tick commits after each stage and sends that stage's messages right after its commit: a
+    # message never goes out for a change that is later rolled back (it would be sent twice), and a
+    # later stage's failure cannot swallow the alerts of closes already saved. Each commit also ends
+    # the desk's write lock, so the owner's taps and closes wait at most one stage.
     outbox: list[str] = []
+
+    def send(texts: list[str]) -> None:
+        for text in texts:
+            telegram.alert(db, owner.id, text)
+
     try:
         cli = cli or scalable_service.make_cli(db)
         underlyings: dict[str, Underlying] = {u.isin: u for u in ALIASES.values()}
@@ -56,6 +63,7 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
         errors: list[str] = []
         # Stops, horizons and knock-outs first: they must not depend on the index rule's reads succeeding.
         expired = service.expire_proposals(db, now)
+        db.commit()
         closed = service.manage_open_positions(db, cli, now, underlyings, errors)
         for position, reason in closed:
             outbox.append(f"Desk paper exit ({reason}), net {position.net_eur} EUR:\n"
@@ -63,10 +71,18 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
         for position, reason in cfd.manage(db, cli, now, underlyings, errors):
             outbox.append(cfd.close_message(position, reason))
             closed.append((position, reason))
+        db.commit()
+        send(outbox)
         opened: list[str] = []
         fired = index_momentum.fire_due_signals(db, owner.id, cli, now, opened, errors, clock) \
             if not service.is_halted(db) else []
-        seen = _news_check(db, cli, now, underlyings, outbox) if now.minute % 5 == 0 else 0
+        db.commit()
+        if fired:
+            # Built after the commit: the CFD line reads index history, whose cache write commits, and a
+            # fill saved before a failed tick would never be announced (the signal counts as fired).
+            send(_announce_fills(db, now, opened))
+        news_out: list[str] = []
+        seen = _news_check(db, cli, now, underlyings, news_out) if now.minute % 5 == 0 else 0
         # A read that failed (an expired session, the sync holding the lock) no longer fails the tick; it
         # is logged once per new code and shown as the desk's last error. An outdated wrapper raises
         # (below); the flag is cleared only by a tick that made wrapper reads, not by an idle one.
@@ -79,12 +95,7 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
             fields["wrapper_outdated"] = False
         service.set_health(db, **fields)
         db.commit()
-        if fired:
-            # Built after the commit: the CFD line reads index history, whose cache write commits, and a
-            # fill saved before a failed tick would never be announced (the signal counts as fired).
-            outbox = _announce_fills(db, now, opened) + outbox
-        for text in outbox:
-            telegram.alert(db, owner.id, text)
+        send(news_out)
         return {"fired": fired, "expired": expired, "closed": len(closed), "news": seen}
     except market.WrapperOutdated:
         db.rollback()

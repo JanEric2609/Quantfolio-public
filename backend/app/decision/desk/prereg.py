@@ -1,4 +1,4 @@
-"""The pre-registered spec and its hash (ADR 0027). A change fails ``tests/test_desk_prereg.py``.
+"""The pre-registered spec and its hash (ADR 0027). A change fails ``tests/test_desk.py`` (the pinned hash).
 
 Only positions entered after ``registered_at`` count. Changing anything here needs
 an ADR amendment and a new registration, never an edit of an old one.

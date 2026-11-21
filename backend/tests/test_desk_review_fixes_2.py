@@ -176,7 +176,8 @@ def test_fill_messages_are_built_after_the_commit(monkeypatch):
     real_commit = db.commit
     monkeypatch.setattr(db, "commit", lambda: (log.append("commit"), real_commit())[1])
     jobs.monitor_tick(db, NOW, _sc().cli())
-    assert log[log.index("announce") - 1] == "commit" and log[-1] == "CFD: BUY"
+    i = log.index("announce")
+    assert log[i - 1] == "commit" and log[i + 1] == "CFD: BUY"  # built after the fire stage's commit, then sent
 
     log.clear()
 
@@ -201,7 +202,7 @@ def test_a_us_stock_keeps_its_exchange_in_taps_and_ticks(monkeypatch):
     db.commit()
     seen: list[str] = []
 
-    def take(db_, pid, nonce, cli, now, underlying=None):
+    def take(db_, pid, nonce, cli, now, underlying=None, clock=None):
         seen.append(underlying.exchange)
         return service.TapResult("unknown", message="x")
 

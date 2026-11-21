@@ -153,7 +153,7 @@ def take_proposal(db: Session, user_id: str, position_id: str, nonce: str) -> di
         raise DeskActionError(404, "Unknown proposal.")
     underlying = service.underlying_of(position)
     try:
-        result = service.take(db, position_id, nonce, _cli(db), datetime.now(UTC), underlying)
+        result = service.take(db, position_id, nonce, _cli(db), datetime.now(UTC), underlying, clock=_wall_clock)
     except ScalableError as exc:
         db.rollback()
         raise DeskActionError(502, f"Could not read the market: {exc.code}") from exc

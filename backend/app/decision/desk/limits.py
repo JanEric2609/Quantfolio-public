@@ -1,7 +1,7 @@
 """The desk's limits: code constants, never settings (ADR 0027).
 
 Nothing in the UI or API can raise one. Changing a value means a commit plus
-an ADR amendment, and ``tests/test_desk_limits.py`` pins every value. They are
+an ADR amendment, and ``tests/test_desk.py`` pins every value. They are
 also part of the pre-registered spec (``prereg.py``), so a change moves its hash.
 """
 from __future__ import annotations

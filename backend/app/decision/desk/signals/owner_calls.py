@@ -77,14 +77,16 @@ def start_idea(db: Session, user_id: str, idea: Idea, cli: ScalableCli, now: dat
         underlying = resolve_underlying(db, idea.target, user_id)
     except UnderlyingUnknown as exc:
         return IdeaOutcome([], None, str(exc))
-    results = [
-        service.propose(
+    # Every product's market reads first, then the writes: the first ledger write holds the desk's write
+    # lock until the commit, and "both" would otherwise hold it across the second product's search.
+    prepared = [
+        service.prepare_proposal(
             db, user_id, signal="owner_call", underlying=underlying, direction=idea.direction, product_type=pt,
             cli=cli, now=clock() if clock else now, event_flag=idea.event,
             horizon_days=HORIZON_DAYS[idea.horizon], clock=clock)
         for pt in idea.product_types
     ]
-    return IdeaOutcome(results, underlying)
+    return IdeaOutcome([service.record_proposal(db, prep) for prep in prepared], underlying)
 
 
 #: Why nothing was proposed, as the owner reads it (Telegram and the Desk page). Unlisted codes are
