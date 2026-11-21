@@ -6,6 +6,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.foundation.jobs import register_cron_job, register_interval_job
 
 logger = logging.getLogger(__name__)
@@ -116,12 +118,24 @@ def _announce_fills(db: Any, now: datetime, position_ids: list[str]) -> list[str
     rows = db.query(DeskPosition).filter(DeskPosition.id.in_(position_ids), DeskPosition.status == "open").all()
     rows.sort(key=lambda p: position_ids.index(p.id))  # the order they were opened in
     for p in rows:
-        if p.product_type == "cfd":
-            key = keys.get(p.underlying_isin)
-            if key:
-                out.append(cfd.open_message(db, p, key, now))
-        else:
-            out.append("Desk paper buy (index rule, no real order):\n" + instrument.describe(p))
+        try:
+            if p.product_type == "cfd":
+                key = keys.get(p.underlying_isin)
+                if key:
+                    out.append(cfd.open_message(db, p, key, now))
+            else:
+                out.append("Desk paper buy (index rule, no real order):\n" + instrument.describe(p))
+        except (SQLAlchemyError, ValueError, KeyError, TypeError, ArithmeticError, OSError) as exc:
+            # One message that cannot be built must not stop the others (exits, CFD closes) going out.
+            db.rollback()
+            logger.warning("desk fill message failed: %s", type(exc).__name__)
+            if p.product_type == "cfd":  # the owner acts on this one by hand: side and market are a must
+                side = "BUY" if p.direction == "long" else "SELL"
+                out.append(f"CFD signal (manual, Trading 212): {side} {p.product_name or p.underlying_label} now. "
+                           "Size and stop: see the Desk page.")
+            else:
+                out.append(f"Desk paper {p.product_type} opened on {p.underlying_label} ({p.direction}); details on "
+                           "the Desk page.")
     return out
 
 

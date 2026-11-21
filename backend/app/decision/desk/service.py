@@ -77,8 +77,12 @@ def set_health(db: Session, **fields: Any) -> None:
 
 
 def set_stream_health(db: Session, state: str, at: datetime) -> None:
-    """The news stream thread's state, in its own key."""
-    upsert_public_settings(db, {STREAM_KEY: {"news_stream": state, "news_stream_at": at.isoformat()}})
+    """The news stream thread's state, in its own key. ``news_stream_at`` is when the state began: a
+    reconnect loop repeating the same failure keeps it, so "down for 15 minutes" can be seen."""
+    value = get_setting_row(db, STREAM_KEY)
+    old = value if isinstance(value, dict) else {}
+    since = old.get("news_stream_at") if old.get("news_stream") == state and old.get("news_stream_at") else at.isoformat()
+    upsert_public_settings(db, {STREAM_KEY: {"news_stream": state, "news_stream_at": since}})
 
 
 # -- live rehearsal: what the live limits would have said ---------------------------
@@ -280,7 +284,7 @@ def propose(
         user_id=user_id, mode=MODE, cell=_cell(signal, product_type), signal=signal, product_type=product_type,
         isin=chosen.isin, issuer=chosen.issuer, underlying_isin=underlying.isin, underlying_label=underlying.label,
         direction=direction, liquid=underlying.liquid, leverage_or_omega=chosen.leverage_or_omega,
-        units=sizing.units, entry_price=chosen.ask, stop_price=sizing.stop_price, max_exit_at=window_end,
+        units=sizing.units, entry_price=chosen.ask, stop_price=sizing.stop_price, max_exit_at=window_end.astimezone(UTC),
         spread_pct=chosen.spread_pct, status="proposed", would_take_live=False, prereg_hash=prereg.PREREG_HASH,
         product_name=chosen.name[:120] or None, wkn=chosen.wkn, barrier_or_strike=chosen.barrier_or_strike,
         expiry=chosen.expiry, created_at=now.astimezone(UTC))
@@ -338,8 +342,11 @@ def _latest_proposal(db: Session, position_id: str) -> dict[str, Any] | None:
 
 def take(db: Session, position_id: str, nonce: str, cli: ScalableCli, now: datetime,
          underlying: Underlying | None = None) -> TapResult:
-    """A tap on "Paper: take": single-use nonce, 180 s window, fill at a fresh quote."""
-    position = db.get(DeskPosition, position_id)
+    """A tap on "Paper: take": single-use nonce, 180 s window, fill at a fresh quote.
+
+    The position row is locked for the whole tap: two taps at once (Telegram and the page, or a
+    re-delivered callback) run one after the other, and the second sees the first's tap as used."""
+    position = db.get(DeskPosition, position_id, with_for_update=True, populate_existing=True)
     proposal = _latest_proposal(db, position_id) if position else None
     if position is None or proposal is None or proposal.get("nonce") != nonce:
         append_event(db, "tap", MODE, {"result": "unknown", "position_id": position_id}, now=now)
@@ -437,7 +444,7 @@ def open_position(db: Session, position: DeskPosition, quote: market.Quote, now:
     position.status = "open"
     position.would_take_live = verdict.ok
     if position.max_exit_at is None:
-        position.max_exit_at = cal.max_exit_at(now)
+        position.max_exit_at = cal.max_exit_at(now).astimezone(UTC)
     if underlying is not None and cli is not None:
         position.underlying_entry = underlying_price(db, cli, underlying, now=now)
     barrier_ref = (_latest_proposal(db, position.id) or {}).get("barrier_ref")  # anchored at the proposal
@@ -465,8 +472,23 @@ def open_directly(db: Session, position: DeskPosition, cli: ScalableCli, now: da
 # -- closing -----------------------------------------------------------------------
 
 
+def claim_open(db: Session, position: DeskPosition) -> bool:
+    """Take the position out of ``open`` with a conditional UPDATE: of two closes at once (the monitor's
+    stop and the owner's Close), the second waits for the first's row lock and then changes no row.
+    ``False``: someone else closed it; the in-memory object is refreshed."""
+    changed = db.query(DeskPosition).filter(DeskPosition.id == position.id, DeskPosition.status == "open") \
+        .update({DeskPosition.status: "closed"}, synchronize_session=False)
+    if changed != 1:
+        db.refresh(position)
+        return False
+    return True
+
+
 def close_position(db: Session, position: DeskPosition, bid: Decimal, reason: str, now: datetime,
-                   underlying_exit: Decimal | None = None) -> None:
+                   underlying_exit: Decimal | None = None) -> bool:
+    """Close at *bid*. ``False`` when the position was no longer open (closed concurrently)."""
+    if not claim_open(db, position):
+        return False
     units = position.units or 0
     entry = Decimal(position.entry_price or 0)
     fee = LIMITS.fee_per_order
@@ -480,6 +502,7 @@ def close_position(db: Session, position: DeskPosition, bid: Decimal, reason: st
         "reason": reason, "price": str(bid), "units": units, "fee": str(fee), "net_eur": str(position.net_eur),
         "underlying_move": None if position.underlying_move is None else str(position.underlying_move)},
         position.id, now=now)
+    return True
 
 
 def expire_proposals(db: Session, now: datetime) -> int:
@@ -522,8 +545,8 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
         if not bid:  # no quote, or a zero bid: a knock-out past its barrier is worth nothing
             level = _knocked_out_at(db, cli, p, u, now)
             if level is not None:
-                close_position(db, p, Decimal(0), "knock_out", now, level)
-                closed.append((p, "knock_out"))
+                if close_position(db, p, Decimal(0), "knock_out", now, level):
+                    closed.append((p, "knock_out"))
                 continue
         reason = check_exit(p, bid, now, halted=halted)
         if reason is None:
@@ -531,8 +554,8 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
         exit_bid = bid if bid is not None else Decimal(p.last_bid or 0)
         if exit_bid <= 0:
             continue
-        close_position(db, p, exit_bid, reason, now, underlying_price(db, cli, u, now=now))
-        closed.append((p, reason))
+        if close_position(db, p, exit_bid, reason, now, underlying_price(db, cli, u, now=now)):
+            closed.append((p, reason))
     return closed
 
 
@@ -622,8 +645,6 @@ def owner_close(db: Session, position: DeskPosition, cli: ScalableCli, now: date
     if not (fresh and quote and quote.bid > 0):
         level = _knocked_out_at(db, cli, position, u, now)
         if level is not None:
-            close_position(db, position, Decimal(0), "knock_out", now, level)
-            return True
+            return close_position(db, position, Decimal(0), "knock_out", now, level)
         return False  # no fresh quote: the paper close would be at a stale price
-    close_position(db, position, quote.bid, "owner_close", now, underlying_price(db, cli, u, now=now))
-    return True
+    return close_position(db, position, quote.bid, "owner_close", now, underlying_price(db, cli, u, now=now))

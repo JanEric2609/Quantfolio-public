@@ -17,7 +17,7 @@ import logging
 import os
 import shutil
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Literal
 
 from sqlalchemy import func
@@ -149,6 +149,11 @@ def attention_items(db: Session, *, today: date | None = None) -> list[dict[str,
     return [asdict(item) for item in items]
 
 
+#: The desk's trading-window start (``decision/desk/limits.py``: 08:05 Berlin); foundation may not
+#: import the desk, so it is repeated here and pinned equal by a test.
+DESK_WINDOW_START = time(8, 5)
+
+
 def _desk_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
     """The paper derivatives desk (ADR 0027): halt, ledger chain, wrapper, quotes, external trades, calendar."""
     from datetime import timedelta
@@ -193,9 +198,13 @@ def _desk_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
         local = now.astimezone(ZoneInfo("Europe/Berlin"))
         if local.weekday() < 5 and 8 <= local.hour < 22:
             cutoff = now - timedelta(minutes=10)
+            # As the desk's quote_lost rule: counted from today's window start, so a position held
+            # overnight is not "without a quote" before the issuers' first morning quotes.
+            window_start = datetime.combine(local.date(), DESK_WINDOW_START, tzinfo=local.tzinfo)
             stale = [p for p in db.query(DeskPosition).filter(DeskPosition.status == "open").all()
-                     if p.last_quote_at is not None and (p.last_quote_at if p.last_quote_at.tzinfo
-                                                         else p.last_quote_at.replace(tzinfo=UTC)) < cutoff]
+                     if p.last_quote_at is not None and max(p.last_quote_at if p.last_quote_at.tzinfo
+                                                            else p.last_quote_at.replace(tzinfo=UTC),
+                                                            window_start) < cutoff]
             if stale:
                 items.append(AttentionItem("desk-quote-lost", "warning", "Open paper position without a fresh quote",
                                            f"{len(stale)} position(s) have had no quote for 10 minutes.", href,

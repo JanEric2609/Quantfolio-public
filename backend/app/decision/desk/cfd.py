@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import DeskPosition
@@ -61,6 +62,10 @@ def _index_level(db: Session, ticker: str) -> Decimal | None:
         rows = history(db, ticker, days=10)
         closes = [r.get("close") for r in rows if r.get("close") is not None]
         return Decimal(str(closes[-1])) if closes else None
+    except SQLAlchemyError as exc:  # the price cache's own write (e.g. a bar another job just stored)
+        db.rollback()
+        logger.info("desk cfd level read failed: %s", type(exc).__name__)
+        return None
     except (ValueError, KeyError, TypeError, OSError, ArithmeticError, httpx.HTTPError) as exc:
         logger.info("desk cfd level read failed: %s", type(exc).__name__)
         return None
@@ -72,6 +77,10 @@ def _eur_per_usd(db: Session, now: datetime) -> Decimal | None:
 
         rate, _src = eur_per_unit(db, "USD", now.date())
         return Decimal(str(rate)) if rate else None
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.info("desk cfd fx read failed: %s", type(exc).__name__)
+        return None
     except (ValueError, KeyError, TypeError, OSError, ArithmeticError, httpx.HTTPError) as exc:
         logger.info("desk cfd fx read failed: %s", type(exc).__name__)
         return None
@@ -143,8 +152,11 @@ def open_message(db: Session, position: DeskPosition, key: str, now: datetime) -
     return "\n".join(lines)
 
 
-def close(db: Session, position: DeskPosition, price: Decimal, reason: str, now: datetime) -> None:
-    """Paper exit at the reference price: spread and (USD) currency fee are the only costs."""
+def close(db: Session, position: DeskPosition, price: Decimal, reason: str, now: datetime) -> bool:
+    """Paper exit at the reference price: spread and (USD) currency fee are the only costs. ``False``
+    when the position was no longer open (closed concurrently, see ``service.claim_open``)."""
+    if not service.claim_open(db, position):
+        return False
     entry = Decimal(position.entry_price or 0)
     qty = Decimal(position.quantity or 0)
     exposure = entry * qty
@@ -163,6 +175,7 @@ def close(db: Session, position: DeskPosition, price: Decimal, reason: str, now:
         "reason": reason, "price": str(price), "product_type": "cfd", "gross_eur": str(gross.quantize(Decimal("0.0001"))),
         "spread_eur": str(spread_cost.quantize(Decimal("0.0001"))), "fx_fee_eur": str(position.exit_fee),
         "net_eur": str(position.net_eur), "underlying_move": str(move)}, position.id, now=now)
+    return True
 
 
 def owner_close(db: Session, position: DeskPosition, cli: ScalableCli, now: datetime,
@@ -174,8 +187,7 @@ def owner_close(db: Session, position: DeskPosition, cli: ScalableCli, now: date
     price = service.underlying_price(db, cli, service.underlying_of(position, underlying), now=now)
     if price is None or price <= 0:
         return False
-    close(db, position, price, "owner_close", now)
-    return True
+    return close(db, position, price, "owner_close", now)
 
 
 def close_any(db: Session, position: DeskPosition, cli: ScalableCli, now: datetime,
@@ -220,8 +232,8 @@ def manage(db: Session, cli: ScalableCli, now: datetime, underlyings: dict[str, 
         px = price if price is not None and price > 0 else Decimal(p.last_bid or 0)
         if px <= 0:
             continue
-        close(db, p, px, reason, now)
-        closed.append((p, reason))
+        if close(db, p, px, reason, now):
+            closed.append((p, reason))
     return closed
 
 

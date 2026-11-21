@@ -29,7 +29,7 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -154,8 +154,10 @@ class StreamRefused(RuntimeError):
     """Alpaca refused the stream (bad key, or another connection already holds it)."""
 
 
-async def alpaca_stream(key: str, secret: str) -> AsyncIterator[WireItem]:
-    """Yield news items from Alpaca's stream until the connection drops (the caller reconnects)."""
+async def alpaca_stream(key: str, secret: str, on_ready: Callable[[], None] | None = None) -> AsyncIterator[WireItem]:
+    """Yield news items from Alpaca's stream until the connection drops (the caller reconnects).
+
+    *on_ready* runs once the login is accepted and the subscription sent: only then is the stream up."""
     import websockets
 
     async with websockets.connect(ALPACA_NEWS_STREAM, ping_interval=20, ping_timeout=20,
@@ -168,6 +170,8 @@ async def alpaca_stream(key: str, secret: str) -> AsyncIterator[WireItem]:
             codes = [m.get("code") for m in auth if m.get("T") == "error"]
             raise StreamRefused(f"auth refused {codes}")
         await ws.send(json.dumps({"action": "subscribe", "news": ["*"]}))
+        if on_ready is not None:
+            on_ready()
         async for raw in ws:
             try:
                 batch = json.loads(raw)

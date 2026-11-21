@@ -77,8 +77,28 @@ def watchlist(db: Session, user_id: str) -> dict[str, str]:
         for sym in INDEX_SYMBOLS.get(key or "", ()):
             out[sym] = f"desk:{key}"
         if key is None and p.underlying_isin:
-            out[p.underlying_isin.upper()] = f"desk:{p.underlying_label or p.underlying_isin}"
+            isin = p.underlying_isin.upper()
+            why = f"desk:{p.underlying_label or p.underlying_isin}"
+            out[isin] = why
+            # Alpaca's items carry US tickers, not ISINs: a desk position on a stock needs its ticker too.
+            ticker = _us_ticker(db, isin, user_id)
+            if ticker:
+                out.setdefault(ticker, why)
     return out
+
+
+def _us_ticker(db: Session, isin: str, user_id: str) -> str | None:
+    """The US ticker Alpaca uses for *isin* (no venue suffix), or ``None``. A non-US ISIN only through
+    Trading 212's US line, never by stripping a suffix (``SHEL.AS`` is not ``SHEL``)."""
+    from app.foundation.broker_instruments import us_ticker_for_isin
+
+    from .underlyings import ticker_for_isin
+
+    if isin.startswith("US"):
+        ticker = ticker_for_isin(db, isin, user_id)
+        if ticker and "." not in ticker:
+            return ticker
+    return us_ticker_for_isin(db, isin)
 
 
 def relevance(item: news_wire.WireItem, watch: dict[str, str], ciks: dict[str, str] | None = None) -> str:
@@ -311,7 +331,7 @@ def poll_feeds(db: Session, user_id: str, now: datetime | None = None,
     new = {source for source, _ in batches} - set(read)
     if new:
         _mark_sources_read(db, {**read, **{source: now.astimezone(UTC).isoformat() for source in new}})
-    if now.astimezone(UTC).hour == 3 and now.minute == 0:
+    if _prune_due(db, now):
         prune(db, now)
     return counts
 
@@ -333,6 +353,21 @@ def _mark_sources_read(db: Session, read: dict[str, str]) -> None:
     upsert_public_settings(db, {READ_KEY: read})  # commits
 
 
+PRUNED_KEY = "desk_news_wire_pruned_json"
+
+
+def _prune_due(db: Session, now: datetime) -> bool:
+    """Once a day from 03:00 UTC: by a stored date, not by hitting one exact minute (a slow run, the
+    model rating a burst of items, can skip or delay the 03:00 tick)."""
+    from app.foundation.settings import get_setting_row
+
+    utc = now.astimezone(UTC)
+    if utc.hour < 3:
+        return False
+    last = get_setting_row(db, PRUNED_KEY)
+    return not (isinstance(last, dict) and last.get("date") == utc.date().isoformat())
+
+
 def prune(db: Session, now: datetime) -> None:
     """Drop items past the retention, but keep each source's newest row: an empty source reads as a
     first read (stored as baseline, nothing sent), and a quiet month must not make SEC's next 8-K one."""
@@ -344,7 +379,9 @@ def prune(db: Session, now: datetime) -> None:
             keep.append(newest[0])
     db.query(NewsWireItem).filter(NewsWireItem.received_at < now - RETENTION,
                                   NewsWireItem.id.notin_(keep)).delete(synchronize_session=False)
-    db.commit()
+    from app.foundation.settings import upsert_public_settings
+
+    upsert_public_settings(db, {PRUNED_KEY: {"date": now.astimezone(UTC).date().isoformat()}})  # commits
 
 
 # -- the Alpaca stream (one worker thread) -------------------------------------------------
@@ -391,8 +428,8 @@ async def _stream_once() -> str:
             return "no_key"
         watch, watch_at = watchlist(db, user_id), time.monotonic()
         db.commit()
-        _set_stream_health("connected")
-        async for item in news_wire.alpaca_stream(*creds):
+        # "connected" only once Alpaca accepted the login: a refused key must stay "refused".
+        async for item in news_wire.alpaca_stream(*creds, on_ready=lambda: _set_stream_health("connected")):
             if time.monotonic() - watch_at > WATCH_TTL_S:
                 watch, watch_at = watchlist(db, user_id), time.monotonic()
             try:
@@ -420,7 +457,8 @@ def _run_forever(stop: threading.Event) -> None:
             logger.warning("news wire: stream loop error: %s", type(exc).__name__)
             reason = "dropped"
 
-        _set_stream_health(reason)
+        if reason != "closed":  # a normal close reconnects at once; the stream was up until now
+            _set_stream_health(reason)
         wait = {"no_key": 300.0, "refused": 120.0}.get(reason, backoff)
         backoff = min(backoff * 2, 300.0) if reason == "dropped" else 5.0
         stop.wait(wait)

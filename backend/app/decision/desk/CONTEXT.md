@@ -40,6 +40,10 @@ every other context, with zero seeded exceptions.
 
 - Limits are never settings and never raised from the UI or API.
 - Every state change is a ledger event in the same transaction as the position update.
+- One fill and one exit per position: a tap locks the position row (`take`), and every close takes the
+  position out of `open` with a conditional UPDATE (`claim_open`), so of two closes at once only one is recorded.
+- The news stream's state (`desk_news_stream_json`) is "connected" only after Alpaca accepted the login, and its
+  `news_stream_at` is when the state began; a desk position on a US stock is watched by its ticker as well.
 - `external` positions (the owner's own app trades) are logged and scored separately, never in a pass-rule cell.
 - Phase 2 (real orders) is Proposed in ADR 0027 and not built.
 - A CFD is never automated (`would_take_live` is always False); Trading 212 stays read-only.
