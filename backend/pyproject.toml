@@ -19,6 +19,7 @@ dependencies = [
   "apscheduler>=3.10",
   "redis>=5.0",
   "httpx>=0.27",
+  "websockets>=13,<17",  # the news wire's Alpaca stream (ADR 0027 amendment 2026-11-20)
   "openai>=1.30",
   "anthropic>=0.35",
   "pgvector>=0.3",
@@ -420,4 +421,26 @@ source_modules = [
     "app.lab.alphacrafter",
 ]
 forbidden_modules = ["app.decision.verification.*"]
+allow_indirect_imports = true
+
+# ADR 0027: the guarded derivatives desk is decision-tier with real internal submodules.
+# Everyone else reads it through the package root. Zero seeded exceptions.
+[[tool.importlinter.contracts]]
+name = "Decision-loop internals are facade-only: desk"
+type = "forbidden"
+source_modules = [
+    "app.interface",
+    "app.worker",
+    "app.main",
+    "app.foundation",
+    "app.lab",
+    "app.decision.advisor",
+    "app.decision.discover",
+    "app.decision.graduation",
+    "app.decision.llm_portfolio",
+    "app.decision.portfolio_advisor",
+    "app.decision.recommendation_engine",
+    "app.decision.verification",
+]
+forbidden_modules = ["app.decision.desk.*"]
 allow_indirect_imports = true

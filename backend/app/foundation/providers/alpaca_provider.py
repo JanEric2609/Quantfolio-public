@@ -196,8 +196,62 @@ class AlpacaProvider(MarketDataProvider):
         return out
 
     _MULTI_BATCH = 100
+    news_url = "https://data.alpaca.markets/v1beta1/news"
 
-    def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def get_intraday_bars(
+        self, symbol: str, timeframe: str, start: datetime, end: datetime, *, feed: str = "iex",
+    ) -> list[dict[str, Any]]:
+        """Intraday bars (``30Min`` and so on) of a US symbol, oldest first, on the free IEX feed.
+
+        Raw prices: an intraday return needs no dividend adjustment. Each row is
+        ``{"t": datetime (UTC), "o", "h", "l", "c", "v"}`` with ``Decimal`` prices.
+        Raises ``ValueError`` on an HTTP error or when the provider is not configured.
+        """
+        if not self.enabled:
+            raise ValueError("Alpaca API key/secret is not configured.")
+        params: dict[str, Any] = {
+            "timeframe": timeframe, "adjustment": "raw", "feed": feed, "limit": 10000,
+            "start": start.astimezone(UTC).isoformat().replace("+00:00", "Z"),
+            "end": end.astimezone(UTC).isoformat().replace("+00:00", "Z"),
+        }
+        rows: list[dict[str, Any]] = []
+        for _page in range(20):
+            data = self._get(f"/stocks/{strip_exchange_suffix(symbol)}/bars", params=params)
+            for bar in data.get("bars") or []:
+                stamp = _parse_iso(bar.get("t")) if isinstance(bar, dict) else None
+                if stamp is None:
+                    continue
+                rows.append({"t": stamp, "o": _decimal(bar.get("o")), "h": _decimal(bar.get("h")),
+                             "l": _decimal(bar.get("l")), "c": _decimal(bar.get("c")), "v": _decimal(bar.get("v"))})
+            token = data.get("next_page_token")
+            if not token:
+                break
+            params["page_token"] = token
+        return sorted(rows, key=lambda r: r["t"])
+
+    def get_news(self, symbols: list[str], start: datetime, limit: int = 20) -> list[dict[str, Any]]:
+        """Headlines for US symbols since *start*: ``{"id", "headline", "created_at", "symbols"}``.
+
+        Polled over REST (no WebSocket in Phase 1). Raises ``ValueError`` on an HTTP error.
+        """
+        if not self.enabled:
+            raise ValueError("Alpaca API key/secret is not configured.")
+        plain = [strip_exchange_suffix(s) for s in symbols if is_us_listing(s)]
+        if not plain:
+            return []
+        params = {
+            "symbols": ",".join(sorted(set(plain))), "limit": max(1, min(limit, 50)), "sort": "desc",
+            "start": start.astimezone(UTC).isoformat().replace("+00:00", "Z"),
+        }
+        data = self._get("", params=params, base=self.news_url)
+        out: list[dict[str, Any]] = []
+        for item in data.get("news") or []:
+            if isinstance(item, dict) and item.get("headline"):
+                out.append({"id": str(item.get("id")), "headline": str(item["headline"])[:300],
+                            "created_at": str(item.get("created_at") or ""), "symbols": list(item.get("symbols") or [])})
+        return out
+
+    def _get(self, path: str, params: dict[str, Any] | None = None, *, base: str | None = None) -> dict[str, Any]:
         # `self.enabled` is only true when both api_key and api_secret are set,
         # so headers will always carry non-empty strings here.
         headers = cast(
@@ -208,7 +262,7 @@ class AlpacaProvider(MarketDataProvider):
             },
         )
         with httpx.Client(timeout=15) as client:
-            response = client.get(f"{self.base_url}{path}", headers=headers, params=params or {})
+            response = client.get(f"{base or self.base_url}{path}", headers=headers, params=params or {})
             if response.status_code >= 400:
                 # Never re-raise httpx's default error: even though the API
                 # key/secret travel via headers (not the URL) here, keep the

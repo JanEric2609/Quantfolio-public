@@ -32,6 +32,7 @@ from app.lab.alphacrafter.jobs import (
 from app.lab.forward_lab.jobs import register_forward_lab_job, register_news_tone_job
 from app.decision.crash_guard import register_crash_guard_job
 from app.decision.graduation.jobs import register_ladder_evidence_job
+from app.decision.desk import register_desk_monitor_job, register_desk_reconcile_job, register_news_wire_job
 from app.decision.monthly_plan_store import register_monthly_plan_snapshot_job
 from app.decision.trade_check import register_trade_check_job
 from app.decision.discover.jobs import (
@@ -164,6 +165,9 @@ EXPECTED_REGISTRATIONS = {
     "bar_catch_up": {"trigger": "cron", "day_of_week": "mon-sat", "hour": "6-12", "minute": 40},
     "crash_guard_daily": {"trigger": "cron", "hour": 7, "minute": 0},
     "ladder_evidence": {"trigger": "cron", "hour": 6, "minute": 45},
+    "desk_monitor": {"trigger": "interval", "minutes": 1},
+    "desk_reconcile": {"trigger": "cron", "minute": 17},
+    "desk_news_wire": {"trigger": "interval", "minutes": 1},
     "monthly_plan_snapshot": {"trigger": "cron", "hour": 7, "minute": 10},
     "trade_check_daily": {"trigger": "cron", "hour": 22, "minute": 30},
     "bar_repull_weekly": {"trigger": "cron", "day_of_week": "sun", "hour": 5, "minute": 0},
@@ -253,6 +257,9 @@ def _drive_all_registrations(sched):
     returns["bar_catch_up"] = register_bar_catch_up_job(sched)
     returns["crash_guard_daily"] = register_crash_guard_job(sched)
     returns["ladder_evidence"] = register_ladder_evidence_job(sched)
+    returns["desk_monitor"] = register_desk_monitor_job(sched)
+    returns["desk_reconcile"] = register_desk_reconcile_job(sched)
+    returns["desk_news_wire"] = register_news_wire_job(sched)
     returns["monthly_plan_snapshot"] = register_monthly_plan_snapshot_job(sched)
     returns["trade_check_daily"] = register_trade_check_job(sched)
     returns["bar_repull_weekly"] = register_bar_repull_job(sched)
@@ -385,11 +392,12 @@ EXPECTED_SCHEDULER_DEFAULTS = {"misfire_grace_time": 300, "coalesce": True, "max
 
 def test_scheduler_defaults_snapshot():
     assert jobs.SCHEDULER_JOB_DEFAULTS == EXPECTED_SCHEDULER_DEFAULTS
-    assert jobs.WORKER_THREAD_POOL_SIZE == 20
-    # A tracked job holds two connections (session + advisory lock).
+    assert jobs.WORKER_THREAD_POOL_SIZE == 21
+    # A tracked job holds two connections (session + advisory lock); the desk's news-stream thread
+    # holds up to two more (its session and the health write).
     from app.foundation.core.db import pool_capacity
 
-    assert (pool_capacity("postgresql://u@h/d") or 0) >= 2 * jobs.WORKER_THREAD_POOL_SIZE
+    assert (pool_capacity("postgresql://u@h/d") or 0) >= 2 * jobs.WORKER_THREAD_POOL_SIZE + 2
     # A caller mutating the returned dict must not change the shared defaults.
     jobs.scheduler_job_defaults()["misfire_grace_time"] = 1
     assert jobs.SCHEDULER_JOB_DEFAULTS == EXPECTED_SCHEDULER_DEFAULTS

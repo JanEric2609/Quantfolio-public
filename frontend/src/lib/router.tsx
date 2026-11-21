@@ -75,6 +75,7 @@ export const appChildren: RouteObject[] = [
   ] },
   { path: "watchlist", element: <Navigate to="/research/watchlist" replace /> },
   { path: "transactions", element: <Navigate to="/portfolio/activity" replace /> },
+  { path: "desk", ...lazyNamed(() => import("../pages/DeskPage"), "DeskPage"), handle: { title: "Derivatives desk" } },
   { path: "tax", ...lazyRoute(() => import("../pages/tax/TaxCockpitLayout")), handle: { title: "Tax Cockpit" }, children: [
     { index: true, element: <Navigate to="overview" replace /> },
     { path: "overview", ...lazyNamed(() => import("../pages/tax/OverviewTab"), "OverviewTab"), handle: { title: "Tax Cockpit — Overview" } },

@@ -1,9 +1,10 @@
 import logging
+import threading
+from collections import deque
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from sqlalchemy.orm import Session
-from starlette.concurrency import run_in_threadpool
 
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import User
@@ -51,9 +52,39 @@ def send_test_message(db: Session = Depends(get_db), user: User = Depends(curren
     return {"sent": False, "message": "Telegram did not accept the message. Test the bot token above."}
 
 
+#: Update ids this process handled recently: Telegram re-delivers an update whose webhook answered late.
+_SEEN_UPDATES: deque[int] = deque(maxlen=500)
+_SEEN_LOCK = threading.Lock()
+
+
+def _first_delivery(update: dict[str, Any]) -> bool:
+    update_id = update.get("update_id")
+    if not isinstance(update_id, int):
+        return True
+    with _SEEN_LOCK:
+        if update_id in _SEEN_UPDATES:
+            return False
+        _SEEN_UPDATES.append(update_id)
+    return True
+
+
+def _handle_after_response(bind: Any, update: dict[str, Any]) -> None:
+    """Run after the 200 went out: a desk /idea makes about twenty market reads, longer than Telegram
+    waits before it re-delivers the update (and the idea would be proposed twice). Its own session on
+    the request's engine: the request's session is closed by then."""
+    db = Session(bind=bind, autoflush=False)
+    try:
+        handle_update(db, update)
+    except Exception as exc:  # noqa: BLE001 - a webhook must never fail; the error is logged
+        logger.error("Telegram webhook handling failed: %s", exc, exc_info=True)
+    finally:
+        db.close()
+
+
 @router.post("/webhook")
 async def telegram_webhook(
     request: Request,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
 ) -> dict[str, bool]:
@@ -61,8 +92,6 @@ async def telegram_webhook(
         raise HTTPException(status_code=403, detail="Invalid webhook secret")
 
     update = await request.json()
-    try:
-        await run_in_threadpool(handle_update, db, update)
-    except Exception as exc:
-        logger.error("Telegram webhook handling failed: %s", exc, exc_info=True)
+    if isinstance(update, dict) and _first_delivery(update):
+        background.add_task(_handle_after_response, db.get_bind(), update)
     return {"ok": True}

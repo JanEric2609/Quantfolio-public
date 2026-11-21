@@ -17,7 +17,7 @@ import logging
 import os
 import shutil
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Literal
 
 from sqlalchemy import func
@@ -74,6 +74,14 @@ class AttentionItem:
 def _page(group: str, connection: str | None = None) -> str:
     href = f"/settings/{PAGE_PATHS[group]}"
     return f"{href}?connection={connection}" if connection else href
+
+
+def _payload(raw: str | None) -> dict[str, Any]:
+    try:
+        value = json.loads(raw or "{}")
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 def _parse_dt(value: Any) -> datetime | None:
@@ -135,9 +143,87 @@ def attention_items(db: Session, *, today: date | None = None) -> list[dict[str,
     _error_items(db, now, items)
     _telegram_items(db, items)
     _derivative_items(db, clock, items)
+    _desk_items(db, now, items)
 
     items.sort(key=lambda item: _SEVERITY_ORDER[item.severity])
     return [asdict(item) for item in items]
+
+
+#: The desk's trading-window start (``decision/desk/limits.py``: 08:05 Berlin); foundation may not
+#: import the desk, so it is repeated here and pinned equal by a test.
+DESK_WINDOW_START = time(8, 5)
+
+
+def _desk_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
+    """The paper derivatives desk (ADR 0027): halt, ledger chain, wrapper, quotes, external trades, calendar."""
+    from datetime import timedelta
+    from zoneinfo import ZoneInfo
+
+    from app.foundation.desk_chain import verify_chain_cached
+    from app.foundation.models.entities import DeskEvent, DeskPosition
+    from app.foundation.settings import get_setting_row
+
+    try:
+        halt = get_setting_row(db, "desk_halt_json") or {}
+        health = get_setting_row(db, "desk_health_json") or {}
+        href = "/desk"
+        if isinstance(halt, dict) and halt.get("halted"):
+            items.append(AttentionItem("desk-halted", "warning", "Desk halted",
+                                       f"Reason: {halt.get('reason') or 'none given'}. Resume it on the Desk page.",
+                                       href, "Open the desk"))
+        if db.query(DeskEvent.id).first() is not None:
+            ok, bad = verify_chain_cached(db)
+            if not ok:
+                items.append(AttentionItem("desk-chain-broken", "error", "Desk ledger chain is broken",
+                                           f"The hash chain fails at event {bad}: a row was changed or removed.",
+                                           href, "Open the desk"))
+        if isinstance(health, dict) and health.get("wrapper_outdated"):
+            items.append(AttentionItem("desk-wrapper", "warning", "Scalable wrapper lacks the desk reads",
+                                       "Run infra/scalable/install.sh as root so the wrapper allows quote, "
+                                       "derivatives search, chart and security-news.", href, "Open the desk"))
+        if isinstance(health, dict) and health.get("last_error") and not health.get("wrapper_outdated"):
+            items.append(AttentionItem("desk-read-failing", "warning", "Desk market reads are failing",
+                                       f"The last read ended with '{health['last_error']}'. The desk retries every "
+                                       "minute and still checks exits; an expired Scalable login needs a new login "
+                                       "in Banks & brokers.", href, "Open the desk"))
+        # Without an Alpaca key the stream never starts ("no_key"): that is the Alpaca connection's item.
+        stream = get_setting_row(db, "desk_news_stream_json") or {}
+        stream_at = _parse_dt(stream.get("news_stream_at")) if isinstance(stream, dict) else None
+        if (isinstance(stream, dict) and stream.get("news_stream") not in (None, "connected", "no_key")
+                and stream_at is not None and now - stream_at > timedelta(minutes=15)):
+            items.append(AttentionItem("desk-news-stream", "warning", "Live news stream is down",
+                                       f"Alpaca's news stream has been '{stream['news_stream']}' since "
+                                       f"{stream_at.astimezone(ZoneInfo('Europe/Berlin')):%H:%M} Berlin. It reconnects "
+                                       "on its own; check the Alpaca key if this stays.", href, "Open the desk"))
+        local = now.astimezone(ZoneInfo("Europe/Berlin"))
+        if local.weekday() < 5 and 8 <= local.hour < 22:
+            cutoff = now - timedelta(minutes=10)
+            # As the desk's quote_lost rule: counted from today's window start, so a position held
+            # overnight is not "without a quote" before the issuers' first morning quotes.
+            window_start = datetime.combine(local.date(), DESK_WINDOW_START, tzinfo=local.tzinfo)
+            stale = [p for p in db.query(DeskPosition).filter(DeskPosition.status == "open").all()
+                     if p.last_quote_at is not None and max(p.last_quote_at if p.last_quote_at.tzinfo
+                                                            else p.last_quote_at.replace(tzinfo=UTC),
+                                                            window_start) < cutoff]
+            if stale:
+                items.append(AttentionItem("desk-quote-lost", "warning", "Open paper position without a fresh quote",
+                                           f"{len(stale)} position(s) have had no quote for 10 minutes.", href,
+                                           "Open the desk"))
+        # By the trade's own date, not when it was logged: the first reconcile logs every past trade at once.
+        week_ago = (now - timedelta(days=7)).date().isoformat()
+        recent = sum(1 for (payload,) in db.query(DeskEvent.payload).filter(DeskEvent.kind == "external_trade")
+                     if str(_payload(payload).get("date") or "") >= week_ago)
+        if recent:
+            items.append(AttentionItem("desk-external", "info", "Derivative trades made outside the desk",
+                                       f"{recent} real trade(s) in the last 7 days were logged and are scored "
+                                       "separately.", href, "Open the desk"))
+        years = health.get("macro_years") if isinstance(health, dict) else None
+        if isinstance(years, list) and now.month == 12 and (now.year + 1) not in years:
+            items.append(AttentionItem("desk-macro-calendar", "warning", "Desk macro calendar is missing next year",
+                                       f"Add {now.year + 1} FOMC, ECB, CPI and payrolls dates to "
+                                       "MACRO_EVENTS_BY_YEAR in decision/desk/calendar.py.", href, "Open the desk"))
+    except Exception:  # noqa: BLE001 - the list must render without this source
+        logger.debug("control_center: desk items failed", exc_info=True)
 
 
 def _derivative_items(db: Session, clock: date, items: list[AttentionItem]) -> None:

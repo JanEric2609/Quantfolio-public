@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 import logging
+import threading
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
@@ -182,6 +183,24 @@ def _fit_threads_to_db_pool(database_url: str) -> None:
     to_thread.current_default_thread_limiter().total_tokens = max(4, capacity - _POOL_HEADROOM)
 
 
+def _resync_telegram_webhook() -> None:
+    """Webhook mode: register the webhook again at startup. Telegram keeps the ``allowed_updates`` of the
+    last ``setWebhook``; a deploy that adds an update type (the desk's ``callback_query`` for "Paper:
+    take") would otherwise never receive it until the owner re-saved the Telegram settings. A thread:
+    the Bot API call must not hold up startup."""
+    from app.foundation.telegram_updates import sync_webhook, telegram_mode
+
+    try:
+        db = SessionLocal()
+        try:
+            if telegram_mode(db) == "webhook":
+                sync_webhook(db)
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001 - a startup convenience; the settings page can always re-register
+        logger.warning("Telegram webhook re-registration at startup skipped", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     settings = get_settings()
@@ -190,6 +209,10 @@ async def lifespan(_app: FastAPI):
     if settings.app_env == "local" or settings.database_url.startswith("sqlite"):
         create_all()
     _fit_threads_to_db_pool(settings.database_url)
+    from app.decision.desk import register_desk_telegram
+
+    register_desk_telegram()  # webhook mode: the same /idea, /desk, /stop, /close and take button as polling
+    threading.Thread(target=_resync_telegram_webhook, name="telegram-webhook-sync", daemon=True).start()
 
     try:
         _announce_first_run_setup()

@@ -30,6 +30,7 @@ from app.decision.discover.jobs import (
 from app.decision.discover.orchestrator import reap_stale_discover_runs
 from app.decision.crash_guard import register_crash_guard_job
 from app.decision.graduation.jobs import register_ladder_evidence_job
+from app.decision.desk import register_desk_monitor_job, register_desk_reconcile_job, register_news_wire_job
 from app.decision.monthly_plan_store import register_monthly_plan_snapshot_job
 from app.decision.trade_check import register_trade_check_job
 from app.decision.verification.jobs import (
@@ -1227,6 +1228,10 @@ def build_scheduler() -> Any:
     register_daily_position_snapshot_job(scheduler)
     register_crash_guard_job(scheduler)
     register_ladder_evidence_job(scheduler)
+    # Paper only (ADR 0027): quotes and ledger rows, no order path.
+    register_desk_monitor_job(scheduler)
+    register_desk_reconcile_job(scheduler)
+    register_news_wire_job(scheduler)
     register_monthly_plan_snapshot_job(scheduler)
     register_trade_check_job(scheduler)
     register_snapshot_paper_portfolios_job(scheduler)
@@ -1268,7 +1273,11 @@ def main() -> None:
     from app.foundation.core.config import get_settings
     from app.foundation.core.logging_setup import configure_logging
 
+    from app.decision.desk import register_desk_telegram, start_news_stream
+
     configure_logging(get_settings().log_level)
+    register_desk_telegram()
+    start_news_stream()  # the Alpaca news stream: one connection per key, so only the worker opens it
     build_scheduler().start()
 
 

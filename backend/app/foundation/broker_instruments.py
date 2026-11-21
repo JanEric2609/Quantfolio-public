@@ -95,6 +95,16 @@ def isin_for_us_ticker(db: Session, symbol: str) -> str | None:
     return row[0] if row else None
 
 
+def us_ticker_for_isin(db: Session, isin: str) -> str | None:
+    """The US symbol (no venue suffix) of *isin* from Trading 212's list, if it has a US line."""
+    for (ticker,) in db.query(BrokerInstrument.ticker).filter(
+            BrokerInstrument.source == SOURCE, BrokerInstrument.isin == isin.strip().upper()):
+        match = _US_TICKER.match(ticker or "")
+        if match:
+            return match.group(1)
+    return None
+
+
 class Trading212Listings:
     """Per-ISIN answers from the stored list, each ISIN queried once."""
 
