@@ -122,17 +122,19 @@ deploy, so migration 0157 itself gains the new columns and table; nothing regist
    22:00-07:00 Berlin pass only a 3; at most 12 messages an hour. **Alert-only**: nothing reads the table
    to open, close or block a position.
 4. **The replay** (`lab/desk_replay.py`, `scripts/desk_replay.py`): the frozen rule on SPY and QQQ 30-minute
-   SIP bars from 2016-02 to 2026-11 (free history on the stored key), desk days only (no Fridays,
-   pre-holidays or half days). Research, outside the pass test, not a trial:
+   SIP bars from 2016-02 to 2026-11 (free history on the stored key), desk days only: the live rule's skip
+   days (a Xetra trading day followed by a Xetra holiday or weekend, when the desk is flat by 21:30; re-run
+   2026-11-21 so the replay skips exactly what the live rule skips; macro days are not replayed). Research,
+   outside the pass test, not a trial:
 
    | | SPY | QQQ |
    |---|---|---|
-   | Trades | 2,122 | 2,123 |
-   | Gross last-half-hour return per trade | -0.74 bp (t -1.16), hit 48 % | -0.20 bp (t -0.27), hit 50 % |
+   | Trades | 2,140 | 2,140 |
+   | Gross last-half-hour return per trade | -0.70 bp (t -1.10), hit 48 % | -0.25 bp (t -0.34), hit 49 % |
    | Knock-out (leverage 5, desk sizing, 2 x 0.99 EUR, 0.5 % spread) | -2.38 EUR a trade | -2.29 EUR a trade |
-   | CFD (2 bp spread, 0.5 % FX fee on the result) | -0.19 EUR a trade (t -6.2) | -0.13 EUR a trade (t -4.7) |
+   | CFD (2 bp spread, 0.5 % FX fee on the result) | -0.18 EUR a trade (t -6.2) | -0.13 EUR a trade (t -4.9) |
 
-   Gao et al.'s effect (1993-2013) is not present in 2016-2026 on these ETFs. Only 2023 on SPY (+2.8 bp,
+   Gao et al.'s effect (1993-2013) is not present in 2016-2026 on these ETFs. Only 2023 on SPY (+2.7 bp,
    t 1.7) came near significance; 2021 was significantly negative on both. The paper cells keep running as
    registered, unchanged, because changing the rule after seeing this would be a new trial. But the
    prior is now that every index-rule cell fails, the CFD one included; the owner should not trade the CFD

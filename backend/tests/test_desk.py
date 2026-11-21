@@ -428,7 +428,10 @@ def test_halt_blocks_a_new_idea_and_closes_open_positions():
     service.set_halt(db, True, "test", "test", now=NOW)
     nxt = owner_calls.start_idea(db, user.id, owner_calls.parse_idea("/idea DAX up ko"), sc.cli(), NOW)
     assert "halted" in (nxt.proposals[0].reason or "")
-    closed = service.manage_open_positions(db, sc.cli(), NOW + timedelta(minutes=5), {d.isin: d for d in ALIASES.values()})
+    fresh = FakeSc(standard_handler({"DE000KO000A1": ("0.995", "1.00"), DAX_ETF: ("100", "100.1")},
+                                    now=NOW + timedelta(minutes=5)))
+    closed = service.manage_open_positions(db, fresh.cli(), NOW + timedelta(minutes=5),
+                                           {d.isin: d for d in ALIASES.values()})
     db.commit()
     assert [r for _, r in closed] == ["halt"] and res.position.status == "closed"
     assert res.position.net_eur is not None

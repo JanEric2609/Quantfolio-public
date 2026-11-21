@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 
@@ -143,19 +143,46 @@ def _already_fired(db: Session, signal_key: str) -> bool:
     return False
 
 
+@dataclass
+class _ProductRead:
+    product_type: str
+    prep: service.PreparedProposal | None = None
+    quote: market.Quote | None = None  # the fill quote, read before any write
+    error: str | None = None  # a failed Scalable read: logged, the other products still go ahead
+
+
+@dataclass
+class _PlanRead:
+    plan: Plan
+    key: str
+    reason: str | None = None  # skipped or not fired: skip reason, no_data, r1_zero
+    error: str | None = None
+    r1: Decimal | None = None
+    direction: str = "long"
+    products: list[_ProductRead] = field(default_factory=list)
+    entry_ref: Decimal | None = None  # the underlying's price for the fills (the placebo's move)
+    cfd_ref: Decimal | None = None
+    cfd_sigma: Decimal | None = None
+
+
 def fire_due_signals(db: Session, user_id: str, cli: ScalableCli, now: datetime,
                      opened: list[str] | None = None, errors: list[str] | None = None,
                      clock: Callable[[], datetime] | None = None) -> list[str]:
-    """Open this minute's paper positions (one per product type) for every index whose entry time has come.
+    """Open this minute's paper positions (one per product type, plus the CFD) for every index whose entry
+    time has come.
 
-    Each index runs in its own savepoint: a failed read (Alpaca, or any sc error such as the 6-hourly
-    sync holding the session lock) rolls back that index only, and is retried next minute inside the
-    fire window; on the window's last minute it is logged as a ``no_data`` day. An outdated wrapper is
-    not a per-index failure and propagates. *opened* collects the ids of the positions opened, so the
+    Every index's reads come first (r1, both products and their fill quotes, the reference price, the
+    CFD's), then the writes, each index in its own savepoint: the first write takes the desk's write lock
+    until the stage commits, and no network read happens under it. A failed r1 read (Alpaca, or any sc
+    error such as the 6-hourly sync holding the session lock) is retried next minute inside the fire
+    window, and on its last minute logged as a ``no_data`` day. A failed product read (the knock-out or
+    warrant search) is logged for that product only: the CFD, priced from the reference alone, still
+    goes out. An outdated wrapper propagates. *opened* collects the ids of the positions opened, so the
     caller announces exactly this tick's fills; *errors* collects the failed reads' codes (health).
-    *clock* (the live monitor: the wall clock) re-reads the time for each quote age and fill, since one
-    tick's sc reads take seconds each; without it *now* is used throughout (tests)."""
+    *clock* (the live monitor: the wall clock) re-reads the time for each quote age and fill; without it
+    *now* is used throughout (tests)."""
     fired: list[str] = []
+    reads: list[_PlanRead] = []
     day = now.astimezone(UTC).date()
     for plan in plans_for_day(day) + plans_for_day(day - timedelta(days=1)):
         if not (plan.enter_at <= now < plan.enter_at + FIRE_WINDOW):
@@ -163,10 +190,8 @@ def fire_due_signals(db: Session, user_id: str, cli: ScalableCli, now: datetime,
         key = f"{plan.key}:{plan.day.isoformat()}"
         if _already_fired(db, key):
             continue
-        ids: list[str] = []
         try:
-            with db.begin_nested():
-                did_fire = _fire_plan(db, user_id, cli, plan, key, now, ids, clock)
+            read = _read_plan(db, user_id, cli, plan, key, now, clock, errors)
         except market.WrapperOutdated:
             raise
         except (DataUnavailable, ScalableError) as exc:
@@ -176,38 +201,80 @@ def fire_due_signals(db: Session, user_id: str, cli: ScalableCli, now: datetime,
             if now + timedelta(minutes=1) < plan.enter_at + FIRE_WINDOW:
                 logger.info("desk index rule %s: read failed (%s), retrying next minute", key, code)
                 continue
-            append_event(db, "signal", service.MODE, {"key": key, "fired": False, "reason": "no_data",
-                                                      "error": code}, now=now)
-            continue
+            read = _PlanRead(plan, key, reason="no_data", error=code)  # the window's last minute
+        reads.append(read)
+    for read in reads:
+        ids: list[str] = []
+        with db.begin_nested():
+            did_fire = _record_plan(db, user_id, read, now, ids, clock)
         if did_fire:
-            fired.append(key)
+            fired.append(read.key)
             if opened is not None:
                 opened.extend(ids)
     return fired
 
 
-def _fire_plan(db: Session, user_id: str, cli: ScalableCli, plan: Plan, key: str, now: datetime,
-               ids: list[str], clock: Callable[[], datetime] | None = None) -> bool:
-    """One index's signal: logged as skipped, or fired with its knock-out, warrant and CFD."""
+def _read_plan(db: Session, user_id: str, cli: ScalableCli, plan: Plan, key: str, now: datetime,
+               clock: Callable[[], datetime] | None, errors: list[str] | None) -> _PlanRead:
+    """All of one index's network reads; writes nothing. Raises only when r1 cannot be read."""
+    read = _PlanRead(plan, key)
     skip = skip_reason(plan)
     r1 = None if skip else compute_r1(db, cli, plan, now)
     if skip or r1 is None or r1 == 0:
-        reason = skip or ("no_data" if r1 is None else "r1_zero")
-        append_event(db, "signal", service.MODE, {"key": key, "fired": False, "reason": reason}, now=now)
-        return False
-    direction = "long" if r1 > 0 else "short"
-    append_event(db, "signal", service.MODE,
-                 {"key": key, "fired": True, "r1": str(r1), "direction": direction}, now=now)
+        read.reason = skip or ("no_data" if r1 is None else "r1_zero")
+        return read
+    read.r1, read.direction = r1, ("long" if r1 > 0 else "short")
     for product_type in PRODUCT_TYPES:
-        result = service.propose(
-            db, user_id, signal="index_momentum", underlying=plan.underlying, direction=direction,
-            product_type=product_type, cli=cli, now=clock() if clock else now, max_exit_at=plan.exit_at, clock=clock)
+        product = _ProductRead(product_type)
+        try:
+            product.prep = service.prepare_proposal(
+                db, user_id, signal="index_momentum", underlying=plan.underlying, direction=read.direction,
+                product_type=product_type, cli=cli, now=clock() if clock else now, max_exit_at=plan.exit_at,
+                clock=clock)
+            chosen = product.prep.selection.chosen if product.prep.selection else None
+            if chosen is not None and product.prep.refusal is None and product.prep.verdict \
+                    and product.prep.verdict.paper_ok:
+                product.quote = market.get_quote(cli, chosen.isin)
+        except market.WrapperOutdated:
+            raise
+        except ScalableError as exc:
+            product.prep, product.error = None, str(exc.code)[:60]
+            if errors is not None:
+                errors.append(product.error)
+        read.products.append(product)
+    at = clock() if clock else now
+    read.entry_ref = service.underlying_price(db, cli, plan.underlying, now=at)
+    read.cfd_ref, read.cfd_sigma = cfd.prepare_signal(db, cli, plan.underlying, at)
+    return read
+
+
+def _record_plan(db: Session, user_id: str, read: _PlanRead, now: datetime, ids: list[str],
+                 clock: Callable[[], datetime] | None) -> bool:
+    """One index's writes (no network read): the signal, the products' proposals and fills, the CFD."""
+    if read.reason is not None:
+        payload = {"key": read.key, "fired": False, "reason": read.reason}
+        if read.error:
+            payload["error"] = read.error
+        append_event(db, "signal", service.MODE, payload, now=now)
+        return False
+    plan = read.plan
+    append_event(db, "signal", service.MODE,
+                 {"key": read.key, "fired": True, "r1": str(read.r1), "direction": read.direction}, now=now)
+    for product in read.products:
+        if product.prep is None:
+            append_event(db, "guard_verdict", service.MODE, {
+                "signal": "index_momentum", "underlying": plan.underlying.isin, "direction": read.direction,
+                "product_type": product.product_type, "ok": False, "reasons": ["read_failed"],
+                "error": product.error}, now=now)
+            continue
+        result = service.record_proposal(db, product.prep)
         if result.position is not None and result.position.status == "proposed":
-            if service.open_directly(db, result.position, cli, clock() if clock else now, plan.underlying):
+            if service.fill_with_quote(db, result.position, product.quote, clock() if clock else now,
+                                       plan.underlying, read.entry_ref):
                 ids.append(result.position.id)
     # The same signal as a manual Trading 212 CFD (cell index_momentum:cfd, paper-scored).
-    position = cfd.open_signal(db, user_id, plan.key, plan.underlying, direction, plan.exit_at, cli,
-                               clock() if clock else now)
+    position = cfd.record_signal(db, user_id, plan.key, plan.underlying, read.direction, plan.exit_at,
+                                 clock() if clock else now, read.cfd_ref, read.cfd_sigma)
     if position is not None:
         ids.append(position.id)
     return True

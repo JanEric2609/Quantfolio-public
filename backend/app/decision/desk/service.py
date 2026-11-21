@@ -479,7 +479,8 @@ NO_REFERENCE = "no_reference_price"
 
 
 def open_position(db: Session, position: DeskPosition, quote: market.Quote, now: datetime,
-                  underlying: Underlying | None = None, cli: ScalableCli | None = None) -> tuple[str, ...]:
+                  underlying: Underlying | None = None, cli: ScalableCli | None = None,
+                  underlying_entry: Decimal | None = None) -> tuple[str, ...]:
     """Fill at the quote's ask and record the fill, the simulated stop and the live rehearsal.
 
     Returns the reasons the fill was refused (the position is then ``rejected``), else ``()``."""
@@ -514,6 +515,8 @@ def open_position(db: Session, position: DeskPosition, quote: market.Quote, now:
     proposal = _latest_proposal(db, position.id) or {}
     if underlying is not None and cli is not None:
         position.underlying_entry = underlying_price(db, cli, underlying, now=now)
+    elif underlying_entry is not None:  # read by the caller before its writes (the index rule)
+        position.underlying_entry = underlying_entry
     if position.underlying_entry is None and proposal.get("underlying_ref"):
         # The read at the proposal, seconds to 3 minutes ago, rather than no move for the placebo.
         position.underlying_entry = Decimal(proposal["underlying_ref"])
@@ -537,6 +540,17 @@ def open_directly(db: Session, position: DeskPosition, cli: ScalableCli, now: da
         append_event(db, "error", MODE, {"code": "no_fresh_quote_at_fill", "isin": position.isin}, position.id, now=now)
         return False
     return not open_position(db, position, quote, now, underlying, cli)
+
+
+def fill_with_quote(db: Session, position: DeskPosition, quote: market.Quote | None, now: datetime,
+                    underlying: Underlying, underlying_entry: Decimal | None) -> bool:
+    """:func:`open_directly` with the quote and the underlying's price read beforehand: no network read
+    happens under the desk's write lock. The quote's age is judged at *now*, the fill time."""
+    if quote is None or quote.outdated or _quote_age(now, quote.ts_utc) > LIMITS.max_quote_age_s:
+        position.status = "rejected"
+        append_event(db, "error", MODE, {"code": "no_fresh_quote_at_fill", "isin": position.isin}, position.id, now=now)
+        return False
+    return not open_position(db, position, quote, now, underlying, None, underlying_entry=underlying_entry)
 
 
 # -- closing -----------------------------------------------------------------------
@@ -646,6 +660,10 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
         reason = check_exit(p, bid, now, halted=halted)
         if reason is None:
             continue
+        if bid is None and reason != "quote_lost" and _quote_missing_for(p, now) < LIMITS.quote_lost_s:
+            # A halt, horizon or cut-off without a fresh bid waits for one (as quote_lost does) instead of
+            # closing at a bid that may be from last night; after 10 minutes it closes at the last bid.
+            continue
         exit_bid = bid if bid is not None else Decimal(p.last_bid or 0)
         if exit_bid <= 0:
             continue
@@ -654,6 +672,15 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
         if close_position(db, p, price, reason, now, level):
             closed.append((p, reason))
     return closed
+
+
+def _quote_missing_for(p: DeskPosition, now: datetime) -> float:
+    """Seconds without a fresh quote, counted inside today's trading window (as ``check_exit``)."""
+    seen = _aware(p.last_quote_at or p.entry_at)
+    if seen is None:
+        return float("inf")
+    opened = cal.window_start_at(now.astimezone(cal.BERLIN).date())
+    return (now - max(seen, opened)).total_seconds()
 
 
 #: How old the reference's last chart point may be when no fresh price can be read at an exit.
@@ -744,7 +771,8 @@ def _knocked_out_at(db: Session, cli: ScalableCli, p: DeskPosition, u: Underlyin
     if barrier is None or entry_at is None:
         return None
     levels = reference_path(db, cli, u, entry_at, now)
-    current = underlying_price(db, cli, u, now=now)
+    # SPY/QQQ quote before and after NYSE hours, when the index (the barrier's level) is not calculated.
+    current = underlying_price(db, cli, u, now=now) if not u.alpaca_symbol or _regular_us_session(now) else None
     if current is not None:
         levels.append(current)
     levels = [v for v in levels if v > 0]

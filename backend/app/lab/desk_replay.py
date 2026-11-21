@@ -25,7 +25,8 @@ import math
 import statistics
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, time
+from datetime import date, time, timedelta
+from functools import lru_cache
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -54,6 +55,30 @@ class Costs:
     cfd_max_exposure: float = 1000.0
 
 
+@lru_cache(maxsize=1)
+def _xetra():
+    import exchange_calendars as xcals
+
+    return xcals.get_calendar("XETR")
+
+
+def _xetra_session(d: date) -> bool:
+    from exchange_calendars.errors import DateOutOfBounds
+
+    try:
+        return bool(_xetra().is_session(d.isoformat()))
+    except DateOutOfBounds:
+        return d.weekday() < 5
+
+
+def xetra_flat_by(d: date) -> bool:
+    """The live rule's skip for the US half (``signals.index_momentum.skip_reason``): the desk is flat by
+    21:30 Berlin, before the 21:57 exit, on a Xetra trading day whose next calendar day is not one
+    (``calendar.flat_by_day``; lab may not import the desk, a test pins the two equal). The live rule's
+    macro-day skip is not replayed: the desk's macro calendar starts in 2026."""
+    return _xetra_session(d) and not _xetra_session(d + timedelta(days=1))
+
+
 def days_from_bars(bars: list[dict[str, Any]]) -> list[Day]:
     """Bars ``{"t": aware datetime (bar start), "c": close}`` of one symbol -> one row per full session."""
     by_day: dict[date, dict[time, float]] = defaultdict(dict)
@@ -71,11 +96,9 @@ def days_from_bars(bars: list[dict[str, Any]]) -> list[Day]:
         if full and closes:
             rets = [math.log(closes[j] / closes[j - 1]) for j in range(max(1, len(closes) - 20), len(closes))]
             sigma = statistics.stdev(rets) if len(rets) >= 20 else None
-            nxt = sessions[i + 1] if i + 1 < len(sessions) else None
-            gap = (nxt - d).days if nxt else 1
             out.append(Day(
                 d, bars_d[OPEN_BAR] / closes[-1] - 1, bars_d[LAST_BAR] / bars_d[PRE_LAST_BAR] - 1, sigma,
-                d.weekday() == 4 or (nxt is not None and gap > 1),
+                xetra_flat_by(d),
             ))
         closes.append(last_close)
     return out

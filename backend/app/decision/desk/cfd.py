@@ -105,9 +105,20 @@ def quantity_hint(db: Session, key: str, exposure_eur: Decimal, now: datetime) -
 def open_signal(db: Session, user_id: str, key: str, underlying: Underlying, direction: str,
                 exit_at: datetime, cli: ScalableCli, now: datetime) -> DeskPosition | None:
     """Open the paper CFD at the reference price; the caller sends :func:`open_message`."""
+    ref, sigma = prepare_signal(db, cli, underlying, now)
+    return record_signal(db, user_id, key, underlying, direction, exit_at, now, ref, sigma)
+
+
+def prepare_signal(db: Session, cli: ScalableCli, underlying: Underlying,
+                   now: datetime) -> tuple[Decimal | None, Decimal | None]:
+    """The read half of :func:`open_signal`: the reference price and the daily sigma."""
+    return service.underlying_price(db, cli, underlying, now=now), service.underlying_sigma(db, cli, underlying)
+
+
+def record_signal(db: Session, user_id: str, key: str, underlying: Underlying, direction: str, exit_at: datetime,
+                  now: datetime, ref: Decimal | None, sigma: Decimal | None) -> DeskPosition | None:
+    """The write half of :func:`open_signal` (no network read)."""
     base = {"signal": "index_momentum", "underlying": underlying.isin, "direction": direction, "product_type": "cfd"}
-    ref = service.underlying_price(db, cli, underlying, now=now)
-    sigma = service.underlying_sigma(db, cli, underlying)
     if ref is None or ref <= 0 or sigma is None or sigma <= 0:
         append_event(db, "guard_verdict", service.MODE, {**base, "ok": False, "reasons": ["no_reference_price"]},
                      now=now)

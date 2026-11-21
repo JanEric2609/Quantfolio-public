@@ -65,12 +65,16 @@ def watchlist(db: Session, user_id: str) -> dict[str, str]:
 
     out: dict[str, str] = {}
     for pos in combined_positions(db, user_id):
-        base = (pos.ticker or "").upper().split(".")[0]
-        label = base or (pos.name or pos.isin or "")[:24]
-        if base:
-            out.setdefault(base, f"holding:{base}")
-        if pos.isin:
-            out.setdefault(pos.isin.upper(), f"holding:{label}")
+        ticker = (pos.ticker or "").upper()
+        isin = (pos.isin or "").upper()
+        # Alpaca and SEC know US tickers only. A suffixed ticker is never cut to its base (ALV.DE is
+        # Allianz, ALV is Autoliv): such a holding gets a US key only through Trading 212's US line.
+        us = ticker if ticker and "." not in ticker else (_us_ticker(db, isin, user_id) if isin else None)
+        label = us or ticker or (pos.name or isin or "")[:24]
+        if us:
+            out.setdefault(us, f"holding:{us}")
+        if isin:
+            out.setdefault(isin, f"holding:{label}")
     by_isin = {u.isin: k for k, u in ALIASES.items()}
     for p in db.query(DeskPosition).filter(DeskPosition.status.in_(("open", "proposed"))).all():
         key = by_isin.get(p.underlying_isin)

@@ -49,6 +49,13 @@ every other context, with zero seeded exceptions.
   writes last (`record_proposal`; "both" reads both products first), the exit checks read every price before
   closing, the monitor commits after each stage (expiry, exits, index rule, news) and sends that stage's
   messages right after, and a tap re-reads the clock once it holds the lock.
+- The index rule reads every index (r1, both products with their fill quotes, the reference price, the
+  CFD's) before its first write. A failed knock-out or warrant read is logged for that product
+  (`read_failed`); the CFD, priced from the reference alone, still goes out.
+- A halt, horizon or cut-off exit without a fresh bid waits for one, up to the 10 minutes `quote_lost`
+  allows, before closing at the last bid.
+- A holding is watched by its ISIN, and by a ticker only when that is a US one (no suffix, or Trading 212's
+  US line): `ALV.DE` is never matched by `ALV`.
 - Telegram's webhook answers at once and handles the update after the response; a re-delivered update id
   is skipped (an idea is never proposed twice). Feed links are kept only when they are http(s).
 - The news stream's state (`desk_news_stream_json`) is "connected" only after Alpaca accepted the login, and its

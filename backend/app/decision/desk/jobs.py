@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -31,7 +32,7 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
     from . import cfd, instrument, prereg, service, telegram
     from .ledger import append_event
     from .signals import index_momentum
-    from .underlyings import ALIASES, Underlying
+    from .underlyings import ALIASES, Underlying, ticker_for_isin
 
     # The live tick re-reads the clock for each quote age and fill (its sc reads take seconds each);
     # a given *now* (tests, replays) is used throughout.
@@ -58,8 +59,12 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
         cli = cli or scalable_service.make_cli(db)
         underlyings: dict[str, Underlying] = {u.isin: u for u in ALIASES.values()}
         open_rows = db.query(DeskPosition).filter(DeskPosition.status == "open").all()
-        for p in open_rows:
-            underlyings.setdefault(p.underlying_isin, service.underlying_of(p))  # a US stock is XNYS
+        pending = db.query(DeskPosition).filter(DeskPosition.status == "proposed").all()
+        for p in [*open_rows, *pending]:
+            if p.underlying_isin and p.underlying_isin not in underlyings:
+                # A stock on its own exchange (a US stock is XNYS) with its ticker, for Alpaca's headlines.
+                u = service.underlying_of(p)
+                underlyings[p.underlying_isin] = replace(u, symbol=ticker_for_isin(db, u.isin, owner.id))
         errors: list[str] = []
         # Stops, horizons and knock-outs first: they must not depend on the index rule's reads succeeding.
         expired = service.expire_proposals(db, now)
