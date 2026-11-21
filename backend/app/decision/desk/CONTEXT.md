@@ -42,6 +42,9 @@ every other context, with zero seeded exceptions.
 - Every state change is a ledger event in the same transaction as the position update.
 - One fill and one exit per position: a tap locks the position row (`take`), and every close takes the
   position out of `open` with a conditional UPDATE (`claim_open`), so of two closes at once only one is recorded.
+- One lock order on every desk write path: the desk's write lock (`ledger.desk_write_lock`, a PostgreSQL
+  transaction advisory lock), then a position row, then the ledger's next seq. The monitor and an owner's Close
+  cannot deadlock.
 - The news stream's state (`desk_news_stream_json`) is "connected" only after Alpaca accepted the login, and its
   `news_stream_at` is when the state began; a desk position on a US stock is watched by its ticker as well.
 - `external` positions (the owner's own app trades) are logged and scored separately, never in a pass-rule cell. They are found from the Scalable activity ledger itself (a round trip between two syncs counts), each ISIN classified by the depot snapshots or, once, by sc's quote (`desk_isin_types_json`).

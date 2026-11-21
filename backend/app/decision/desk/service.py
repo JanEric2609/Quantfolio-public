@@ -25,7 +25,7 @@ from app.foundation.settings import get_setting_row, upsert_public_settings
 from . import calendar as cal
 from . import news, prereg
 from .guard import DeskState, Proposal, Verdict, check_entry, check_exit
-from .ledger import append_event, events_for
+from .ledger import append_event, desk_write_lock, events_for
 from .limits import LIMITS
 from .products import Candidate, select_product
 from .sizing import size_position
@@ -350,6 +350,7 @@ def take(db: Session, position_id: str, nonce: str, cli: ScalableCli, now: datet
 
     The position row is locked for the whole tap: two taps at once (Telegram and the page, or a
     re-delivered callback) run one after the other, and the second sees the first's tap as used."""
+    desk_write_lock(db)  # before the row lock: one lock order on every desk write path
     position = db.get(DeskPosition, position_id, with_for_update=True, populate_existing=True)
     proposal = _latest_proposal(db, position_id) if position else None
     if position is None or proposal is None or proposal.get("nonce") != nonce:
@@ -484,6 +485,7 @@ def claim_open(db: Session, position: DeskPosition) -> bool:
     """Take the position out of ``open`` with a conditional UPDATE: of two closes at once (the monitor's
     stop and the owner's Close), the second waits for the first's row lock and then changes no row.
     ``False``: someone else closed it; the in-memory object is refreshed."""
+    desk_write_lock(db)  # before the row lock: one lock order on every desk write path
     changed = db.query(DeskPosition).filter(DeskPosition.id == position.id, DeskPosition.status == "open") \
         .update({DeskPosition.status: "closed"}, synchronize_session=False)
     if changed != 1:
@@ -518,6 +520,7 @@ def expire_proposals(db: Session, now: datetime) -> int:
     ``take``) is skipped this tick, and the status changes only where it is still ``proposed``: a tap
     that committed ``open`` (or a re-ask with a new window) is never overwritten with ``expired``."""
     count = 0
+    desk_write_lock(db)  # before the row locks: one lock order on every desk write path
     rows = db.query(DeskPosition).filter(DeskPosition.status == "proposed", DeskPosition.mode == MODE) \
         .with_for_update(skip_locked=True).all()
     for p in rows:

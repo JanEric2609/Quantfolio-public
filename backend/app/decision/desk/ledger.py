@@ -11,13 +11,27 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.foundation.desk_chain import canonical_json, compute_hash, verify_chain
 from app.foundation.models.entities import DeskEvent
 from app.foundation.models.entities.desk import DESK_EVENT_KINDS, GENESIS_HASH
+
+
+#: The one lock every desk write takes first (a transaction-level PostgreSQL advisory lock). Lock order is
+#: then always: this lock, a position row, the ledger's next seq. Without it the monitor (ledger seq, then
+#: a position row) and an owner's Close (the row, then the ledger) could deadlock. The jobs' own advisory
+#: locks use ``hashtext(job_name)`` too; no job has this name.
+WRITE_LOCK_NAME = "desk_ledger_write"
+
+
+def desk_write_lock(db: Session) -> None:
+    """Take the desk's write lock for the rest of this transaction (re-entrant; a no-op on SQLite)."""
+    bind = db.get_bind()
+    if bind.dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:name))"), {"name": WRITE_LOCK_NAME})
 
 
 def _append_once(db: Session, kind: str, mode: str, payload: dict[str, Any], position_id: str | None,
@@ -44,6 +58,7 @@ def append_event(db: Session, kind: str, mode: str, payload: dict[str, Any], pos
     if kind not in DESK_EVENT_KINDS:
         raise ValueError(f"unknown desk event kind: {kind}")
     now = now or datetime.now(UTC)
+    desk_write_lock(db)
     for attempt in (1, 2):
         try:
             with db.begin_nested():
@@ -65,4 +80,5 @@ def events_for(db: Session, position_id: str, kind: str | None = None) -> list[D
     return list(db.execute(stmt).scalars())
 
 
-__all__ = ["append_event", "canonical_json", "compute_hash", "event_count", "events_for", "verify_chain"]
+__all__ = ["append_event", "canonical_json", "compute_hash", "desk_write_lock", "event_count", "events_for",
+           "verify_chain"]
