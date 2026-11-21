@@ -264,7 +264,9 @@ async def ingest(db: Session, user_id: str, item: news_wire.WireItem, watch: dic
     row.alert = "sent" if decision == "send" else decision
     db.commit()  # stored before it is sent: a failed commit must not send the line twice
     if decision == "send":
-        telegram.alert(db, user_id, format_alert(item, why, rating, now))
+        # In a thread: the Bot API call blocks up to 10 s, and the stream's event loop must keep answering
+        # Alpaca's pings meanwhile. Nothing else uses this session while the coroutine waits for it.
+        await asyncio.to_thread(telegram.alert, db, user_id, format_alert(item, why, rating, now))
     return row.alert
 
 

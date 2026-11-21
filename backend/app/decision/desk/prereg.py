@@ -33,6 +33,9 @@ SPEC = {
     "placebo": {
         "draws": 2000, "seed": 20261121, "direction_p": "0.5", "percentile": 95,
         "opposite_result": "-(leverage_or_omega) * underlying_move * notional - round_trip_cost",
+        "missing_move": "trades without a recorded underlying move are left out of the placebo and its "
+                        "comparison mean; at most 10 % of a cell's trades may lack one, else there is no placebo "
+                        "and the cell cannot pass",
     },
     "signals": {
         "owner_call": "the owner's /idea call, taken by tap within 180 s, filled at a fresh quote",

@@ -120,15 +120,16 @@ def compute_r1_us(bars: list[dict], day: date) -> Decimal | None:
     return (first[0]["c"] / prev_close - 1) if prev_close else None
 
 
-def compute_r1(db: Session, cli: ScalableCli, plan: Plan) -> Decimal | None:
+def compute_r1(db: Session, cli: ScalableCli, plan: Plan, now: datetime | None = None) -> Decimal | None:
+    """r1 for *plan*. The US bars are read for the week up to *now* (the tick's time), not the wall clock."""
     u = plan.underlying
+    end = now or datetime.now(UTC)
     if u.alpaca_symbol:
         provider = news.alpaca_for(db)
         if provider is None:
             return None
         try:
-            bars = provider.get_intraday_bars(u.alpaca_symbol, "30Min", datetime.now(UTC) - timedelta(days=7),
-                                              datetime.now(UTC))
+            bars = provider.get_intraday_bars(u.alpaca_symbol, "30Min", end - timedelta(days=7), end)
         except (ValueError, httpx.HTTPError) as exc:  # HTTP 429/5xx (ValueError) or a timeout
             raise DataUnavailable(type(exc).__name__) from exc
         return compute_r1_us(bars, plan.day)
@@ -189,7 +190,7 @@ def _fire_plan(db: Session, user_id: str, cli: ScalableCli, plan: Plan, key: str
                ids: list[str], clock: Callable[[], datetime] | None = None) -> bool:
     """One index's signal: logged as skipped, or fired with its knock-out, warrant and CFD."""
     skip = skip_reason(plan)
-    r1 = None if skip else compute_r1(db, cli, plan)
+    r1 = None if skip else compute_r1(db, cli, plan, now)
     if skip or r1 is None or r1 == 0:
         reason = skip or ("no_data" if r1 is None else "r1_zero")
         append_event(db, "signal", service.MODE, {"key": key, "fired": False, "reason": reason}, now=now)

@@ -4512,6 +4512,8 @@ export interface DeskEventDto {
 export interface DeskCellScore {
   n: number; n_min: number; mean_net: number | null; hit_rate: number | null; median_cost_share: number | null;
   p: number; p_holm: number; placebo_percentile: number | null; placebo_p95: number | null; passes: boolean;
+  /** Closed trades whose underlying move could not be recorded (left out of the placebo; over 10 %: no pass). */
+  missing_move?: number;
 }
 
 export interface DeskScorecardDto {

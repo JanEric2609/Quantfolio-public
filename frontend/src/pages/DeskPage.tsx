@@ -266,11 +266,13 @@ export function DeskPage() {
                   <td>{s.hit_rate == null ? "-" : `${(s.hit_rate * 100).toFixed(0)} %`}</td>
                   <td>{s.median_cost_share == null ? "-" : `${(s.median_cost_share * 100).toFixed(1)} %`}</td>
                   <td>{s.n >= s.n_min ? fmt(s.p_holm, 3) : "-"}</td><td>{fmt(s.placebo_percentile, 0)}</td>
-                  <td>{s.passes ? "Yes" : "No"}</td>
+                  <td>{s.passes ? "Yes" : "No"}{(s.missing_move ?? 0) > 0 && (
+                    <span className="block text-xs text-text-secondary">{s.missing_move} without the underlying's move</span>)}</td>
                 </tr>))}
               </tbody>
             </table>
-            <p className="mt-2 text-xs text-text-secondary">Your own app trades are logged separately ({score.external_closed}) and never count here.</p>
+            <p className="mt-2 text-xs text-text-secondary">Your own app trades are logged separately ({score.external_closed}) and never count here.
+              A trade whose underlying price could not be read is left out of the placebo; if more than 10 % of a cell lack it, the cell cannot pass.</p>
           </CardContent>
         </Card>
       )}

@@ -248,9 +248,10 @@ def propose(
 
     # A knock-out's barrier in the reference price's units, from the listing's distance and a reference
     # price read in the same snapshot (the distance is only true for the level it was measured at).
-    underlying_ref = barrier_ref = None
+    # Read for every product: the fill falls back to it when its own read fails (the placebo needs the move).
+    underlying_ref = underlying_price(db, cli, underlying, now=now)
+    barrier_ref = None
     if product_type == "knockout":
-        underlying_ref = underlying_price(db, cli, underlying, now=now)
         barrier_ref = barrier_in_reference(direction, underlying_ref, chosen.barrier_distance)
         if barrier_ref is None:  # a knock-out the desk could not watch for its barrier is not proposed
             append_event(db, "guard_verdict", MODE, {**base, "ok": False, "reasons": [NO_REFERENCE]}, now=now)
@@ -306,9 +307,12 @@ def propose(
 
 
 def _ref_payload(underlying_ref: Decimal | None, barrier_ref: Decimal | None) -> dict[str, Any]:
-    if barrier_ref is None:
-        return {}
-    return {"underlying_ref": str(underlying_ref), "barrier_ref": str(barrier_ref)}
+    out: dict[str, Any] = {}
+    if underlying_ref is not None:
+        out["underlying_ref"] = str(underlying_ref)
+    if barrier_ref is not None:
+        out["barrier_ref"] = str(barrier_ref)
+    return out
 
 
 def _proposal_payload(position: DeskPosition, c: Candidate, sizing, verdict: Verdict) -> dict[str, Any]:
@@ -445,9 +449,13 @@ def open_position(db: Session, position: DeskPosition, quote: market.Quote, now:
     position.would_take_live = verdict.ok
     if position.max_exit_at is None:
         position.max_exit_at = cal.max_exit_at(now).astimezone(UTC)
+    proposal = _latest_proposal(db, position.id) or {}
     if underlying is not None and cli is not None:
         position.underlying_entry = underlying_price(db, cli, underlying, now=now)
-    barrier_ref = (_latest_proposal(db, position.id) or {}).get("barrier_ref")  # anchored at the proposal
+    if position.underlying_entry is None and proposal.get("underlying_ref"):
+        # The read at the proposal, seconds to 3 minutes ago, rather than no move for the placebo.
+        position.underlying_entry = Decimal(proposal["underlying_ref"])
+    barrier_ref = proposal.get("barrier_ref")  # anchored at the proposal
     append_event(db, "fill", MODE, {
         "price": str(quote.ask), "bid": str(quote.bid), "units": units, "fee": str(LIMITS.fee_per_order),
         "would_take_live": verdict.ok, "live_reasons": list(verdict.reasons),
@@ -506,11 +514,21 @@ def close_position(db: Session, position: DeskPosition, bid: Decimal, reason: st
 
 
 def expire_proposals(db: Session, now: datetime) -> int:
+    """Expire proposals past the tap window. A proposal a tap is filling right now (its row locked by
+    ``take``) is skipped this tick, and the status changes only where it is still ``proposed``: a tap
+    that committed ``open`` (or a re-ask with a new window) is never overwritten with ``expired``."""
     count = 0
-    for p in db.query(DeskPosition).filter(DeskPosition.status == "proposed", DeskPosition.mode == MODE).all():
+    rows = db.query(DeskPosition).filter(DeskPosition.status == "proposed", DeskPosition.mode == MODE) \
+        .with_for_update(skip_locked=True).all()
+    for p in rows:
         proposal = _latest_proposal(db, p.id)
         if proposal is None or now - datetime.fromisoformat(proposal["proposed_at"]) > timedelta(
                 seconds=LIMITS.tap_window_s):
+            changed = db.query(DeskPosition).filter(DeskPosition.id == p.id, DeskPosition.status == "proposed") \
+                .update({DeskPosition.status: "expired"}, synchronize_session=False)
+            if changed != 1:
+                db.refresh(p)
+                continue
             p.status = "expired"
             append_event(db, "expired", MODE, {"reason": "no_tap"}, p.id, now=now)
             count += 1
@@ -554,9 +572,23 @@ def manage_open_positions(db: Session, cli: ScalableCli, now: datetime, underlyi
         exit_bid = bid if bid is not None else Decimal(p.last_bid or 0)
         if exit_bid <= 0:
             continue
-        if close_position(db, p, exit_bid, reason, now, underlying_price(db, cli, u, now=now)):
+        if close_position(db, p, exit_bid, reason, now, underlying_exit_level(db, cli, u, now)):
             closed.append((p, reason))
     return closed
+
+
+#: How old the reference's last chart point may be when no fresh price can be read at an exit.
+EXIT_LEVEL_MAX_AGE = timedelta(minutes=30)
+
+
+def underlying_exit_level(db: Session, cli: ScalableCli, u: Underlying, now: datetime) -> Decimal | None:
+    """The underlying's level at an exit, for the placebo's move: a fresh price, else the reference's
+    last chart point (Alpaca 1-minute close, sc chart mid) of the past 30 minutes, else ``None``."""
+    price = underlying_price(db, cli, u, now=now)
+    if price is not None:
+        return price
+    path = reference_path(db, cli, u, now - EXIT_LEVEL_MAX_AGE, now, closes=True)
+    return path[-1] if path else None
 
 
 def barrier_in_reference(direction: str, reference: Decimal | None, distance: Any) -> Decimal | None:
@@ -587,9 +619,11 @@ def _barrier_ref_of(db: Session, p: DeskPosition) -> Decimal | None:
     return Decimal(raw) if raw else None
 
 
-def reference_path(db: Session, cli: ScalableCli, u: Underlying, since: datetime, now: datetime) -> list[Decimal]:
+def reference_path(db: Session, cli: ScalableCli, u: Underlying, since: datetime, now: datetime, *,
+                   closes: bool = False) -> list[Decimal]:
     """The reference's lows and highs since *since*: Alpaca 1-minute bars for the US indices (low and
-    high of each bar), else sc's 7-day chart of the proxy (one mid per point). Empty when unreadable."""
+    high of each bar; with *closes*, each bar's close), else sc's 7-day chart of the proxy (one mid per
+    point). Oldest first; empty when unreadable."""
     try:
         if u.alpaca_symbol:
             provider = news.alpaca_for(db)
@@ -597,7 +631,8 @@ def reference_path(db: Session, cli: ScalableCli, u: Underlying, since: datetime
                 return []
             out: list[Decimal] = []
             for bar in provider.get_intraday_bars(u.alpaca_symbol, "1Min", since, now):
-                out += [Decimal(v) for v in (bar.get("l"), bar.get("h")) if v is not None]
+                fields = (bar.get("c"),) if closes else (bar.get("l"), bar.get("h"))
+                out += [Decimal(v) for v in fields if v is not None]
             return out
         return [mid for ts, mid in market.get_chart(cli, u.proxy_isin or u.isin, "7d") if since <= ts <= now]
     except market.WrapperOutdated:
@@ -647,4 +682,4 @@ def owner_close(db: Session, position: DeskPosition, cli: ScalableCli, now: date
         if level is not None:
             return close_position(db, position, Decimal(0), "knock_out", now, level)
         return False  # no fresh quote: the paper close would be at a stale price
-    return close_position(db, position, quote.bid, "owner_close", now, underlying_price(db, cli, u, now=now))
+    return close_position(db, position, quote.bid, "owner_close", now, underlying_exit_level(db, cli, u, now))

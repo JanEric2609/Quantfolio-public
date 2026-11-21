@@ -172,11 +172,76 @@ def _news_check(db: Any, cli: Any, now: datetime, underlyings: dict[str, Any], o
     return count
 
 
+#: ISIN -> sc security type, for ISINs the owner traded but the desk never saw held (internal state).
+ISIN_TYPES_KEY = "desk_isin_types_json"
+DERIVATIVE_TYPES = ("DERIVATIVE", "WARRANT")
+#: sc quotes per reconcile run to classify ISINs the depot snapshots never held.
+MAX_TYPE_LOOKUPS = 10
+
+
+def _known_security_types(db: Any, user_id: str) -> dict[str, str]:
+    """ISIN -> security type from every Scalable depot snapshot, the live positions, the owner's derivative
+    terms and the desk's own lookups."""
+    from app.foundation.live_positions import live_positions
+    from app.foundation.models.entities import ConnectedAccount, DerivativeTerms
+    from app.foundation.settings import get_setting_row
+
+    out: dict[str, str] = {}
+    cached = get_setting_row(db, ISIN_TYPES_KEY)
+    if isinstance(cached, dict):
+        out.update({k: str(v) for k, v in cached.items()})
+    for (raw,) in db.query(ConnectedAccount.raw_json).filter(ConnectedAccount.user_id == user_id,
+                                                              ConnectedAccount.source == "scalable",
+                                                              ConnectedAccount.account_type == "depot"):
+        try:
+            types = json.loads(raw or "{}").get("security_types")
+        except (ValueError, AttributeError):
+            types = None
+        if isinstance(types, dict):
+            out.update({k: str(v) for k, v in types.items()})
+    for p in live_positions(db, user_id):
+        if p.isin and p.security_type:
+            out[p.isin] = p.security_type
+    for (isin,) in db.query(DerivativeTerms.isin).filter(DerivativeTerms.user_id == user_id):
+        out.setdefault(isin, "DERIVATIVE")
+    return out
+
+
+def _classify_unknown(db: Any, isins: list[str], types: dict[str, str], today: str) -> None:
+    """Ask sc's quote for the security type of up to ``MAX_TYPE_LOOKUPS`` ISINs; answers are cached. An ISIN
+    without a quote (delisted, no market at night) is marked ``?<date>`` and asked again the next day."""
+    from app.foundation.scalable import market
+    from app.foundation.scalable import service as scalable_service
+    from app.foundation.scalable.cli import ScalableError, ScalableUsageError
+    from app.foundation.settings import get_setting_row, upsert_public_settings
+
+    if not isins:
+        return
+    found: dict[str, str] = {}
+    try:
+        cli = scalable_service.make_cli(db)
+        for isin in isins[:MAX_TYPE_LOOKUPS]:
+            try:
+                quote = market.get_quote(cli, isin)
+            except ScalableUsageError as exc:
+                if isinstance(exc, market.WrapperOutdated):
+                    raise
+                quote = None  # this ISIN only (refused as input): marked, the others are still asked
+            found[isin] = quote.security_type.upper() if quote is not None and quote.security_type else f"?{today}"
+    except ScalableError as exc:  # no session, the sync's lock, an old wrapper: the rest is tried next hour
+        logger.info("desk reconcile: type lookup stopped: %s", exc.code)
+    if found:
+        cached = get_setting_row(db, ISIN_TYPES_KEY)
+        upsert_public_settings(db, {ISIN_TYPES_KEY: {**(cached if isinstance(cached, dict) else {}), **found}})
+        types.update(found)
+
+
 def reconcile_external(db: Any, now: datetime | None = None) -> int:
-    """Log real Scalable trades in derivative ISINs that the desk did not make (the owner's app trades)."""
-    from app.foundation.models.entities import (
-        ActivityLedgerEntry, DeskEvent, DeskPosition, DerivativeTerms,
-    )
+    """Log real Scalable trades in derivative ISINs that the desk did not make (the owner's app trades).
+
+    The ISINs come from the activity ledger itself, not from what is held now: a knock-out bought and
+    sold between two syncs is never in a depot snapshot. An ISIN of unknown type is classified by sc."""
+    from app.foundation.models.entities import ActivityLedgerEntry, DeskEvent, DeskPosition
 
     from . import service
     from .ledger import append_event
@@ -185,21 +250,23 @@ def reconcile_external(db: Any, now: datetime | None = None) -> int:
     owner = _owner(db)
     if owner is None:
         return 0
-    from app.foundation.live_positions import live_positions
-
-    isins = {p.isin for p in live_positions(db, owner.id) if (p.security_type or "").upper() in ("DERIVATIVE", "WARRANT")}
-    isins |= {i for (i,) in db.query(DerivativeTerms.isin).filter(DerivativeTerms.user_id == owner.id)}
-    if not isins:
-        return 0
     logged: set[str] = set()
     for ev in db.query(DeskEvent).filter(DeskEvent.kind == "external_trade"):
         logged.add(json.loads(ev.payload).get("ledger_id", ""))
-    count = 0
-    rows = db.query(ActivityLedgerEntry).filter(
+    rows = [r for r in db.query(ActivityLedgerEntry).filter(
         ActivityLedgerEntry.user_id == owner.id, ActivityLedgerEntry.source == "scalable",
-        ActivityLedgerEntry.activity_type.in_(("buy", "sell")), ActivityLedgerEntry.isin.in_(isins)).all()
+        ActivityLedgerEntry.activity_type.in_(("buy", "sell")), ActivityLedgerEntry.isin.isnot(None)).all()
+        if r.id not in logged]
+    if not rows:
+        return 0
+    types = _known_security_types(db, owner.id)
+    today = now.astimezone(UTC).date().isoformat()
+    unknown = {r.isin for r in rows if r.isin and (r.isin not in types or (types[r.isin].startswith("?")
+                                                                         and types[r.isin] != f"?{today}"))}
+    _classify_unknown(db, sorted(unknown), types, today)
+    count = 0
     for row in rows:
-        if row.id in logged:
+        if types.get(row.isin or "", "").upper() not in DERIVATIVE_TYPES:
             continue
         position = DeskPosition(
             user_id=owner.id, mode=service.MODE, cell="external", signal="external", product_type="unknown",

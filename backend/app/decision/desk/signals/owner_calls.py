@@ -45,7 +45,9 @@ def parse_idea(text: str) -> Idea:
     seen: set[str] = set()
     for raw in words[2:]:
         w = raw.lower()
-        if w in HORIZON_DAYS and "h" not in seen:
+        if w in HORIZON_DAYS and "h" in seen:
+            raise IdeaParseError(f"Give one horizon, today or 1d. {USAGE}")
+        if w in HORIZON_DAYS:
             horizon = w
             seen.add("h")
         elif w in PRODUCT_WORDS and "p" not in seen:

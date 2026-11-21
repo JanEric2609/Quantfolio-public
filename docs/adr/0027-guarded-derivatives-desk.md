@@ -145,3 +145,13 @@ deploy, so migration 0157 itself gains the new columns and table; nothing regist
    interest at 22:00 GMT (21:00 in summer time) Monday to Thursday (after the desk's exits), and "77% of
    retail investor accounts lose money when trading CFDs with this provider". Scalable lists gettex at
    07:30-23:00 and derivatives "generally" 08:00-22:00; SEC's fair-access limit is 10 requests a second.
+
+## Amendment 2026-11-21: placebo with a missing underlying move (before the first registration)
+
+A closed position whose underlying move could not be recorded (one failed price read at its entry or exit)
+used to void the cell's placebo for good, so the cell could never pass. Now, pre-registered in
+`prereg.SPEC["placebo"]["missing_move"]`: such trades are left out of the placebo and of the mean it is
+compared with; if more than 10 % of a cell's trades lack the move there is no placebo and the cell cannot
+pass. The desk also records the move far more often: the fill falls back to the reference price read at the
+proposal, and the exit to the reference's last chart point of the past 30 minutes. The spec hash changed
+(`86396b95…`); the desk had not been registered in production yet, so no registration is superseded.

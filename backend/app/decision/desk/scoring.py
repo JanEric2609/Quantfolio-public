@@ -19,6 +19,8 @@ PLACEBO_DRAWS = prereg.SPEC["placebo"]["draws"]
 PLACEBO_SEED = prereg.SPEC["placebo"]["seed"]
 N_MIN = prereg.SPEC["n_min"]
 ALPHA = 0.05
+#: Share of a cell's trades that may lack the underlying move (``prereg.SPEC["placebo"]["missing_move"]``).
+MAX_MISSING_MOVE = 0.10
 
 
 @dataclass(frozen=True)
@@ -80,13 +82,16 @@ def score_cell(trades: list[Trade]) -> dict[str, Any]:
     base["missing_move"] = sum(1 for t in trades if t.move is None)
     if n >= N_MIN:
         base["p"] = _bootstrap_p(trades)
-        if base["missing_move"]:
-            # Without the underlying move the opposite-direction result is just -cost, an easy bar.
-            # No placebo, so the cell cannot pass.
+        if base["missing_move"] > MAX_MISSING_MOVE * n:
+            # Too many trades without the underlying move: no placebo, so the cell cannot pass.
             return base
-        means = _placebo_means(trades)
+        # Without the move the opposite-direction result would be just -cost, an easy bar: those trades
+        # are left out of the placebo and of the mean it is compared with (pre-registered, "missing_move").
+        known = [t for t in trades if t.move is not None]
+        means = _placebo_means(known)
+        base["placebo_mean_net"] = statistics.fmean(t.net for t in known)
         base["placebo_p95"] = float(np.percentile(means, 95))
-        base["placebo_percentile"] = float((means < base["mean_net"]).mean() * 100)
+        base["placebo_percentile"] = float((means < base["placebo_mean_net"]).mean() * 100)
     return base
 
 
@@ -126,7 +131,7 @@ def scorecard(db: Session) -> dict[str, Any]:
         mean = s["mean_net"]
         s["passes"] = bool(
             s["n"] >= N_MIN and mean is not None and mean > 0 and adjusted[c] < ALPHA
-            and s["placebo_p95"] is not None and mean > s["placebo_p95"]
+            and s["placebo_p95"] is not None and s["placebo_mean_net"] > s["placebo_p95"]
         )
         trades = cells[c]
         s["split"] = {

@@ -44,7 +44,9 @@ every other context, with zero seeded exceptions.
   position out of `open` with a conditional UPDATE (`claim_open`), so of two closes at once only one is recorded.
 - The news stream's state (`desk_news_stream_json`) is "connected" only after Alpaca accepted the login, and its
   `news_stream_at` is when the state began; a desk position on a US stock is watched by its ticker as well.
-- `external` positions (the owner's own app trades) are logged and scored separately, never in a pass-rule cell.
+- `external` positions (the owner's own app trades) are logged and scored separately, never in a pass-rule cell. They are found from the Scalable activity ledger itself (a round trip between two syncs counts), each ISIN classified by the depot snapshots or, once, by sc's quote (`desk_isin_types_json`).
+- A trade without a recorded underlying move is left out of the placebo; over 10 % of a cell without one: no placebo, no pass (pre-registered, `missing_move`). The fill falls back to the proposal's reference read, the exit to the reference's last chart point of 30 minutes.
+- Proposal expiry skips a row a tap holds and never overwrites a status that is no longer `proposed`.
 - Phase 2 (real orders) is Proposed in ADR 0027 and not built.
 - A CFD is never automated (`would_take_live` is always False); Trading 212 stays read-only.
 - Nothing reads `news_wire_items` to open, close or block a position.

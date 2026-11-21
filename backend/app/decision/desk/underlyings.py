@@ -68,8 +68,11 @@ def resolve_underlying(db: Session | None, text: str, user_id: str | None = None
             candidates[us] = key
     if len(candidates) == 1:
         isin, name = next(iter(candidates.items()))
+        # The typed ticker names the earnings calendar only for a US listing: "ALV" typed for Allianz
+        # (Xetra) is Autoliv in the US calendar. Elsewhere the listing's own symbol, suffix kept.
+        symbol = key if isin.startswith("US") else ticker_for_isin(db, isin, user_id)
         return Underlying(isin, name[:60], "XNYS" if isin.startswith("US") else "XETR", isin in LIQUID_ISINS,
-                          symbol=key)
+                          symbol=symbol)
     raise UnderlyingUnknown(f"'{text}' is {'ambiguous' if candidates else 'unknown'}: send the ISIN instead.")
 
 

@@ -100,7 +100,7 @@ def test_a_failed_price_read_retries_inside_the_window_then_logs_no_data(monkeyp
     db = _memory_db()
     user = make_user(db)
 
-    def down(db, cli, plan):
+    def down(db, cli, plan, now=None):
         raise index_momentum.DataUnavailable("ReadTimeout")
 
     monkeypatch.setattr(index_momentum, "compute_r1", down)

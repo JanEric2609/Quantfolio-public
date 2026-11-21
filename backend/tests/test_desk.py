@@ -548,11 +548,14 @@ def test_scoring_zero_edge_fails_and_large_edge_passes():
     assert score_cell([])["n"] == 0
 
 
-def test_scoring_without_the_underlying_move_has_no_placebo_and_cannot_pass():
+def test_scoring_leaves_a_few_missing_moves_out_of_the_placebo_but_not_many():
     trades = _trades([2.0] * 60, move=0.01)
-    trades[0] = replace(trades[0], move=None)
+    trades[0] = replace(trades[0], move=None)  # one failed price read must not void the cell for good
     scored = score_cell(trades)
-    assert scored["missing_move"] == 1 and scored["placebo_p95"] is None and scored["p"] < 0.05
+    assert scored["missing_move"] == 1 and scored["placebo_p95"] is not None and scored["p"] < 0.05
+    many = [replace(t, move=None) if i < 7 else t for i, t in enumerate(trades)]  # 7 of 60: over 10 %
+    scored = score_cell(many)
+    assert scored["missing_move"] == 7 and scored["placebo_p95"] is None
 
 
 def test_scoring_is_deterministic():
@@ -591,7 +594,7 @@ def test_scorecard_counts_only_positions_after_registration():
 
 
 def test_prereg_hash_is_pinned():
-    assert prereg.PREREG_HASH == "acda5491d40711ac7172e6df6e2a685e7123ddf3d715c9553e92fa89086d74d3"
+    assert prereg.PREREG_HASH == "86396b951089aa96007d6227bbfda59991be23b7b8b8ecd2975af6afa5c4a8cd"
     assert prereg.CELLS == ("owner_call:knockout", "owner_call:warrant", "index_momentum:knockout",
                             "index_momentum:warrant", "index_momentum:cfd")
 
