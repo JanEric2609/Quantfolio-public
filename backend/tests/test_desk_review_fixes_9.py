@@ -170,3 +170,39 @@ def test_a_slow_rating_does_not_block_the_streams_receive_loop(monkeypatch):
     monkeypatch.setattr(news_wire, "alpaca_stream", burst)
     assert asyncio.run(newswire._stream_once()) == "closed"
     assert len(received) == 50 and 0 < len(rated) < 50  # all 50 read; the queue kept what fit
+
+
+# Pullfrog on 1e706d5: the worker is never cancelled mid-item; the session closes only after it ends.
+def test_the_item_in_hand_finishes_before_the_stream_closes_its_session(monkeypatch):
+    events: list[str] = []
+
+    class Db:
+        def commit(self):
+            pass
+
+        def close(self):
+            events.append("close")
+
+    monkeypatch.setattr("app.foundation.core.db.SessionLocal", lambda: Db())
+    monkeypatch.setattr(newswire, "_owner_and_key", lambda db_: ("u", ("k", "s")))
+    monkeypatch.setattr(newswire, "watchlist", lambda db_, uid: {})
+    monkeypatch.setattr(newswire, "_set_stream_health", lambda state, now=None: None)
+    monkeypatch.setattr(newswire, "STREAM_DRAIN_S", 0.01)  # the drain gives up at once
+
+    async def slow_ingest(db_, uid, item, watch, *a, **k):
+        events.append(f"start {item.source_id}")
+        await asyncio.sleep(0.1)  # e.g. the alert being sent in a thread on this session
+        events.append(f"done {item.source_id}")
+        return "sent"
+
+    monkeypatch.setattr(newswire, "ingest", slow_ingest)
+
+    async def two(key, secret, on_ready=None):
+        on_ready()
+        for i in range(2):
+            yield news_wire.WireItem("alpaca", str(i), "h", NOW.astimezone(UTC))
+
+    monkeypatch.setattr(news_wire, "alpaca_stream", two)
+    assert asyncio.run(newswire._stream_once()) == "closed"
+    assert events[:2] == ["start 0", "done 0"] and events[-1] == "close"
+    assert "start 1" not in events  # the queued rest is dropped, never half-rated

@@ -427,12 +427,31 @@ STREAM_QUEUE_MAX = 500
 STREAM_DRAIN_S = 60.0
 
 
-async def _ingest_worker(db: Session, user_id: str, queue: asyncio.Queue[news_wire.WireItem]) -> None:
-    """Rate and store the stream's items in order (the only user of *db* while the stream runs)."""
+async def _stop_worker(queue: asyncio.Queue[news_wire.WireItem | None], worker: asyncio.Task[None]) -> None:
+    """End the worker without cancelling it: an item it is rating may be sending its alert in a thread
+    on the same session (already stored as sent), so it finishes that item; the rest is dropped. Only
+    then may the caller close the session. The item's own timeouts (model, Bot API) bound the wait."""
+    while True:
+        try:
+            queue.get_nowait()
+            queue.task_done()
+        except asyncio.QueueEmpty:
+            break
+    if not worker.done():
+        await queue.put(None)
+        await asyncio.gather(worker, return_exceptions=True)
+
+
+async def _ingest_worker(db: Session, user_id: str, queue: asyncio.Queue[news_wire.WireItem | None]) -> None:
+    """Rate and store the stream's items in order (the only user of *db* while the stream runs); a
+    ``None`` ends it after the item in hand."""
     watch, watch_at = watchlist(db, user_id), time.monotonic()
     db.commit()
     while True:
         item = await queue.get()
+        if item is None:
+            queue.task_done()
+            return
         try:
             if time.monotonic() - watch_at > WATCH_TTL_S:
                 watch, watch_at = watchlist(db, user_id), time.monotonic()
@@ -460,7 +479,7 @@ async def _stream_once() -> str:
         # The receive loop never waits on the local model: items go into a bounded queue that one worker
         # rates and stores in order. A slow model fills the queue (the newest items are then dropped and
         # counted) instead of stalling the websocket until its keepalive times out and the stream drops.
-        queue: asyncio.Queue[news_wire.WireItem] = asyncio.Queue(maxsize=STREAM_QUEUE_MAX)
+        queue: asyncio.Queue[news_wire.WireItem | None] = asyncio.Queue(maxsize=STREAM_QUEUE_MAX)
         worker = asyncio.create_task(_ingest_worker(db, user_id, queue))
         dropped = 0
         try:
@@ -478,7 +497,7 @@ async def _stream_once() -> str:
         except asyncio.TimeoutError:
             logger.info("news wire: %d queued item(s) left unrated at the stream's end", queue.qsize())
         finally:
-            worker.cancel()
+            await _stop_worker(queue, worker)
         return "closed"
     except news_wire.StreamRefused:
         return "refused"
