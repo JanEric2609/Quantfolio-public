@@ -361,3 +361,44 @@ def test_handle_update_ignores_non_message_shapes():
     assert handle_update(db, {}) is False
     assert handle_update(db, {"message": {"chat": {}, "text": "hi"}}) is False
     assert handle_update(db, {"message": {"chat": {"id": 1}, "text": "   "}}) is False
+
+
+# -- replies to the bot's own messages ---------------------------------------
+
+
+def test_a_reply_to_a_bot_message_goes_to_the_reply_handler_and_is_never_logged_as_spending(monkeypatch):
+    """A fill price sent as a reply under a CFD message ("7020.5") must not become a 7,020.5 EUR expense."""
+    db = _db_with_bot()
+    user = _linked_user(db)
+    seen = []
+
+    def handler(db_, account, chat_id, text, replied):
+        seen.append((account.user_id, chat_id, text, replied["message_id"]))
+        return replied["message_id"] == 106
+
+    monkeypatch.setattr(telegram_updates, "_reply_handlers", [handler])
+    reply = {"update_id": 1, "message": {"chat": {"id": 777}, "text": "7020.5",
+                                         "reply_to_message": {"message_id": 106, "from": {"is_bot": True}}}}
+    with patch("app.foundation.telegram_bot.send_telegram_message", return_value=True):
+        assert handle_update(db, reply)
+    assert seen == [(user.id, "777", "7020.5", 106)]
+    assert db.query(Expense).count() == 0
+
+    # Not handled (a reply to another bot message) or a reply to a non-bot message: the usual flow.
+    other = {"update_id": 2, "message": {"chat": {"id": 777}, "text": "3.50 coffee",
+                                         "reply_to_message": {"message_id": 5, "from": {"is_bot": True}}}}
+    own = {"update_id": 3, "message": {"chat": {"id": 777}, "text": "2.00 tea",
+                                       "reply_to_message": {"message_id": 6, "from": {"is_bot": False}}}}
+    with patch("app.foundation.telegram_bot.send_telegram_message", return_value=True):
+        handle_update(db, other)
+        handle_update(db, own)
+    assert db.query(Expense).count() == 2 and len(seen) == 2
+
+
+def test_the_desk_registers_its_reply_handler():
+    from app.decision.desk import telegram as desk_telegram
+
+    desk_telegram.register_desk_telegram()
+    assert desk_telegram.handle_cfd_reply in telegram_updates._reply_handlers
+    desk_telegram.register_desk_telegram()  # idempotent
+    assert telegram_updates._reply_handlers.count(desk_telegram.handle_cfd_reply) == 1

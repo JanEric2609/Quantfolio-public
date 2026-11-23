@@ -293,6 +293,8 @@ def open_message(db: Session, position: DeskPosition, key: str, now: datetime,
         f"Stop: {ctx.stop_points:,.0f} pts from your fill (1 daily sigma; a 27-minute move this large is rare)",
         f"Typical last-30-minute move \u00b1{ctx.typical_30m_points:,.0f} pts; spread \u2248 {ctx.spread_points:,.1f} pts "
         "(Trading 212, observed)",
+        f"Index at the signal \u2248 {ctx.index_level_est:,.0f}; Trading 212's price follows the futures and can differ by "
+        "a few points. The stop counts from your fill.",
         f"Close at {exit_local} Berlin; I will tell you.",
     ]
     if ctx.currency == "USD":
@@ -351,7 +353,7 @@ def live_text(db: Session, position: DeskPosition, journal: Any, now: datetime,
             move = (last / entry - 1) * (1 if position.direction == "long" else -1)
             pnl = move * entry * Decimal(position.quantity or 0)
             mins = max(0, -int(-(exit_at - now).total_seconds() // 60))
-            status.append(f"Now ({local:%H:%M}): {position.underlying_label} \u2248 {level_now:,.0f} "
+            status.append(f"Now ({local:%H:%M}): {position.underlying_label} index \u2248 {level_now:,.0f} "
                           f"({level_now - ctx.index_level_est:+,.0f} pts since the signal), paper {pnl:+.2f} EUR "
                           f"before costs. Exit {exit_at.astimezone(cal.BERLIN):%H:%M} (in {mins} min).")
         if journal.status == "sent" and now > ctx.enter_by:
@@ -369,7 +371,7 @@ def _journal_line(j: Any) -> list[str]:
     qty = j.quantity if j.quantity is not None else j.quantity_suggested
     if j.status == "entered":
         if j.entry_level is None:
-            return ["Your trade: entered (send your fill: /cfd in <price>)"]
+            return ["Your trade: entered (reply to this message with your fill price)"]
         stop = cfd_journal.stop_level(j)
         tail = f", stop {stop:,.1f}" if stop is not None else ""
         return [f"Your trade: entered {Decimal(j.entry_level):,.1f} \u00d7 {Decimal(qty or 0):.4f}{tail}"]
@@ -487,6 +489,13 @@ def close_message(position: DeskPosition, reason: str, ctx_or_journal: Any = Non
     why = {"time": f"{hhmm}, the rule's exit", "stop": "stop-loss level reached", "halt": "desk halted",
            "quote_lost": "price feed lost", "owner_close": "you closed it"}.get(reason, reason)
     night = Decimal(exposure) * T212["overnight_rate"]
-    return (f"{position.underlying_label} CFD: CLOSE now ({why}). Paper result {position.net_eur} EUR after spread and "
+    text = (f"{position.underlying_label} CFD: CLOSE now ({why}). Paper result {position.net_eur} EUR after spread and "
             f"fees.\nThe rule's trade ends here. Holding on is a new trade without a tested edge: overnight interest "
             f"\u2248 {night:,.2f} EUR per night on {Decimal(exposure):,.0f} EUR, plus gap risk.")
+    status = getattr(ctx_or_journal, "status", None)
+    if status in ("entered", "closed") and getattr(ctx_or_journal, "exit_level", 0) is None:
+        missing = "<exit price>" if getattr(ctx_or_journal, "entry_level", None) is not None \
+            else "<entry price> <exit price>"
+        text += (f"\nTo log your trade ({position.id[:8]}), reply to this message with: {missing}, as Trading 212 "
+                 "shows them.")
+    return text

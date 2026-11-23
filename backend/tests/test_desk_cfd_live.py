@@ -91,7 +91,7 @@ def test_a_moved_price_edits_the_message(monkeypatch):
     jobs._live_edits(db, user.id, NOW + timedelta(minutes=12))
     assert len(tg.edits) == 1
     mid, text, markup = tg.edits[0]
-    assert mid == 701 and "Now (11:12): DAX ≈ 25,020 (+20 pts since the signal), paper +0.40 EUR before costs." in text
+    assert mid == 701 and "Now (11:12): DAX index ≈ 25,020 (+20 pts since the signal), paper +0.40 EUR before costs." in text
     assert "Exit 11:27 (in 15 min)." in text and "Also on paper (no action):" in text
     assert markup["inline_keyboard"][0][1]["text"] == "Skipped"
     jobs._live_edits(db, user.id, NOW + timedelta(minutes=12))  # same text again: nothing
