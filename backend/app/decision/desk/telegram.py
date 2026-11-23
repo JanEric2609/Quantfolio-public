@@ -3,7 +3,9 @@
 ``/cfd`` is the owner's journal of the manual Trading 212 CFD trades: ``/cfd`` lists today's rows,
 ``/cfd in <price> [quantity] [id]``, ``/cfd out <price> [id]``, ``/cfd skip [id]``. The CFD message carries
 the buttons ``cfd:in:<position id>`` (Entered), ``cfd:skip:<position id>`` (Skipped) and
-``cfd:out:<position id>`` (Closed, after Entered). All of it is the owner's own record, never the ledger.
+``cfd:out:<position id>`` (Closed, after Entered). A plain reply to the CFD message, its close message or a
+button's prompt (``7020.5``, ``7020.5 0.0400``, ``7020.5 7005.5``, ``out 7005.5``) needs no id: the
+replied-to message names the trade. All of it is the owner's own record, never the ledger.
 
 Registered at startup by ``register_desk_telegram()`` (worker and API); the
 foundation's update handler never imports this package. Only an admin's linked
@@ -19,7 +21,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.foundation import telegram_bot, telegram_updates
-from app.foundation.models.entities import DeskPosition, User
+from app.foundation.models.entities import DeskCfdJournal, DeskPosition, User
 from app.foundation.scalable import market
 from app.foundation.scalable import service as scalable_service
 from app.foundation.scalable.cli import ScalableError
@@ -188,13 +190,94 @@ def handle_cfd_button(db: Session, account: Any, chat_id: str, data: str) -> str
     except cfd_journal.JournalError as exc:
         db.rollback()
         return str(exc)
+    short = journal.position_id[:8]
     if parts[1] == "in":
-        _say(db, chat_id, f"Noted. Send your fill: /cfd in 24500.5 0.0113 {journal.position_id[:8]} (quantity optional)")
+        _say(db, chat_id, f"Noted ({journal.market_key} {short}). Reply to this message with your fill price as "
+                          "Trading 212 shows it (quantity optional), or send /cfd in <price> [quantity] " + short,
+             _force_reply("fill price [quantity]"))
         return "Entered."
     if parts[1] == "out":
-        _say(db, chat_id, f"Noted. Send your exit level: /cfd out 25500.5 {journal.position_id[:8]}")
+        _say(db, chat_id, f"Noted ({journal.market_key} {short}). Reply to this message with your exit price "
+                          "(with the entry first if you have not sent it: <entry> <exit>), or send "
+                          f"/cfd out <price> {short}", _force_reply("exit price"))
         return "Closed."
     return "Skipped."
+
+
+def _force_reply(placeholder: str) -> dict[str, Any]:
+    """Opens the reply field under the prompt, so the answer carries the trade (Bot API ``ForceReply``)."""
+    return {"force_reply": True, "input_field_placeholder": placeholder[:64]}
+
+
+def _noted_in(journal: Any) -> str:
+    text = f"Noted: {journal.market_key} in at {Decimal(journal.entry_level):,.1f}"
+    slip = cfd_journal.slippage_points(journal)
+    if slip is not None:
+        text += f" ({abs(slip):,.1f} pts {'worse' if slip > 0 else 'better'} than the signal's index level)"
+    stop = cfd_journal.stop_level(journal)
+    if stop is not None and journal.stop_points is not None:
+        text += f". Stop for your fill: {stop:,.1f} ({Decimal(journal.stop_points):,.0f} pts)"
+    return text + "."
+
+
+def _noted_out(db: Session, journal: Any) -> str:
+    position = db.get(DeskPosition, journal.position_id)
+    real = f"{Decimal(journal.real_pnl_eur):+.2f} EUR" if journal.real_pnl_eur is not None else \
+        "not computed (send the entry too)"
+    paper = f"{Decimal(position.net_eur):+.2f} EUR" if position and position.net_eur is not None else "still open"
+    return (f"Noted: {journal.market_key} out at {Decimal(journal.exit_level):,.1f}. Your result {real} "
+            f"(before overnight interest); paper result {paper}.")
+
+
+#: An 8-character trade id in the text of the message replied to (the prompts and close messages name it).
+_ID_IN_TEXT = re.compile(r"\b([0-9a-f]{8})\b")
+
+
+def _journal_for_reply(db: Session, user_id: str, replied: dict[str, Any]) -> Any:
+    message_id = replied.get("message_id")
+    if isinstance(message_id, int):
+        row = db.query(DeskCfdJournal).filter(DeskCfdJournal.user_id == user_id,
+                                              DeskCfdJournal.telegram_message_id == message_id).one_or_none()
+        if row is not None:
+            return row
+    for ref in _ID_IN_TEXT.findall(str(replied.get("text") or "")):
+        row = cfd_journal.find_for_owner(db, user_id, ref)
+        if row is not None:
+            return row
+    return None
+
+
+def handle_cfd_reply(db: Session, account: Any, chat_id: str, text: str, replied: dict[str, Any]) -> bool:
+    """A reply to a CFD message or prompt: the replied-to message names the trade, so no id is needed.
+    ``False`` (not handled) for a reply to anything else, or a bare ``/cfd`` (the list)."""
+    if text.split() == ["/cfd"] or not _is_admin(db, account):
+        return False
+    journal = _journal_for_reply(db, account.user_id, replied)
+    if journal is None:
+        return False
+    now = datetime.now(UTC)
+    try:
+        fill = cfd_journal.parse_reply(journal, text)
+        if fill.skip:
+            cfd_journal.mark_skipped(db, journal, now)
+            db.commit()
+            _say(db, chat_id, f"Noted: {journal.market_key} skipped.")
+            return True
+        said: list[str] = []
+        if fill.entry is not None or fill.quantity is not None:
+            cfd_journal.mark_entered(db, journal, now, fill.entry, fill.quantity)
+            said.append(_noted_in(journal) if journal.entry_level is not None
+                        else f"Noted: quantity {Decimal(journal.quantity):.4f}.")
+        if fill.exit is not None:
+            cfd_journal.mark_closed(db, journal, now, fill.exit)
+            said.append(_noted_out(db, journal))
+        db.commit()
+    except cfd_journal.JournalError as exc:
+        db.rollback()
+        _say(db, chat_id, str(exc))
+        return True
+    _say(db, chat_id, "\n".join(said))
+    return True
 
 
 def _cfd_line(j: Any) -> str:
@@ -203,6 +286,8 @@ def _cfd_line(j: Any) -> str:
         bits.append(f"suggested {Decimal(j.quantity_suggested):.4f}")
     if j.entry_level is not None:
         bits.append(f"in {Decimal(j.entry_level):,.1f}" + (f" x {Decimal(j.quantity):.4f}" if j.quantity else ""))
+        if (slip := cfd_journal.slippage_points(j)) is not None:
+            bits.append(f"{slip:+,.1f} pts vs the signal")
     if j.exit_level is not None:
         bits.append(f"out {Decimal(j.exit_level):,.1f}")
     if j.real_pnl_eur is not None:
@@ -236,31 +321,26 @@ def handle_cfd(db: Session, account: Any, chat_id: str, text: str) -> None:
             if rest and _is_quantity(rest[0]):
                 quantity = cfd_journal.parse_number(rest[0])
                 rest = rest[1:]
-            journal = cfd_journal.find_for_owner(db, account.user_id, rest[0] if rest else None, now)
+            journal = cfd_journal.find_for_owner(db, account.user_id, rest[0] if rest else None, now,
+                                                 action="in", level=level)
             if journal is None:
                 return _say(db, chat_id, "No open CFD trade found (add the id from /cfd).")
             cfd_journal.mark_entered(db, journal, now, level, quantity)
             db.commit()
-            stop = cfd_journal.stop_level(journal)
-            tail = f" Stop for your fill: {stop:,.1f} ({Decimal(journal.stop_points):,.0f} pts)" \
-                if stop is not None and journal.stop_points is not None else ""
-            return _say(db, chat_id, f"Noted: in at {level:,.1f}." + tail)
+            return _say(db, chat_id, _noted_in(journal))
         if action == "out":
             if not args:
                 return _say(db, chat_id, usage)
             level = cfd_journal.parse_number(args[0])
-            journal = cfd_journal.find_for_owner(db, account.user_id, args[1] if len(args) > 1 else None, now)
+            journal = cfd_journal.find_for_owner(db, account.user_id, args[1] if len(args) > 1 else None, now,
+                                                 action="out", level=level)
             if journal is None:
                 return _say(db, chat_id, "No open CFD trade found (add the id from /cfd).")
             cfd_journal.mark_closed(db, journal, now, level)
-            position = db.get(DeskPosition, journal.position_id)
             db.commit()
-            real = f"{Decimal(journal.real_pnl_eur):+.2f} EUR" if journal.real_pnl_eur is not None else "not computed"
-            paper = f"{Decimal(position.net_eur):+.2f} EUR" if position and position.net_eur is not None else "still open"
-            return _say(db, chat_id, f"Noted: out at {level:,.1f}. Your result {real} (before overnight interest); "
-                                     f"paper result {paper}.")
+            return _say(db, chat_id, _noted_out(db, journal))
         if action == "skip":
-            journal = cfd_journal.find_for_owner(db, account.user_id, args[0] if args else None, now)
+            journal = cfd_journal.find_for_owner(db, account.user_id, args[0] if args else None, now, action="skip")
             if journal is None:
                 return _say(db, chat_id, "No open CFD trade found (add the id from /cfd).")
             cfd_journal.mark_skipped(db, journal, now)
@@ -275,6 +355,7 @@ def handle_cfd(db: Session, account: Any, chat_id: str, text: str) -> None:
 def register_desk_telegram() -> None:
     telegram_updates.register_command_handler("/cfd", handle_cfd)
     telegram_updates.register_callback_handler("cfd", handle_cfd_button)
+    telegram_updates.register_reply_handler(handle_cfd_reply)
     telegram_updates.register_command_handler("/idea", handle_idea)
     telegram_updates.register_command_handler("/desk", handle_desk)
     telegram_updates.register_command_handler("/stop", handle_stop)

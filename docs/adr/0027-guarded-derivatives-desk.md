@@ -197,3 +197,20 @@ desk limit becomes a setting.
   session, not Scalable's own limit). The sort is unchanged; page one is read, then one-row probes bisect to the
   band, then full pages follow, advancing by the raw item count, with at most 8 `sc` reads per search.
 
+- **Journal by reply (first live night, 2026-11-23).** Both US signals fired. An S&P fill was sent with a digit
+  missing and without an id, and the lookup took the newest row of the day (NDX), so the answer named the wrong
+  index. Nothing was saved; the fills were logged later with ids. Changes, all owner input and display:
+  - a reply to the CFD message, its close message or a button prompt is read as the fill (`7020.5`,
+    `7020.5 0.0400`, `7020.5 7005.5`, `out 7005.5`, `skip`), and the replied-to message names the trade
+    (`telegram_message_id`, or the 8-character id in its text). The foundation's update handler gains a reply-handler
+    registry that runs before the expense parser, so a price is never logged as spending;
+  - `/cfd in|out|skip` without an id picks among the rows the action applies to, keeps the rows whose index is
+    near the level, prefers a row marked Entered, and refuses with the ids when two remain;
+  - a number that is neither near the index nor a plausible quantity (at most 50 times the suggested one) is
+    refused, so `702.05` is never stored as a quantity;
+  - the prompts show `<price>` placeholders instead of example levels and open the reply field (Bot API
+    `ForceReply`); the close message asks for the missing prices;
+  - each fill shows its distance from the signal's index level (`cfd_journal.slippage_points`). Trading 212's
+    USA 500 and USA Tech 100 are futures-based CFDs (its instrument pages are `USA500.DEC26` and `TECH100.DEC26`).
+    Its prices that night sat a few tenths of a percent above the cash index scaled by the ETF proxy. The message
+    says so; the stop counts from the owner's fill, so it is unaffected.

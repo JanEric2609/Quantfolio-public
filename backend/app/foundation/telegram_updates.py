@@ -55,8 +55,14 @@ CommandHandler = Callable[[Session, Any, str, str], None]
 #: ``fn(db, account, chat_id, data) -> str`` (the toast text), called for a button tap.
 CallbackHandler = Callable[[Session, Any, str, str], str]
 
+#: ``fn(db, account, chat_id, text, replied) -> bool``, called for a reply to one of the bot's own messages
+#: (``replied`` is Telegram's ``reply_to_message``); ``True`` means handled, ``False`` lets the next
+#: handler, then the usual command and expense handling, see it.
+ReplyHandler = Callable[[Session, Any, str, str, dict[str, Any]], bool]
+
 _command_handlers: dict[str, CommandHandler] = {}
 _callback_handlers: dict[str, CallbackHandler] = {}
+_reply_handlers: list[ReplyHandler] = []
 
 
 def register_command_handler(prefix: str, fn: CommandHandler) -> None:
@@ -65,6 +71,11 @@ def register_command_handler(prefix: str, fn: CommandHandler) -> None:
 
 def register_callback_handler(prefix: str, fn: CallbackHandler) -> None:
     _callback_handlers[prefix] = fn
+
+
+def register_reply_handler(fn: ReplyHandler) -> None:
+    if fn not in _reply_handlers:
+        _reply_handlers.append(fn)
 
 
 def _matching(registry: dict[str, Any], text: str) -> Any | None:
@@ -86,7 +97,8 @@ def handle_update(db: Session, update: dict[str, Any]) -> bool:
     text = (message.get("text") or "").strip()
     if not chat_id or not text:
         return False
-    handle_message(db, chat_id, text)
+    replied = message.get("reply_to_message")
+    handle_message(db, chat_id, text, replied if isinstance(replied, dict) else None)
     return True
 
 
@@ -116,7 +128,7 @@ def handle_callback_query(db: Session, query: dict[str, Any]) -> None:
     telegram_bot.answer_callback_query(db, callback_id, toast)
 
 
-def handle_message(db: Session, chat_id: str, text: str) -> None:
+def handle_message(db: Session, chat_id: str, text: str, replied: dict[str, Any] | None = None) -> None:
     # telegram_bot.send_telegram_message is looked up on the module at call time
     # (not imported by name) so tests can patch it in one place.
     if text.startswith("/start"):
@@ -135,6 +147,13 @@ def handle_message(db: Session, chat_id: str, text: str) -> None:
     if account is None:
         telegram_bot.send_telegram_message(db, chat_id, "This chat isn't linked yet. Generate a pairing code in Quantfolio Settings and send /start CODE.")
         return
+
+    if replied is not None and (replied.get("from") or {}).get("is_bot"):
+        # A reply to the bot's own message (e.g. a fill price under a CFD signal) goes to the handler that
+        # owns that message, before the expense parser could log "7020.5" as spending.
+        for reply_handler in list(_reply_handlers):
+            if reply_handler(db, account, chat_id, text, replied):
+                return
 
     command = _matching(_command_handlers, text)
     if command is not None:

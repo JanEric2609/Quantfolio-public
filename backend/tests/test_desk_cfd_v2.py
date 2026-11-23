@@ -60,6 +60,8 @@ def test_dax_long_message_text(monkeypatch):
         "Quantity 0.0200 (≈ 500 EUR, margin ≈ 25.00 EUR). Enter by 17:05 Berlin, otherwise skip today.",
         "Stop: 250 pts from your fill (1 daily sigma; a 27-minute move this large is rare)",
         "Typical last-30-minute move ±61 pts; spread ≈ 1.2 pts (Trading 212, observed)",
+        "Index at the signal ≈ 25,000; Trading 212's price follows the futures and can differ by a few points. "
+        "The stop counts from your fill.",
         "Close at 17:27 Berlin; I will tell you.",
         "Paper-scored as index_momentum:cfd. Most retail CFD accounts lose money; nothing is ordered for you.",
     ]
