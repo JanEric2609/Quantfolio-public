@@ -248,7 +248,7 @@ def weekly_advisor_pulse() -> None:
                     run_pulse_check(holdings, regime, regime_weights, lookthrough)
                     tally.success()
                 except Exception as exc:
-                    logging.getLogger(__name__).warning("Pulse check failed for user %s: %s", user.id, exc_info=True)
+                    logging.getLogger(__name__).warning("Pulse check failed for user %s", user.id, exc_info=True)
                     tally.failure(f"user {user.id}", exc)
             return tally.outcome()
     _track_job("weekly_advisor_pulse", _weekly_advisor_pulse_inner)
@@ -273,7 +273,7 @@ def monthly_advisor_deep() -> None:
                     run_deep_analysis(holdings, regime, llm_func=llm, regime_weights=regime_weights, lookthrough=lookthrough)
                     tally.success()
                 except Exception as exc:
-                    logging.getLogger(__name__).warning("Deep analysis failed for user %s: %s", user.id, exc_info=True)
+                    logging.getLogger(__name__).warning("Deep analysis failed for user %s", user.id, exc_info=True)
                     tally.failure(f"user {user.id}", exc)
             return tally.outcome()
     _track_job("monthly_advisor_deep", _monthly_advisor_deep_inner)

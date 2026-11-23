@@ -383,3 +383,17 @@ def test_replay_days_from_bars_and_costs():
     assert trade_results(Day(date(2026, 2, 2), 0.0, 0.001, 0.01, False), Costs()) is None
     report = evaluate(days, Costs())
     assert report["gross_bp"]["n"] == len([x for x in days if not x.friday_or_preholiday and x.sigma])
+
+
+def test_alpaca_holding_hit_needs_ticker_or_name_in_headline():
+    watch = newswire.Watch({"NUE": "holding:NUE", "RGLD": "holding:RGLD", "CF": "holding:CF",
+                            "ROP": "holding:ROP", "KMB": "holding:KMB", "IBM": "holding:IBM"})
+    watch.names.update({"NUE": "Nucor Corp", "RGLD": "Royal Gold Inc", "CF": "CF Industries Holdings",
+                        "ROP": "Roper Technologies", "KMB": "Kimberly-Clark Corp", "IBM": "International Business Machines"})
+    for sym, headline in [("NUE", "NU E Power Corp. Appoints a new director"),
+                          ("RGLD", "Red Lake Gold Inc. Announces Grant of Stock Options"),
+                          ("CF", "Canaccord Genuity Raises Price Target for Tasmea"),
+                          ("ROP", "Carolin Kordomatis joins Roche Diagnostics")]:
+        assert newswire.relevance(_item(symbols=(sym,), headline=headline), watch) == ""
+    assert newswire.relevance(_item(symbols=("KMB",), headline="Kimberly-Clark Enters Agreement with Suzano"), watch) == "holding:KMB"
+    assert newswire.relevance(_item(symbols=("IBM",), headline="IBM Reduces H-1B Hiring"), watch) == "holding:IBM"

@@ -57,13 +57,42 @@ INDEX_SYMBOLS = {"DAX": ("DAX",), "ES50": ("STOXX50",), "SPX": ("SPY", "SPX"), "
 # -- relevance -----------------------------------------------------------------------
 
 
+class Watch(dict):
+    """The watchlist plus ``names``: ticker -> company name, for the Alpaca headline check."""
+
+    names: dict[str, str]
+
+    def __init__(self, *a: Any, **k: Any) -> None:
+        super().__init__(*a, **k)
+        self.names = {}
+
+
+_NAME_NOISE = {"inc", "corp", "corporation", "co", "company", "ag", "plc", "se", "sa", "nv", "ltd", "the", "group",
+               "holdings", "holding", "class", "a", "b", "adr", "n", "&"}
+
+
+def _name_word(name: str) -> str:
+    for w in name.replace(",", " ").replace(".", " ").replace("-", " ").split():
+        if w.lower() not in _NAME_NOISE:
+            return w.lower()
+    return ""
+
+
+def _mentions(headline: str, sym: str, name: str) -> bool:
+    words = {w.strip(".,:;()\"'’!?$").upper() for w in headline.replace("-", " ").split()}
+    if sym.upper() in words:
+        return True
+    first = _name_word(name)
+    return bool(first) and first in {w.lower() for w in words}
+
+
 def watchlist(db: Session, user_id: str) -> dict[str, str]:
     """``{symbol or ISIN: why}`` for the owner's holdings and the desk's open or proposed positions."""
     from app.foundation.live_positions import combined_positions
 
     from .underlyings import ALIASES
 
-    out: dict[str, str] = {}
+    out = Watch()
     for pos in combined_positions(db, user_id):
         ticker = (pos.ticker or "").upper()
         isin = (pos.isin or "").upper()
@@ -73,6 +102,7 @@ def watchlist(db: Session, user_id: str) -> dict[str, str]:
         label = us or ticker or (pos.name or isin or "")[:24]
         if us:
             out.setdefault(us, f"holding:{us}")
+            out.names.setdefault(us, pos.name or "")
         if isin:
             out.setdefault(isin, f"holding:{label}")
     by_isin = {u.isin: k for k, u in ALIASES.items()}
@@ -110,8 +140,14 @@ def relevance(item: news_wire.WireItem, watch: dict[str, str], ciks: dict[str, s
         return "central_bank"
     if item.source == "sec_8k":
         return f"holding:{(ciks or {}).get(item.cik or '', '')}" if (ciks or {}).get(item.cik or "") else ""
+    names = getattr(watch, "names", None)
     for sym in item.symbols:
         if sym in watch:
+            # Benzinga tags CSE/TSX/ASX names with the same letters as a US holding ("NU E Power" -> NUE):
+            # an Alpaca holding hit also needs the ticker or the company's first word in the headline.
+            if names and item.source == "alpaca" and watch[sym].startswith("holding:") \
+                    and not _mentions(item.headline, sym, names.get(sym, "")):
+                continue
             return watch[sym]
     return ""
 
@@ -297,6 +333,11 @@ def holding_ciks(db: Session, watch: dict[str, str]) -> dict[str, str]:
     return mapping
 
 
+def _why(exc: Exception) -> str:
+    """``news_wire.fetch`` raises ValueError("HTTP 403") / ("network: ReadTimeout"): no secret in it."""
+    return str(exc) if type(exc) is ValueError else type(exc).__name__
+
+
 def poll_feeds(db: Session, user_id: str, now: datetime | None = None,
                fetch=news_wire.fetch) -> dict[str, int]:
     """Read the RSS feeds and SEC 8-K once; store the new items, send what matters."""
@@ -311,7 +352,7 @@ def poll_feeds(db: Session, user_id: str, now: datetime | None = None,
         try:
             batches.append((source, news_wire.parse_rss(fetch(url, news_wire.FEED_USER_AGENT), source)))
         except (ValueError, OSError, SyntaxError) as exc:  # ParseError subclasses SyntaxError
-            logger.info("news wire: %s feed failed: %s", source, type(exc).__name__)
+            logger.info("news wire: %s feed failed: %s", source, _why(exc))
     ciks = holding_ciks(db, watch)
     if ciks:
         try:
@@ -320,7 +361,7 @@ def poll_feeds(db: Session, user_id: str, now: datetime | None = None,
             # stored marker below, not "no sec_8k row yet" (a holding's first 8-K would be the baseline).
             batches.append(("sec_8k", [f for f in filings if f.cik in ciks]))
         except (ValueError, OSError, SyntaxError) as exc:
-            logger.info("news wire: SEC feed failed: %s", type(exc).__name__)
+            logger.info("news wire: SEC feed failed: %s", _why(exc))
 
     read = _sources_read(db)
 

@@ -20,7 +20,10 @@ def run_pulse_check(holdings: list[dict], regime: dict | None, regime_weights: d
     # Regime check — severity adjusted by MWU weights
     if regime:
         reg_label = regime.get("label", "unknown")
-        reg_confidence = regime.get("confidence", 0)
+        # The jump-model regime is a state, not a probability: confidence is None on purpose.
+        reg_confidence = regime.get("confidence")
+        has_conf = isinstance(reg_confidence, (int, float))
+        conf_text = f"{reg_confidence:.0%}" if has_conf else None
 
         # Check if regime signal is trusted based on MWU weights
         regime_weight = 1.0
@@ -31,7 +34,7 @@ def run_pulse_check(holdings: list[dict], regime: dict | None, regime_weights: d
             equity_w = regime_weights.get("buy_equity", uniform) + regime_weights.get("hold_cash", uniform)
             regime_weight = min(1.0, equity_w / (4 * uniform))  # scale to [0, 1]
 
-        if reg_label in ("bear", "high_vol") and reg_confidence > 0.5:
+        if reg_label in ("bear", "high_vol") and (not has_conf or reg_confidence > 0.5):
             severity = "warning"
             if regime_weight < 0.3:
                 severity = "info"  # MWU suggests regime signal isn't reliable here
@@ -41,14 +44,16 @@ def run_pulse_check(holdings: list[dict], regime: dict | None, regime_weights: d
                 "type": "regime",
                 "severity": severity,
                 "message": f"Adverse regime detected: {reg_label}",
-                "detail": f"VIX: {regime.get('vix')}, confidence: {reg_confidence:.0%}, mwu_weight: {regime_weight:.2f}",
+                "detail": f"VIX: {regime.get('vix')}, "
+                + (f"confidence: {conf_text}, " if conf_text else "")
+                + f"mwu_weight: {regime_weight:.2f}",
             })
         elif reg_label == "bull":
             checks.append({
                 "type": "regime",
                 "severity": "info",
                 "message": "Bullish regime — favorable for equities",
-                "detail": f"Confidence: {reg_confidence:.0%}",
+                "detail": f"Confidence: {conf_text}" if conf_text else "Regime state (no confidence figure)",
             })
 
     # Drift checks from gap analysis
