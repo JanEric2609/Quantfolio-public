@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 #: A fill more than this far from the estimated index level is a typo, not a price.
 LEVEL_TOLERANCE = Decimal("0.20")
 MAX_QUANTITY = Decimal(1000)
+#: No index is near this level; it also keeps level x quantity inside ``real_pnl_eur`` (Numeric(14, 4)).
+MAX_LEVEL = Decimal(1_000_000)
 FX_FEE_ON_RESULT = Decimal("0.005")  # Trading 212's fee on a USD market's result (broker fact, see cfd.T212)
 SHORT_ID = re.compile(r"[0-9a-f][0-9a-f-]{7,35}")
 
@@ -71,8 +73,8 @@ def for_position(db: Session, position_id: str) -> DeskCfdJournal | None:
 def _check_level(journal: DeskCfdJournal, level: Decimal | None) -> None:
     if level is None:
         return
-    if level <= 0:
-        raise JournalError("The level must be above 0.")
+    if level <= 0 or level > MAX_LEVEL:
+        raise JournalError("The level must be above 0 and below 1,000,000.")
     est = Decimal(journal.index_level_est) if journal.index_level_est else None
     if est and abs(level / est - 1) > LEVEL_TOLERANCE:
         raise JournalError(f"{level:,.1f} is more than 20 % away from the index near {est:,.0f}: check the number.")
@@ -111,12 +113,16 @@ def mark_skipped(db: Session, journal: DeskCfdJournal, now: datetime) -> DeskCfd
 
 
 def mark_closed(db: Session, journal: DeskCfdJournal, now: datetime, level: Decimal | None = None) -> DeskCfdJournal:
-    if journal.status in ("closed", "skipped"):
+    # A row closed by the button without a level may get its exit level afterwards (``/cfd out <level> <id>``).
+    adding_level = journal.status == "closed" and journal.exit_level is None and level is not None
+    if journal.status == "skipped" or (journal.status == "closed" and not adding_level):
         raise JournalError(f"That trade is {journal.status}.")
     _check_level(journal, level)
     if journal.entered_at is None:
         journal.entered_at = now
-    journal.status, journal.closed_at = "closed", now
+    journal.status = "closed"
+    if journal.closed_at is None:
+        journal.closed_at = now
     if level is not None:
         journal.exit_level = level
     if journal.quantity is None:
@@ -171,7 +177,8 @@ def stop_level(journal: DeskCfdJournal) -> Decimal | None:
 
 
 def find_for_owner(db: Session, user_id: str, ref: str | None, now: datetime | None = None) -> DeskCfdJournal | None:
-    """With no *ref*: the newest row of today (Berlin) that is not closed or skipped. With a *ref*: the row
+    """With no *ref*: the newest row of today (Berlin) that is not skipped and not closed with its exit
+    level (a row the "Closed" button closed still takes ``/cfd out <level>``). With a *ref*: the row
     whose position id starts with it (8 or more characters, a literal prefix, no LIKE)."""
     rows = db.query(DeskCfdJournal).filter(DeskCfdJournal.user_id == user_id).order_by(
         DeskCfdJournal.created_at.desc()).all()
@@ -183,7 +190,8 @@ def find_for_owner(db: Session, user_id: str, ref: str | None, now: datetime | N
         return matches[0] if len(matches) == 1 else None
     today = (now or datetime.now(UTC)).astimezone(cal.BERLIN).date()
     for row in rows:
-        if _aware(row.created_at).astimezone(cal.BERLIN).date() == today and row.status not in ("closed", "skipped"):
+        if _aware(row.created_at).astimezone(cal.BERLIN).date() == today and row.status != "skipped" \
+                and not (row.status == "closed" and row.exit_level is not None):
             return row
     return None
 

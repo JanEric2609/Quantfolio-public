@@ -189,10 +189,10 @@ def handle_cfd_button(db: Session, account: Any, chat_id: str, data: str) -> str
         db.rollback()
         return str(exc)
     if parts[1] == "in":
-        _say(db, chat_id, "Noted. Send your fill: /cfd in 24500.5 0.0113 (quantity optional)")
+        _say(db, chat_id, f"Noted. Send your fill: /cfd in 24500.5 0.0113 {journal.position_id[:8]} (quantity optional)")
         return "Entered."
     if parts[1] == "out":
-        _say(db, chat_id, "Noted. Send your exit level: /cfd out 25500.5")
+        _say(db, chat_id, f"Noted. Send your exit level: /cfd out 25500.5 {journal.position_id[:8]}")
         return "Closed."
     return "Skipped."
 

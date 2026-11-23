@@ -177,3 +177,50 @@ def test_no_ledger_row_and_no_position_change_from_journal_actions():
     db.refresh(p)
     assert db.query(DeskEvent).count() == events
     assert {c: getattr(p, c) for c in before} == before and db.query(DeskPosition).count() == 1
+
+
+def test_closed_button_then_cfd_out_with_the_prompted_id_sets_the_exit(monkeypatch):
+    """pullfrog on public #17: the Closed button's prompt must lead to a command that finds this row."""
+    db = _memory_db()
+    user = make_user(db)
+    p, j = _signal(db, user)
+    log = _say_log(monkeypatch)
+    monkeypatch.setattr(telegram, "_is_admin", lambda db, a: True)
+    acct = _Account(user.id)
+    telegram.handle_cfd_button(db, acct, "1", f"cfd:in:{p.id}")
+    telegram.handle_cfd(db, acct, "1", f"/cfd in 25000 0.02 {p.id[:8]}")
+    assert telegram.handle_cfd_button(db, acct, "1", f"cfd:out:{p.id}") == "Closed."
+    assert j.status == "closed" and j.exit_level is None and p.id[:8] in log[-1]
+    closed_at = j.closed_at
+    telegram.handle_cfd(db, acct, "1", log[-1].split(": ", 1)[1].replace("25500.5", "25100"))
+    assert j.exit_level == Decimal("25100") and j.real_pnl_eur == Decimal("2.0000")
+    assert j.closed_at == closed_at  # the button's time stays the close time
+    with pytest.raises(cfd_journal.JournalError):  # an exit level is set once
+        cfd_journal.mark_closed(db, j, NOW, Decimal("25200"))
+
+
+def test_ref_less_lookup_finds_a_row_closed_without_level_but_not_one_with_it():
+    db = _memory_db()
+    user = make_user(db)
+    p, j = _signal(db, user)
+    j.created_at = NOW  # the lookup is by today's date (Berlin)
+    cfd_journal.mark_entered(db, j, NOW, Decimal("25000"))
+    cfd_journal.mark_closed(db, j, NOW)
+    assert cfd_journal.find_for_owner(db, user.id, None, NOW) is j
+    cfd_journal.mark_closed(db, j, NOW, Decimal("25050"))
+    assert cfd_journal.find_for_owner(db, user.id, None, NOW) is None
+
+
+def test_level_without_an_estimate_is_still_bounded():
+    """pullfrog on public #17: without index_level_est a huge level overflowed real_pnl_eur at commit."""
+    db = _memory_db()
+    user = make_user(db)
+    p, j = _signal(db, user)
+    j.index_level_est = None
+    db.commit()
+    cfd_journal.mark_entered(db, j, NOW, Decimal(1), Decimal(1000))
+    with pytest.raises(cfd_journal.JournalError):
+        cfd_journal.mark_closed(db, j, NOW, Decimal("1e12"))
+    cfd_journal.mark_closed(db, j, NOW, Decimal(999_999))
+    db.commit()
+    assert j.real_pnl_eur == Decimal("999998000.0000")
