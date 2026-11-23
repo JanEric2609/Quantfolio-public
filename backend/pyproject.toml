@@ -61,7 +61,7 @@ dependencies = [
   "slowapi>=0.1.9",
   "defusedxml>=0.7",
   "pyarrow>=17.0",
-  "duckdb>=1.5,<2",
+  "duckdb>=1.5,<3",
   "justetf-scraping@git+https://github.com/druzsan/justetf-scraping.git@bf6717c2a7721a1678befb8feb1e331773368577",
 ]
 
