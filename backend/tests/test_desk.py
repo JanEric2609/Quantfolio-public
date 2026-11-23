@@ -326,7 +326,7 @@ def test_warrant_direction_mapping_and_delta_band():
     sel = select_product(sc.cli(), DAX, "short", "warrant", NOW, sigma=Decimal("0.01"), liquid=True)
     assert [c.isin for c in sel.candidates] == ["DE000WA000A1"]
     assert sel.candidates[0].realised_vol is not None and sel.candidates[0].implied_vol == Decimal("0.2")
-    assert {d["reason"] for d in sel.dropped} == {"delta_band", "near_expiry"}
+    assert {d["reason"] for d in sel.dropped} == {"near_expiry"}  # the 0.9 delta never leaves the paged search
 
 
 # --- owner calls ------------------------------------------------------------------
@@ -704,3 +704,46 @@ def test_desk_events_reject_update_on_postgres_only_by_trigger_is_declared_in_th
 
     src = (Path(__file__).resolve().parents[1] / "alembic" / "versions" / "0157_derivatives_desk.py").read_text()
     assert "BEFORE UPDATE OR DELETE ON desk_events" in src and "append-only" in src
+
+
+# --- warrant search pages ----------------------------------------------------------
+
+
+def _warrant_pages(deltas, strategy):
+    epoch = (NOW.date() + timedelta(days=60) - datetime(1970, 1, 1).date()).days
+    rows = [{"strategy": strategy, "issuer": "X", "omega": 8, "implied_volatility": 0.2, "underlying_isin": DAX,
+             "isin": f"DE000WB{i:05d}", "delta": d, "expiry_date": {"epoch_day": epoch}} for i, d in enumerate(deltas)]
+    calls = []
+
+    def handler(args):
+        if args[:3] == ["broker", "derivatives", "search"]:
+            calls.append(args)
+            off = int(args[args.index("--offset") + 1]) if "--offset" in args else 0
+            page = rows[off:off + 100]
+            return {"result": {"total_available": len(rows), "count": len(page), "items": page}}
+        return standard_handler({}, {})(args)
+    return handler, calls
+
+
+def test_warrant_search_pages_from_deep_itm_into_the_band_for_a_call():
+    deltas = [0.95] * 100 + [0.6] * 50 + [0.4] * 50 + [0.05] * 100 + [0.02] * 100
+    handler, calls = _warrant_pages(deltas, "call")
+    sc = FakeSc(handler)
+    sel = select_product(sc.cli(), DAX, "long", "warrant", NOW, sigma=Decimal("0.01"), liquid=True)
+    assert len(calls) == 3  # page 3 ends at 0.05, below the band
+    assert all(c[c.index("--sort-field") + 1] == "delta" and c[c.index("--sort-order") + 1] == "desc" for c in calls)
+    assert sel.searched == 100 and {d["reason"] for d in sel.dropped} == {"no_quote"}
+
+
+def test_warrant_search_for_a_put_sorts_ascending():
+    deltas = [-0.95] * 100 + [-0.5] * 40
+    handler, calls = _warrant_pages(deltas, "put")
+    select_product(FakeSc(handler).cli(), DAX, "short", "warrant", NOW, sigma=Decimal("0.01"), liquid=True)
+    assert len(calls) == 2  # the short second page ends the search
+    assert calls[0][calls[0].index("--sort-order") + 1] == "asc"
+
+
+def test_warrant_search_stops_at_the_page_cap():
+    handler, calls = _warrant_pages([0.95] * 1000, "call")
+    select_product(FakeSc(handler).cli(), DAX, "long", "warrant", NOW, sigma=Decimal("0.01"), liquid=True)
+    assert len(calls) == 6

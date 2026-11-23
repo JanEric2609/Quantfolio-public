@@ -149,10 +149,12 @@ def parse_listings(result: dict[str, Any]) -> list[DerivativeListing]:
 def search_derivatives(
     cli: ScalableCli, *, underlying: str, product_type: str, strategy: str, limit: int = 100,
     leverage_max: str | None = None, expiry_from: date | None = None, expiry_to: date | None = None,
-    sort_field: str | None = None, sort_order: str | None = None,
+    sort_field: str | None = None, sort_order: str | None = None, offset: int = 0,
 ) -> list[DerivativeListing]:
     args = ["broker", "derivatives", "search", "--underlying", underlying, "--type", product_type,
             "--strategy", strategy, "--limit", str(limit)]
+    if offset:
+        args += ["--offset", str(offset)]
     if leverage_max:
         args += ["--leverage-max", leverage_max]
     if expiry_from:

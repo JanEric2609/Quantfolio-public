@@ -12,11 +12,13 @@ items of this same list to Telegram, so a new check belongs here.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import shutil
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Literal
 
@@ -154,6 +156,19 @@ def attention_items(db: Session, *, today: date | None = None) -> list[dict[str,
 DESK_WINDOW_START = time(8, 5)
 
 
+REPO_WRAPPER = Path(__file__).resolve().parents[3] / "infra" / "scalable" / "quantfolio-sc-ro"
+
+
+def _wrapper_outdated(settings: dict[str, Any]) -> bool:
+    """The installed sc wrapper differs from the repo's. Skipped when either file is missing or unreadable.
+    Never runs sc."""
+    installed = Path(str(settings.get("scalable_wrapper_path") or "/usr/local/libexec/quantfolio-sc-ro"))
+    try:
+        return hashlib.sha256(installed.read_bytes()).digest() != hashlib.sha256(REPO_WRAPPER.read_bytes()).digest()
+    except OSError:
+        return False
+
+
 def _desk_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
     """The paper derivatives desk (ADR 0027): halt, ledger chain, wrapper, quotes, external trades, calendar."""
     from datetime import timedelta
@@ -181,6 +196,10 @@ def _desk_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:
             items.append(AttentionItem("desk-wrapper", "warning", "Scalable wrapper lacks the desk reads",
                                        "Run infra/scalable/install.sh as root so the wrapper allows quote, "
                                        "derivatives search, chart and security-news.", href, "Open the desk"))
+        if _wrapper_outdated(get_public_settings(db)) and not (isinstance(health, dict) and health.get("wrapper_outdated")):
+            items.append(AttentionItem("desk-wrapper-file", "error", "sc wrapper out of date",
+                                       "Run infra/scalable/install.sh as root: the installed wrapper differs from the "
+                                       "one in the repo and may lack the desk reads.", href, "Open the desk"))
         if isinstance(health, dict) and health.get("last_error") and not health.get("wrapper_outdated"):
             items.append(AttentionItem("desk-read-failing", "warning", "Desk market reads are failing",
                                        f"The last read ended with '{health['last_error']}'. The desk retries every "
