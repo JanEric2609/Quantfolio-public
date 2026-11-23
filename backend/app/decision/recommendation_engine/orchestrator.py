@@ -97,7 +97,7 @@ async def generate_recommendations(
     prompt = build_recommendation_prompt(context, weights=weights)
 
     # Step 4: Call LLM
-    logger.info("Calling LLM for recommendations (report %s)", report_id)
+    logger.info("Calling LLM for recommendations (report %s, prompt %d chars)", report_id, len(prompt))
     try:
         raw_response = await _call_llm(db, prompt, user_id)
     except Exception as e:
@@ -165,7 +165,7 @@ async def _call_llm(db: Session, prompt: str, user_id: str) -> str:
         db,
         task_type="routine",
         messages=messages,
-        timeout_s=120.0,
+        timeout_s=300.0,  # 120 s timed out on 2026-11-22 (the local model is shared with the news wire)
         user_id=user_id,
         # The answer is a JSON array of up to a dozen items with evidence and
         # risks; the 4096 default truncated it mid-array (audit 2026-11-15, 2.3).

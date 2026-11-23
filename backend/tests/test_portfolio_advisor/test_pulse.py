@@ -37,3 +37,15 @@ def test_uniform_regime_weights_give_a_plain_warning_not_critical():
     learned = {**uniform, "buy_equity": 0.45, "hold_cash": 0.35}
     out = run_pulse_check([], {"label": "bear", "confidence": 0.9}, regime_weights=learned)
     assert [c for c in out["checks"] if c["type"] == "regime"][0]["severity"] == "critical"
+
+
+def test_jump_model_regime_without_confidence_does_not_crash():
+    from app.decision.portfolio_advisor.deep import build_deep_prompt
+    holdings = [{"name": "Stock", "current_value": 1000, "asset_type": "stock"}]
+    for label in ("bull", "bear", "high_vol"):
+        regime = {"label": label, "confidence": None, "vix": 20.0}
+        result = run_pulse_check(holdings, regime)
+        regime_checks = [c for c in result["checks"] if c["type"] == "regime"]
+        assert regime_checks and "None" not in regime_checks[0]["detail"]
+        prompt = build_deep_prompt(holdings, regime)
+        assert "Confidence" not in prompt and label in prompt

@@ -31,7 +31,9 @@ def build_deep_prompt(
     if regime:
         parts.append("\n## Current Regime")
         parts.append(f"Label: {regime.get('label', 'unknown')}")
-        parts.append(f"Confidence: {regime.get('confidence', 0):.0%}")
+        conf = regime.get("confidence")
+        if isinstance(conf, (int, float)):  # the jump-model state carries no probability
+            parts.append(f"Confidence: {conf:.0%}")
         parts.append(f"VIX: {regime.get('vix')}")
         parts.append(f"Yield Spread: {regime.get('yield_spread')}")
         parts.append(f"Momentum (3M): {regime.get('momentum_3m')}")
