@@ -211,3 +211,34 @@ def test_worker_heartbeat_lists_scheduled_jobs():
         ("news_cleanup", "Daily 02:00 UTC"),
         ("price_refresh", "Every 15 min"),
     ]
+
+
+def _wrapper_files(monkeypatch, tmp_path, installed, repo):
+    from app.foundation import control_center as cc
+
+    inst = tmp_path / "installed"
+    if installed is not None:
+        inst.write_bytes(installed)
+    rp = tmp_path / "repo"
+    if repo is not None:
+        rp.write_bytes(repo)
+    monkeypatch.setattr(cc, "REPO_WRAPPER", rp)
+    return {"scalable_wrapper_path": str(inst)}
+
+
+def test_sc_wrapper_matching_repo_is_fine(monkeypatch, tmp_path):
+    from app.foundation.control_center import _wrapper_outdated
+
+    assert not _wrapper_outdated(_wrapper_files(monkeypatch, tmp_path, b"v2", b"v2"))
+
+
+def test_sc_wrapper_different_from_repo_is_flagged(monkeypatch, tmp_path):
+    from app.foundation.control_center import _wrapper_outdated
+
+    assert _wrapper_outdated(_wrapper_files(monkeypatch, tmp_path, b"v1", b"v2"))
+
+
+def test_sc_wrapper_check_skipped_without_repo_file(monkeypatch, tmp_path):
+    from app.foundation.control_center import _wrapper_outdated
+
+    assert not _wrapper_outdated(_wrapper_files(monkeypatch, tmp_path, b"v1", None))

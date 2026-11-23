@@ -1,6 +1,7 @@
 """Choosing the product (ADR 0027): search, local filters, quote each candidate, rank by spread."""
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -11,6 +12,8 @@ from app.foundation.scalable import market
 from app.foundation.scalable.cli import ScalableCli
 
 from .limits import LIMITS
+
+logger = logging.getLogger(__name__)
 
 MAX_CANDIDATES = 8  # quotes per proposal: the sc session lock is shared with the 6-hourly sync
 
@@ -88,10 +91,7 @@ def select_product(
             cli, underlying=underlying_isin, product_type="knockout", strategy=strategy, limit=100,
             leverage_max=str(LIMITS.knockout_max_leverage), sort_field="leverage", sort_order="desc")
     else:
-        listings = market.search_derivatives(
-            cli, underlying=underlying_isin, product_type="warrant", strategy=strategy, limit=100,
-            expiry_from=today + timedelta(days=LIMITS.warrant_min_days_to_expiry),
-            sort_field="implied-volatility", sort_order="asc")
+        listings = _search_warrants(cli, underlying_isin, strategy, today)
     dropped: list[dict[str, str]] = []
     keep: list[market.DerivativeListing] = []
     for row in listings:
@@ -127,6 +127,34 @@ def select_product(
                 expiry=row.expiry))
     out.sort(key=lambda c: c.spread_pct)
     return Selection(out, dropped, len(listings))
+
+
+
+WARRANT_PAGE = 100
+WARRANT_MAX_PAGES = 6
+
+
+def _search_warrants(cli: ScalableCli, underlying_isin: str, strategy: str, today) -> list[market.DerivativeListing]:
+    """Warrants whose delta is in the band. The band sits in the middle of several hundred listings, so
+    the search is sorted by delta from deep in the money outwards and paged until a page ends below the
+    band (a sort by implied volatility returned only far out-of-the-money rows). Calls have positive delta
+    (sorted desc), puts negative (asc)."""
+    order = "desc" if strategy == "call" else "asc"
+    in_band: list[market.DerivativeListing] = []
+    pages = 0
+    for page in range(WARRANT_MAX_PAGES):
+        rows = market.search_derivatives(
+            cli, underlying=underlying_isin, product_type="warrant", strategy=strategy, limit=WARRANT_PAGE,
+            offset=page * WARRANT_PAGE, expiry_from=today + timedelta(days=LIMITS.warrant_min_days_to_expiry),
+            sort_field="delta", sort_order=order)
+        pages += 1
+        in_band += [r for r in rows if r.delta is not None
+                    and LIMITS.warrant_min_abs_delta <= abs(r.delta) <= LIMITS.warrant_max_abs_delta]
+        last = rows[-1].delta if rows else None
+        if len(rows) < WARRANT_PAGE or (last is not None and abs(last) < LIMITS.warrant_min_abs_delta):
+            break
+    logger.info("desk warrant search: %d page(s), %d in the delta band", pages, len(in_band))
+    return in_band
 
 
 def _local_filter(row: market.DerivativeListing, product_type: str, today, sigma: Decimal | None) -> str | None:
