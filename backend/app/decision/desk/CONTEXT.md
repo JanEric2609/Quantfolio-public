@@ -21,15 +21,18 @@ user, no trade wrapper, no `trade` argv; the broker allow-lists stay read-only.
 | `prereg.py`, `scoring.py` | The pre-registered spec/hash, per-cell bootstrap, placebo, Holm |
 | `news.py` | Guard and log only; news never opens or closes a position |
 | `newswire.py` | The news wire: Alpaca stream (worker thread), Fed/ECB, German ad-hoc (by ISIN), Handelsblatt, SEC 8-K (job `desk_news_wire`), local-model rating, Telegram alerts; alert-only |
-| `cfd.py` | The index rule as a manual Trading 212 CFD line, paper-scored in `index_momentum:cfd` |
+| `cfd.py` | The index rule as a manual Trading 212 CFD line, paper-scored in `index_momentum:cfd`. `prepare_context` (a read) gives the v2 message its index level, Trading 212 quantity, stop in points and costs; `T212` holds the broker facts of 2026-11-23 (display only); `live_text` rebuilds the message for in-place edits |
+| `cfd_journal.py` | The owner's journal of the manual CFD trades (`desk_cfd_journal`): entered, skipped, closed, real P&L. Owner input outside the ledger: never a `desk_events` row, never a change to a paper position |
+| `intraday.py` | The board snapshot for the Intraday page (`desk_intraday_board_json`, every five minutes); reads first, one write last |
 | `instrument.py` | Names the exact product: issuer name, ISIN/WKN, leverage and barrier or omega and strike, expiry, order line |
-| `telegram.py`, `jobs.py` | `/idea /desk /stop /close` + "Paper: take"; 1-minute monitor (exits first, then the index rule; an outdated wrapper fails the tick and sets `wrapper_outdated`, which only a tick that made reads clears; other failed reads become `last_error`; quote ages and fills use the wall clock; each index in its own savepoint, so one failed read rolls back only that index; fills announced by the ids opened this tick), hourly reconcile, 1-minute news wire (a feed's first successful read is stored as `desk_news_wire_read_json`; only that read is a silent baseline) |
+| `telegram.py`, `jobs.py` | `/idea /desk /stop /close /cfd` + "Paper: take" and the CFD buttons (`cfd:in`, `cfd:skip`, `cfd:out`); 1-minute monitor (exits first, then the index rule; an outdated wrapper fails the tick and sets `wrapper_outdated`, which only a tick that made reads clears; other failed reads become `last_error`; quote ages and fills use the wall clock; each index in its own savepoint, so one failed read rolls back only that index; fills announced by the ids opened this tick), hourly reconcile, 1-minute news wire (a feed's first successful read is stored as `desk_news_wire_read_json`; only that read is a silent baseline) |
 
 ## Where it shows
 
 - The Desk page (`/desk`), a research tool in the sidebar (shown with "Show research tools"), also in the command palette: limits, today's live-rehearsal counts, health (last check, failing reads, the news stream), ideas and taps, open positions with Close, recently closed exits with their reason in words, the scorecard, the news wire and the event log.
 - The Control Center's attention list (and the 06:00 Telegram self-check built from it): halt, broken chain, outdated wrapper, failing market reads, a news stream down for 15 minutes, positions without a quote, external trades.
-- Telegram: `/idea`, `/desk`, `/stop`, `/close`, the "Paper: take" button, exit and CFD messages, news alerts.
+- The Intraday CFD page (`/desk/intraday`): the four indices' board, a position calculator, the journal.
+- Telegram: `/idea`, `/desk`, `/stop`, `/close`, `/cfd`, the "Paper: take" and CFD (Entered, Skipped, Closed) buttons, the morning heads-up and get-ready messages, one live-edited CFD message per trade, exit messages, news alerts.
 
 ## Public surface
 
@@ -70,3 +73,7 @@ every other context, with zero seeded exceptions.
 - Phase 2 (real orders) is Proposed in ADR 0027 and not built.
 - A CFD is never automated (`would_take_live` is always False); Trading 212 stays read-only.
 - Nothing reads `news_wire_items` to open, close or block a position.
+- The journal (`desk_cfd_journal`) and the heads-up notices (`cfd_notices` in the health key) are owner-facing
+  records and previews. `preview_due` is a read phase plus one `set_health` write: no `append_event`, and
+  `fire_due_signals` recomputes r1 itself. The Trading 212 facts in `cfd.T212` are not limits and never scoring inputs.
+- No network read after the first write of a stage: the live edit step builds its text from stored rows.

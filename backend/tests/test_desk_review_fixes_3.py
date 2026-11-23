@@ -263,7 +263,9 @@ def test_one_index_failing_a_read_neither_rolls_back_the_other_nor_announces_it_
     assert {db.get(DeskPosition, i).product_type for i in opened} == {"knockout", "warrant", "cfd"}
     keys = [json.loads(e.payload)["key"] for e in db.query(DeskEvent).filter(DeskEvent.kind == "signal")]
     assert keys == ["DAX:2026-11-18"]  # ES50 is retried next minute, not logged yet
-    assert len(jobs._announce_fills(db, at, opened)) == 3
+    msgs = jobs._announce_fills(db, at, opened)
+    assert len(msgs) == 1 and "Also on paper (no action):" in msgs[0]  # one message per index (commit 4)
+    assert msgs[0].count("\n  ") == 2  # the knock-out and the warrant
     # ES50's last minute: logged as no data. Nothing new opened, so DAX's fills are not announced again.
     last = enter + index_momentum.FIRE_WINDOW - timedelta(seconds=30)
     opened2: list[str] = []

@@ -232,7 +232,7 @@ def _put(db, settings=None, integrations=None):
 
 @pytest.mark.parametrize(
     "key",
-    ["worker_heartbeat_json", "connection_tests_json", "regime_snapshot_json", "risk_free_rate_pct", "telegram_update_offset", "made_up"],
+    ["worker_heartbeat_json", "desk_intraday_board_json", "connection_tests_json", "regime_snapshot_json", "risk_free_rate_pct", "telegram_update_offset", "made_up"],
 )
 def test_put_settings_rejects_keys_outside_the_documented_set(key):
     db = _memory_db()

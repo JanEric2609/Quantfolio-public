@@ -131,29 +131,64 @@ def select_product(
 
 
 WARRANT_PAGE = 100
-WARRANT_MAX_PAGES = 6
+WARRANT_MAX_READS = 8  # sc reads per warrant search, probes included
+WARRANT_ENOUGH = 2 * MAX_CANDIDATES  # rows in the band; _local_filter may still drop a few
 
 
 def _search_warrants(cli: ScalableCli, underlying_isin: str, strategy: str, today) -> list[market.DerivativeListing]:
-    """Warrants whose delta is in the band. The band sits in the middle of several hundred listings, so
-    the search is sorted by delta from deep in the money outwards and paged until a page ends below the
-    band (a sort by implied volatility returned only far out-of-the-money rows). Calls have positive delta
-    (sorted desc), puts negative (asc)."""
+    """Warrants whose delta is in the band. Sorted by |delta| from deep in the money outwards. A DAX
+    universe holds thousands of listings, so when page 1 still ends above the band the search bisects with
+    one-row probes to the band's start, then reads full pages. Paging advances by the raw item count (the
+    parser drops items without an ISIN). Calls have positive delta (desc), puts negative (asc)."""
     order = "desc" if strategy == "call" else "asc"
-    in_band: list[market.DerivativeListing] = []
-    pages = 0
-    for page in range(WARRANT_MAX_PAGES):
-        rows = market.search_derivatives(
-            cli, underlying=underlying_isin, product_type="warrant", strategy=strategy, limit=WARRANT_PAGE,
-            offset=page * WARRANT_PAGE, expiry_from=today + timedelta(days=LIMITS.warrant_min_days_to_expiry),
+    lo_b, hi_b = LIMITS.warrant_min_abs_delta, LIMITS.warrant_max_abs_delta
+    reads = 0
+
+    def page(offset: int, limit: int) -> market.ListingPage:
+        nonlocal reads
+        reads += 1
+        return market.search_derivatives_page(
+            cli, underlying=underlying_isin, product_type="warrant", strategy=strategy, limit=limit,
+            offset=offset, expiry_from=today + timedelta(days=LIMITS.warrant_min_days_to_expiry),
             sort_field="delta", sort_order=order)
-        pages += 1
-        in_band += [r for r in rows if r.delta is not None
-                    and LIMITS.warrant_min_abs_delta <= abs(r.delta) <= LIMITS.warrant_max_abs_delta]
-        last = rows[-1].delta if rows else None
-        if len(rows) < WARRANT_PAGE or (last is not None and abs(last) < LIMITS.warrant_min_abs_delta):
+
+    def a(row: market.DerivativeListing) -> Decimal | None:
+        return abs(row.delta) if row.delta is not None else None
+
+    def band(rows: list[market.DerivativeListing]) -> list[market.DerivativeListing]:
+        return [r for r in rows if (d := a(r)) is not None and lo_b <= d <= hi_b]
+
+    first = page(0, WARRANT_PAGE)
+    total = first.total_available
+    in_band = band(first.rows)
+    offset = first.raw_count
+    last = a(first.rows[-1]) if first.rows else None
+    # Invariant: every row before `lo` has |delta| > hi_b; row `hi` (if < total) has |delta| <= hi_b.
+    if not in_band and last is not None and last > hi_b and total is not None and total > offset:
+        lo, hi = offset, total
+        while hi - lo > WARRANT_PAGE and reads < WARRANT_MAX_READS - 1:
+            mid = (lo + hi) // 2
+            probe = page(mid, 1).rows
+            d = a(probe[0]) if probe else None
+            if d is None:
+                break
+            if d > hi_b:
+                lo = mid + 1
+            else:
+                hi = mid
+        offset = lo
+    elif last is not None and last < lo_b:
+        offset = total if total is not None else offset  # already below the band: stop
+    while reads < WARRANT_MAX_READS and len(in_band) < WARRANT_ENOUGH and (total is None or offset < total):
+        p = page(offset, WARRANT_PAGE)
+        if p.raw_count == 0:
             break
-    logger.info("desk warrant search: %d page(s), %d in the delta band", pages, len(in_band))
+        in_band += band(p.rows)
+        offset += p.raw_count
+        tail = a(p.rows[-1]) if p.rows else None
+        if tail is not None and tail < lo_b:
+            break
+    logger.info("desk warrant search: %d sc read(s), total %s, %d in the delta band", reads, total, len(in_band))
     return in_band
 
 

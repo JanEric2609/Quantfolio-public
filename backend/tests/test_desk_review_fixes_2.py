@@ -171,7 +171,7 @@ def test_fill_messages_are_built_after_the_commit(monkeypatch):
     make_user(db)
     log: list[str] = []
     monkeypatch.setattr("app.decision.desk.signals.index_momentum.fire_due_signals", lambda *a, **k: ["DAX"])
-    monkeypatch.setattr(jobs, "_announce_fills", lambda db_, now, ids: log.append("announce") or ["CFD: BUY"])
+    monkeypatch.setattr(jobs, "_announce_fills", lambda db_, now, ids, *a: log.append("announce") or ["CFD: BUY"])
     monkeypatch.setattr("app.decision.desk.telegram.alert", lambda db_, uid, text: log.append(text))
     real_commit = db.commit
     monkeypatch.setattr(db, "commit", lambda: (log.append("commit"), real_commit())[1])

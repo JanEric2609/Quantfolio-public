@@ -50,3 +50,10 @@ def order_line(p: DeskPosition, side: str = "Buy", price: Decimal | None = None)
 
 def describe(p: DeskPosition) -> str:
     return "\n".join([*identity_lines(p), order_line(p)])
+
+
+def short_line(p: DeskPosition) -> str:
+    """One short line for a grouped message: 'Knock-out GV4T3V, 2 units', 'Call FE2DQS, 4 units'."""
+    kind = "Knock-out" if p.product_type == "knockout" else (
+        "Call" if p.direction == "long" else "Put") if p.product_type == "warrant" else p.product_type
+    return f"{kind} {p.wkn or p.isin}, {p.units or 0} units"

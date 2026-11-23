@@ -730,7 +730,7 @@ def test_warrant_search_pages_from_deep_itm_into_the_band_for_a_call():
     handler, calls = _warrant_pages(deltas, "call")
     sc = FakeSc(handler)
     sel = select_product(sc.cli(), DAX, "long", "warrant", NOW, sigma=Decimal("0.01"), liquid=True)
-    assert len(calls) == 3  # page 3 ends at 0.05, below the band
+    assert len(calls) <= 8  # page 1, bisecting probes, then the band's page
     assert all(c[c.index("--sort-field") + 1] == "delta" and c[c.index("--sort-order") + 1] == "desc" for c in calls)
     assert sel.searched == 100 and {d["reason"] for d in sel.dropped} == {"no_quote"}
 
@@ -746,4 +746,5 @@ def test_warrant_search_for_a_put_sorts_ascending():
 def test_warrant_search_stops_at_the_page_cap():
     handler, calls = _warrant_pages([0.95] * 1000, "call")
     select_product(FakeSc(handler).cli(), DAX, "long", "warrant", NOW, sigma=Decimal("0.01"), liquid=True)
-    assert len(calls) == 6
+    from app.decision.desk.products import WARRANT_MAX_READS
+    assert len(calls) <= WARRANT_MAX_READS

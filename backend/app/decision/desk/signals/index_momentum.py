@@ -81,20 +81,25 @@ def _nearest(points: list[tuple[datetime, Decimal]], target: datetime, tolerance
     return best[1] if best and abs(best[0] - target) <= tolerance else None
 
 
-def compute_r1_xetra(points: list[tuple[datetime, Decimal]], day: date) -> Decimal | None:
-    """Previous close (last point at or before 17:30 Berlin of the previous session) to the 09:30 point."""
+def compute_r1_xetra_parts(points: list[tuple[datetime, Decimal]], day: date) -> tuple[Decimal | None, Decimal | None]:
+    """``(r1, previous close)``: the previous close is the last point at or before 17:30 Berlin of the
+    previous session, r1 runs from it to the 09:30 point."""
     prev = [p for p in points if p[0].astimezone(cal.BERLIN).date() < day]
     if not prev:
-        return None
+        return None, None
     prev_day = max(p[0].astimezone(cal.BERLIN).date() for p in prev)
     close_cut = datetime.combine(prev_day, time(17, 30), tzinfo=cal.BERLIN)
     closes = [p for p in prev if p[0].astimezone(cal.BERLIN).date() == prev_day and p[0] <= close_cut]
     if not closes:
-        return None
+        return None, None
     prev_close = max(closes, key=lambda p: p[0])[1]
     target = datetime.combine(day, time(9, 30), tzinfo=cal.BERLIN)
     px = _nearest([p for p in points if p[0].astimezone(cal.BERLIN).date() == day], target, timedelta(minutes=15))
-    return (px / prev_close - 1) if px is not None and prev_close else None
+    return ((px / prev_close - 1) if px is not None and prev_close else None), prev_close
+
+
+def compute_r1_xetra(points: list[tuple[datetime, Decimal]], day: date) -> Decimal | None:
+    return compute_r1_xetra_parts(points, day)[0]
 
 
 #: Regular-session 30-minute bar starts (New York). Alpaca's bars include pre- and after-market
@@ -106,34 +111,48 @@ class DataUnavailable(RuntimeError):
     """The price read failed (network, rate limit): try again next minute, do not log a no-data day."""
 
 
-def compute_r1_us(bars: list[dict], day: date) -> Decimal | None:
-    """Previous session's regular close (the 15:30 bar's close, i.e. 16:00) to the close of the first
-    30-minute bar of *day* (New York). Extended-hours bars are ignored, as in the replay."""
+def compute_r1_us_parts(bars: list[dict], day: date) -> tuple[Decimal | None, Decimal | None]:
+    """``(r1, previous close)``: previous session's regular close (the 15:30 bar's close, i.e. 16:00) to
+    the close of the first 30-minute bar of *day* (New York). Extended-hours bars are ignored, as in the
+    replay."""
     def local(b):
         return b["t"].astimezone(cal.NEW_YORK)
     prev = [b for b in bars if local(b).date() < day and b["c"] is not None
             and US_FIRST_BAR <= local(b).time() <= US_LAST_BAR]
     first = [b for b in bars if local(b).date() == day and local(b).time() == time(9, 30) and b["c"] is not None]
-    if not prev or not first:
-        return None
+    if not prev:
+        return None, None
     prev_close = max(prev, key=lambda b: b["t"])["c"]
-    return (first[0]["c"] / prev_close - 1) if prev_close else None
+    if not first:  # before the first bar closes: no r1 yet, but the previous close is known
+        return None, prev_close
+    return ((first[0]["c"] / prev_close - 1) if prev_close else None), prev_close
 
 
-def compute_r1(db: Session, cli: ScalableCli, plan: Plan, now: datetime | None = None) -> Decimal | None:
-    """r1 for *plan*. The US bars are read for the week up to *now* (the tick's time), not the wall clock."""
+def compute_r1_us(bars: list[dict], day: date) -> Decimal | None:
+    return compute_r1_us_parts(bars, day)[0]
+
+
+def compute_r1_parts(db: Session, cli: ScalableCli, plan: Plan,
+                     now: datetime | None = None) -> tuple[Decimal | None, Decimal | None]:
+    """``(r1, the proxy's previous close)`` for *plan*. The US bars are read for the week up to *now*
+    (the tick's time), not the wall clock."""
     u = plan.underlying
     end = now or datetime.now(UTC)
     if u.alpaca_symbol:
         provider = news.alpaca_for(db)
         if provider is None:
-            return None
+            return None, None
         try:
             bars = provider.get_intraday_bars(u.alpaca_symbol, "30Min", end - timedelta(days=7), end)
         except (ValueError, httpx.HTTPError) as exc:  # HTTP 429/5xx (ValueError) or a timeout
             raise DataUnavailable(type(exc).__name__) from exc
-        return compute_r1_us(bars, plan.day)
-    return compute_r1_xetra(market.get_chart(cli, u.proxy_isin or u.isin, "7d"), plan.day)
+        r1, prev = compute_r1_us_parts(bars, plan.day)
+        return r1, (Decimal(str(prev)) if prev is not None else None)
+    return compute_r1_xetra_parts(market.get_chart(cli, u.proxy_isin or u.isin, "7d"), plan.day)
+
+
+def compute_r1(db: Session, cli: ScalableCli, plan: Plan, now: datetime | None = None) -> Decimal | None:
+    return compute_r1_parts(db, cli, plan, now)[0]
 
 
 def _already_fired(db: Session, signal_key: str) -> bool:
@@ -163,11 +182,13 @@ class _PlanRead:
     entry_ref: Decimal | None = None  # the underlying's price for the fills (the placebo's move)
     cfd_ref: Decimal | None = None
     cfd_sigma: Decimal | None = None
+    cfd_ctx: cfd.CfdContext | None = None
 
 
 def fire_due_signals(db: Session, user_id: str, cli: ScalableCli, now: datetime,
                      opened: list[str] | None = None, errors: list[str] | None = None,
-                     clock: Callable[[], datetime] | None = None) -> list[str]:
+                     clock: Callable[[], datetime] | None = None,
+                     contexts: dict[str, cfd.CfdContext] | None = None) -> list[str]:
     """Open this minute's paper positions (one per product type, plus the CFD) for every index whose entry
     time has come.
 
@@ -180,7 +201,8 @@ def fire_due_signals(db: Session, user_id: str, cli: ScalableCli, now: datetime,
     goes out. An outdated wrapper propagates. *opened* collects the ids of the positions opened, so the
     caller announces exactly this tick's fills; *errors* collects the failed reads' codes (health).
     *clock* (the live monitor: the wall clock) re-reads the time for each quote age and fill; without it
-    *now* is used throughout (tests)."""
+    *now* is used throughout (tests). *contexts* collects position id -> the CFD's :class:`cfd.CfdContext`
+    (index level, quantity, stop in points) for the caller's announcement."""
     fired: list[str] = []
     reads: list[_PlanRead] = []
     day = now.astimezone(UTC).date()
@@ -206,7 +228,7 @@ def fire_due_signals(db: Session, user_id: str, cli: ScalableCli, now: datetime,
     for read in reads:
         ids: list[str] = []
         with db.begin_nested():
-            did_fire = _record_plan(db, user_id, read, now, ids, clock)
+            did_fire = _record_plan(db, user_id, read, now, ids, clock, contexts)
         if did_fire:
             fired.append(read.key)
             if opened is not None:
@@ -219,7 +241,7 @@ def _read_plan(db: Session, user_id: str, cli: ScalableCli, plan: Plan, key: str
     """All of one index's network reads; writes nothing. Raises only when r1 cannot be read."""
     read = _PlanRead(plan, key)
     skip = skip_reason(plan)
-    r1 = None if skip else compute_r1(db, cli, plan, now)
+    r1, proxy_prev_close = (None, None) if skip else compute_r1_parts(db, cli, plan, now)
     if skip or r1 is None or r1 == 0:
         read.reason = skip or ("no_data" if r1 is None else "r1_zero")
         return read
@@ -245,11 +267,16 @@ def _read_plan(db: Session, user_id: str, cli: ScalableCli, plan: Plan, key: str
     at = clock() if clock else now
     read.entry_ref = service.underlying_price(db, cli, plan.underlying, now=at)
     read.cfd_ref, read.cfd_sigma = cfd.prepare_signal(db, cli, plan.underlying, at)
+    # Still a read phase: the index history's price-cache write may commit, which is harmless because this
+    # stage has written nothing yet (the first write comes in _record_plan).
+    read.cfd_ctx = cfd.prepare_context(db, plan.key, plan.underlying, read.r1, proxy_prev_close, read.cfd_ref,
+                                       read.cfd_sigma, plan.enter_at + FIRE_WINDOW, plan.exit_at, at)
     return read
 
 
 def _record_plan(db: Session, user_id: str, read: _PlanRead, now: datetime, ids: list[str],
-                 clock: Callable[[], datetime] | None) -> bool:
+                 clock: Callable[[], datetime] | None,
+                 contexts: dict[str, cfd.CfdContext] | None = None) -> bool:
     """One index's writes (no network read): the signal, the products' proposals and fills, the CFD."""
     if read.reason is not None:
         payload = {"key": read.key, "fired": False, "reason": read.reason}
@@ -274,7 +301,106 @@ def _record_plan(db: Session, user_id: str, read: _PlanRead, now: datetime, ids:
                 ids.append(result.position.id)
     # The same signal as a manual Trading 212 CFD (cell index_momentum:cfd, paper-scored).
     position = cfd.record_signal(db, user_id, plan.key, plan.underlying, read.direction, plan.exit_at,
-                                 clock() if clock else now, read.cfd_ref, read.cfd_sigma)
+                                 clock() if clock else now, read.cfd_ref, read.cfd_sigma, context=read.cfd_ctx)
     if position is not None:
         ids.append(position.id)
+        if contexts is not None and read.cfd_ctx is not None:
+            contexts[position.id] = read.cfd_ctx
     return True
+
+
+# --- heads-up and get-ready messages (a read-only preview of the rule; ADR 0027 amendment 2026-11-23) ----
+
+HEADSUP_AFTER_OPEN = {"XETR": timedelta(minutes=45), "XNYS": timedelta(minutes=35)}
+HEADSUP_UNTIL_BEFORE_ENTRY = timedelta(minutes=10)
+READY_BEFORE_ENTRY = timedelta(minutes=5)
+NOTICE_KEEP_DAYS = 3
+_SKIP_TEXT = {"half_day": "half day", "cutoff_before_exit": "the cut-off falls before the exit",
+              "r1_zero": "r1 is 0"}
+
+
+def _prune_notices(notices: dict[str, dict], today: date) -> dict[str, dict]:
+    keep: dict[str, dict] = {}
+    for k, v in notices.items():
+        try:
+            day = date.fromisoformat(k.split(":")[1])
+        except (IndexError, ValueError):
+            continue
+        if (today - day).days <= NOTICE_KEEP_DAYS:
+            keep[k] = v
+    return keep
+
+
+def preview_due(db: Session, cli: ScalableCli, now: datetime) -> list[str]:
+    """The morning heads-up and the get-ready message of today's CFD plan, for the owner to act on.
+
+    A read phase plus ``service.set_health`` (the notices already sent live in the health key): it never
+    calls ``append_event`` and has no effect on :func:`fire_due_signals`, which computes r1 again itself.
+    The heads-up says what the rule expects; it is never used for a fill. A failed read is retried next tick.
+    """
+    out: list[str] = []
+    notices = dict(service.health(db).get("cfd_notices") or {})
+    changed = False
+    day = now.astimezone(UTC).date()
+    by_group: dict[tuple[str, date], list[Plan]] = {}
+    for plan in plans_for_day(day) + plans_for_day(day - timedelta(days=1)):
+        by_group.setdefault((plan.underlying.exchange, plan.day), []).append(plan)
+    for (exchange, plan_day), plans in by_group.items():
+        times = cal.session_times(plan_day, exchange)
+        if times is None:
+            continue
+        enter_at = plans[0].enter_at
+        base = f"{exchange}:{plan_day.isoformat()}"
+        start = times[0].astimezone(UTC) + HEADSUP_AFTER_OPEN.get(exchange, timedelta(minutes=45))
+        head_key, ready_key = f"{base}:headsup", f"{base}:ready"
+        if head_key not in notices and start <= now < enter_at - HEADSUP_UNTIL_BEFORE_ENTRY:
+            lines: list[str] = []
+            firing: dict[str, dict[str, str]] = {}
+            events = cal.macro_events_between(plan_day, plan_day)
+            ok = True
+            for plan in plans:
+                reason = skip_reason(plan)
+                r1 = None
+                if reason is None:
+                    try:
+                        r1 = compute_r1(db, cli, plan, now)
+                    except market.WrapperOutdated:
+                        raise
+                    except (DataUnavailable, ScalableError):
+                        ok = False
+                        break
+                    if r1 is None:
+                        ok = False  # no price yet: not a "no trade" day, ask again next tick
+                        break
+                    if r1 == 0:
+                        reason = "r1_zero"
+                label = plan.underlying.label
+                if reason is not None:
+                    why = (f"macro event: {', '.join(k.upper() for k, _ in events)}" if reason == "macro_event"
+                           else _SKIP_TEXT.get(reason, reason))
+                    lines.append(f"{label}: no trade today ({why})")
+                    continue
+                assert r1 is not None
+                direction = "long" if r1 > 0 else "short"
+                firing[plan.key] = {"dir": direction, "r1": str(r1)}
+                lines.append(f"{label}: {direction} at {plan.enter_at.astimezone(cal.BERLIN):%H:%M} Berlin "
+                             f"(r1 {r1 * 100:+.2f} %), market {cfd.MARKETS[plan.key][0]}")
+            if ok:
+                text = ["Today's CFD plan (paper rule, manual on Trading 212):", *lines]
+                if events:
+                    text.append("Events today: " + ", ".join(k.upper() for k, _ in events))
+                text.append(f"The final call with size and stop comes at {enter_at.astimezone(cal.BERLIN):%H:%M}.")
+                out.append("\n".join(text))
+                notices[head_key] = firing
+                changed = True
+        firing_now = notices.get(head_key)
+        if firing_now and ready_key not in notices and enter_at - READY_BEFORE_ENTRY <= now < enter_at:
+            ready = [f"In 5 minutes: {key} {info['dir']} expected. Open Trading 212 → {cfd.MARKETS[key][0]}."
+                     for key, info in firing_now.items() if key in cfd.MARKETS]
+            if ready:
+                out.append("\n".join(ready))
+            notices[ready_key] = {}
+            changed = True
+    if changed:
+        service.set_health(db, cfd_notices=_prune_notices(notices, day))
+    return out

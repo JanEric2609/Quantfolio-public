@@ -4544,3 +4544,40 @@ export const postDeskClose = (positionId: string) =>
 export const postDeskHalt = (reason: string) =>
   api<DeskStatusDto>("/api/desk/halt", { method: "POST", body: JSON.stringify({ reason }) });
 export const postDeskResume = () => api<DeskStatusDto>("/api/desk/resume", { method: "POST" });
+
+/** Trading 212's CFD facts as the owner's app showed them (display and the calculator only). */
+export interface T212Facts {
+  spread_bp: Record<string, string>; margin_rate: string; overnight_rate: string; fx_fee_on_result: string;
+  min_order_eur: string; quantity_decimals: string; observed: string;
+}
+export interface IntradayCfdToday {
+  position_id: string; status: string; direction: string; entry_price: string | null;
+  paper_pnl_before_costs: string | null; paper_net_eur: string | null; journal_status: string | null;
+}
+export interface IntradayIndex {
+  key: string; label: string; t212_name: string; exchange: string; currency: string;
+  session: { open: string | null; close: string | null; status: "before" | "open" | "closed" };
+  enter_at: string | null; exit_at: string | null; skip_reason: string | null; macro_events_today: string[];
+  r1?: string; direction?: string; cfd_today?: IntradayCfdToday | null;
+  proxy_price?: string; index_level_est?: string; move_pct?: string; sigma?: string; sigma_points?: string;
+  typical_30m_points?: string; spread_points?: string; eur_per_unit?: string; error?: string;
+}
+export interface IntradayBoard { as_of: string; day: string; indices: IntradayIndex[] }
+export interface CfdJournalRow {
+  position_id: string; short_id: string; created_at: string | null; market_key: string; direction: string;
+  currency: string; status: "sent" | "entered" | "skipped" | "closed"; r1: string | null;
+  index_level_est: string | null; quantity_suggested: string | null; quantity: string | null;
+  exposure_eur: string | null; stop_points: string | null; stop_level: string | null; entry_level: string | null;
+  exit_level: string | null; entered_at: string | null; closed_at: string | null; real_pnl_eur: string | null;
+  paper_net_eur: string | null; paper_status: string | null; nights_held: number | null; note: string | null;
+}
+export interface IntradayDto {
+  board: IntradayBoard | null; board_age_s: number | null; t212: T212Facts; journal: CfdJournalRow[];
+}
+export interface CfdJournalAction {
+  action: "entered" | "skipped" | "closed"; level?: string | null; quantity?: string | null; note?: string | null;
+}
+export const getIntraday = () => api<IntradayDto>("/api/desk/intraday");
+/** The owner's own record of a manual Trading 212 trade. Never an order. */
+export const postCfdJournal = (positionId: string, body: CfdJournalAction) =>
+  api<CfdJournalRow>(`/api/desk/cfd/${positionId}/journal`, { method: "POST", body: JSON.stringify(body) });

@@ -138,7 +138,7 @@ def test_a_tick_without_sc_reads_keeps_the_wrapper_flag(monkeypatch):
     service.set_health(db, wrapper_outdated=True)
     monkeypatch.setattr(news, "alpaca_for", lambda db_: None)  # an SPX CFD is priced from Alpaca only
     sc_calls: list[list[str]] = []
-    jobs.monitor_tick(db, NOW.replace(minute=1), FakeSc(lambda args: sc_calls.append(args) or {}).cli())
+    jobs.monitor_tick(db, NOW.replace(hour=8, minute=1), FakeSc(lambda args: sc_calls.append(args) or {}).cli())
     assert sc_calls == [] and service.health(db)["wrapper_outdated"] is True
 
 

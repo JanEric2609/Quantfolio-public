@@ -20,6 +20,19 @@ def _owner(db: Any) -> Any:
     return db.query(User).filter(User.role == "admin").order_by(User.created_at).first()
 
 
+class OutMsg(str):
+    """A message with the inline buttons it is sent with and the journal row it belongs to (a ``str``, so
+    callers that only read the text keep working)."""
+
+    markup: dict[str, Any] | None
+    journal_id: str | None
+
+    def __new__(cls, text: str, markup: dict[str, Any] | None = None, journal_id: str | None = None) -> OutMsg:
+        obj = super().__new__(cls, text)
+        obj.markup, obj.journal_id = markup, journal_id
+        return obj
+
+
 def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[str, Any]:
     """One desk tick: register the spec, fire index signals, expire proposals, manage open positions, news."""
     from app.foundation.scalable import market
@@ -29,7 +42,7 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
     from app.foundation.models.entities import DeskPosition
 
     from . import calendar as cal
-    from . import cfd, instrument, prereg, service, telegram
+    from . import cfd, cfd_journal, instrument, intraday, prereg, service
     from .ledger import append_event
     from .signals import index_momentum
     from .underlyings import ALIASES, Underlying, ticker_for_isin
@@ -51,9 +64,8 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
     # the desk's write lock, so the owner's taps and closes wait at most one stage.
     outbox: list[str] = []
 
-    def send(texts: list[str]) -> None:
-        for text in texts:
-            telegram.alert(db, owner.id, text)
+    def send(texts: list[Any]) -> None:
+        _send(db, owner.id, texts)
 
     try:
         cli = _CountingCli(cli or scalable_service.make_cli(db))  # counts the sc reads that worked
@@ -70,22 +82,39 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
         expired = service.expire_proposals(db, now)
         db.commit()
         closed = service.manage_open_positions(db, cli, now, underlyings, errors)
+        cfd_closed = cfd.manage(db, cli, now, underlyings, errors)
+        cfd_isins = {p.underlying_isin for p, _ in cfd_closed}
+        grouped: dict[str, list[str]] = {}
         for position, reason in closed:
-            outbox.append(f"Desk paper exit ({reason}), net {position.net_eur} EUR:\n"
-                          + instrument.order_line(position, "Sell", position.exit_price))
-        for position, reason in cfd.manage(db, cli, now, underlyings, errors):
-            outbox.append(cfd.close_message(position, reason))
+            if position.signal == "index_momentum" and position.underlying_isin in cfd_isins:
+                # The index rule's own knock-out or warrant leaves with its CFD's close message.
+                grouped.setdefault(position.underlying_isin, []).append(
+                    f"  {instrument.short_line(position)}: {reason}, net {position.net_eur} EUR")
+            else:
+                outbox.append(f"Desk paper exit ({reason}), net {position.net_eur} EUR:\n"
+                              + instrument.order_line(position, "Sell", position.exit_price))
+        for position, reason in cfd_closed:
+            text = cfd.close_message(position, reason, cfd_journal.for_position(db, position.id))
+            if lines := grouped.get(position.underlying_isin):
+                text += "\nAlso closed on paper:\n" + "\n".join(lines)
+            outbox.append(text)
             closed.append((position, reason))
         db.commit()
         send(outbox)
+        _live_edits(db, owner.id, now)
         opened: list[str] = []
-        fired = index_momentum.fire_due_signals(db, owner.id, cli, now, opened, errors, clock) \
+        contexts: dict[str, Any] = {}
+        fired = index_momentum.fire_due_signals(db, owner.id, cli, now, opened, errors, clock, contexts) \
             if not service.is_halted(db) else []
         db.commit()
         if fired:
             # Built after the commit: the CFD line reads index history, whose cache write commits, and a
             # fill saved before a failed tick would never be announced (the signal counts as fired).
-            send(_announce_fills(db, now, opened))
+            send(_announce_fills(db, now, opened, contexts))
+        # The heads-up and get-ready messages: reads, then one health write; nothing here touches the ledger.
+        previews = index_momentum.preview_due(db, cli, now) if not service.is_halted(db) else []
+        db.commit()
+        send(previews)
         news_out: list[str] = []
         seen = _news_check(db, cli, now, underlyings, news_out) if now.minute % 5 == 0 else 0
         # A read that failed (an expired session, the sync holding the lock) no longer fails the tick; it
@@ -101,6 +130,9 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
         service.set_health(db, **fields)
         db.commit()
         send(news_out)
+        if now.minute % 5 == 2 and not fired:  # never the news minute (:00/:05 ...) or an entry's (:00/:30)
+            intraday.store_board(db, intraday.build_board(db, cli, now))
+            db.commit()
         return {"fired": fired, "expired": expired, "closed": len(closed), "news": seen}
     except market.WrapperOutdated:
         db.rollback()
@@ -134,13 +166,89 @@ def _wall_clock() -> datetime:
     return datetime.now(UTC)
 
 
-def _announce_fills(db: Any, now: datetime, position_ids: list[str]) -> list[str]:
-    """Name exactly what the index rule bought this tick (*position_ids*, from ``fire_due_signals``), and
-    the manual CFD line; sent after the commit. By id, not by entry time: a second index firing a minute
-    later must not announce the first one's fills (and its "CFD: BUY") again."""
+def _send(db: Any, owner_id: str, texts: list[Any]) -> None:
+    """Send the outbox. A CFD message (an :class:`OutMsg` with a journal id) keeps its Telegram message id,
+    so that later ticks can edit it in place; the others go out as plain messages."""
+    from . import telegram
+
+    for text in texts:
+        markup = getattr(text, "markup", None)
+        journal_id = getattr(text, "journal_id", None)
+        if journal_id:
+            message_id = telegram.alert_with_id(db, owner_id, str(text), markup)
+            if message_id is not None:
+                _remember_message(db, journal_id, message_id, str(text))
+        elif markup:
+            telegram.alert(db, owner_id, str(text), markup)
+        else:
+            telegram.alert(db, owner_id, str(text))
+
+
+def _remember_message(db: Any, journal_id: str, message_id: int, text: str) -> None:
+    """Store the Telegram message id and the hash of the text sent (a small commit after the send: the
+    stage's own changes were committed before sending)."""
+    import hashlib
+
+    from app.foundation.models.entities import DeskCfdJournal
+
+    try:
+        row = db.get(DeskCfdJournal, journal_id)
+        if row is not None:
+            row.telegram_message_id = message_id
+            row.last_text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.warning("desk cfd message id not stored: %s", type(exc).__name__)
+
+
+def _live_edits(db: Any, owner_id: str, now: datetime) -> None:
+    """Edit each recent CFD message in place when its text changed (a moved price, the owner's answer, the
+    close). At most one edit per message per tick; a failed edit is retried by the next tick. No network
+    read: the text is built from stored rows (``cfd.manage`` has just refreshed the last price)."""
+    import hashlib
+
+    from app.foundation.models.entities import DeskCfdJournal, DeskPosition
+
+    from . import cfd, telegram
+
+    since = now.astimezone(UTC) - timedelta(hours=3)
+    try:
+        rows = db.query(DeskCfdJournal).filter(
+            DeskCfdJournal.user_id == owner_id, DeskCfdJournal.telegram_message_id.isnot(None),
+            DeskCfdJournal.created_at >= since).all()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.warning("desk cfd live edit query failed: %s", type(exc).__name__)
+        return
+    for journal in rows:
+        try:
+            position = db.get(DeskPosition, journal.position_id)
+            text = cfd.live_text(db, position, journal, now) if position is not None else None
+            if text is None:
+                continue
+            digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            if digest == journal.last_text_hash:
+                continue
+            if telegram.edit_alert(db, owner_id, int(journal.telegram_message_id), text,
+                                   telegram.cfd_markup(journal)):
+                journal.last_text_hash = digest
+                db.commit()
+        except (SQLAlchemyError, ValueError, KeyError, TypeError, ArithmeticError) as exc:
+            db.rollback()
+            logger.warning("desk cfd live edit failed: %s", type(exc).__name__)
+
+
+def _announce_fills(db: Any, now: datetime, position_ids: list[str],
+                    contexts: dict[str, Any] | None = None) -> list[str]:
+    """Name exactly what the index rule bought this tick (*position_ids*, from ``fire_due_signals``), one
+    message per index: the manual CFD with its buttons, then the paper knock-out and warrant it opened
+    ("Also on paper"). Sent after the commit. By id, not by entry time: a second index firing a minute
+    later must not announce the first one's fills again. An index without a CFD (its price read failed)
+    gets one message per paper position."""
     from app.foundation.models.entities import DeskPosition
 
-    from . import cfd, instrument
+    from . import cfd, cfd_journal, instrument, telegram
     from .underlyings import ALIASES
 
     out: list[str] = []
@@ -149,25 +257,44 @@ def _announce_fills(db: Any, now: datetime, position_ids: list[str]) -> list[str
         return out
     rows = db.query(DeskPosition).filter(DeskPosition.id.in_(position_ids), DeskPosition.status == "open").all()
     rows.sort(key=lambda p: position_ids.index(p.id))  # the order they were opened in
+    groups: dict[str, list[Any]] = {}
     for p in rows:
+        groups.setdefault(p.underlying_isin, []).append(p)
+
+    def paper_message(p: Any) -> str:
         try:
-            if p.product_type == "cfd":
-                key = keys.get(p.underlying_isin)
-                if key:
-                    out.append(cfd.open_message(db, p, key, now))
-            else:
-                out.append("Desk paper buy (index rule, no real order):\n" + instrument.describe(p))
+            return "Desk paper buy (index rule, no real order):\n" + instrument.describe(p)
+        except (SQLAlchemyError, ValueError, KeyError, TypeError, ArithmeticError, OSError) as exc:
+            db.rollback()
+            logger.warning("desk fill message failed: %s", type(exc).__name__)
+            return (f"Desk paper {p.product_type} opened on {p.underlying_label} ({p.direction}); details on "
+                    "the Desk page.")
+
+    for isin, members in groups.items():
+        cfd_pos = next((p for p in members if p.product_type == "cfd"), None)
+        paper = [p for p in members if p.product_type != "cfd"]
+        key = keys.get(isin)
+        if cfd_pos is None or not key:
+            out.extend(paper_message(p) for p in paper)
+            continue
+        try:
+            journal = cfd_journal.for_position(db, cfd_pos.id)
+            ctx = (contexts or {}).get(cfd_pos.id) or (cfd.context_from_journal(journal) if journal else None)
+            text = cfd.live_text(db, cfd_pos, journal, now, ctx) if journal is not None else None
+            if text is None:  # no context (a price or the index close was missing): the short text
+                text = cfd.open_message(db, cfd_pos, key, now, None)
+                if paper:
+                    text += "\nAlso on paper (no action):\n" + "\n".join(f"  {instrument.short_line(p)}" for p in paper)
+            out.append(OutMsg(text, telegram.cfd_markup(journal) if journal else None,
+                              journal.id if journal else None))
         except (SQLAlchemyError, ValueError, KeyError, TypeError, ArithmeticError, OSError) as exc:
             # One message that cannot be built must not stop the others (exits, CFD closes) going out.
             db.rollback()
             logger.warning("desk fill message failed: %s", type(exc).__name__)
-            if p.product_type == "cfd":  # the owner acts on this one by hand: side and market are a must
-                side = "BUY" if p.direction == "long" else "SELL"
-                out.append(f"CFD signal (manual, Trading 212): {side} {p.product_name or p.underlying_label} now. "
-                           "Size and stop: see the Desk page.")
-            else:
-                out.append(f"Desk paper {p.product_type} opened on {p.underlying_label} ({p.direction}); details on "
-                           "the Desk page.")
+            side = "BUY" if cfd_pos.direction == "long" else "SELL"
+            out.append(f"CFD signal (manual, Trading 212): {side} {cfd_pos.product_name or cfd_pos.underlying_label} "
+                       "now. Size and stop: see the Desk page.")
+            out.extend(paper_message(p) for p in paper)
     return out
 
 

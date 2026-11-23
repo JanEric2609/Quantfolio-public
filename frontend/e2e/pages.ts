@@ -21,6 +21,7 @@ export const SMOKE_PAGES: string[] = [
   "/portfolio/drift",
   "/portfolio/analysis",
   "/desk",
+  "/desk/intraday",
   "/tax/overview",
   "/tax/lots",
   "/tax/box3",
