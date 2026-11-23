@@ -189,4 +189,4 @@ from .tax import (
 )
 from .verification import VerificationAlert as VerificationAlert
 from .watchlist import WatchlistItem as WatchlistItem
-from .desk import DeskEvent as DeskEvent, DeskPosition as DeskPosition, DeskRegistration as DeskRegistration, NewsWireItem as NewsWireItem
+from .desk import DeskCfdJournal as DeskCfdJournal, DeskEvent as DeskEvent, DeskPosition as DeskPosition, DeskRegistration as DeskRegistration, NewsWireItem as NewsWireItem

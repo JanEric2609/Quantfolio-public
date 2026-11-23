@@ -157,3 +157,43 @@ compared with; if more than 10 % of a cell's trades lack the move there is no pl
 pass. The desk also records the move far more often: the fill falls back to the reference price read at the
 proposal, and the exit to the reference's last chart point of the past 30 minutes. The spec hash changed
 (`86396b95…`); the desk had not been registered in production yet, so no registration is superseded.
+
+## Amendment 2026-11-23: CFD messages v2, owner journal, intraday page
+
+**No rule change.** `prereg.PREREG_HASH` stays `86396b951089aa96007d6227bbfda59991be23b7b8b8ecd2975af6afa5c4a8cd`
+(a test pins the literal). r1, the entry and exit times, the sizing (`exposure = min(max_loss_per_trade / sigma,
+max_exposure_eur)`), the paper stop of one daily sigma and the paper cost model (`SPREAD_BP`, `FX_FEE`) are as
+registered. Everything below is display, owner input, or a read-only preview. No order path exists or is added:
+no Trading 212 write, no new `sc` command or wrapper flag (`--offset` and `--limit` were already allowed), and no
+desk limit becomes a setting.
+
+- **Trading 212 facts (observed 2026-11-23, about 17:40 Berlin)**, code constants in `cfd.T212`, for display and the
+  owner's calculator only: spreads DAX 0.5 bp, EU50 3.8 bp, USA500 0.75 bp, TECH100 0.6 bp; margin 5 % (1:20);
+  overnight 0.0083 % of the position value per night; 0.5 % FX fee on the result of a USD market; minimum order
+  20 EUR; quantities in 4 decimals. They are broker facts, not limits, and paper scoring keeps the registered values.
+- **Message v2.** At the signal the desk reads the index's previous close and the proxy's (`cfd.prepare_context`,
+  in the read phase) and sends the owner the quantity in Trading 212 units (rounded down), margin, the enter-by time,
+  the stop in index points from the owner's own fill, the typical last-30-minute move and the spread in points.
+  The reason now reads "DAX +0.42 % from yesterday's close to 09:30 Berlin" (it used to say "first half hour",
+  which was wrong: r1 runs from the previous close).
+- **One live message per trade.** The CFD message and the paper knock-out and warrant of the same signal go out as
+  one message per index. The monitor edits it in place (at most once a minute, only when the text changed): the
+  index level now, the paper result before costs, the time to the exit, the owner's answer. The close is a new
+  message, so it notifies.
+- **Owner journal.** `desk_cfd_journal` (migration 0158) is the owner's own record of the manual trades: Telegram
+  buttons (Entered, Skipped, Closed), `/cfd in|out|skip`, or the Intraday page. It is owner input **outside the
+  hash-chained ledger**: it never writes a `desk_events` row and never changes a paper position, and the cell
+  `index_momentum:cfd` is scored on the rule's prices whatever the owner did. The real result is signed points x
+  quantity x EUR per unit, less 0.5 % on a USD market; overnight interest is not included (nights held are shown).
+- **Heads-up and get-ready messages.** From 45 minutes after the Xetra open (35 for NYSE) until ten minutes before
+  the entry, the monitor sends once the day's plan per exchange, computed by the rule's own r1. Five minutes before
+  the entry it sends a get-ready line for the indices the heads-up expects to fire. These are read-only previews;
+  the entry recomputes r1 itself and never uses the heads-up.
+- **Intraday page.** `/desk/intraday` shows a board snapshot (`desk_intraday_board_json`, an internal key like
+  `desk_health_json`, rebuilt every five minutes), a client-side position calculator and the journal.
+- **Warrant search.** Day 1 (2026-11-23) found no warrants for the DAX: the search stopped on a page that was short
+  because the parser drops items without an ISIN, and a DAX universe is too large for six pages to reach
+  |delta| <= 0.7. The ES50 search read all six pages, then hit `rate_limited` (the wrapper's `flock` on the `sc`
+  session, not Scalable's own limit). The sort is unchanged; page one is read, then one-row probes bisect to the
+  band, then full pages follow, advancing by the raw item count, with at most 8 `sc` reads per search.
+

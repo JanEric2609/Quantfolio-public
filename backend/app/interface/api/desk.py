@@ -1,7 +1,7 @@
 """The guarded derivatives desk (ADR 0027): paper only, admin only. No order endpoint exists."""
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -12,6 +12,8 @@ from app.decision.desk import (
     chain_status,
     close_position_api,
     desk_status,
+    intraday_view,
+    journal_action,
     list_events,
     list_news,
     list_positions,
@@ -23,6 +25,7 @@ from app.decision.desk import (
 from app.foundation.auth import require_admin
 from app.foundation.core.db import get_db
 from app.foundation.models.entities import User
+from app.foundation.schemas.bounds import MoneyDecimal
 from app.interface.api.params import ROWS_BOUND
 
 router = APIRouter(prefix="/api/desk", tags=["desk"])
@@ -38,6 +41,13 @@ class TakeIn(BaseModel):
 
 class HaltIn(BaseModel):
     reason: str = Field(default="halted from the app", max_length=200)
+
+
+class CfdJournalIn(BaseModel):
+    action: Literal["entered", "skipped", "closed"]
+    level: MoneyDecimal | None = None
+    quantity: MoneyDecimal | None = None
+    note: str | None = Field(default=None, max_length=200)
 
 
 def _raise(exc: DeskActionError) -> HTTPException:
@@ -84,6 +94,22 @@ def get_scorecard(user: User = Depends(require_admin), db: Session = Depends(get
 @router.get("/chain")
 def get_chain(user: User = Depends(require_admin), db: Session = Depends(get_db)) -> dict[str, Any]:
     return chain_status(db)
+
+
+@router.get("/intraday")
+def get_intraday(user: User = Depends(require_admin), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """The Intraday CFD page: the board snapshot, Trading 212's facts and the owner's CFD journal."""
+    return intraday_view(db, user.id)
+
+
+@router.post("/cfd/{position_id}/journal")
+def post_cfd_journal(position_id: str, body: CfdJournalIn, user: User = Depends(require_admin),
+                     db: Session = Depends(get_db)) -> dict[str, Any]:
+    """The owner's own record of a manual CFD trade (entered, skipped, closed). Never an order."""
+    try:
+        return journal_action(db, user.id, position_id, body.action, body.level, body.quantity, body.note)
+    except DeskActionError as exc:
+        raise _raise(exc) from exc
 
 
 @router.post("/ideas")

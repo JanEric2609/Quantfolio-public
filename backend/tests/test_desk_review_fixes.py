@@ -103,7 +103,7 @@ def test_a_failed_price_read_retries_inside_the_window_then_logs_no_data(monkeyp
     def down(db, cli, plan, now=None):
         raise index_momentum.DataUnavailable("ReadTimeout")
 
-    monkeypatch.setattr(index_momentum, "compute_r1", down)
+    monkeypatch.setattr(index_momentum, "compute_r1_parts", down)
     plan = next(p for p in index_momentum.plans_for_day(NOW.date()) if p.key == "DAX")
     index_momentum.fire_due_signals(db, user.id, None, plan.enter_at + timedelta(seconds=5))
     assert db.query(DeskEvent).filter(DeskEvent.kind == "signal").count() == 0  # retried next minute

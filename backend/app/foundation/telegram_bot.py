@@ -71,6 +71,34 @@ def send_telegram_message(
         return False
 
 
+def send_telegram_message_id(
+    db: Session, chat_id: str, text: str, reply_markup: dict[str, Any] | None = None
+) -> int | None:
+    """Like :func:`send_telegram_message`, but returns the sent message's id (to edit it later), or None."""
+    token = get_bot_token(db)
+    if not token:
+        logger.warning("Telegram message not sent: no bot token configured")
+        return None
+    payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    result = _call_api(token, "sendMessage", payload)
+    message_id = result.get("message_id") if isinstance(result, dict) else None
+    return message_id if isinstance(message_id, int) and not isinstance(message_id, bool) else None
+
+
+def edit_telegram_message(
+    db: Session, chat_id: str, message_id: int, text: str, reply_markup: dict[str, Any] | None = None
+) -> bool:
+    """Replace a sent message's text and buttons. Without *reply_markup* the buttons are removed."""
+    token = get_bot_token(db)
+    if not token:
+        return False
+    payload = {"chat_id": chat_id, "message_id": message_id, "text": text,
+               "reply_markup": reply_markup if reply_markup else {"inline_keyboard": []}}
+    return _call_api(token, "editMessageText", payload) is not None
+
+
 def _call_api(token: str, method: str, payload: dict[str, Any] | None = None, *, timeout: float = 10.0) -> Any | None:
     """POST one Bot API method; the decoded ``result`` on success, ``None`` on any failure.
 

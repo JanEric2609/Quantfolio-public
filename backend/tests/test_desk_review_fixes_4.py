@@ -71,7 +71,7 @@ def test_an_idle_tick_does_not_clear_the_outdated_wrapper_flag():
     db = _memory_db()
     make_user(db)
     service.set_health(db, wrapper_outdated=True)
-    jobs.monitor_tick(db, NOW.replace(hour=11, minute=1), FakeSc(standard_handler({})).cli())  # no position, no rule
+    jobs.monitor_tick(db, NOW.replace(hour=8, minute=1), FakeSc(standard_handler({})).cli())  # 08:01: no position, no rule, before the heads-up window
     assert service.health(db)["wrapper_outdated"] is True
 
 

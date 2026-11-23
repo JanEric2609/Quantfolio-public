@@ -1451,6 +1451,66 @@
         "title": "CategoryOut",
         "type": "object"
       },
+      "CfdJournalIn": {
+        "properties": {
+          "action": {
+            "enum": [
+              "entered",
+              "skipped",
+              "closed"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "CfdJournalIn",
+        "type": "object"
+      },
       "ClientErrorIn": {
         "properties": {
           "kind": {
@@ -23958,6 +24018,61 @@
         ]
       }
     },
+    "/api/desk/cfd/{position_id}/journal": {
+      "post": {
+        "description": "The owner's own record of a manual CFD trade (entered, skipped, closed). Never an order.",
+        "operationId": "post_cfd_journal_api_desk_cfd__position_id__journal_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "position_id",
+            "required": true,
+            "schema": {
+              "title": "Position Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CfdJournalIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Post Cfd Journal Api Desk Cfd  Position Id  Journal Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Cfd Journal",
+        "tags": [
+          "desk"
+        ]
+      }
+    },
     "/api/desk/chain": {
       "get": {
         "operationId": "get_chain_api_desk_chain_get",
@@ -24133,6 +24248,30 @@
           }
         },
         "summary": "Post Idea",
+        "tags": [
+          "desk"
+        ]
+      }
+    },
+    "/api/desk/intraday": {
+      "get": {
+        "description": "The Intraday CFD page: the board snapshot, Trading 212's facts and the owner's CFD journal.",
+        "operationId": "get_intraday_api_desk_intraday_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Intraday Api Desk Intraday Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Intraday",
         "tags": [
           "desk"
         ]

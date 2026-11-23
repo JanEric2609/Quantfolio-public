@@ -5,8 +5,8 @@ the limits, the ledger, the lifecycle and scorecard reads, the job registrars,
 the Telegram registration and the news wire's stream thread (worker only).
 """
 from .api_ops import (
-    DeskActionError, chain_status, close_position_api, desk_status, list_events, list_news, list_positions,
-    submit_idea,
+    DeskActionError, chain_status, close_position_api, desk_status, intraday_view, journal_action, list_events,
+    list_news, list_positions, submit_idea,
     take_proposal,
 )
 from .jobs import register_desk_monitor_job, register_desk_reconcile_job, register_news_wire_job
@@ -20,7 +20,7 @@ from .telegram import register_desk_telegram
 
 __all__ = [
     "DeskActionError", "chain_status", "close_position_api", "desk_status", "list_events", "list_news",
-    "list_positions",
+    "list_positions", "intraday_view", "journal_action",
     "submit_idea", "take_proposal", "LIMITS", "PREREG_HASH", "append_event", "halt_info", "health", "is_halted", "owner_close", "propose",
     "register_desk", "register_desk_monitor_job", "register_desk_reconcile_job", "register_desk_telegram",
     "register_news_wire_job", "scorecard", "set_halt", "start_news_stream", "verify_chain",

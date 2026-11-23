@@ -97,8 +97,12 @@ export const ROUTE_ENTRIES: RouteEntry[] = [
     keywords: ["evidence", "advisor", "mandates", "graduation", "capital ladder", "paper"],
   },
   {
-    id: "desk", to: "/desk", label: "Derivatives desk", icon: Gauge, group: "tools", researchTool: true,
+    id: "desk", to: "/desk", label: "Derivatives desk", icon: Gauge, group: "tools", researchTool: true, end: true,
     keywords: ["knock-out", "warrant", "turbo", "cfd", "paper", "idea", "derivatives", "news wire"],
+  },
+  {
+    id: "intraday", to: "/desk/intraday", label: "Intraday CFD", icon: Activity, group: "tools", researchTool: true,
+    keywords: ["cfd", "trading 212", "intraday"],
   },
   { id: "learn", to: "/learn", label: "Learn", icon: GraduationCap, group: "trust", keywords: ["tutorial", "teach", "how it works", "quiz"] },
   { id: "settings", to: "/settings", label: "Control Center", icon: Settings, group: "admin", keywords: ["settings", "connections", "status"] },

@@ -146,11 +146,30 @@ def parse_listings(result: dict[str, Any]) -> list[DerivativeListing]:
     return out
 
 
-def search_derivatives(
+@dataclass(frozen=True)
+class ListingPage:
+    """One search page: the parsed rows, the raw item count (the parser drops items without an ISIN, so
+    paging must advance by this, not by ``len(rows)``) and the size of the whole result when sc says."""
+    rows: list[DerivativeListing]
+    raw_count: int
+    total_available: int | None
+
+
+def _as_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def search_derivatives_page(
     cli: ScalableCli, *, underlying: str, product_type: str, strategy: str, limit: int = 100,
     leverage_max: str | None = None, expiry_from: date | None = None, expiry_to: date | None = None,
     sort_field: str | None = None, sort_order: str | None = None, offset: int = 0,
-) -> list[DerivativeListing]:
+) -> ListingPage:
     args = ["broker", "derivatives", "search", "--underlying", underlying, "--type", product_type,
             "--strategy", strategy, "--limit", str(limit)]
     if offset:
@@ -163,7 +182,21 @@ def search_derivatives(
         args += ["--expiry-to", expiry_to.isoformat()]
     if sort_field:
         args += ["--sort-field", sort_field, "--sort-order", sort_order or "asc"]
-    return parse_listings(_run(cli, *args))
+    result = _run(cli, *args)
+    rows = parse_listings(result)
+    items = result.get("items")
+    return ListingPage(rows, len(items) if isinstance(items, list) else 0, _as_int(result.get("total_available")))
+
+
+def search_derivatives(
+    cli: ScalableCli, *, underlying: str, product_type: str, strategy: str, limit: int = 100,
+    leverage_max: str | None = None, expiry_from: date | None = None, expiry_to: date | None = None,
+    sort_field: str | None = None, sort_order: str | None = None, offset: int = 0,
+) -> list[DerivativeListing]:
+    return search_derivatives_page(
+        cli, underlying=underlying, product_type=product_type, strategy=strategy, limit=limit,
+        leverage_max=leverage_max, expiry_from=expiry_from, expiry_to=expiry_to, sort_field=sort_field,
+        sort_order=sort_order, offset=offset).rows
 
 
 def get_chart(cli: ScalableCli, isin: str, timeframe: str) -> list[tuple[datetime, Decimal]]:

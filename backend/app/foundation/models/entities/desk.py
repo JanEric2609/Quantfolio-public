@@ -138,3 +138,42 @@ class NewsWireItem(Base):
     rated_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # sent | rate_capped | quiet | "" (not sent)
     alert: Mapped[str] = mapped_column(String(12), default="")
+
+
+class DeskCfdJournal(Base):
+    """The owner's own record of a manual Trading 212 CFD trade (one row per paper CFD signal).
+
+    Owner input, outside the hash-chained ledger: nothing here changes a paper position or is scored.
+    """
+
+    __tablename__ = "desk_cfd_journal"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_pk)
+    position_id: Mapped[str] = mapped_column(
+        ForeignKey("desk_positions.id", ondelete="CASCADE"), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    market_key: Mapped[str] = mapped_column(String(8))  # DAX | ES50 | SPX | NDX
+    direction: Mapped[str] = mapped_column(String(5))
+    currency: Mapped[str] = mapped_column(String(3))
+    r1: Mapped[Decimal | None] = mapped_column(Numeric(14, 8), nullable=True)
+    index_level_est: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    eur_per_unit: Mapped[Decimal | None] = mapped_column(Numeric(20, 10), nullable=True)
+    quantity_suggested: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    exposure_eur: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    stop_points: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    typical_30m_points: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    spread_points: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    enter_by: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exit_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # sent | entered | skipped | closed
+    status: Mapped[str] = mapped_column(String(10), default="sent")
+    entered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    entry_level: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    exit_level: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    real_pnl_eur: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    telegram_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_text_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)

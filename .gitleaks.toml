@@ -1,0 +1,20 @@
+# gitleaks config: default rules plus the known false positives.
+# Run: gitleaks git --config .gitleaks.toml --redact
+# Personal-data rules (name, email, LAN IPs, IBANs) live outside the repo
+# in ~/.config/gitleaks/private.toml, because writing them here would publish them.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Setting-name constants and SQL key lookups, not credentials"
+condition = "OR"
+regexes = [
+  '''sec_8k_through''',
+  '''trading212_pie_plans''',
+  '''trading212_enabled''',
+]
+
+[[allowlists]]
+description = "Dummy token in the incident runbook's bad-key probe"
+paths = ['''infra/runbooks/incident-cloud-keys-rotated\.md''']
+regexes = ['''sk-invalid-test''']

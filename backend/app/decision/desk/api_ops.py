@@ -8,13 +8,14 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.foundation.desk_chain import verify_chain, verify_chain_cached
-from app.foundation.models.entities import DeskEvent, DeskPosition
+from app.foundation.models.entities import DeskCfdJournal, DeskEvent, DeskPosition
+from app.foundation.settings import get_setting_row
 from app.foundation.scalable import market
 from app.foundation.scalable import service as scalable_service
 from app.foundation.scalable.cli import ScalableError
 
 from . import calendar as cal
-from . import cfd, prereg, service
+from . import cfd, cfd_journal, intraday, prereg, service
 from .limits import LIMITS
 from .signals import owner_calls
 from .underlyings import Underlying
@@ -181,3 +182,63 @@ def close_position_api(db: Session, user_id: str, position_id: str) -> dict[str,
         raise DeskActionError(502, f"Could not read the market: {exc.code}") from exc
     db.commit()
     return {"closed": ok, "position": position_dict(position)}
+
+
+def _journal_dict(db: Session, j: DeskCfdJournal) -> dict[str, Any]:
+    p = db.get(DeskPosition, j.position_id)
+
+    def num(v: Any) -> str | None:
+        return None if v is None else str(v)
+
+    stop = cfd_journal.stop_level(j)
+    return {
+        "position_id": j.position_id, "short_id": j.position_id[:8], "created_at": _iso(j.created_at),
+        "market_key": j.market_key, "direction": j.direction, "currency": j.currency, "status": j.status,
+        "r1": num(j.r1), "index_level_est": num(j.index_level_est), "quantity_suggested": num(j.quantity_suggested),
+        "quantity": num(j.quantity), "exposure_eur": num(j.exposure_eur), "stop_points": num(j.stop_points),
+        "stop_level": num(stop), "entry_level": num(j.entry_level), "exit_level": num(j.exit_level),
+        "entered_at": _iso(j.entered_at), "closed_at": _iso(j.closed_at), "real_pnl_eur": num(j.real_pnl_eur),
+        "paper_net_eur": num(p.net_eur) if p else None, "paper_status": p.status if p else None,
+        "nights_held": cfd_journal.nights_held(j), "note": j.note,
+    }
+
+
+def intraday_view(db: Session, user_id: str) -> dict[str, Any]:
+    """The Intraday page's data: the board snapshot, Trading 212's facts and the owner's last 30 journal rows."""
+    stored = get_setting_row(db, intraday.BOARD_KEY)
+    board = {k: v for k, v in stored.items() if k != "ctx"} if isinstance(stored, dict) else None
+    age = None
+    if board and board.get("as_of"):
+        try:
+            age = max(0, int((datetime.now(UTC) - datetime.fromisoformat(board["as_of"])).total_seconds()))
+        except ValueError:
+            age = None
+    t212 = {k: ({a: str(b) for a, b in v.items()} if isinstance(v, dict) else str(v)) for k, v in cfd.T212.items()}
+    rows = db.query(DeskCfdJournal).filter(DeskCfdJournal.user_id == user_id) \
+        .order_by(DeskCfdJournal.created_at.desc()).limit(30).all()
+    return {"board": board, "board_age_s": age, "t212": t212, "journal": [_journal_dict(db, j) for j in rows]}
+
+
+def journal_action(db: Session, user_id: str, position_id: str, action: str, level: Any, quantity: Any,
+                   note: str | None) -> dict[str, Any]:
+    """The owner's answer on a CFD signal: the same functions and checks as Telegram's buttons and ``/cfd``."""
+    journal = cfd_journal.for_position(db, position_id)
+    if journal is None or journal.user_id != user_id:
+        raise DeskActionError(404, "Unknown trade.")
+    now = datetime.now(UTC)
+    try:
+        if action == "entered":
+            cfd_journal.mark_entered(db, journal, now, level, quantity)
+        elif action == "skipped":
+            cfd_journal.mark_skipped(db, journal, now)
+        elif action == "closed":
+            cfd_journal.mark_closed(db, journal, now, level)
+        else:
+            raise DeskActionError(422, "Unknown action.")
+        if note is not None:
+            journal.note = note[:200]
+        db.commit()
+    except cfd_journal.JournalError as exc:
+        db.rollback()
+        raise DeskActionError(422, str(exc)) from exc
+    return _journal_dict(db, journal)
