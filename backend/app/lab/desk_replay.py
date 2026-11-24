@@ -163,6 +163,7 @@ def evaluate(days: list[Day], costs: Costs, *, desk_days: bool = True) -> dict[s
 # seeing the result makes it a new trial.
 
 ENTRY_MINUTE, EXIT_MINUTE, R1_MINUTE = time(15, 29), time(15, 56), time(9, 59)  # bar starts; closes at +1 min
+SESSION_LAST_MINUTE = time(15, 59)
 TYPICAL_MINUTES = 27
 EXIT_VARIANTS: dict[str, tuple[str, float]] = {"fixed": ("fixed", 0.0), "tp_0.5": ("tp", 0.5),
                                                "tp_1.0": ("tp", 1.0), "trail": ("trail", 0.5)}
@@ -179,11 +180,14 @@ class MinuteDay:
 
 
 def minute_days(rows: list[tuple[datetime, float, float, float]]) -> list[MinuteDay]:
-    """Rows ``(bar start, high, low, close)`` of one symbol, at least 09:59 and 15:29-15:59 New York."""
+    """Rows ``(bar start, high, low, close)`` of one symbol, at least 09:59 and 15:29-15:59 New York. Bars outside
+    the regular session (Alpaca's 1-minute bars include extended hours) are dropped, so the previous close is
+    the 15:59 bar's and never an after-hours print."""
     by_day: dict[date, dict[time, tuple[float, float, float]]] = defaultdict(dict)
     for t, h, lo, c in rows:
         local = t.astimezone(NEW_YORK)
-        by_day[local.date()][local.time()] = (h, lo, c)
+        if OPEN_BAR <= local.time() <= SESSION_LAST_MINUTE:
+            by_day[local.date()][local.time()] = (h, lo, c)
     closes: list[float] = []
     out: list[MinuteDay] = []
     for d in sorted(by_day):
@@ -196,7 +200,7 @@ def minute_days(rows: list[tuple[datetime, float, float, float]]) -> list[Minute
             path = tuple(bars[time(15, m)] for m in range(30, EXIT_MINUTE.minute + 1))
             out.append(MinuteDay(d, bars[R1_MINUTE][2] / closes[-1] - 1, bars[ENTRY_MINUTE][2], path, sigma,
                                  xetra_flat_by(d)))
-        if max(bars) >= time(15, 59):
+        if max(bars) == SESSION_LAST_MINUTE:
             closes.append(last)
     return out
 

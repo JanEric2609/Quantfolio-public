@@ -126,3 +126,25 @@ def test_minute_days_builds_r1_entry_and_sigma_from_the_kept_minutes():
     rep = evaluate_exits(days, Costs(), desk_days=False)
     assert set(rep["variants"]) == {"fixed", "tp_0.5", "tp_1.0", "trail"}
     assert "p_holm" in rep["variants"]["tp_0.5"]["vs_fixed"]
+
+
+def test_minute_days_ignores_after_hours_bars():
+    from datetime import UTC, datetime, timedelta
+
+    from app.lab.desk_replay import NEW_YORK, minute_days
+
+    def build(after_hours):
+        rows, k = [], 0
+        for i in range(40):
+            d = datetime(2026, 6, 1, tzinfo=NEW_YORK) + timedelta(days=i)
+            if d.weekday() > 4:
+                continue
+            k += 1
+            base = 100 + (0.5 if k % 2 else -0.5)
+            for hh, mm in [(9, 59)] + [(15, m) for m in range(29, 60)]:
+                rows.append((d.replace(hour=hh, minute=mm).astimezone(UTC), base, base, base))
+            if after_hours:
+                rows.append((d.replace(hour=19, minute=59).astimezone(UTC), 150.0, 150.0, 150.0))
+        return minute_days(rows)
+
+    assert [(x.r1, x.sigma) for x in build(True)] == [(x.r1, x.sigma) for x in build(False)]
