@@ -63,3 +63,66 @@ def test_replay_rule_on_synthetic_bars():
     assert rows and all(r["direction"] == 1 for r in rows)  # first half hour always up
     stats = mod.summarise(rows)
     assert sum(s["n"] for s in stats.values()) == len(rows)
+
+
+# --- exit variants on 1-minute bars ------------------------------------------------------------------------
+
+def _mday(path, r1=0.002, sigma=0.01, entry=100.0):
+    from datetime import date as _date
+
+    from app.lab.desk_replay import MinuteDay
+    return MinuteDay(_date(2026, 11, 24), r1, entry, tuple(path), sigma, False)
+
+
+def test_fixed_exit_is_the_last_close_and_take_profit_fills_at_its_level():
+    import math
+
+    from app.lab.desk_replay import exit_return
+    unit = 0.01 * math.sqrt(27 / 390)  # ~0.263 %
+    up_then_down = [(100.2, 99.9, 100.1), (100.3, 100.0, 100.2)] + [(100.0, 99.7, 99.8)] * 25
+    day = _mday(up_then_down)
+    assert abs(exit_return(day, "fixed") - (-0.002)) < 1e-12
+    assert abs(exit_return(day, "tp_0.5") - 0.5 * unit) < 1e-12  # the first +0.2 % high passes 0.13 %
+    assert abs(exit_return(day, "tp_1.0") - unit) < 1e-12  # the second bar's +0.3 % high passes 0.263 %
+    assert abs(exit_return(day, "trail") - (-0.002)) < 1e-12  # armed at +0.2 %; the next close is already -0.2 %
+
+
+def test_short_side_trailing_exit_and_stop():
+    from app.lab.desk_replay import exit_return
+    # short (r1 < 0): price falls 0.4 %, then gives back to -0.15 % -> trailing exit there
+    path = [(100.0, 99.7, 99.7), (99.7, 99.6, 99.6), (99.9, 99.8, 99.85)] + [(100.5, 100.0, 100.4)] * 24
+    day = _mday(path, r1=-0.002)
+    assert abs(exit_return(day, "trail") - 0.0015) < 1e-9
+    assert abs(exit_return(day, "fixed") - (-0.004)) < 1e-9
+    stopped = _mday([(101.5, 100.0, 101.2)] + [(100.0, 99.0, 99.0)] * 26, r1=-0.002)
+    assert exit_return(stopped, "fixed") == -0.01  # one daily sigma against a short
+
+
+def test_no_trade_without_r1_or_sigma():
+    from app.lab.desk_replay import exit_return
+    assert exit_return(_mday([(1, 1, 1)] * 27, r1=0.0), "fixed") is None
+    assert exit_return(_mday([(1, 1, 1)] * 27, sigma=None), "tp_0.5") is None
+
+
+def test_minute_days_builds_r1_entry_and_sigma_from_the_kept_minutes():
+    from datetime import UTC, datetime, timedelta
+
+    from app.lab.desk_replay import NEW_YORK, evaluate_exits, minute_days, Costs
+    rows = []
+    d0 = datetime(2026, 6, 1, tzinfo=NEW_YORK)
+    k = 0
+    for i in range(40):
+        d = d0 + timedelta(days=i)
+        if d.weekday() > 4:
+            continue
+        k += 1
+        base = 100 + (0.5 if k % 2 else -0.5)
+        stamp = lambda hh, mm: (d.replace(hour=hh, minute=mm)).astimezone(UTC)  # noqa: E731
+        rows.append((stamp(9, 59), base, base, base * 1.001))
+        for m in range(29, 60):
+            rows.append((stamp(15, m), base + 0.1, base - 0.1, base))
+    days = minute_days(rows)
+    assert days and days[-1].sigma is not None and len(days[-1].path) == 27
+    rep = evaluate_exits(days, Costs(), desk_days=False)
+    assert set(rep["variants"]) == {"fixed", "tp_0.5", "tp_1.0", "trail"}
+    assert "p_holm" in rep["variants"]["tp_0.5"]["vs_fixed"]

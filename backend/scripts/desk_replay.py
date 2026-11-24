@@ -4,6 +4,8 @@
                                                    # for bars older than 15 minutes), print the report
     python scripts/desk_replay.py --dump bars.json # also save the bars
     python scripts/desk_replay.py --bars bars.json # replay saved bars, no network
+    python scripts/desk_replay.py --minutes m.json # the pre-registered exit variants (take-profit, trailing)
+                                                   # on saved 1-minute bars {sym: [[iso, high, low, close]]}
 
 Writes nothing to the database. See ``app/lab/desk_replay.py`` for the cost models.
 """
@@ -17,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.lab.desk_replay import Costs, days_from_bars, evaluate  # noqa: E402
+from app.lab.desk_replay import Costs, days_from_bars, evaluate, evaluate_exits, minute_days  # noqa: E402
 
 SYMBOLS = ("SPY", "QQQ")
 START = datetime(2016, 1, 1, tzinfo=UTC)
@@ -48,7 +50,14 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--bars")
     ap.add_argument("--dump")
+    ap.add_argument("--minutes")
     args = ap.parse_args()
+    if args.minutes:
+        raw_m = json.loads(Path(args.minutes).read_text())
+        exits = {sym: evaluate_exits(minute_days([(datetime.fromisoformat(t), h, lo, c) for t, h, lo, c in rows]),
+                                     Costs()) for sym, rows in raw_m.items()}
+        print(json.dumps(exits, indent=1, default=str))
+        return
     raw = json.loads(Path(args.bars).read_text()) if args.bars else fetch()
     if args.dump:
         Path(args.dump).write_text(json.dumps(raw))

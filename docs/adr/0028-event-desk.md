@@ -96,3 +96,15 @@ Per-trade mean in EUR at 5 EUR risk at the stop (the size budgets the overnight 
 All three technical rules lose after costs on the replay (with a 15 bp stock spread the trend cell is -0.43, t -2.94). The expectation going in is therefore that they fail the pre-registered rule; the live paper score decides, and the desk keeps them only as a measured null.
 
 (The Alpaca entitlement findings are added when the first live run reports them.)
+
+## Amendment 2026-11-24 (evening): a replay that loses makes the message paper only
+
+The replay summary (`desk_signal_replay_json`) had never been written on the server, so every card said
+"replay n/a" and the SIE, BAS and IFX cards went out with a quantity and a stop. Written on 2026-11-24 from the
+committed `docs/research/signal-replay-2026-11.json` (three research trials under the current event hash).
+
+A cell whose replay loses after costs clearly (mean below zero, t at or below -2.0, at least 100 replayed
+trades; `event_messages.REPLAY_LOSS_T`, `REPLAY_MIN_N`) now sends paper-only messages, like the bankroll stop and
+a failing cell: no quantity or stop, "Exit (paper)" only. Today that is all three technical cells. The cells
+are still opened and scored on paper exactly as registered; the pre-registration and its hash are unchanged
+(message text only). A rule without history (hype fade, news drift, the owner's call) is never affected.
