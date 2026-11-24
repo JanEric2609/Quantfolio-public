@@ -86,3 +86,22 @@ def test_guard_open_and_other_month():
         _row(db, "entered")
     g = bankroll.guard(db, "u", NOW)
     assert not g.ok and "open" in g.reason
+
+
+def test_overnight_budget_covers_every_night_to_the_exit():
+    from zoneinfo import ZoneInfo
+
+    from app.decision.desk import events
+
+    berlin = ZoneInfo("Europe/Berlin")
+    fri = datetime(2026, 11, 20, 17, 10, tzinfo=berlin)
+    assert events.planned_nights(fri, datetime(2026, 11, 23, 17, 10, tzinfo=berlin)) == 3  # Friday to Monday
+    assert events.planned_nights(fri, fri) == 0  # out the same day
+    inst = ci.by_key("DE:SAP")
+    one = event_sizing.size(inst, Decimal("200"), Decimal("10"), Decimal(1), fri, "long", nights=1)
+    ten = event_sizing.size(inst, Decimal("200"), Decimal("10"), Decimal(1), fri, "long", nights=14)
+    assert ten.quantity < one.quantity and ten.loss_at_stop_eur <= Decimal("5")
+    # the loss at the stop on the last night, every night charged, stays within the 5 EUR risk
+    nightly = inst.overnight_rate("long") * Decimal("200")
+    worst = ten.quantity * (Decimal("10") + inst.spread_bp / Decimal(10000) * Decimal("200") + nightly * 14)
+    assert worst <= Decimal("5")

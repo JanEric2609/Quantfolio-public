@@ -86,7 +86,7 @@ def test_collect_stores_scores_and_reads_back_without_lookahead():
     chain = [_row("put", -0.25, 0.3), _row("call", 0.5, 0.25)]
 
     class P:
-        def option_chain(self, sym, a, b):
+        def option_chain(self, sym, a, b, before_request=None):
             if sym == "NONE":
                 return []
             return chain
@@ -103,8 +103,36 @@ def test_collect_stops_when_not_entitled():
     db = _memory_db()
 
     class P:
-        def option_chain(self, sym, a, b):
+        def option_chain(self, sym, a, b, before_request=None):
             raise ap.DataUnavailable("options_not_entitled")
 
     out = om.collect(db, P(), ["A", "B"], datetime(2026, 11, 24, 4, 30, tzinfo=UTC), bucket=om.TokenBucket(10_000))
     assert out["stopped"] == "options_not_entitled" and out["names"] == 0
+
+
+def test_every_chain_page_counts_against_the_bucket():
+    prov = ap.AlpacaProvider("k", api_secret="s")
+    pages = [{"snapshots": {}, "next_page_token": "p2"}, {"snapshots": {}, "next_page_token": "p3"},
+             {"snapshots": {}, "next_page_token": "p4"}]
+    waits = []
+    with patch.object(prov, "_get", side_effect=pages) as get:
+        prov.option_chain("AAPL", date(2026, 12, 1), date(2026, 12, 31), before_request=lambda: waits.append(1))
+    assert get.call_count == 3 and len(waits) == 3  # one token per page, and at most three pages
+
+
+def test_collect_stops_on_rate_limit_and_keeps_what_it_read():
+    db = _memory_db()
+    chain = [_row("put", -0.25, 0.3), _row("call", 0.5, 0.25)]
+
+    class P:
+        def option_chain(self, sym, a, b, before_request=None):
+            if before_request is not None:
+                before_request()
+            if sym == "LATE":
+                raise ValueError("Alpaca HTTP 429 for /LATE")
+            return chain
+
+    now = datetime(2026, 11, 24, 4, 30, tzinfo=UTC)
+    out = om.collect(db, P(), ["AAA", "LATE", "BBB"], now, bucket=om.TokenBucket(10_000))
+    assert out == {"names": 1, "asked": 3, "stopped": "rate_limited"}
+    assert set(om.stored_scores(db, "2026-11-23")) == {"AAA"}

@@ -41,6 +41,15 @@ def nights(entry: date, exit_: date) -> int:
     return max(0, (exit_ - entry).days)
 
 
+def planned_nights(bars: list[technical.Bar], i: int, max_hold: int) -> int:
+    """Calendar nights from bar *i* to its time exit *max_hold* bars on, as the desk budgets them in its sizing
+    (past the data's end: 7 calendar days per 5 trading days)."""
+    j = i + max_hold
+    if j < len(bars):
+        return nights(bars[i].date, bars[j].date)
+    return round(max_hold * 7 / 5)
+
+
 def simulate(key: str, bars: list[technical.Bar], inst: dict[str, Any], risk: float = 5.0,
              rules: dict[str, Any] | None = None, cells: tuple[str, ...] = CELLS) -> list[RTrade]:
     """One cell at a time per instrument: a new entry waits until the previous trade of that cell closed."""
@@ -86,7 +95,7 @@ def simulate(key: str, bars: list[technical.Bar], inst: dict[str, Any], risk: fl
             dist = h.stop_atr * a
             px = bar.close
             night = float(inst["overnight_long" if h.direction == "long" else "overnight_short"]) * px
-            per_unit = dist + spread * px + (FX_FEE * dist if usd else 0.0) + night
+            per_unit = dist + spread * px + (FX_FEE * dist if usd else 0.0) + night * planned_nights(bars, i, h.max_hold_days)
             qty = risk / per_unit
             stop = px - dist if h.direction == "long" else px + dist
             pos = {"date": bar.date, "i": i, "px": px, "dir": h.direction, "stop": stop, "qty": qty,

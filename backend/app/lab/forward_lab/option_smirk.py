@@ -77,7 +77,10 @@ def smirk_score(chain: list[dict[str, Any]], today: date) -> float | None:
 def collect(db: Session, provider: AlpacaProvider, symbols: list[str], now: datetime,
             bucket: TokenBucket | None = None, deadline_s: float = DEADLINE_S,
             clock: Callable[[], float] = time.monotonic) -> dict[str, Any]:
-    """Read one chain per symbol (each page counts against the bucket) and store the scores."""
+    """Read one chain per symbol (each page counts against the bucket) and store the scores.
+
+    A 429 (rate limited despite the bucket) stops the night's scan like the deadline does: the names read so far
+    are kept, and ``stopped`` says why, in the result and in the stored value."""
     bucket = bucket or TokenBucket()
     started = clock()
     today = now.astimezone(UTC).date()
@@ -87,19 +90,23 @@ def collect(db: Session, provider: AlpacaProvider, symbols: list[str], now: date
         if clock() - started > deadline_s:
             stopped = "deadline"
             break
-        bucket.wait()
         try:
-            chain = provider.option_chain(sym, today + timedelta(days=MIN_DAYS), today + timedelta(days=MAX_DAYS))
+            chain = provider.option_chain(sym, today + timedelta(days=MIN_DAYS), today + timedelta(days=MAX_DAYS),
+                                          before_request=bucket.wait)
         except DataUnavailable:
             stopped = "options_not_entitled"
             break
         except (ValueError, OSError) as exc:
+            if "HTTP 429" in str(exc):
+                stopped = "rate_limited"
+                logger.info("option smirk: rate limited after %d name(s); stopping tonight's scan", len(scores))
+                break
             logger.debug("option chain failed for a symbol: %s", type(exc).__name__)
             continue
         value = smirk_score(chain, today)
         if value is not None:
             scores[sym] = round(value, 6)
-    upsert_public_settings(db, {KEY: {"collected_on": today.isoformat(), "scores": scores}})
+    upsert_public_settings(db, {KEY: {"collected_on": today.isoformat(), "scores": scores, "stopped": stopped}})
     db.commit()
     return {"names": len(scores), "asked": len(symbols), "stopped": stopped}
 

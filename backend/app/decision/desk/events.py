@@ -187,6 +187,11 @@ def _nights(position: DeskPosition, now: datetime) -> int:
     return max(0, (now.astimezone(cal.BERLIN).date() - a.astimezone(cal.BERLIN).date()).days) if a else 0
 
 
+def planned_nights(now: datetime, exit_at: datetime) -> int:
+    """Calendar nights from *now* to the planned exit, as the exit charges them (Friday to Monday is 3)."""
+    return max(0, (exit_at.astimezone(cal.BERLIN).date() - now.astimezone(cal.BERLIN).date()).days)
+
+
 def event_close(db: Session, position: DeskPosition, price: Decimal, reason: str, now: datetime,
                 inst: cfd_instruments.CfdInstrument) -> bool:
     """Paper exit at the reference price. Costs: the spread, the FX fee on a USD result and overnight interest
@@ -310,7 +315,8 @@ def _open_one(db: Session, user_id: str, cand: Candidate, now: datetime, fx: Dec
         i2 = _inst_of(db, j)
         if j is not None and i2 is not None and j.exposure_eur:
             open_margin += Decimal(j.exposure_eur) * i2.margin_rate
-    sizing = event_sizing.size(inst, level, cand.stop_distance, eur, now, cand.direction, open_margin)
+    sizing = event_sizing.size(inst, level, cand.stop_distance, eur, now, cand.direction, open_margin,
+                               nights=planned_nights(now, cand.max_exit_at))
     if sizing is None:
         return None, "sizing"
     scale = cand.ref_price / level

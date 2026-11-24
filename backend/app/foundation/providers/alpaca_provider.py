@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
@@ -266,16 +267,20 @@ class AlpacaProvider(MarketDataProvider):
     options_url = "https://data.alpaca.markets/v1beta1/options/snapshots"
 
     def option_chain(self, underlying: str, expiration_gte: date, expiration_lte: date,
-                     feed: str = "indicative") -> list[dict[str, Any]]:
+                     feed: str = "indicative", before_request: Callable[[], None] | None = None
+                     ) -> list[dict[str, Any]]:
         """Option snapshots of one underlying (market data only): ``{"symbol", "type", "strike", "expiration",
         "iv", "delta"}``, at most three pages. Alpaca sends implied volatility and Greeks but no open interest.
-        A 403 (no options entitlement) is ``DataUnavailable("options_not_entitled")``."""
+        A 403 (no options entitlement) is ``DataUnavailable("options_not_entitled")``. *before_request* runs
+        before every page's GET (a caller's rate limiter: each page is one request)."""
         if not self.enabled:
             raise ValueError("Alpaca API key/secret is not configured.")
         params: dict[str, Any] = {"feed": feed, "limit": 1000, "expiration_date_gte": expiration_gte.isoformat(),
                                   "expiration_date_lte": expiration_lte.isoformat()}
         out: list[dict[str, Any]] = []
         for _page in range(3):
+            if before_request is not None:
+                before_request()
             try:
                 data = self._get(f"/{strip_exchange_suffix(underlying)}", params=params, base=self.options_url)
             except ValueError as exc:

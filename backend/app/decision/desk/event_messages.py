@@ -99,6 +99,10 @@ def open_text(db: Session, position: DeskPosition, journal: DeskCfdJournal, now:
     inst = _inst(db, journal)
     cell = position.cell or ""
     only = fill.get("paper_only") or ""
+    if not only and position.status == "open" and journal.status == "sent":
+        # Rebuilt on every tick: a bankroll stop (or a failing cell) since the fill switches a trade the owner
+        # has not entered yet to paper only. One already entered keeps its stop: the owner needs it.
+        only = paper_only_reason(db, position.user_id, cell, now)
     side = position.direction
     name = inst.t212_name if inst else journal.market_key
     lines = [f"{_label(position, journal)} {side}: CFD, manual (Trading 212: {name})",
@@ -109,7 +113,8 @@ def open_text(db: Session, position: DeskPosition, journal: DeskCfdJournal, now:
     if inst is not None and not only:
         margin = exposure * inst.margin_rate
         lines.append(f"Quantity {qty:.4f} (~ {exposure:,.0f} EUR, margin ~ {margin:,.0f} EUR, leverage "
-                     f"{Decimal(1) / inst.margin_rate:.0f}x). Loss at the stop ~ {fill.get('loss_at_stop', '5')} EUR.")
+                     f"{Decimal(1) / inst.margin_rate:.0f}x). Loss at the stop ~ {fill.get('loss_at_stop', '5')} EUR, "
+                     "overnight to the exit date included.")
         pts = Decimal(journal.stop_points or 0)
         stop = entry - pts if side == "long" else entry + pts
         lines.append(f"Stop: {stop:,.2f} ({fill.get('stop_text', 'ATR stop')}). Exit: by {_exit_text(position)}, "

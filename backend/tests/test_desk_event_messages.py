@@ -32,9 +32,10 @@ def test_hype_message_golden():
         "Why: hype fade. +11.2% today on 6x its usual news and 4x its usual volume; no filing or earnings.",
         "Research: after retail herding, such stocks gave back about 5 % over 20 days (Barber, Huang, Odean, Schwarz).",
         "Evidence: replay 2016-26 n/a (no history for this rule) | live paper 0 trades (too early).",
-        "Quantity 0.1813 (~ 78 EUR, margin ~ 16 EUR, leverage 5x). Loss at the stop ~ 5.00 EUR.",
+        ("Quantity 0.1725 (~ 75 EUR, margin ~ 15 EUR, leverage 5x). Loss at the stop ~ 5.00 EUR, overnight to the "
+         "exit date included."),
         "Stop: 510.00 (1.5 ATR). Exit: by 2026-12-02 at 21:40 Berlin, or when I tell you.",
-        "Costs: spread ~ 0.08 %, overnight ~ 0.02 EUR per night on 78 EUR, 0.5 % FX on the result.",
+        "Costs: spread ~ 0.08 %, overnight ~ 0.02 EUR per night on 75 EUR, 0.5 % FX on the result.",
         "Bankroll: month +0 EUR of the 60 EUR stop.",
         "Paper-scored as hype_fade:cfd. If Trading 212 has no CFD on NVDA, skip; nothing is ordered for you.",
     ]
@@ -94,3 +95,26 @@ def test_index_message_gets_one_evidence_line():
     db, _ = _setup()
     line = cfd.evidence_line(db)
     assert line.startswith("Evidence: replay 2016-26 -0.18 EUR a trade (SPY") and "(too early)" in line
+
+
+def _log_real_result(db, position, eur):
+    """The owner logs a real trade on *position*'s journal row, closed at US_NOW with *eur*."""
+    j = cfd_journal.for_position(db, position.id)
+    j.status, j.real_pnl_eur, j.closed_at = "closed", Decimal(eur), US_NOW
+    db.commit()
+
+
+def test_bankroll_stop_after_the_fill_switches_an_unentered_message_to_paper_only():
+    db, user = _setup()
+    earlier, why = events._open_one(db, user.id, _cand("DE:SAP"), NOW, Decimal(1))
+    assert earlier is not None, why
+    p = _hype(db, user)
+    j = cfd_journal.for_position(db, p.id)
+    assert "Quantity" in event_messages.live_text(db, p, j, US_NOW)
+    _log_real_result(db, earlier, "-61")  # an earlier real trade, logged after this fill: the monthly stop trips
+    text = event_messages.live_text(db, p, j, US_NOW)
+    assert "Bankroll stop" in text and "Quantity" not in text and "Exit (paper)" in text
+    # A trade the owner already entered keeps its quantity and stop: they need them for the open position.
+    j.status = "entered"
+    db.commit()
+    assert "Quantity" in event_messages.live_text(db, p, j, US_NOW)

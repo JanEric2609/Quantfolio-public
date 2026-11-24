@@ -43,6 +43,8 @@ market-data GETs only, `would_take_live` stays False.
 in a month, or 3 open real positions, switches every message to paper only (no quantity or order lines) until
 the next day or the 1st of the month (Berlin). A cell with n >= 40 whose mean is not above zero also sends
 paper-only messages.
+Messages are rebuilt on every tick, so a stop that trips after a signal also switches that signal's message,
+as long as the owner has not entered it; a trade already entered keeps its quantity and stop.
 
 ## What would make us stop
 
@@ -55,14 +57,14 @@ Out of scope.
 
 ## Replay (2016-2026 daily bars, 24 instruments, research only)
 
-Per-trade mean in EUR at 5 EUR risk at the stop, after spread, FX fee and overnight interest. Raw output: `docs/research/signal-replay-2026-11.json`. This is not the pass test; all cells are scored live.
+Per-trade mean in EUR at 5 EUR risk at the stop (the size budgets the overnight interest of every night to the planned exit, as the live sizing does), after spread, FX fee and overnight interest. Raw output: `docs/research/signal-replay-2026-11.json`. This is not the pass test; all cells are scored live.
 
 | Cell | Trades | Mean EUR | t | Hit rate | Mean hold (d) | Max drawdown EUR |
 |---|---|---|---|---|---|---|
-| ta_trend (EMA cross) | 1071 | -0.46 | -2.80 | 0.41 | 11.7 | 508 |
-| ta_band (Bollinger fade) | 3817 | -0.52 | -6.47 | 0.43 | 5.7 | 2160 |
-| ta_rsi2 (RSI(2)) | 3202 | -0.18 | -2.61 | 0.60 | 3.5 | 595 |
+| ta_trend (EMA cross) | 1071 | -0.43 | -2.91 | 0.41 | 11.7 | 477 |
+| ta_band (Bollinger fade) | 3817 | -0.49 | -6.49 | 0.43 | 5.7 | 2037 |
+| ta_rsi2 (RSI(2)) | 3202 | -0.16 | -2.45 | 0.60 | 3.5 | 533 |
 
-All three technical rules lose after costs on the replay (with a 15 bp stock spread the trend cell is -0.46, t -2.83). The expectation going in is therefore that they fail the pre-registered rule; the live paper score decides, and the desk keeps them only as a measured null.
+All three technical rules lose after costs on the replay (with a 15 bp stock spread the trend cell is -0.43, t -2.94). The expectation going in is therefore that they fail the pre-registered rule; the live paper score decides, and the desk keeps them only as a measured null.
 
 (The Alpaca entitlement findings are added when the first live run reports them.)

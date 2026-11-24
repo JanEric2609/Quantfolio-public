@@ -23,11 +23,14 @@ class Sizing:
 
 
 def size(inst: CfdInstrument, ref_price: Decimal, stop_distance: Decimal, eur_per_unit: Decimal,
-         now: datetime, direction: str = "long", open_margin_eur: Decimal = Decimal(0)) -> Sizing | None:
+         now: datetime, direction: str = "long", open_margin_eur: Decimal = Decimal(0), nights: int = 1
+         ) -> Sizing | None:
     """quantity = risk after costs / (stop distance x EUR per unit), rounded DOWN to the step.
 
-    Costs per unit at the stop: the spread, the 0.5 % FX fee on the loss (USD) and one night of interest.
-    ``None`` when the quantity rounds to 0 or the margin would break ``max_margin_share`` of the pot."""
+    Costs per unit at the stop: the spread, the 0.5 % FX fee on the loss (USD) and the interest of *nights*
+    nights, the calendar nights to the planned exit (Friday to Monday is 3), so a stop hit on the last day
+    still loses no more than ``risk_per_trade``. ``None`` when the quantity rounds to 0 or the margin would
+    break ``max_margin_share`` of the pot."""
     if ref_price <= 0 or stop_distance <= 0 or eur_per_unit <= 0:
         return None
     price_eur = ref_price * eur_per_unit
@@ -35,7 +38,7 @@ def size(inst: CfdInstrument, ref_price: Decimal, stop_distance: Decimal, eur_pe
     spread = inst.spread_bp / Decimal(10000) * price_eur
     fx = FX_FEE * stop_loss if inst.usd else Decimal(0)
     night = inst.overnight_rate(direction) * price_eur
-    per_unit = stop_loss + spread + fx + night
+    per_unit = stop_loss + spread + fx + night * max(0, nights)
     qty = (EVENT_LIMITS.risk_per_trade / per_unit).quantize(inst.quantity_step, rounding=ROUND_DOWN)
     if qty <= 0:
         return None
