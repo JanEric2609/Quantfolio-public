@@ -1,7 +1,7 @@
 import {
   BrainCircuit, CalendarCheck, Calculator, CreditCard, FlaskConical, Home, Inbox, LandPlot,
   LineChart, Newspaper, PieChart, Settings, ShieldCheck, Table2, ListChecks, FileText, Target,
-  Wallet, Receipt, Repeat, Briefcase, GraduationCap, ArrowLeftRight, Activity, Gauge, Library, Star, type LucideIcon,
+  Wallet, Receipt, Repeat, Briefcase, GraduationCap, ArrowLeftRight, Activity, Radio, Gauge, Library, Star, type LucideIcon,
 } from "lucide-react";
 import { isStrategyLabPath } from "../pages/lab/strategyLabTabs";
 
@@ -103,6 +103,10 @@ export const ROUTE_ENTRIES: RouteEntry[] = [
   {
     id: "intraday", to: "/desk/intraday", label: "Intraday CFD", icon: Activity, group: "tools", researchTool: true,
     keywords: ["cfd", "trading 212", "intraday"],
+  },
+  {
+    id: "signals", to: "/desk/signals", label: "Signals", icon: Radio, group: "tools", researchTool: true,
+    keywords: ["signals", "event desk", "hype", "news drift", "rsi", "bankroll", "cfd"],
   },
   { id: "learn", to: "/learn", label: "Learn", icon: GraduationCap, group: "trust", keywords: ["tutorial", "teach", "how it works", "quiz"] },
   { id: "settings", to: "/settings", label: "Control Center", icon: Settings, group: "admin", keywords: ["settings", "connections", "status"] },

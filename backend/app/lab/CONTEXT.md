@@ -74,3 +74,8 @@ behaviour change. Three ADR-0015 verdicts are reflected physically here:
 `alphacrafter` promoted to the lab search engine, `backtest_vbt` demoted to
 test oracle, `quant_rl` frozen. `regime`'s demotion is forced by its
 module-level `quant_ml` import, not chosen — see the exception above.
+
+## Event-desk research (ADR 0028)
+
+- `signal_replay.py` (+ `scripts/signal_replay.py`): the replay of the three technical rules on 2016-2026 daily bars of the 24 CFD instruments, with the desk's costs (spread, overnight per calendar night, 0.5 % FX). It uses `foundation/technical.py`, never `decision/`. Research, not the pass test; its pooled per-cell summary is the internal `app_settings` key `desk_signal_replay_json`.
+- `forward_lab/option_smirk.py`: the `option_smirk` forward-lab signal (Xing, Zhang & Zhao 2010) from Alpaca's option snapshots, collected before the nightly scoring (throttled to 150 requests a minute, 45 minute deadline) into the internal key `forward_lab_option_smirk_json`. Scored by the lab like the other signals; it earns a desk cell only by an ADR amendment after months of data.

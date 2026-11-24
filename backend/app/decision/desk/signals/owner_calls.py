@@ -16,7 +16,9 @@ from ..underlyings import Underlying, UnderlyingUnknown, resolve_underlying
 #: ``1d`` holds to 21:30 on the next trading day: the desk's maximum (``max_holding_trading_days``).
 HORIZON_DAYS = {"today": 1, "1d": 2}
 PRODUCT_WORDS = {"ko": ("knockout",), "knockout": ("knockout",), "warrant": ("warrant",), "both": ("knockout", "warrant")}
-USAGE = "Usage: /idea <TICKER or ISIN> <up|down> [today|1d] [ko|warrant|both] [event]"
+USAGE = ("Usage: /idea <TICKER or ISIN> <up|down> [today|1d] [ko|warrant|both] [event]\n"
+         "or: /idea <TICKER or ISIN> <up|down> cfd [stop <price>|<pct>%] [today|1d|5d|10d]")
+MAX_CFD_HOLD_DAYS = 10
 
 
 class IdeaParseError(ValueError):
@@ -30,6 +32,8 @@ class Idea:
     horizon: str
     product_types: tuple[str, ...]
     event: bool
+    cfd_stop: str | None = None  # "512.4" (a price) or "3%" (a distance); None = 1.5 x ATR
+    hold_days: int | None = None  # CFD only: 0 = today, else trading days; None = 5
 
 
 def parse_idea(text: str) -> Idea:
@@ -41,6 +45,8 @@ def parse_idea(text: str) -> Idea:
     target, side = words[0], words[1].lower()
     if side not in ("up", "down", "long", "short"):
         raise IdeaParseError("Say up or down. " + USAGE)
+    if any(w.lower() == "cfd" for w in words[2:]):
+        return _parse_cfd(target, side, words[2:])
     horizon, products, event = "today", ("knockout", "warrant"), False
     seen: set[str] = set()
     for raw in words[2:]:
@@ -61,6 +67,80 @@ def parse_idea(text: str) -> Idea:
         else:
             raise IdeaParseError(f"I don't know '{raw}'. {USAGE}")
     return Idea(target, "long" if side in ("up", "long") else "short", horizon, products, event)
+
+
+def _parse_cfd(target: str, side: str, rest: list[str]) -> Idea:
+    stop: str | None = None
+    hold: int | None = None
+    i = 0
+    while i < len(rest):
+        w = rest[i].lower()
+        if w == "cfd":
+            pass
+        elif w == "stop":
+            if i + 1 >= len(rest) or stop is not None:
+                raise IdeaParseError("Say the stop once, as a price or a percent, e.g. stop 3%. " + USAGE)
+            stop = rest[i + 1].replace(",", ".")
+            body = stop[:-1] if stop.endswith("%") else stop
+            try:
+                if float(body) <= 0:
+                    raise ValueError
+            except ValueError as exc:
+                raise IdeaParseError(f"'{rest[i + 1][:12]}' is not a stop price or percent. {USAGE}") from exc
+            i += 1
+        elif w == "today" and hold is None:
+            hold = 0
+        elif w == "1d" and hold is None:
+            hold = 1
+        elif w.endswith("d") and w[:-1].isdigit() and hold is None:
+            hold = int(w[:-1])
+            if not 1 <= hold <= MAX_CFD_HOLD_DAYS:
+                raise IdeaParseError(f"A CFD idea holds at most {MAX_CFD_HOLD_DAYS} trading days. {USAGE}")
+        else:
+            raise IdeaParseError(f"I don't know '{rest[i]}'. {USAGE}")
+        i += 1
+    return Idea(target, "long" if side in ("up", "long") else "short", "today" if hold in (None, 0) else "1d",
+                ("cfd",), False, cfd_stop=stop, hold_days=hold)
+
+
+def cfd_candidate(db: Session, idea: Idea, cli: ScalableCli, now: datetime) -> Any | str:
+    """The read half of a CFD call: a ``Candidate`` for the event engine, or the reason it cannot be made."""
+    from decimal import Decimal
+
+    from .. import cfd_instruments as ci
+    from ..event_sources import Candidate, exit_after_days
+
+    inst = ci.for_symbol(db, idea.target)
+    if inst is None:
+        return f"'{idea.target}' is not a ticker or ISIN I can trade as a CFD (US ticker, Xetra ticker or ISIN)."
+    ref = ci.reference_price(db, cli, inst, now)
+    if ref is None:
+        return f"No fresh price for {inst.t212_name}: try again while its exchange is open."
+    level = ref
+    if inst.kind == "index":  # the paper price is the ETF proxy; the owner trades the index in points
+        bars = ci.daily_bars(db, inst, days=10)
+        if not bars:
+            return f"No index level for {inst.t212_name}."
+        level = Decimal(str(bars[-1].close))
+    if idea.cfd_stop is None:
+        atr = ci.atr14(db, inst, now.date())
+        if atr is None:
+            return "No daily history to size a default stop: give one, e.g. stop 3%."
+        dist = Decimal("1.5") * atr
+    elif idea.cfd_stop.endswith("%"):
+        dist = level * Decimal(idea.cfd_stop[:-1]) / 100
+    else:
+        stop_level = Decimal(idea.cfd_stop)
+        dist = level - stop_level if idea.direction == "long" else stop_level - level
+        if dist <= 0:
+            return f"The stop {idea.cfd_stop} is on the wrong side of the price {level:.2f}."
+    days = 5 if idea.hold_days is None else idea.hold_days
+    exchange = inst.underlying.exchange
+    exit_at = exit_after_days(now, max(days, 0), exchange)
+    return Candidate(
+        cell="owner_call:cfd", inst=inst, direction=idea.direction, ref_price=ref, stop_distance=dist,
+        max_exit_at=exit_at, reason=f"your call: {idea.target.upper()} {'up' if idea.direction == 'long' else 'down'}.",
+        evidence={"stop": idea.cfd_stop or "1.5 ATR", "hold_days": days}, level=level)
 
 
 @dataclass

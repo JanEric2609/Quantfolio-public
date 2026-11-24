@@ -84,8 +84,13 @@ NEWS_SIGNAL = Signal(
     "Lopez-Lira & Tang 2023; Glasserman & Lin 2023",
 )
 
-SIGNALS: tuple[Signal, ...] = (*PRICE_SIGNALS, NEWS_SIGNAL)
+#: Scored from the option chain's volatility skew (``option_smirk``), not prices. Research only (ADR 0028).
+OPTION_SIGNAL = Signal(
+    "option_smirk", "Flat option smirk (OTM put IV minus ATM call IV)", "Xing, Zhang & Zhao 2010",
+)
+
+SIGNALS: tuple[Signal, ...] = (*PRICE_SIGNALS, NEWS_SIGNAL, OPTION_SIGNAL)
 SIGNAL_NAMES: tuple[str, ...] = tuple(s.name for s in SIGNALS)
 BY_NAME: dict[str, Signal] = {s.name: s for s in SIGNALS}
 
-__all__ = ["BY_NAME", "HISTORY_DAYS", "NEWS_SIGNAL", "PRICE_SIGNALS", "SIGNALS", "SIGNAL_NAMES", "Signal"]
+__all__ = ["BY_NAME", "HISTORY_DAYS", "NEWS_SIGNAL", "OPTION_SIGNAL", "PRICE_SIGNALS", "SIGNALS", "SIGNAL_NAMES", "Signal"]
