@@ -170,8 +170,13 @@ def close_text(db: Session, position: DeskPosition, reason: str, journal: DeskCf
            "owner_close": "you closed it", "rollover": "its contract rolls within the hour: close yours too",
            "opposite_cross": "the EMA cross reversed", "middle_band": "the price is back at the middle band",
            "rsi_50": "RSI(2) crossed 50"}.get(reason, reason)
-    text = (f"{label}: CLOSE now ({why}). Paper result {Decimal(position.net_eur or 0):+.2f} EUR after costs "
-            f"({position.cell}).")
+    result = f"Paper result {Decimal(position.net_eur or 0):+.2f} EUR after costs ({position.cell})."
+    if journal is not None and journal.status == "skipped":
+        # The owner said they did not take it: nothing to close, the paper score only.
+        return f"{label}: paper trade closed ({why.removesuffix(': close yours too')}). {result}"
+    # Kept under the bankroll stop on purpose: closing only lowers the exposure, and the owner may hold the
+    # trade without having logged it yet. The stop withholds new entries, never the exit.
+    text = f"{label}: CLOSE now ({why}). {result}"
     if journal is not None and journal.status in ("entered", "closed") and journal.exit_level is None:
         missing = "<exit price>" if journal.entry_level is not None else "<entry price> <exit price>"
         text += (f"\nTo log your trade ({position.id[:8]}), reply to this message with: {missing}, as Trading 212 "

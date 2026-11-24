@@ -118,3 +118,14 @@ def test_bankroll_stop_after_the_fill_switches_an_unentered_message_to_paper_onl
     j.status = "entered"
     db.commit()
     assert "Quantity" in event_messages.live_text(db, p, j, US_NOW)
+
+
+def test_close_message_for_a_skipped_trade_says_paper_only():
+    db, user = _setup()
+    p = _hype(db, user)
+    j = cfd_journal.for_position(db, p.id)
+    j.status = "skipped"
+    db.commit()
+    text = event_messages.close_text(db, p, "rollover", j)
+    assert text.startswith("NVIDIA (NVDA): paper trade closed (its contract rolls within the hour). Paper result ")
+    assert "CLOSE now" not in text and "close yours" not in text and "reply to this message" not in text
