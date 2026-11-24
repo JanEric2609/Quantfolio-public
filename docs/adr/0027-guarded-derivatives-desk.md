@@ -221,3 +221,20 @@ The registration above, its hash and its limits are unchanged. ADR 0028 adds a s
 with six more paper cells. One invariant of this ADR changes there: the news wire may open **paper** positions
 in the event desk's `hype_fade` and `news_drift` cells. It still never closes or blocks a position, and no order
 path exists.
+
+## Amendment 2026-11-24: exit variants of the index rule (research only)
+
+The question: would a take-profit help a trade that is often in profit early and in loss at the fixed exit? On 30-minute bars the trade is one bar, so four exits were fixed in
+`lab/desk_replay.py` (`EXIT_VARIANTS`) before the data was read and replayed on SPY and QQQ 1-minute SIP bars
+2016-02 to 2026-11 (desk days, CFD costs, one-daily-sigma stop): the registered fixed exit, take-profit at 0.5
+and 1.0 x the typical 27-minute move, and a trailing exit that gives back at most half once 0.5 x in profit.
+
+| | fixed | tp 0.5 | tp 1.0 | trail |
+|---|---|---|---|---|
+| SPY, EUR a trade (n 2,129) | -0.180 (t -6.9) | -0.170 | -0.172 | -0.178 |
+| QQQ, EUR a trade (n 2,130) | -0.137 (t -5.8) | -0.131 | -0.131 | -0.135 |
+
+No variant differs from the fixed exit (paired t at most 0.6, Holm p = 1.0). A take-profit raises the hit rate
+(43 % to 55 % on SPY) without changing the mean. Before costs the fixed exit earns -0.6 bp (SPY, t -1.1) and
+-0.4 bp (QQQ, t -0.7): the effect is not in this sample, and the costs are the loss. The live rule is unchanged.
+Raw output: `docs/research/desk-exit-variants-2026-11.json` (`scripts/desk_replay.py --minutes`).

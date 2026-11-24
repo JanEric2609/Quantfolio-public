@@ -75,6 +75,34 @@ def test_failing_cell_is_paper_only():
     assert "failing its own test" in text and "Quantity" not in text and "Exit (paper)" in text
 
 
+def test_a_replay_that_loses_after_costs_makes_the_message_paper_only():
+    # 2026-11-24: Bollinger fade, 3,817 replayed trades at -0.49 EUR each (t -6.5); SIE and IFX were sent with a
+    # quantity and a stop although the history said the rule loses after costs.
+    db, user = _setup()
+    upsert_public_settings(db, {"desk_signal_replay_json": json.dumps({
+        "ta_band:cfd": {"n": 3817, "mean_eur": -0.4933, "t": -6.49},
+        "ta_rsi2:cfd": {"n": 3202, "mean_eur": -0.15, "t": -1.4},  # negative, not clearly: still tradeable
+        "ta_trend:cfd": {"n": 40, "mean_eur": -0.9, "t": -3.0},  # too few trades to rule on
+    })})
+    db.commit()
+    reason = event_messages.paper_only_reason(db, user.id, "ta_band:cfd", NOW)
+    assert reason == "The 2016-26 replay loses after costs (-0.49 EUR a trade over 3,817 trades, t -6.5). Paper only."
+    assert event_messages.paper_only_reason(db, user.id, "ta_rsi2:cfd", NOW) == ""
+    assert event_messages.paper_only_reason(db, user.id, "ta_trend:cfd", NOW) == ""
+    assert event_messages.paper_only_reason(db, user.id, "news_drift:cfd", NOW) == ""  # no history at all
+    p, _ = events._open_one(db, user.id, _cand("DE:SIE", "ta_band:cfd"), NOW, Decimal(1))
+    assert p is not None and p.status == "open"  # still opened and scored on paper
+    text = event_messages.live_text(db, p, cfd_journal.for_position(db, p.id), NOW)
+    assert "replay loses after costs" in text and "Quantity" not in text and "Exit (paper)" in text
+
+
+def test_an_unreadable_replay_row_never_blocks():
+    db, user = _setup()
+    upsert_public_settings(db, {"desk_signal_replay_json": json.dumps({"ta_band:cfd": {"n": "x", "t": None}})})
+    db.commit()
+    assert event_messages.paper_only_reason(db, user.id, "ta_band:cfd", NOW) == ""
+
+
 def test_close_message():
     db, user = _setup()
     p = _hype(db, user)

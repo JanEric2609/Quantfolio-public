@@ -48,13 +48,39 @@ def cell_state(db: Session, cell: str) -> dict[str, Any]:
     return s
 
 
-def evidence_line(db: Session, cell: str) -> str:
+#: A rule whose 2016-26 replay (``scripts/signal_replay.py``) loses after costs at least this clearly
+#: (t-value of the mean per trade, over at least ``REPLAY_MIN_N`` trades) is sent as paper only: the desk
+#: still scores it exactly as registered, but its message carries no quantity or stop to act on.
+REPLAY_LOSS_T = -2.0
+REPLAY_MIN_N = 100
+
+
+def replay_summary(db: Session, cell: str) -> dict[str, Any] | None:
+    """The cell's pooled replay summary from ``desk_signal_replay_json``, or None (no history, unreadable)."""
     raw = get_setting_row(db, REPLAY_KEY)
     try:
         replay = json.loads(raw) if isinstance(raw, str) else raw
     except ValueError:
-        replay = None
-    rp = (replay or {}).get(cell) if isinstance(replay, dict) else None
+        return None
+    rp = replay.get(cell) if isinstance(replay, dict) else None
+    return rp if isinstance(rp, dict) else None
+
+
+def replay_loses(db: Session, cell: str) -> str:
+    """``""``, or the reason the replay rules the cell out for real money."""
+    rp = replay_summary(db, cell)
+    try:
+        n, mean, t = int(rp["n"]), float(rp["mean_eur"]), float(rp["t"])  # type: ignore[index]
+    except (TypeError, KeyError, ValueError):
+        return ""
+    if n >= REPLAY_MIN_N and mean < 0 and t <= REPLAY_LOSS_T:
+        return (f"The 2016-26 replay loses after costs ({mean:+.2f} EUR a trade over {n:,} trades, t {t:.1f}). "
+                "Paper only.")
+    return ""
+
+
+def evidence_line(db: Session, cell: str) -> str:
+    rp = replay_summary(db, cell)
     if rp and rp.get("n"):
         r = f"replay 2016-26 n={rp['n']}, {Decimal(str(rp['mean_eur'])):+.2f} EUR a trade"
     else:
@@ -65,13 +91,14 @@ def evidence_line(db: Session, cell: str) -> str:
 
 
 def paper_only_reason(db: Session, user_id: str, cell: str, now: datetime) -> str:
-    """Why this message carries no order details, or ``""``: the bankroll stop, or a failing cell."""
+    """Why this message carries no order details, or ``""``: the bankroll stop, a failing cell, or a replay
+    that loses after costs (:func:`replay_loses`)."""
     g = bankroll.guard(db, user_id, now)
     if not g.ok:
         return f"Bankroll stop: {g.reason}. Paper only until {g.resumes}."
     if cell_state(db, cell)["verdict"] == "failing":
         return "This cell is failing its own test (40 or more paper trades, mean at or below zero). Paper only."
-    return ""
+    return replay_loses(db, cell)
 
 
 def _label(position: DeskPosition, journal: DeskCfdJournal) -> str:
