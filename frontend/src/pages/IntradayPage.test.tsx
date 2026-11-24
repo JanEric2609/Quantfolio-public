@@ -67,4 +67,31 @@ describe("IntradayPage", () => {
     fireEvent.change(await screen.findByLabelText("Risk (EUR)"), { target: { value: "0.01" } });
     expect(await screen.findByText(/Below the 20 EUR minimum order/)).toBeInTheDocument();
   });
+  it("says when a market opens instead of a reading error before its session", async () => {
+    const spx: api.IntradayIndex = {
+      key: "SPX", label: "S&P 500", t212_name: "US 500 (US500)", exchange: "XNYS", currency: "USD",
+      session: { open: "2026-11-24T14:30:00+00:00", close: "2026-11-24T21:00:00+00:00", status: "before" },
+      enter_at: "2026-11-24T20:30:00+00:00", exit_at: "2026-11-24T20:57:00+00:00", skip_reason: null,
+      macro_events_today: [], cfd_today: null, error: "no_data",
+    };
+    vi.spyOn(api, "getIntraday").mockResolvedValue({ ...dto, board: { ...dto.board!, indices: [dax, spx] } });
+    render(<MemoryRouter><IntradayPage /></MemoryRouter>);
+    expect(await screen.findByText("Opens 15:30 Berlin; the numbers fill in once it trades.")).toBeInTheDocument();
+    expect(screen.queryByText(/Reading failed/)).not.toBeInTheDocument();
+    // DAX: spread 1.25 of a typical 61-point move.
+    expect(screen.getByText("Spread as a share of the typical move").nextSibling).toHaveTextContent("2.0 %");
+  });
+
+  it("notes that DAX and Euro Stoxx 50 in the same direction are one bet", async () => {
+    const es50: api.IntradayIndex = { ...dax, key: "ES50", label: "Euro Stoxx 50", t212_name: "EU 50 (EU50)" };
+    vi.spyOn(api, "getIntraday").mockResolvedValue({ ...dto, board: { ...dto.board!, indices: [dax, es50] } });
+    const { unmount } = render(<MemoryRouter><IntradayPage /></MemoryRouter>);
+    expect(await screen.findByText(/both say long today/)).toBeInTheDocument();
+    unmount();
+    const opposite = { ...es50, direction: "short" };
+    vi.spyOn(api, "getIntraday").mockResolvedValue({ ...dto, board: { ...dto.board!, indices: [dax, opposite] } });
+    render(<MemoryRouter><IntradayPage /></MemoryRouter>);
+    expect(await screen.findByText("Germany 40 (GER40) · session open 09:00-17:30")).toBeInTheDocument();
+    expect(screen.queryByText(/one bet at double the size/)).not.toBeInTheDocument();
+  });
 });

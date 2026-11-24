@@ -277,7 +277,8 @@ def test_ingest_stores_once_rates_and_sends(monkeypatch):
     row = db.get(NewsWireItem, "alpaca:1")
     assert (row.materiality, row.direction, row.rated_ms, row.alert) == (3, "down", 640, "sent")
     assert len(sent) == 1 and sent[0].startswith("News (you hold NVDA, 3/3 down): Nvidia cuts guidance")
-    assert "2 s ago" in sent[0] and "never trades on news" in sent[0]
+    assert "2 s ago" in sent[0] and "nothing is ordered" in sent[0]
+    assert sent[0].endswith("\nWhy now? Who benefits? What's missing?")
 
 
 def test_poll_feeds_baselines_a_new_feed_then_sends_new_items(monkeypatch):
