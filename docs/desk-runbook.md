@@ -23,6 +23,11 @@ Paper-scored as <cell>.
 - **Cells.** `ta_trend`, `ta_band`, `ta_rsi2` (daily-bar rules, evaluated at 17:10 Berlin for Xetra names and
   21:40 for US names and indices), `hype_fade` (US stocks), `news_drift` (primary-source news the local model
   rated 3), `owner_call` (your `/idea NVDA down cfd [stop 3%|512.4] [today|1d|5d|10d]`).
+- `news_drift` waits 15 minutes after the session opens before it enters (the opening prints are thin).
+- US stock prices: the quote midpoint when its spread is at most 1 %, else the last real trade (at most 5
+  minutes old), else no price and the desk waits (`wide_quote` in the errors).
+- When the paper stop fires on a trade you logged with your own fill, the close message tells you whether
+  *your* stop (your fill ± the stop distance) is reached. If it is not, it says so instead of "CLOSE now".
 - At most 3 positions are open and 4 start per day; an instrument gets no second position within 24 hours.
 - An index CFD still open an hour before its contract expires is closed on paper (`rollover`); close yours too,
   because Trading 212 rolls the contract and the price jumps by the futures basis.

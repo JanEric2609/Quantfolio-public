@@ -157,3 +157,19 @@ def test_hype_screener_prefilter_skips_small_movers_before_any_bar_read():
     assert [c.inst.key for c in out] == ["US:PLTR", "US:NEAR"]  # NEAR passes on its bars (+12 % in the fake)
     assert p.bar_reads == ["PLTR", "NEAR"]  # +3 % never costs a request; +6.5 % is within the slack
     assert es._may_qualify({"symbol": "X", "percent_change": None})  # most-actives rows go to the full check
+
+
+def test_no_news_entry_in_the_first_fifteen_minutes_of_the_session(monkeypatch):
+    # 2026-11-24 SHOE: the short was entered on the opening print (10.45); three minutes later it traded near 11.
+    db = _memory_db()
+    open_ny = datetime(2026, 11, 24, 14, 30, tzinfo=UTC)  # 09:30 New York
+    db.add(NewsWireItem(id="sec_8k:7", source="sec_8k", headline="8-K: results", symbols="NVDA",
+                        received_at=open_ny - timedelta(minutes=5), materiality=3, scope="company", direction="up"))
+    db.commit()
+    monkeypatch.setattr(ci, "daily_bars", lambda db, inst, days=400: _bars())
+    monkeypatch.setattr(ci, "reference_price", lambda *a, **k: Decimal("103"))
+    assert technical.EVENT_RULES["news_drift"]["open_delay_minutes"] == 15
+    assert es.prepare_news(db, None, open_ny + timedelta(seconds=13)) == []
+    assert es.prepare_news(db, None, open_ny + timedelta(minutes=14, seconds=59)) == []
+    out = es.prepare_news(db, None, open_ny + timedelta(minutes=15))
+    assert len(out) == 1 and out[0].direction == "long"

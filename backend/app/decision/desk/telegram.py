@@ -226,13 +226,17 @@ def _force_reply(placeholder: str) -> dict[str, Any]:
 
 
 def _noted_in(journal: Any) -> str:
-    text = f"Noted: {journal.market_key} in at {Decimal(journal.entry_level):,.1f}"
+    # A stock (US:SHOE, DE:SAP) is a share price with cents; an index is points.
+    stock = ":" in (journal.market_key or "")
+    nd, unit, ref = (2, "", "price") if stock else (1, " pts", "index level")
+    text = f"Noted: {journal.market_key} in at {Decimal(journal.entry_level):,.{nd}f}"
     slip = cfd_journal.slippage_points(journal)
     if slip is not None:
-        text += f" ({abs(slip):,.1f} pts {'worse' if slip > 0 else 'better'} than the signal's index level)"
+        text += f" ({abs(slip):,.{nd}f}{unit} {'worse' if slip > 0 else 'better'} than the signal's {ref})"
     stop = cfd_journal.stop_level(journal)
     if stop is not None and journal.stop_points is not None:
-        text += f". Stop for your fill: {stop:,.1f} ({Decimal(journal.stop_points):,.0f} pts)"
+        dist = f"{Decimal(journal.stop_points):,.2f} from your fill" if stock else f"{Decimal(journal.stop_points):,.0f} pts"
+        text += f". Stop for your fill: {stop:,.{nd}f} ({dist})"
     return text + "."
 
 
@@ -241,7 +245,8 @@ def _noted_out(db: Session, journal: Any) -> str:
     real = f"{Decimal(journal.real_pnl_eur):+.2f} EUR" if journal.real_pnl_eur is not None else \
         "not computed (send the entry too)"
     paper = f"{Decimal(position.net_eur):+.2f} EUR" if position and position.net_eur is not None else "still open"
-    return (f"Noted: {journal.market_key} out at {Decimal(journal.exit_level):,.1f}. Your result {real} "
+    nd = 2 if ":" in (journal.market_key or "") else 1
+    return (f"Noted: {journal.market_key} out at {Decimal(journal.exit_level):,.{nd}f}. Your result {real} "
             f"(before overnight interest); paper result {paper}.")
 
 

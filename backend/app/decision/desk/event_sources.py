@@ -217,13 +217,23 @@ def prepare_news(db: Session, cli: Any, now: datetime, errors: list[str] | None 
             if inst is None or inst.kind != "stock" or inst.key in seen:
                 continue
             exchange = inst.underlying.exchange
-            if not cal.underlying_session_open(exchange, now):
+            if not cal.underlying_session_open(exchange, now) or _in_opening_minutes(exchange, now):
                 continue
             cand = _news_one(db, cli, inst, r, now)
             if cand is not None:
                 seen.add(inst.key)
                 out.append(cand)
     return out
+
+
+def _in_opening_minutes(exchange: str, now: datetime) -> bool:
+    """The first ``open_delay_minutes`` of the session: the opening prints are thin and jumpy (SHOE on
+    2026-11-24 printed 10.45 at the open and traded near 11 three minutes later), so no news entry yet."""
+    day = now.astimezone(NY if exchange == "XNYS" else cal.BERLIN).date()
+    times = cal.session_times(day, exchange)
+    if times is None:
+        return False
+    return now < times[0].astimezone(UTC) + timedelta(minutes=RULES_NEWS["open_delay_minutes"])
 
 
 def _news_one(db: Session, cli: Any, inst: ci.CfdInstrument, item: NewsWireItem, now: datetime) -> Candidate | None:

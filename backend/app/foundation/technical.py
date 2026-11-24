@@ -23,7 +23,8 @@ EVENT_RULES: dict[str, Any] = {
                   "max_hold_days": 10, "window_ny": "10:30-15:30", "every_minutes": 15,
                   "no_primary_source": ["sec_8k", "de_adhoc", "earnings headline"]},
     "news_drift": {"min_materiality": 3, "scope": "company", "sources": ["sec_8k", "de_adhoc", "earnings headline"],
-                   "min_age_minutes": 30, "move_sigmas": 2, "sigma_days": 20, "stop_atr": 1.5, "max_hold_days": 5},
+                   "min_age_minutes": 30, "open_delay_minutes": 15, "move_sigmas": 2, "sigma_days": 20,
+                   "stop_atr": 1.5, "max_hold_days": 5},
     "owner_call": {"default_stop_atr": 1.5, "default_hold": "5d"},
 }
 

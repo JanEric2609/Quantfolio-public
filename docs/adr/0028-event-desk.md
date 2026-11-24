@@ -46,6 +46,34 @@ paper-only messages.
 Messages are rebuilt on every tick, so a stop that trips after a signal also switches that signal's message,
 as long as the owner has not entered it; a trade already entered keeps its quantity and stop.
 
+## Amendment 2026-11-24: thin US stocks (first news-drift trade, SHOE)
+
+The first news-drift paper trade showed two faults in how a thin US stock is priced.
+
+- **Entry on the opening print.** The SHOE short (earnings, rated 3 of 3, down) was entered at 15:30:13 Berlin
+  at 10.445. That was the first IEX print. Three minutes later the stock traded near 11.
+- **Stop on a quote nobody traded at.** The paper stop (11.72) fired at 16:28 on a midpoint of 11.985. Alpaca's
+  free quote is from IEX alone; it read bid 11.18 / ask 12.79. No trade that day was above 11.27.
+
+Changes:
+
+1. **Rule change.** `news_drift` takes no entry in the first 15 minutes of the session
+   (`open_delay_minutes: 15` in `EVENT_RULES`). The 30-minute news window is unchanged and counts back from the
+   entry. At the first allowed entry (open + 15) it therefore covers news from 15 minutes before the open. This
+   changes the registered rules, so `EVENT_HASH` changes:
+   - the desk registers anew at the first tick after the deploy, and only positions entered after that count;
+   - the SHOE trade, priced on the faults above, drops out of the score;
+   - the trial ledger gains the six cells of the new hash.
+2. **Price (not a rule).** For a US stock or index proxy, the quote midpoint is used only when the spread is at
+   most 1 % (`service.MAX_QUOTE_SPREAD`). Above that, the last IEX trade is used if it is at most 5 minutes old
+   (`TRADE_MAX_AGE_S`). Otherwise there is no price and the desk waits, as for any missing price (the error code
+   is `wide_quote`). Entries, stops and exits all go through this one read.
+3. **Messages.**
+   - When a paper stop fires on a trade the owner logged with their own fill, the close message compares the
+     owner's own stop (fill ± the stop distance) with the closing level. If the owner's stop is not reached, the
+     message says so and no longer says "CLOSE now".
+   - A stock fill is confirmed in cents and price words, not index points.
+
 ## What would make us stop
 
 A cell with n >= 40 whose bootstrap mean is below 0 at Holm-adjusted p < 0.05 stops sending order details. It
