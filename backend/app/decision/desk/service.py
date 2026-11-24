@@ -151,6 +151,11 @@ def underlying_price(db: Session, cli: ScalableCli, u: Underlying, *, now: datet
     proxy or the line itself on sc. An outdated quote, or one older than ``REF_MAX_AGE_S`` at *now*, is
     ``None``: a frozen price must not move stops, fill a CFD or reset the quote-lost clock.
 
+    One exception, for thin US stocks: when the Alpaca quote is wider than ``MAX_QUOTE_SPREAD`` the last
+    real IEX trade is returned instead, and it may be up to ``TRADE_MAX_AGE_S`` (300 s) old. Entries,
+    stops, exits and the quote-lost clock all act on that trade price; with no trade that recent the
+    result is ``None`` and ``wide_quote`` goes to *errors*. The 60 s bound holds for every quote path.
+
     The price is in the proxy's own units (the DAX ETF in EUR, SPY in USD, a US stock's gettex line in
     EUR), never index points: compare it only with levels converted by :func:`barrier_in_reference`.
 
