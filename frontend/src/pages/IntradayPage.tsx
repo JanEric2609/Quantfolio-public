@@ -31,9 +31,18 @@ const SKIP_TEXT: Record<string, string> = {
   half_day: "half day", macro_event: "macro event today", cutoff_before_exit: "the 21:30 cut-off falls before the exit",
 };
 
+/** The direction DAX and Euro Stoxx 50 share today (both expected the same way, neither skipped), else null. */
+function europeTwin(indices: IntradayIndex[]): string | null {
+  const dax = indices.find((i) => i.key === "DAX"), es = indices.find((i) => i.key === "ES50");
+  if (!dax?.direction || !es?.direction || dax.skip_reason || es.skip_reason) return null;
+  return dax.direction === es.direction ? dax.direction : null;
+}
+
 function IndexCard({ idx, now }: { idx: IntradayIndex; now: number }) {
   const s = idx.session;
   const cfdToday = idx.cfd_today;
+  const spread = num(idx.spread_points), typical = num(idx.typical_30m_points);
+  const spreadShare = spread != null && typical != null && typical > 0 ? (spread / typical) * 100 : null;
   return (
     <Card>
       <CardHeader>
@@ -48,7 +57,9 @@ function IndexCard({ idx, now }: { idx: IntradayIndex; now: number }) {
         <p>
           Expected: {idx.direction ? `${idx.direction} (r1 ${fmt(num(idx.r1) == null ? null : num(idx.r1)! * 100)} %)` : "not known yet"}
         </p>
-        {idx.error && <p role="alert" className="text-amber-600">Reading failed: {idx.error.replace(/_/g, " ")}</p>}
+        {idx.error && (s.status === "before" && idx.error === "no_data"
+          ? <p>Opens {hhmm(s.open)} Berlin; the numbers fill in once it trades.</p>
+          : <p role="alert" className="text-amber-600">Reading failed: {idx.error.replace(/_/g, " ")}</p>)}
         {idx.index_level_est && (
           <table className="w-full"><tbody>
             <tr><td>Index level (estimate)</td><td className="text-right">{fmt(idx.index_level_est, 0)}</td></tr>
@@ -56,6 +67,9 @@ function IndexCard({ idx, now }: { idx: IntradayIndex; now: number }) {
             <tr><td>1-day sigma</td><td className="text-right">{fmt(idx.sigma_points, 0)} pts</td></tr>
             <tr><td>Typical last-30-minute move</td><td className="text-right">±{fmt(idx.typical_30m_points, 0)} pts</td></tr>
             <tr><td>Spread (Trading 212, observed)</td><td className="text-right">{fmt(idx.spread_points, 1)} pts</td></tr>
+            {spreadShare != null && (
+              <tr><td>Spread as a share of the typical move</td><td className="text-right">{fmt(spreadShare, 1)} %</td></tr>
+            )}
           </tbody></table>
         )}
         <p>
@@ -230,6 +244,12 @@ export function IntradayPage() {
           <p className="text-sm">As of {hhmm(board.as_of)} Berlin{data?.board_age_s != null ? ` (${Math.round(data.board_age_s / 60)} min ago)` : ""}.
             {stale && <span role="alert" className="ml-2 text-amber-600">The board is older than 10 minutes: the desk monitor may be stopped.</span>}
           </p>
+          {europeTwin(board.indices) && (
+            <p role="note" className="text-sm">
+              DAX and Euro Stoxx 50 both say {europeTwin(board.indices)} today. They move almost together, so taking
+              both is one bet at double the size. Take one if any; the DAX has the smaller spread.
+            </p>
+          )}
           <div className="grid gap-4 lg:grid-cols-2">
             {board.indices.map((i) => <IndexCard key={i.key} idx={i} now={now} />)}
           </div>

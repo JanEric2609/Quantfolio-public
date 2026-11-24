@@ -284,7 +284,7 @@ export function DeskPage() {
           <CardTitle>News wire</CardTitle>
           <CardDescription>
             Alpaca stream, Fed, ECB, German ad-hoc disclosures, Handelsblatt and SEC 8-K filings of your holdings, rated 0-3 by the
-            local model. A feed's very first read is kept as the starting point without alerts. Information only: the desk never trades on news.
+            local model. A feed's very first read is kept as the starting point without alerts. Information only: nothing is ordered. Each alert ends with three questions: why now, who benefits, what is missing.
           </CardDescription>
         </CardHeader>
         <CardContent>

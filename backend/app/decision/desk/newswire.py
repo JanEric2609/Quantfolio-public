@@ -256,6 +256,10 @@ def alert_decision(db: Session, item: news_wire.WireItem, why: str, rating: Rati
     return "rate_capped" if sent >= MAX_ALERTS_PER_HOUR else "send"
 
 
+#: Ends every alert: three questions to think the item through, so it is built on rather than just logged.
+THINK_PROMPT = "Why now? Who benefits? What's missing?"
+
+
 def format_alert(item: news_wire.WireItem, why: str, rating: Rating, now: datetime) -> str:
     label = {"central_bank": "central bank", "": "market"}.get(why, why.replace("holding:", "you hold ")
                                                                 .replace("desk:", "desk position on "))
@@ -267,7 +271,8 @@ def format_alert(item: news_wire.WireItem, why: str, rating: Rating, now: dateti
 
         lines.append(describe(",".join(item.items)) or ("8-K items " + ", ".join(item.items)))
     lines.append(f"{item.source}{lag}" + (f" - {item.url}" if item.url else ""))
-    lines.append("Information only: the desk never trades on news.")
+    lines.append("Information only: nothing is ordered.")
+    lines.append(THINK_PROMPT)
     return "\n".join(lines)
 
 
