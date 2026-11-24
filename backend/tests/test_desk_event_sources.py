@@ -133,3 +133,27 @@ def test_news_needs_primary_source_and_rating(monkeypatch):
     monkeypatch.setattr(ci, "daily_bars", lambda db, inst, days=400: _bars())
     monkeypatch.setattr(ci, "reference_price", lambda *a, **k: Decimal("103"))
     assert es.prepare_news(db, None, NOW) == []
+
+
+def test_hype_screener_prefilter_skips_small_movers_before_any_bar_read():
+    db = _memory_db()
+
+    class Counting(FakeProvider):
+        def __init__(self, movers, **kw):
+            super().__init__(**kw)
+            self.movers, self.bar_reads = movers, []
+
+        def screener_movers(self, top=50):
+            return self.movers
+
+        def get_intraday_bars(self, symbol, tf, start, end):
+            self.bar_reads.append(symbol)
+            return super().get_intraday_bars(symbol, tf, start, end)
+
+    p = Counting([{"symbol": "PLTR", "percent_change": 12.0, "price": 112.0},
+                  {"symbol": "SMAL", "percent_change": 3.0, "price": 20.0},
+                  {"symbol": "NEAR", "percent_change": 6.5, "price": 20.0}])
+    out = es.prepare_hype(db, p, NOW)
+    assert [c.inst.key for c in out] == ["US:PLTR", "US:NEAR"]  # NEAR passes on its bars (+12 % in the fake)
+    assert p.bar_reads == ["PLTR", "NEAR"]  # +3 % never costs a request; +6.5 % is within the slack
+    assert es._may_qualify({"symbol": "X", "percent_change": None})  # most-actives rows go to the full check

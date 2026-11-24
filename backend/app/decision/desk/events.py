@@ -226,6 +226,11 @@ def owner_close(db: Session, position: DeskPosition, cli: Any, now: datetime) ->
     return event_close(db, position, price, "owner_close", now, inst)
 
 
+def _rollover_at(inst: cfd_instruments.CfdInstrument, entered: datetime) -> datetime:
+    """When an index position entered at *entered* closes for the roll: an hour before its contract expires."""
+    return cfd_instruments.index_expiry(inst.key, entered).astimezone(UTC) - ROLLOVER_LEAD
+
+
 def _stopped(position: DeskPosition, price: Decimal) -> bool:
     return cfd._stopped(position, price)
 
@@ -245,9 +250,8 @@ def _exits(db: Session, now: datetime, reads: Reads, halted: bool, out: Outcome)
             reason = "halt"
         elif price is not None and price > 0 and _stopped(p, price):
             reason = "stop"
-        elif inst.kind == "index" and now >= cfd_instruments.index_expiry(inst.key, now.astimezone(cal.BERLIN).date()) \
-                .astimezone(UTC) - ROLLOVER_LEAD:
-            reason = "rollover"
+        elif inst.kind == "index" and now >= _rollover_at(inst, service._aware(p.entry_at) or now):
+            reason = "rollover"  # the contract it was entered in, even when a missing price kept it past expiry
         elif p.id in reads.tech_exits:
             reason = reads.tech_exits[p.id]
         elif exit_at is not None and now >= exit_at:
@@ -294,7 +298,9 @@ def _open_one(db: Session, user_id: str, cand: Candidate, now: datetime, fx: Dec
         return None, "instrument_busy"
     if not _session_ok(inst, now):
         return None, "session_closed"
-    eur = Decimal(1) if inst.currency == "EUR" else fx
+    if inst.kind == "index" and now >= _rollover_at(inst, now):
+        return None, "rollover_soon"  # it would close for the roll on the next tick
+    eur =Decimal(1) if inst.currency == "EUR" else fx
     if eur is None or eur <= 0:
         return None, "no_fx"
     level = cand.level or cand.ref_price
@@ -329,7 +335,7 @@ def _open_one(db: Session, user_id: str, cand: Candidate, now: datetime, fx: Dec
             db.flush()
             expiry = ""
             if inst.kind == "index":
-                expiry = cfd_instruments.index_expiry(inst.key, now.astimezone(cal.BERLIN).date()) \
+                expiry = cfd_instruments.index_expiry(inst.key, now).astimezone(cal.BERLIN) \
                     .strftime("%Y-%m-%d at %H:%M Berlin")
             append_event(db, "fill", service.MODE, {
                 "product_type": "cfd", "cell": cand.cell, "market": inst.t212_name, "reference_price": str(cand.ref_price),
@@ -414,6 +420,7 @@ SKIP_TEXT = {
     "max_new_per_day": "Four new event positions today already.",
     "instrument_busy": "That instrument has an event position open or opened in the last 24 hours.",
     "session_closed": "Its exchange is closed (or too late in an early-close session).",
+    "rollover_soon": "Its index contract expires within the hour; the desk closes index positions before the roll.",
     "no_fx": "No EUR/USD rate to size it.", "sizing": "Nothing fits the 5 EUR risk and the margin limit at that stop.",
     "db_error": "A database error stopped it; nothing was opened.",
 }

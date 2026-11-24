@@ -435,13 +435,22 @@ def register_desk_reconcile_job(scheduler: Any | None = None) -> str:
         try:
             out: dict[str, Any] = {"logged": reconcile_external(db)}
             now = datetime.now(UTC)
-            if now.weekday() == 6 and now.hour == 17:  # Sunday 17:17 UTC: the weekly digest rides this job
-                out["digest"] = send_weekly_digest(db, now)  # (the worker's pool allows no further job)
+            if digest_due(now):  # the weekly digest rides this job (the worker's pool allows no further job)
+                out["digest"] = send_weekly_digest(db, now)
             return out
         finally:
             db.close()
 
     return register_cron_job("desk_reconcile", desk_reconcile_inner, scheduler=scheduler, minute=17)
+
+
+def digest_due(now: datetime) -> bool:
+    """Sunday in the 18:00 hour, Berlin time (so 18:17 all year, summer time or not): the reconcile job's run
+    that sends the weekly digest."""
+    from . import calendar as cal
+
+    local = now.astimezone(cal.BERLIN)
+    return local.weekday() == 6 and local.hour == 18
 
 
 def send_weekly_digest(db: Any, now: datetime | None = None) -> dict[str, Any]:

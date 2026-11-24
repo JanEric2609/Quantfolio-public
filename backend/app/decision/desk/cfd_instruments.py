@@ -185,29 +185,46 @@ def atr14(db: Session, inst: CfdInstrument, day: date | None = None) -> Decimal 
     return None if value is None else Decimal(str(value))
 
 
-def index_expiry(key: str, today: date) -> datetime:
-    """The contract's expiry (Berlin time), or the assumed one: the Thursday before the third Friday of
-    Mar/Jun/Sep/Dec at 13:00."""
+def _moment(at: date | datetime) -> datetime:
+    """*at* as an aware moment: a plain date is the start of that day in Berlin, a naive datetime is UTC."""
+    from datetime import UTC
+
     from . import calendar as cal
 
+    if isinstance(at, datetime):
+        return at if at.tzinfo else at.replace(tzinfo=UTC)
+    return datetime(at.year, at.month, at.day, tzinfo=cal.BERLIN)
+
+
+def index_expiry(key: str, at: date | datetime) -> datetime:
+    """The first expiry of the contract strictly after *at* (Berlin time): the observed one while it is still
+    ahead, else the assumed one (the Thursday before the third Friday of Mar/Jun/Sep/Dec at 13:00). Compared
+    as moments, not dates: on an expiry day after the expiry time it is already the next contract's."""
+    from . import calendar as cal
+
+    moment = _moment(at)
     raw = INDEX_EXPIRY.get(key)
     if raw:
         got = datetime.fromisoformat(raw).replace(tzinfo=cal.BERLIN)
-        if got.date() >= today:
+        if got > moment:
             return got
-    return assumed_expiry(today)
+    return assumed_expiry(moment)
 
 
-def assumed_expiry(today: date) -> datetime:
+def assumed_expiry(at: date | datetime) -> datetime:
+    """The first assumed quarterly expiry strictly after *at* (a plain date: from the start of that day)."""
     from . import calendar as cal
 
-    for year in (today.year, today.year + 1):
+    moment = _moment(at)
+    year0 = moment.astimezone(cal.BERLIN).year
+    for year in (year0, year0 + 1):
         for month in (3, 6, 9, 12):
             first = date(year, month, 1)
             third_friday = first + timedelta(days=(4 - first.weekday()) % 7 + 14)
             thursday = third_friday - timedelta(days=1)
-            if thursday >= today:
-                return datetime(thursday.year, thursday.month, thursday.day, 13, 0, tzinfo=cal.BERLIN)
+            expiry = datetime(thursday.year, thursday.month, thursday.day, 13, 0, tzinfo=cal.BERLIN)
+            if expiry > moment:
+                return expiry
     raise AssertionError("unreachable")  # pragma: no cover
 
 

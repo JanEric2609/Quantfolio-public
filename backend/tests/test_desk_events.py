@@ -220,3 +220,32 @@ def test_run_stage_opens_technical_signals_once_a_day(monkeypatch):
     assert service.health(db)["event_eval_XETR"] == NOW.date().isoformat()
     again = events.run_stage(db, user.id, None, at + timedelta(minutes=1), [])
     assert again == []  # the evaluation runs once per exchange and day
+
+
+def test_index_entry_refused_in_the_last_hour_before_expiry():
+    db, user = _setup()
+    # DAX expires Thu 17 Dec 2026 at 13:00 Berlin: at 12:30 an entry would close for the roll on the next tick.
+    last_hour = datetime(2026, 12, 17, 12, 30, tzinfo=BERLIN)
+    assert _open(db, user, _cand("DAX", now=last_hour), now=last_hour)[1] == "rollover_soon"
+    assert "within the hour" in events.SKIP_TEXT["rollover_soon"]
+    # After the expiry the next contract trades: the US evaluation that evening may open an index position.
+    evening = datetime(2026, 12, 17, 21, 40, tzinfo=BERLIN)
+    position, why = events._open_one(db, user.id, _cand("NDX", now=evening), evening, Decimal("0.9"))
+    assert position is not None, why
+    reads = events.Reads(prices={"NDX": Decimal("100")})
+    out = events.Outcome()
+    events._exits(db, (evening + timedelta(minutes=1)).astimezone(UTC), reads, False, out)
+    assert out.closed == []  # not closed for a roll that already happened
+
+
+@pytest.mark.parametrize("later", [timedelta(hours=1, minutes=15), timedelta(days=1)])
+def test_index_position_closes_for_the_roll_of_its_own_contract(later):
+    db, user = _setup()
+    entered = datetime(2026, 12, 16, 11, 0, tzinfo=BERLIN)
+    position, why = _open(db, user, _cand("DAX", now=entered), now=entered)
+    assert position is not None, why
+    # 12:05 on expiry day (the roll point is 12:00, an hour before 13:00), or the day after when no price came in time.
+    now = datetime(2026, 12, 17, 10, 50, tzinfo=BERLIN) + later
+    out = events.Outcome()
+    events._exits(db, now.astimezone(UTC), events.Reads(prices={"DAX": Decimal("100")}), False, out)
+    assert out.closed == [(position.id, "rollover")]

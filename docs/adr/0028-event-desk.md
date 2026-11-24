@@ -31,7 +31,8 @@ Rule parameters are textbook values, frozen in `foundation/technical.py:EVENT_RU
 **Costs** are charged on paper: the instrument's own spread (Trading 212 shows 2 bp to 17 bp across stocks),
 the 0.5 % FX fee on USD results, and overnight interest for each night held (Friday counts 3x; stocks about
 25 %/yr long, 9 %/yr short; indices 0.0083 % / 0.0139 % a night). Index CFDs roll at expiry; an event-desk
-position still open 60 minutes before its contract's expiry is closed on paper with reason `rollover`.
+position still open 60 minutes before its contract's expiry is closed on paper with reason `rollover`. No index
+position opens in that last hour; after the expiry time the next contract counts.
 
 **Changed invariant.** ADR 0027 said nothing reads `news_wire_items` to open, close or block a position. Now
 `hype_fade` and `news_drift` read it to open *paper* positions in their registered cells. Nothing else reads it

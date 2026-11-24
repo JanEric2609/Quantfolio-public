@@ -31,6 +31,8 @@ RULES_NEWS = technical.EVENT_RULES["news_drift"]
 EARNINGS_PATTERNS = re.compile(r"earnings|results|\bQ[1-4]\b|guidance|revenue", re.I)
 PRIMARY_SOURCES = ("sec_8k", "de_adhoc")
 MAX_SEEDS = 20
+#: The screener pre-filter lets through names at 3/4 of the rule's day change (6 % for the 8 % rule).
+SCREENER_SLACK = 0.75
 
 
 @dataclass(frozen=True)
@@ -121,12 +123,26 @@ def prepare_hype(db: Session, provider: AlpacaProvider | None, now: datetime,
     since = now.astimezone(NY).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
     today = now.astimezone(NY).date()
     for sym, row in list(names.items())[:60]:
-        if sym in exclude:
+        if sym in exclude or not _may_qualify(row):
             continue
         cand = _hype_one(db, provider, sym, row, now, since, today)
         if cand is not None:
             out.append(cand)
     return out
+
+
+def _may_qualify(row: dict[str, Any]) -> bool:
+    """A cheap pre-filter on the screener's own change (Alpaca gives it in percent: 12.5 = +12.5 %), so daily
+    bars are fetched only for names that can pass. Loose on purpose (``SCREENER_SLACK``): the screener can lag
+    the bars, and the rule itself is decided on the bars. Rows without a change (most-actives, news seeds)
+    always go on to the full check."""
+    pc = row.get("percent_change")
+    if pc is None:
+        return True
+    try:
+        return float(pc) / 100 >= RULES_HYPE["min_day_change"] * SCREENER_SLACK
+    except (TypeError, ValueError):
+        return True
 
 
 def _wire_seeds(db: Session, now: datetime) -> list[dict[str, Any]]:

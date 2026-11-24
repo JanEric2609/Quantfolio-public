@@ -55,3 +55,12 @@ def test_digest_rides_the_reconcile_job_on_sunday(monkeypatch):
     monkeypatch.setattr(telegram, "alert", lambda db, uid, text, markup=None: sent.append(text))
     assert jobs.send_weekly_digest(db, datetime(2026, 11, 22, 17, 17, tzinfo=UTC)) == {"sent": True}
     assert sent and sent[0].startswith("Desk week")
+
+
+def test_digest_is_due_sunday_18_berlin_all_year():
+    # Winter (UTC+1) and summer (UTC+2): 18:17 Berlin both times.
+    assert jobs.digest_due(datetime(2026, 11, 22, 17, 17, tzinfo=UTC))
+    assert not jobs.digest_due(datetime(2026, 11, 22, 16, 17, tzinfo=UTC))
+    assert jobs.digest_due(datetime(2026, 7, 5, 16, 17, tzinfo=UTC))
+    assert not jobs.digest_due(datetime(2026, 7, 5, 17, 17, tzinfo=UTC))  # 19:17 Berlin in summer
+    assert not jobs.digest_due(datetime(2026, 11, 21, 17, 17, tzinfo=UTC))  # a Saturday

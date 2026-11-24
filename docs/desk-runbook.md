@@ -26,6 +26,8 @@ Paper-scored as <cell>.
 - At most 3 positions are open and 4 start per day; an instrument gets no second position within 24 hours.
 - An index CFD still open an hour before its contract expires is closed on paper (`rollover`); close yours too,
   because Trading 212 rolls the contract and the price jumps by the futures basis.
+  No index position starts in that last hour.
+- The weekly digest comes on Sunday at 18:17 Berlin time, summer and winter.
 
 ## Logging a trade
 

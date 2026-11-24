@@ -69,3 +69,16 @@ def test_technical_basics():
     assert technical.rsi(closes, 2) == 100.0
     bars = [technical.Bar(date(2026, 1, 1), c, c + 1, c - 1, c) for c in closes]
     assert technical.atr(bars, 14) is not None
+
+
+def test_index_expiry_is_a_moment_not_a_date():
+    from zoneinfo import ZoneInfo
+
+    berlin = ZoneInfo("Europe/Berlin")
+    before = datetime(2026, 12, 17, 14, 59, tzinfo=berlin)
+    after = datetime(2026, 12, 17, 15, 0, tzinfo=berlin)
+    assert ci.index_expiry("NDX", before) == datetime(2026, 12, 17, 15, 0, tzinfo=berlin)
+    # On the expiry day after the expiry time it is the next contract's (assumed) expiry.
+    assert ci.index_expiry("NDX", after) == datetime(2027, 3, 18, 13, 0, tzinfo=berlin)
+    assert ci.assumed_expiry(datetime(2027, 3, 18, 13, 0, tzinfo=berlin)).date() == date(2027, 6, 17)
+    assert ci.assumed_expiry(datetime(2027, 3, 18, 12, 59, tzinfo=berlin)).date() == date(2027, 3, 18)
