@@ -136,6 +136,13 @@ def _error_code(exc: BaseException) -> str:
 
 #: A reference price older than this is not used (no CFD fill, stop or exit at it, no knock-out read).
 REF_MAX_AGE_S = LIMITS.max_quote_age_s
+#: Alpaca's free quote comes from one small venue (IEX). For a thinly traded stock its bid and ask can sit far
+#: apart (SHOE on 2026-11-24: 11.18 / 12.79 while every trade was at or below 11.27), and the midpoint is then
+#: not a price anyone dealt at. Above this spread the last real trade is used instead.
+MAX_QUOTE_SPREAD = Decimal("0.01")
+#: How old that last trade may be. Thin names trade every few minutes on IEX; a real trade minutes ago is a
+#: better price than a midpoint nobody dealt at, and with no trade at all the desk waits.
+TRADE_MAX_AGE_S = 300
 
 
 def underlying_price(db: Session, cli: ScalableCli, u: Underlying, *, now: datetime,
@@ -163,7 +170,13 @@ def underlying_price(db: Session, cli: ScalableCli, u: Underlying, *, now: datet
                 return None
             if _quote_age(now, _aware(as_of)) > REF_MAX_AGE_S:
                 return None
-            return Decimal(str(data["close"]))
+            mid = Decimal(str(data["close"]))
+            bid, ask = data.get("bid"), data.get("ask")
+            if bid is None or ask is None or mid <= 0:
+                return mid
+            if (Decimal(str(ask)) - Decimal(str(bid))) / mid <= MAX_QUOTE_SPREAD:
+                return mid
+            return _last_trade(provider, u.alpaca_symbol, now, errors)
         q = market.get_quote(cli, u.proxy_isin or u.isin)
         if q is None or q.outdated or _quote_age(now, q.ts_utc) > REF_MAX_AGE_S:
             return None
@@ -175,6 +188,17 @@ def underlying_price(db: Session, cli: ScalableCli, u: Underlying, *, now: datet
         if errors is not None:
             errors.append(_error_code(exc))
         return None
+
+
+def _last_trade(provider: Any, symbol: str, now: datetime, errors: list[str] | None) -> Decimal | None:
+    """The quote is too wide to trust: the last IEX trade if it is recent, else ``None`` (the caller waits)."""
+    read = getattr(provider, "latest_trade", None)
+    trade = read(symbol) if read is not None else None
+    if not trade or _quote_age(now, _aware(trade["as_of"])) > TRADE_MAX_AGE_S:
+        if errors is not None:
+            errors.append("wide_quote")
+        return None
+    return Decimal(str(trade["price"]))
 
 
 def underlying_sigma(db: Session, cli: ScalableCli, u: Underlying) -> Decimal | None:

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.foundation.models.entities import DeskCfdJournal, DeskPosition
 from app.foundation.settings import get_setting_row
 
-from . import bankroll, cfd_instruments, scoring_events, service
+from . import bankroll, cfd_instruments, cfd_journal, scoring_events, service
 from . import calendar as cal
 from .event_limits import EVENT_LIMITS
 from .ledger import events_for
@@ -174,11 +174,39 @@ def close_text(db: Session, position: DeskPosition, reason: str, journal: DeskCf
     if journal is not None and journal.status == "skipped":
         # The owner said they did not take it: nothing to close, the paper score only.
         return f"{label}: paper trade closed ({why.removesuffix(': close yours too')}). {result}"
-    # Kept under the bankroll stop on purpose: closing only lowers the exposure, and the owner may hold the
-    # trade without having logged it yet. The stop withholds new entries, never the exit.
-    text = f"{label}: CLOSE now ({why}). {result}"
+    own = _own_stop_not_reached(position, reason, journal)
+    if own is not None:
+        # The owner filled at another price, so their stop sits elsewhere: the paper stop is not theirs.
+        text = (f"{label}: the paper trade was stopped out at {own[0]}. Your own stop for your fill, {own[1]}, is "
+                f"not reached, so this is not a close signal for your trade. The desk no longer tracks it: keep "
+                f"your stop in Trading 212 and the planned exit ({_exit_text(position)}), or close it when you "
+                f"choose. {result}")
+    else:
+        # Kept under the bankroll stop on purpose: closing only lowers the exposure, and the owner may hold the
+        # trade without having logged it yet. The stop withholds new entries, never the exit.
+        text = f"{label}: CLOSE now ({why}). {result}"
     if journal is not None and journal.status in ("entered", "closed") and journal.exit_level is None:
         missing = "<exit price>" if journal.entry_level is not None else "<entry price> <exit price>"
         text += (f"\nTo log your trade ({position.id[:8]}), reply to this message with: {missing}, as Trading 212 "
                  "shows them.")
     return text
+
+
+def _own_stop_not_reached(position: DeskPosition, reason: str, journal: DeskCfdJournal | None
+                          ) -> tuple[str, str] | None:
+    """On a paper stop of a trade the owner entered with a fill: (paper level, own stop) as text when the
+    owner's own stop is not reached at the closing price, else ``None``. Levels are in the units Trading 212
+    shows (the index level, or the share price): the paper price is scaled by the signal's level."""
+    if reason != "stop" or journal is None or journal.status != "entered":
+        return None
+    own = cfd_journal.stop_level(journal)
+    entry, px, level = (Decimal(position.entry_price or 0), Decimal(position.exit_price or 0),
+                        Decimal(journal.index_level_est or 0))
+    if own is None or entry <= 0 or px <= 0 or level <= 0:
+        return None
+    now_level = level * px / entry
+    reached = now_level <= own if position.direction == "long" else now_level >= own
+    if reached:
+        return None
+    nd = 2 if ":" in (journal.market_key or "") else 0
+    return f"{now_level:,.{nd}f}", f"{own:,.{nd}f}"

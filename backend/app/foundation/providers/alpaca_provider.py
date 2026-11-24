@@ -84,6 +84,19 @@ class AlpacaProvider(MarketDataProvider):
             logger.warning("Alpaca get_quote failed for %s: %s", symbol, exc)
             return self.unavailable("quote", str(exc))
 
+    def latest_trade(self, symbol: str) -> dict[str, Any] | None:
+        """The last trade on the free IEX feed: ``{"price": Decimal, "as_of": datetime}``, or ``None`` when there
+        is none. A failed read raises (``ValueError``/``httpx.HTTPError``), like the other market reads."""
+        if not self.enabled or not is_us_listing(symbol):
+            return None
+        data = self._get(f"/stocks/{strip_exchange_suffix(symbol)}/trades/latest", {"feed": "iex"})
+        trade = data.get("trade") if isinstance(data, dict) else None
+        price = _decimal(trade.get("p")) if isinstance(trade, dict) else None
+        as_of = _parse_iso(trade.get("t")) if isinstance(trade, dict) else None
+        if price is None or price <= 0 or as_of is None:
+            return None
+        return {"price": price, "as_of": as_of}
+
     def get_history(
         self,
         symbol: str,
