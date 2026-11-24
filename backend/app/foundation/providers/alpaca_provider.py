@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import UTC, datetime, timedelta
+import re
+from collections.abc import Callable
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
@@ -229,6 +231,72 @@ class AlpacaProvider(MarketDataProvider):
             params["page_token"] = token
         return sorted(rows, key=lambda r: r["t"])
 
+    screener_url = "https://data.alpaca.markets/v1beta1/screener/stocks"
+
+    def _screener(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        """A market-data GET on the screener. A 403 means the plan has no screener: ``DataUnavailable``."""
+        if not self.enabled:
+            raise ValueError("Alpaca API key/secret is not configured.")
+        try:
+            return self._get(path, params=params, base=self.screener_url)
+        except ValueError as exc:
+            if "HTTP 403" in str(exc):
+                raise DataUnavailable("screener_not_entitled") from exc
+            raise
+
+    def screener_movers(self, top: int = 50) -> list[dict[str, Any]]:
+        """Today's top gainers: ``{"symbol", "percent_change", "price"}`` (floats), best first."""
+        data = self._screener("/movers", {"top": max(1, min(top, 50))})
+        out: list[dict[str, Any]] = []
+        for row in data.get("gainers") or []:
+            if isinstance(row, dict) and row.get("symbol"):
+                pc, px = _float(row.get("percent_change")), _float(row.get("price"))
+                if pc is not None and px is not None:
+                    out.append({"symbol": str(row["symbol"]).upper(), "percent_change": pc, "price": px})
+        return out
+
+    def screener_most_actives(self, top: int = 100) -> list[dict[str, Any]]:
+        """The most active symbols by volume: ``{"symbol", "volume"}``."""
+        data = self._screener("/most-actives", {"by": "volume", "top": max(1, min(top, 100))})
+        out: list[dict[str, Any]] = []
+        for row in data.get("most_actives") or []:
+            if isinstance(row, dict) and row.get("symbol"):
+                out.append({"symbol": str(row["symbol"]).upper(), "volume": _float(row.get("volume")) or 0.0})
+        return out
+
+    options_url = "https://data.alpaca.markets/v1beta1/options/snapshots"
+
+    def option_chain(self, underlying: str, expiration_gte: date, expiration_lte: date,
+                     feed: str = "indicative", before_request: Callable[[], None] | None = None
+                     ) -> list[dict[str, Any]]:
+        """Option snapshots of one underlying (market data only): ``{"symbol", "type", "strike", "expiration",
+        "iv", "delta"}``, at most three pages. Alpaca sends implied volatility and Greeks but no open interest.
+        A 403 (no options entitlement) is ``DataUnavailable("options_not_entitled")``. *before_request* runs
+        before every page's GET (a caller's rate limiter: each page is one request)."""
+        if not self.enabled:
+            raise ValueError("Alpaca API key/secret is not configured.")
+        params: dict[str, Any] = {"feed": feed, "limit": 1000, "expiration_date_gte": expiration_gte.isoformat(),
+                                  "expiration_date_lte": expiration_lte.isoformat()}
+        out: list[dict[str, Any]] = []
+        for _page in range(3):
+            if before_request is not None:
+                before_request()
+            try:
+                data = self._get(f"/{strip_exchange_suffix(underlying)}", params=params, base=self.options_url)
+            except ValueError as exc:
+                if "HTTP 403" in str(exc):
+                    raise DataUnavailable("options_not_entitled") from exc
+                raise
+            for occ, snap in (data.get("snapshots") or {}).items():
+                row = _parse_occ(str(occ), snap if isinstance(snap, dict) else {})
+                if row is not None:
+                    out.append(row)
+            token = data.get("next_page_token")
+            if not token:
+                break
+            params["page_token"] = token
+        return out
+
     def get_news(self, symbols: list[str], start: datetime, limit: int = 20) -> list[dict[str, Any]]:
         """Headlines for US symbols since *start*: ``{"id", "headline", "created_at", "symbols"}``.
 
@@ -270,6 +338,29 @@ class AlpacaProvider(MarketDataProvider):
                 # safe if the auth mechanism ever changes.
                 raise ValueError(f"Alpaca HTTP {response.status_code} for {path}")
             return response.json()
+
+
+_OCC = re.compile(r"^([A-Z.]{1,6})(\d{6})([CP])(\d{8})$")
+
+
+def _parse_occ(occ: str, snap: dict[str, Any]) -> dict[str, Any] | None:
+    m = _OCC.match(occ)
+    if m is None:
+        return None
+    iv = _float(snap.get("impliedVolatility"))
+    delta = _float((snap.get("greeks") or {}).get("delta"))
+    if iv is None or delta is None or iv <= 0:
+        return None
+    try:
+        expiry = datetime.strptime(m.group(2), "%y%m%d").date()
+    except ValueError:
+        return None
+    return {"symbol": occ, "type": "call" if m.group(3) == "C" else "put", "strike": int(m.group(4)) / 1000,
+            "expiration": expiry, "iv": iv, "delta": delta}
+
+
+class DataUnavailable(ValueError):
+    """The provider answers, but not for this plan (a 403): the caller falls back or skips."""
 
 
 #: Alpaca keys bars by ticker, so a reused ticker joins two companies (docs/research/2026-11-12-alpaca-reused-tickers.md).

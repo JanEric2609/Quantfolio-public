@@ -12,20 +12,20 @@ import {
 } from "./routeManifest";
 
 describe("route manifest", () => {
-  it("lists fourteen primary sidebar items plus Control Center in the footer", () => {
+  it("lists fifteen primary sidebar items plus Control Center in the footer", () => {
     const groups = sidebarGroups();
     const main = groups.filter((g) => g.id !== "admin").flatMap((g) => g.items);
 
     expect(main.map((e) => e.label)).toEqual([
       "Home", "This month", "Portfolio", "Tax", "Budget", "Discover", "Watchlist", "News",
-      "Can I trust it?", "Learn", "Quant Lab", "Strategy lab", "Derivatives desk", "Intraday CFD",
+      "Can I trust it?", "Learn", "Quant Lab", "Strategy lab", "Derivatives desk", "Intraday CFD", "Signals",
     ]);
     expect(groups.find((g) => g.id === "admin")?.items.map((e) => e.label)).toEqual(["Control Center"]);
     expect(groups.map((g) => g.label)).toEqual(["Today", "My money", "Ideas", "Trust", "Research tools", "Admin"]);
   });
 
-  it("flags exactly Quant Lab, Strategy lab, the derivatives desk and Intraday CFD as research tools", () => {
-    expect(ROUTE_ENTRIES.filter((e) => e.researchTool).map((e) => e.label)).toEqual(["Quant Lab", "Strategy lab", "Derivatives desk", "Intraday CFD"]);
+  it("flags exactly Quant Lab, Strategy lab, the derivatives desk, Intraday CFD and Signals as research tools", () => {
+    expect(ROUTE_ENTRIES.filter((e) => e.researchTool).map((e) => e.label)).toEqual(["Quant Lab", "Strategy lab", "Derivatives desk", "Intraday CFD", "Signals"]);
     expect(isResearchToolPath("/desk")).toBe(true);
     expect(isResearchToolPath("/quantlab/risk")).toBe(true);
     expect(isResearchToolPath("/advisor/loop")).toBe(true);

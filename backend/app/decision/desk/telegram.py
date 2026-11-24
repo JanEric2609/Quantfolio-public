@@ -13,11 +13,13 @@ chat reaches these handlers. Resuming a halt is possible only from the app.
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.foundation import telegram_bot, telegram_updates
@@ -26,10 +28,12 @@ from app.foundation.scalable import market
 from app.foundation.scalable import service as scalable_service
 from app.foundation.scalable.cli import ScalableError
 
-from . import cfd, cfd_journal, service
+from . import cfd, cfd_journal, events, outmsg, service  # events registers the event desk's owner-close hook
 from .guard import DeskState
 from .limits import LIMITS
 from .signals import owner_calls
+
+logger = logging.getLogger(__name__)
 
 
 #: ``/close`` takes the 8-character id ``/desk`` shows (or more of the id): hex digits and dashes only.
@@ -50,6 +54,26 @@ def _say(db: Session, chat_id: str, text: str, markup: dict[str, Any] | None = N
         db, chat_id, text)
 
 
+def _handle_cfd_idea(db: Session, account: Any, chat_id: str, idea: Any) -> None:
+    """``/idea X up cfd``: read first, then open the paper position of cell owner_call:cfd (ADR 0028)."""
+    now = datetime.now(UTC)
+    try:
+        cli = scalable_service.make_cli(db)
+        cand = owner_calls.cfd_candidate(db, idea, cli, now)
+    except market.WrapperOutdated:
+        db.rollback()
+        return _say(db, chat_id, "The sc wrapper needs install.sh again before the desk can read quotes.")
+    except ScalableError as exc:
+        db.rollback()
+        return _say(db, chat_id, f"Could not read the market: {exc.code}.")
+    if isinstance(cand, str):
+        return _say(db, chat_id, cand)
+    texts, why = events.open_owner_call(db, account.user_id, cand, cli, now)
+    if why:
+        return _say(db, chat_id, f"No paper CFD opened: {events.SKIP_TEXT.get(why, why)}")
+    send_out(db, account.user_id, texts)
+
+
 def handle_idea(db: Session, account: Any, chat_id: str, text: str) -> None:
     if not _is_admin(db, account):
         return _say(db, chat_id, "The desk is for the admin account.")
@@ -59,6 +83,8 @@ def handle_idea(db: Session, account: Any, chat_id: str, text: str) -> None:
         return _say(db, chat_id, str(exc))
     if service.is_halted(db):
         return _say(db, chat_id, "The desk is halted. Resume it in the app first.")
+    if idea.product_types == ("cfd",):
+        return _handle_cfd_idea(db, account, chat_id, idea)
     try:
         outcome = owner_calls.start_idea(db, account.user_id, idea, scalable_service.make_cli(db),
                                          datetime.now(UTC), clock=_wall_clock)
@@ -156,17 +182,7 @@ def handle_close(db: Session, account: Any, chat_id: str, text: str) -> None:
     _say(db, chat_id, f"Closed at {pos.exit_price} (net {pos.net_eur} EUR)." if ok else "Could not close it.")
 
 
-def cfd_markup(journal: Any) -> dict[str, Any] | None:
-    """The buttons for a journal row's state: Entered/Skipped while unanswered, Closed once entered."""
-    if journal is None:
-        return None
-    pid = journal.position_id
-    if journal.status == "sent":
-        return {"inline_keyboard": [[{"text": "Entered", "callback_data": f"cfd:in:{pid}"},
-                                     {"text": "Skipped", "callback_data": f"cfd:skip:{pid}"}]]}
-    if journal.status == "entered":
-        return {"inline_keyboard": [[{"text": "Closed", "callback_data": f"cfd:out:{pid}"}]]}
-    return None
+cfd_markup = outmsg.cfd_markup
 
 
 def handle_cfd_button(db: Session, account: Any, chat_id: str, data: str) -> str:
@@ -386,3 +402,37 @@ def edit_alert(db: Session, user_id: str, message_id: int, text: str, markup: di
     if account is None:
         return False
     return telegram_bot.edit_telegram_message(db, account.chat_id, message_id, text, markup)
+
+
+def send_out(db: Any, owner_id: str, texts: list[Any]) -> None:
+    """Send the outbox. A CFD message (an :class:`OutMsg` with a journal id) keeps its Telegram message id,
+    so that later ticks can edit it in place; the others go out as plain messages."""
+    for text in texts:
+        markup = getattr(text, "markup", None)
+        journal_id = getattr(text, "journal_id", None)
+        if journal_id:
+            message_id = alert_with_id(db, owner_id, str(text), markup)
+            if message_id is not None:
+                _remember_message(db, journal_id, message_id, str(text))
+        elif markup:
+            alert(db, owner_id, str(text), markup)
+        else:
+            alert(db, owner_id, str(text))
+
+
+def _remember_message(db: Any, journal_id: str, message_id: int, text: str) -> None:
+    """Store the Telegram message id and the hash of the text sent (a small commit after the send: the
+    stage's own changes were committed before sending)."""
+    import hashlib
+
+    try:
+        row = db.get(DeskCfdJournal, journal_id)
+        if row is not None:
+            row.telegram_message_id = message_id
+            row.last_text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.warning("desk cfd message id not stored: %s", type(exc).__name__)
+
+

@@ -9,6 +9,7 @@ from .api_ops import (
     list_news, list_positions, submit_idea,
     take_proposal,
 )
+from .event_report import signals_overview
 from .jobs import register_desk_monitor_job, register_desk_reconcile_job, register_news_wire_job
 from .ledger import append_event, verify_chain
 from .limits import LIMITS
@@ -22,6 +23,6 @@ __all__ = [
     "DeskActionError", "chain_status", "close_position_api", "desk_status", "list_events", "list_news",
     "list_positions", "intraday_view", "journal_action",
     "submit_idea", "take_proposal", "LIMITS", "PREREG_HASH", "append_event", "halt_info", "health", "is_halted", "owner_close", "propose",
-    "register_desk", "register_desk_monitor_job", "register_desk_reconcile_job", "register_desk_telegram",
+    "register_desk", "register_desk_monitor_job", "signals_overview", "register_desk_reconcile_job", "register_desk_telegram",
     "register_news_wire_job", "scorecard", "set_halt", "start_news_stream", "verify_chain",
 ]

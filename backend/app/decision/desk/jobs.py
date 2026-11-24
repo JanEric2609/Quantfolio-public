@@ -13,24 +13,13 @@ from app.foundation.jobs import register_cron_job, register_interval_job
 
 logger = logging.getLogger(__name__)
 
+from .outmsg import OutMsg  # noqa: E402,F401  (re-exported: other modules import it from here)
+
 
 def _owner(db: Any) -> Any:
     from app.foundation.models.entities import User
 
     return db.query(User).filter(User.role == "admin").order_by(User.created_at).first()
-
-
-class OutMsg(str):
-    """A message with the inline buttons it is sent with and the journal row it belongs to (a ``str``, so
-    callers that only read the text keep working)."""
-
-    markup: dict[str, Any] | None
-    journal_id: str | None
-
-    def __new__(cls, text: str, markup: dict[str, Any] | None = None, journal_id: str | None = None) -> OutMsg:
-        obj = super().__new__(cls, text)
-        obj.markup, obj.journal_id = markup, journal_id
-        return obj
 
 
 def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[str, Any]:
@@ -42,7 +31,7 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
     from app.foundation.models.entities import DeskPosition
 
     from . import calendar as cal
-    from . import cfd, cfd_journal, instrument, intraday, prereg, service
+    from . import cfd, cfd_journal, events, instrument, intraday, prereg, service
     from .ledger import append_event
     from .signals import index_momentum
     from .underlyings import ALIASES, Underlying, ticker_for_isin
@@ -111,6 +100,12 @@ def monitor_tick(db: Any, now: datetime | None = None, cli: Any = None) -> dict[
             # Built after the commit: the CFD line reads index history, whose cache write commits, and a
             # fill saved before a failed tick would never be announced (the signal counts as fired).
             send(_announce_fills(db, now, opened, contexts))
+        # The event desk (ADR 0028): technical rules, hype, news drift. Its own reads, one write phase, one commit.
+        try:
+            send(events.run_stage(db, owner.id, cli, now, errors))
+        except (SQLAlchemyError, ValueError, KeyError, TypeError, ArithmeticError, OSError) as exc:
+            db.rollback()
+            logger.warning("desk event stage failed: %s", type(exc).__name__)
         # The heads-up and get-ready messages: reads, then one health write; nothing here touches the ledger.
         previews = index_momentum.preview_due(db, cli, now) if not service.is_halted(db) else []
         db.commit()
@@ -167,39 +162,9 @@ def _wall_clock() -> datetime:
 
 
 def _send(db: Any, owner_id: str, texts: list[Any]) -> None:
-    """Send the outbox. A CFD message (an :class:`OutMsg` with a journal id) keeps its Telegram message id,
-    so that later ticks can edit it in place; the others go out as plain messages."""
     from . import telegram
 
-    for text in texts:
-        markup = getattr(text, "markup", None)
-        journal_id = getattr(text, "journal_id", None)
-        if journal_id:
-            message_id = telegram.alert_with_id(db, owner_id, str(text), markup)
-            if message_id is not None:
-                _remember_message(db, journal_id, message_id, str(text))
-        elif markup:
-            telegram.alert(db, owner_id, str(text), markup)
-        else:
-            telegram.alert(db, owner_id, str(text))
-
-
-def _remember_message(db: Any, journal_id: str, message_id: int, text: str) -> None:
-    """Store the Telegram message id and the hash of the text sent (a small commit after the send: the
-    stage's own changes were committed before sending)."""
-    import hashlib
-
-    from app.foundation.models.entities import DeskCfdJournal
-
-    try:
-        row = db.get(DeskCfdJournal, journal_id)
-        if row is not None:
-            row.telegram_message_id = message_id
-            row.last_text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-            db.commit()
-    except SQLAlchemyError as exc:
-        db.rollback()
-        logger.warning("desk cfd message id not stored: %s", type(exc).__name__)
+    telegram.send_out(db, owner_id, texts)
 
 
 def _live_edits(db: Any, owner_id: str, now: datetime) -> None:
@@ -224,7 +189,12 @@ def _live_edits(db: Any, owner_id: str, now: datetime) -> None:
     for journal in rows:
         try:
             position = db.get(DeskPosition, journal.position_id)
-            text = cfd.live_text(db, position, journal, now) if position is not None else None
+            if position is not None and position.cell in cfd.EVENT_CELL_NAMES:
+                from . import event_messages
+
+                text = event_messages.live_text(db, position, journal, now)
+            else:
+                text = cfd.live_text(db, position, journal, now) if position is not None else None
             if text is None:
                 continue
             digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -463,11 +433,34 @@ def register_desk_reconcile_job(scheduler: Any | None = None) -> str:
 
         db = SessionLocal()
         try:
-            return {"logged": reconcile_external(db)}
+            out: dict[str, Any] = {"logged": reconcile_external(db)}
+            now = datetime.now(UTC)
+            if digest_due(now):  # the weekly digest rides this job (the worker's pool allows no further job)
+                out["digest"] = send_weekly_digest(db, now)
+            return out
         finally:
             db.close()
 
     return register_cron_job("desk_reconcile", desk_reconcile_inner, scheduler=scheduler, minute=17)
+
+
+def digest_due(now: datetime) -> bool:
+    """Sunday in the 18:00 hour, Berlin time (so 18:17 all year, summer time or not): the reconcile job's run
+    that sends the weekly digest."""
+    from . import calendar as cal
+
+    local = now.astimezone(cal.BERLIN)
+    return local.weekday() == 6 and local.hour == 18
+
+
+def send_weekly_digest(db: Any, now: datetime | None = None) -> dict[str, Any]:
+    from . import event_report, telegram
+
+    owner = _owner(db)
+    if owner is None:
+        return {"skipped": "no_admin"}
+    telegram.alert(db, owner.id, event_report.weekly_digest(db, owner.id, now))
+    return {"sent": True}
 
 
 def news_wire_tick(db: Any, now: datetime | None = None) -> dict[str, Any]:

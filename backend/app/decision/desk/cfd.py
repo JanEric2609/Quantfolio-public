@@ -27,6 +27,7 @@ from decimal import ROUND_DOWN, Decimal
 from typing import Any
 
 import httpx
+from sqlalchemy import or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -42,6 +43,9 @@ from .underlyings import Underlying
 logger = logging.getLogger(__name__)
 
 CELL = "index_momentum:cfd"
+#: The event desk's cells (ADR 0028; pinned equal to ``prereg_events.EVENT_CELLS`` by a test). Their CFDs are
+#: managed by ``events.py`` (overnight interest, rollover, rule exits), never by :func:`manage`.
+EVENT_CELL_NAMES = ("ta_trend:cfd", "ta_band:cfd", "ta_rsi2:cfd", "hype_fade:cfd", "news_drift:cfd", "owner_call:cfd")
 SPEC = prereg.SPEC["cfd"]
 SPREAD_BP: dict[str, Decimal] = {k: Decimal(v) for k, v in SPEC["spread_bp"].items()}
 FX_FEE = Decimal(SPEC["fx_fee_on_result"])
@@ -57,6 +61,7 @@ T212 = {
     "quantity_decimals": 4,
     "observed": "2026-11-23",
 }
+EVENT_OWNER_CLOSE: Any = None  # set by events.py (a hook, so that cfd never imports the event engine)
 SESSION_MINUTES = {"XETR": 510, "XNYS": 390}  # 09:00-17:30 Berlin, 09:30-16:00 New York
 #: The market's name in the Trading 212 app and the index ticker for its level (quantity hint).
 MARKETS: dict[str, tuple[str, str, str]] = {  # key -> (Trading 212 name, level ticker, currency)
@@ -266,6 +271,21 @@ def _reason(position: DeskPosition, key: str, ctx: CfdContext | None) -> str:
     return f"{label} {ctx.r1:+.2%} from yesterday's close to {until}"
 
 
+def evidence_line(db: Session) -> str:
+    """One honest line on how strong the index rule's evidence is: the 2016-26 replay and the live paper cell."""
+    from . import scoring
+
+    s = scoring.scorecard(db)["cells"][CELL]
+    if s["n"] < s["n_min"]:
+        word = "too early"
+    elif s["mean_net"] is None or s["mean_net"] <= 0:
+        word = "failing"
+    else:
+        word = "passing" if s.get("passes") else "not significant"
+    mean = f", {s['mean_net']:+.2f} EUR a trade" if s["mean_net"] is not None else ""
+    return (f"Evidence: replay 2016-26 -0.18 EUR a trade (SPY, -0.13 QQQ) | live paper {s['n']} trades{mean} ({word}).")
+
+
 def open_message(db: Session, position: DeskPosition, key: str, now: datetime,
                  ctx: CfdContext | None = None) -> str:
     name = MARKETS[key][0]
@@ -299,6 +319,8 @@ def open_message(db: Session, position: DeskPosition, key: str, now: datetime,
     ]
     if ctx.currency == "USD":
         lines.append(f"USD market: {T212['fx_fee_on_result'] * 100:.1f} % FX fee on the result at close.")
+    if db is not None:
+        lines.append(evidence_line(db))
     lines.append("Paper-scored as index_momentum:cfd. Most retail CFD accounts lose money; nothing is ordered for you.")
     return "\n".join(lines)
 
@@ -415,6 +437,9 @@ def owner_close(db: Session, position: DeskPosition, cli: ScalableCli, now: date
     nothing is closed (``False``): the last stored price may be minutes old."""
     if position.status != "open" or position.product_type != "cfd":
         return False
+    if position.cell in EVENT_CELL_NAMES:
+        # The event desk's own close (overnight interest, its costs): ``events`` registers it on import.
+        return EVENT_OWNER_CLOSE is not None and EVENT_OWNER_CLOSE(db, position, cli, now)
     price = service.underlying_price(db, cli, service.underlying_of(position, underlying), now=now)
     if price is None or price <= 0:
         return False
@@ -442,7 +467,8 @@ def manage(db: Session, cli: ScalableCli, now: datetime, underlyings: dict[str, 
     exits: list[tuple[DeskPosition, Decimal, str]] = []
     halted = service.is_halted(db)
     rows = db.query(DeskPosition).filter(DeskPosition.status == "open", DeskPosition.mode == service.MODE,
-                                         DeskPosition.product_type == "cfd").all()
+                                         DeskPosition.product_type == "cfd",
+                                         or_(DeskPosition.cell.is_(None), DeskPosition.cell.notin_(EVENT_CELL_NAMES))).all()
     for p in rows:
         # Only a fresh price moves the stop and resets the quote-lost clock (a frozen proxy quote is None).
         price = service.underlying_price(db, cli, service.underlying_of(p, underlyings.get(p.underlying_isin)),

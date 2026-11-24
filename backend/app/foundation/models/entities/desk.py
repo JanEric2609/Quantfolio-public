@@ -116,7 +116,7 @@ class DeskRegistration(Base):
 class NewsWireItem(Base):
     """One headline or release from the news wire (ADR 0027 amendment 2026-11-20): logged, rated, maybe sent.
 
-    Alert-only: nothing reads this table to open or close a position. ``id`` is
+    Alert-only, except that the event desk's hype and news-drift cells read it to open *paper* positions (ADR 0028). ``id`` is
     ``<source>:<source id>`` so a re-delivered item is stored once.
     """
 
@@ -153,7 +153,7 @@ class DeskCfdJournal(Base):
         ForeignKey("desk_positions.id", ondelete="CASCADE"), unique=True, index=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    market_key: Mapped[str] = mapped_column(String(8))  # DAX | ES50 | SPX | NDX
+    market_key: Mapped[str] = mapped_column(String(24))  # DAX | ES50 | SPX | NDX, or US:NVDA (event desk)
     direction: Mapped[str] = mapped_column(String(5))
     currency: Mapped[str] = mapped_column(String(3))
     r1: Mapped[Decimal | None] = mapped_column(Numeric(14, 8), nullable=True)

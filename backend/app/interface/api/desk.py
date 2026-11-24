@@ -14,6 +14,7 @@ from app.decision.desk import (
     desk_status,
     intraday_view,
     journal_action,
+    signals_overview,
     list_events,
     list_news,
     list_positions,
@@ -89,6 +90,13 @@ def get_news(
 @router.get("/scorecard")
 def get_scorecard(user: User = Depends(require_admin), db: Session = Depends(get_db)) -> dict[str, Any]:
     return scorecard(db)
+
+
+@router.get("/signals")
+def get_signals(user: User = Depends(require_admin), db: Session = Depends(get_db)) -> dict[str, Any]:
+    """The Signals page (ADR 0028): every cell of both registrations, the replay, the owner's real trades
+    beside the paper ones, the open event positions and the bankroll."""
+    return signals_overview(db, user.id)
 
 
 @router.get("/chain")

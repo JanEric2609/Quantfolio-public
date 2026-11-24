@@ -4578,6 +4578,35 @@ export interface CfdJournalAction {
   action: "entered" | "skipped" | "closed"; level?: string | null; quantity?: string | null; note?: string | null;
 }
 export const getIntraday = () => api<IntradayDto>("/api/desk/intraday");
+
+/** The Signals page (ADR 0028): both registrations' cells, the owner's real trades, open event positions, bankroll. */
+export type SignalVerdict = "too early" | "failing" | "not significant" | "passing";
+export interface SignalCell {
+  cell: string; registration: "first" | "events"; n: number; n_min: number; mean_net: number | null;
+  hit_rate: number | null; p_holm: number | null; passes: boolean; verdict: SignalVerdict;
+  placebo_percentile: number | null; placebo_p95: number | null;
+  replay: { n?: number; mean_eur?: number | null; t?: number | null; hit_rate?: number | null } | null;
+  real: { n: number; real_total: number; paper_total_same_trades: number } | null;
+}
+export interface SignalOpenPosition {
+  id: string; short_id: string; cell: string; instrument: string; direction: string; entry_price: string;
+  stop_price: string; last: string | null; paper_pnl_eur: number | null; max_exit_at: string | null;
+}
+export interface SignalJournalRow {
+  position_id: string; cell: string | null; market_key: string; status: string; real_pnl_eur: number | null;
+  paper_net_eur: number | null; created_at: string | null;
+}
+export interface SignalsDto {
+  estimate: boolean; not_tax_advice: boolean;
+  registrations: { first: { hash: string; registered_at: string | null }; events: { hash: string; registered_at: string | null } };
+  cells: SignalCell[]; open_positions: SignalOpenPosition[]; journal: SignalJournalRow[];
+  bankroll: {
+    month_eur: string; day_eur: string; ok: boolean; reason: string; resumes: string; pot: string;
+    monthly_stop: string; daily_stop: string; max_open: number; open_real: number;
+  };
+  owner_call: SignalCell | null; limits: Record<string, string | number>;
+}
+export const getSignals = () => api<SignalsDto>("/api/desk/signals");
 /** The owner's own record of a manual Trading 212 trade. Never an order. */
 export const postCfdJournal = (positionId: string, body: CfdJournalAction) =>
   api<CfdJournalRow>(`/api/desk/cfd/${positionId}/journal`, { method: "POST", body: JSON.stringify(body) });

@@ -43,7 +43,8 @@ from app.foundation.evidence_weights import centred_rank_weights, efficient_weig
 from app.foundation.index_universe import universe_symbols
 from app.foundation.models.entities import ForwardLabDaily, ForwardLabSnapshot, NewsToneScore
 import app.lab.forward_lab.robustness as rb
-from app.lab.forward_lab.signals import BY_NAME, HISTORY_DAYS, NEWS_SIGNAL, PRICE_SIGNALS, SIGNAL_NAMES
+from app.lab.forward_lab import option_smirk
+from app.lab.forward_lab.signals import BY_NAME, HISTORY_DAYS, NEWS_SIGNAL, OPTION_SIGNAL, PRICE_SIGNALS, SIGNAL_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,7 @@ def score_day(db: Session, panel: pd.DataFrame, real: pd.DataFrame, bench: pd.Se
     all_scores = _price_scores(panel, real, bench, as_of)
     priced = {sym for sym in panel.columns if bool(real.at[as_of, sym])}
     all_scores[NEWS_SIGNAL.name] = _news_scores(db, as_of, priced)
+    all_scores[OPTION_SIGNAL.name] = {k: v for k, v in option_smirk.stored_scores(db, as_of).items() if k in priced}
     written = 0
     for name in SIGNAL_NAMES:
         scores = all_scores.get(name) or {}

@@ -111,8 +111,11 @@ def _trade(p: DeskPosition) -> Trade | None:
 
 
 def scorecard(db: Session) -> dict[str, Any]:
-    reg_at = prereg.registered_at(db)
-    cells: dict[str, list[Trade]] = {c: [] for c in prereg.CELLS}
+    return _scorecard(db, prereg.registered_at(db), prereg.CELLS, prereg.PREREG_HASH, None)
+
+
+def _scorecard(db: Session, reg_at, cell_names, spec_hash: str, only_hash: str | None) -> dict[str, Any]:
+    cells: dict[str, list[Trade]] = {c: [] for c in cell_names}
     external = 0
     if reg_at is not None:
         rows = db.query(DeskPosition).filter(DeskPosition.mode == "paper", DeskPosition.status == "closed").all()
@@ -122,7 +125,7 @@ def scorecard(db: Session) -> dict[str, Any]:
                 continue
             if p.signal == "external":
                 external += 1
-            elif p.cell in cells and (t := _trade(p)):
+            elif p.cell in cells and (only_hash is None or p.prereg_hash == only_hash) and (t := _trade(p)):
                 cells[p.cell].append(t)
     scored = {c: score_cell(t) for c, t in cells.items()}
     adjusted = holm({c: s["p"] for c, s in scored.items()})
@@ -139,7 +142,7 @@ def scorecard(db: Session) -> dict[str, Any]:
             "would_take_live": _split(trades, lambda t: t.would_take_live),
         }
     return {
-        "prereg_hash": prereg.PREREG_HASH, "registered_at": reg_at.isoformat() if reg_at else None,
+        "prereg_hash": spec_hash, "registered_at": reg_at.isoformat() if reg_at else None,
         "n_min": N_MIN, "cells": scored, "external_closed": external,
         "estimate": True, "not_tax_advice": True,
     }

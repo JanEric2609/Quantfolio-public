@@ -24537,6 +24537,30 @@
         ]
       }
     },
+    "/api/desk/signals": {
+      "get": {
+        "description": "The Signals page (ADR 0028): every cell of both registrations, the replay, the owner's real trades\nbeside the paper ones, the open event positions and the bankroll.",
+        "operationId": "get_signals_api_desk_signals_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Signals Api Desk Signals Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Signals",
+        "tags": [
+          "desk"
+        ]
+      }
+    },
     "/api/desk/status": {
       "get": {
         "operationId": "get_status_api_desk_status_get",

@@ -214,3 +214,10 @@ desk limit becomes a setting.
     USA 500 and USA Tech 100 are futures-based CFDs (its instrument pages are `USA500.DEC26` and `TECH100.DEC26`).
     Its prices that night sat a few tenths of a percent above the cash index scaled by the ETF proxy. The message
     says so; the stop counts from the owner's fill, so it is unaffected.
+
+## Amendment 2026-11-24: the event desk (ADR 0028)
+
+The registration above, its hash and its limits are unchanged. ADR 0028 adds a second, separate registration
+with six more paper cells. One invariant of this ADR changes there: the news wire may open **paper** positions
+in the event desk's `hype_fade` and `news_drift` cells. It still never closes or blocks a position, and no order
+path exists.
