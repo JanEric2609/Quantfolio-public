@@ -320,3 +320,11 @@ def test_a_short_dated_or_low_vol_american_option_prices_without_dividing_by_zer
     assert set(g) == {"delta", "gamma", "theta_per_day", "vega_per_point"}
     far = derivatives.binomial_american("put", 90.0, 100.0, 7 / 365, 0.02, 0.2)
     assert far == pytest.approx(10.0, abs=0.1)
+
+
+def test_the_american_fallback_is_never_below_exercise_value():
+    for args in (("put", 90.0, 100.0, 7 / 365, 0.02, 0.005), ("put", 60.0, 100.0, 7 / 365, 0.02, 0.01),
+                 ("call", 120.0, 100.0, 7 / 365, 0.02, 0.005)):
+        assert derivatives.binomial_american(*args) >= derivatives._intrinsic(args[0], args[1], args[2]) - 1e-12
+    # So a price below exercise value has no implied volatility.
+    assert derivatives.implied_vol(9.9, "put", "american", 90.0, 100.0, 7 / 365, 0.02) is None

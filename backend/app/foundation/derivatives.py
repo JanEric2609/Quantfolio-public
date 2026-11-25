@@ -138,11 +138,11 @@ def binomial_american(
     p_star = _lr_inversion(d1, n)
     if not (0.0 < p < 1.0 and 0.0 < p_star < 1.0):
         # The inversion saturates for a short-dated or low-vol option far from the strike.
-        return black_scholes(kind, spot, strike, years, rate, vol)
+        return max(black_scholes(kind, spot, strike, years, rate, vol), _intrinsic(kind, spot, strike))
     up = grow * p_star / p
     down = (grow - p * up) / (1.0 - p)
     if not 0.0 < down < up:
-        return black_scholes(kind, spot, strike, years, rate, vol)
+        return max(black_scholes(kind, spot, strike, years, rate, vol), _intrinsic(kind, spot, strike))
     disc = 1.0 / grow
     values = [_intrinsic(kind, spot * up ** (n - i) * down ** i, strike) for i in range(n + 1)]
     for step in range(n - 1, -1, -1):
