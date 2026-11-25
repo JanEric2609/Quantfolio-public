@@ -8,8 +8,8 @@ Prepared ahead of the January update in `AGENTS.md` ("Tax cockpit"). Nothing in 
 |---|---|---|---|
 | `BASISZINS_BY_YEAR` (`vorabpauschale.py`) | not published | The Bundesbank computes it on the first trading day of January and the BMF letter follows. 2026: reference date 2 Jan 2026, letter of 13 Jan 2026, 3.20 % | Add the 2027 line when the BMF letter appears (expect mid-January 2027). Until then 2027 falls back to 3.20 %, flagged unknown |
 | `GRUNDFREIBETRAG_BY_YEAR` (`gain_harvest.py`) and `Tariff.grundfreibetrag` | **12,564 EUR** (2028: 12,900) | Cabinet draft of the Einkommensteuerreformgesetz 2027 (2 Sep 2026). Parliament and Bundesrat steps not confirmed | Add 2027 only after promulgation |
-| `TARIFF_BY_YEAR` (`income_tax.py`) | not available | The draft restructures the tariff; no coefficients were in any source read | Do not add. The `Tariff` dataclass will not fit (see below) |
-| `FAMILIENVERSICHERUNG_MONTHLY_LIMIT_BY_YEAR` (`gain_harvest.py`) | probably **590 EUR** (4,130 / 7) | Bezugsgroesse 4,130 EUR came from a summary of the BMAS release and is **unverified**. Regulation: Bundesrat consent obtained (Bundesregierung, 20 Nov 2026) | Confirm the Bezugsgroesse in the regulation text, then add |
+| `TARIFF_BY_YEAR` (`income_tax.py`) | coefficients in the Regierungsentwurf (see below) | Draft only (BR-Drs 507/26, 4 Sep 2026) | Stage the numbers now, add only after promulgation. The `Tariff` dataclass will not fit (see below) |
+| `FAMILIENVERSICHERUNG_MONTHLY_LIMIT_BY_YEAR` (`gain_harvest.py`) | **590 EUR** (4,130 / 7) | Bezugsgroesse 4,130 EUR a month (49,560 a year) is in section 1 of BR-Drs 576/26. Bundesrat consent obtained (Bundesregierung, 20 Nov 2026); the BGBl. publication was not checked | Add after promulgation in the BGBl. |
 
 ## Details and sources
 
@@ -18,17 +18,26 @@ Prepared ahead of the January update in `AGENTS.md` ("Tax cockpit"). Nothing in 
 - PwC blog, 19 Aug 2026 (on the 18 Aug draft): https://blogs.pwc.de/de/steuern-und-recht/article/256501/bmf-entwurf-eines-einkommensteuerreformgesetzes-2027
 - Bundestag Drucksache 21/8530, 13 Oct 2026 (still calls it the Regierungsentwurf): https://dserver.bundestag.de/btd/21/085/2108530.pdf
 
-**Tariff (section 32a EStG).** The draft changes the tariff for the assessment year 2027:
-- the second progression zone is flattened up to a taxable income of 70,600 EUR (the code's 2026 zone 2 ends at 69,878);
-- 42 % from 70,601 to 249,999 EUR;
-- the 45 % threshold falls from 277,826 to 250,000 EUR;
-- a new 47 % rate from a taxable income of 280,000 EUR.
+**Tariff (section 32a EStG).** The Regierungsentwurf (BR-Drs 507/26, Article 1 no. 4, Article 2 no. 2) gives the formulas. Only the first 60 % of the PDF, which includes the whole operative text, was read verbatim. Taxable income in EUR; y is one ten-thousandth of the part above the Grundfreibetrag, z one ten-thousandth of the part above 17,799, x the rounded income; the tax is rounded down.
 
-None of the pages gave the formulas or coefficients. `income_tax.py` models four zones and a 45 % top rate through the `Tariff` dataclass (`zone2_end`, `zone3_end`, `zone5_start`, `c4`, `c5`). A 47 % band needs a new zone and a new constant, so January means a code change as well as new numbers. Take the coefficients from the promulgated section 32a text (Bundesgesetzblatt) or the BMF Programmablaufplan for 2027, and check the result with a hand-computed case, as the tests for 2024 to 2026 do.
+| Zone (2027) | Formula |
+|---|---|
+| up to 12,564 | 0 |
+| 12,565 to 17,799 | (952.24 y + 1,400) y |
+| 17,800 to 70,600 | (170.74 z + 2,397) z + 993.86 |
+| 70,601 to 249,999 | 0.42 x - 11,241.73 |
+| 250,000 to 279,999 | 0.45 x - 18,741.70 |
+| 280,000 and above | 0.47 x - 24,341.68 |
+
+For 2028 the draft has a Grundfreibetrag of 12,900, 1,017.55 in zone 2, 930.08 in zone 3, and constants 11,305.52, 18,805.49 and 24,405.47 in zones 4 to 6. A continuity check at 70,600 EUR gives 18,410.9 and 18,410.3 from the two formulas, which is rounding.
+
+Mapping to `income_tax.py`: the second field of `Tariff` (`zone2_end`) is the end of the first progression zone, 17,799, which does not change. The end of the second progression zone, 69,878 in 2026, sits in `zone3_end`; it becomes 70,600. The 2027 values map to `a2` = 952.24, `a3` = 170.74, `c3` = 993.86, `c4` = 11,241.73, and the 45 % band now starts at 250,000 (`zone5_start`, `c5` = 18,741.70). The 47 % band needs a new field pair (start 280,000, constant 24,341.68) and a branch in `income_tax()`. A hand-computed test belongs at each zone edge.
+
+Sources: https://dserver.bundestag.de/brd/2026/0507-26.pdf (draft text), the Bundesregierung Q&A and the PwC summary above, and the Bundestag answer 21/8530, which refers to a shift of selected tariff corner values.
 
 **Capital-income rules.** The three sources do not mention the Sparer-Pauschbetrag (1,000 / 2,000 EUR), the 25 % flat tax, the Solidaritaetszuschlag, the Teilfreistellung or the Vorabpauschale. The ministry draft is said to leave them unchanged; the cabinet text itself was not checked.
 
-**Familienversicherung limit.** 2026 uses 565 EUR, one seventh of the 2026 Bezugsgroesse of 3,955 EUR. For 2027 the Bundesregierung page of 20 Nov 2026 confirms the Bundesrat consented to the Sozialversicherungsrechengroessen-Verordnung 2027 and lists the Beitragsbemessungsgrenze of the statutory health insurance at 6,375 EUR a month and the Versicherungspflichtgrenze at 84,150 EUR a year. The Bezugsgroesse itself (4,130 EUR a month, 49,560 a year) is only in a model summary of the BMAS release. 4,130 / 7 = 590.
+**Familienversicherung limit.** 2026 uses 565 EUR, one seventh of the 2026 Bezugsgroesse of 3,955 EUR. For 2027 the Bundesregierung page of 20 Nov 2026 confirms the Bundesrat consented to the Sozialversicherungsrechengroessen-Verordnung 2027 and lists the Beitragsbemessungsgrenze of the statutory health insurance at 6,375 EUR a month and the Versicherungspflichtgrenze at 84,150 EUR a year. The Bezugsgroesse itself is verbatim in section 1 of the regulation (BR-Drs 576/26, https://dserver.bundestag.de/brd/2026/0576-26.pdf): 49,560 EUR a year, 4,130 EUR a month. 4,130 / 7 = 590.
 - https://www.bundesregierung.de/breg-de/aktuelles/beitragsbemessungsgrenzen-2027-2454638
 - https://www.deutsche-rentenversicherung.de/DRV/DE/Ueber-uns-und-Presse/Presse/Meldungen/2026/261008-bundeskabinett-sv-rechengroessen-2027.html
 - https://www.bmas.de/DE/Service/Presse/Pressemitteilungen/2026/bundeskabinett-beschliesst-sozialversicherungsrechengroessen-2027.html
@@ -39,10 +48,10 @@ None of the pages gave the formulas or coefficients. `income_tax.py` models four
 ## January checklist (when the values are final)
 
 1. Basiszins 2027 into `BASISZINS_BY_YEAR` with the letter date in the comment.
-2. After promulgation: Grundfreibetrag 2027 into `GRUNDFREIBETRAG_BY_YEAR`, the new section 32a zones into `income_tax.py` (extend `Tariff` for the 47 % band), a hand-computed test at each zone edge.
-3. Familienversicherung limit for 2027 once the Bezugsgroesse is confirmed in the regulation.
+2. After promulgation: Grundfreibetrag 2027 into `GRUNDFREIBETRAG_BY_YEAR`, the section 32a zones from the promulgated text (compare with the table above) into `income_tax.py` with the 47 % band, a hand-computed test at each zone edge.
+3. Familienversicherung limit 590 EUR for 2027 once the regulation is in the BGBl.
 4. Run `tests/test_tax_cockpit.py`, `tests/test_gain_harvest*.py` and the tariff tests; assert `estimate` and `not_tax_advice`.
 
 ## Limits of this research
 
-Eleven pages were opened and about thirty search results were listed; the request for 100+ sources was not reached for this item, because the decisive documents (the final law text, the BMF letter) do not exist yet. Re-run the search once the Bundestag has passed the reform and in the second week of January.
+Fifteen pages were opened and about thirty search results were listed; the request for 100+ sources was not reached for this item, because the decisive documents (the final law text, the BMF letter) do not exist yet. Re-run the search once the Bundestag has passed the reform and in the second week of January.
