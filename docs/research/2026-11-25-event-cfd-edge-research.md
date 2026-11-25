@@ -11,7 +11,7 @@ Evidence tags used below: **[read]** I read the paper text through the PDF tool;
 5. **Everything below is hypothesis-grade until the replay on deep history says otherwise.** Expected outcome: null. A null is still useful because it ends the search honestly.
 
 ## 2. What was and was not done
-- Asked for 250+ independent sources. **Reached about 242 distinct sources surfaced** (web results across 20 searches plus alphaXiv discovery across 14 calls, after dropping off-topic hits) and, after a second reading pass, **14 read in full** [read] (6 in the first pass; the first version of this report wrongly said 7). The other roughly 228 are title or abstract lines only, tagged [listed], and perhaps 100 of them are directly on point; the rest are background (theses, vendor pages, adjacent topics). Treat 'about 242' as a count of sources seen, not of sources studied; I have not read 250 papers. The previous reviews in `cfd-review/` already carry about 110 further sources; I did not repeat them.
+- Asked for 250+ independent sources. **Reached about 242 distinct sources surfaced** (web results across 20 searches plus alphaXiv discovery across 14 calls, after dropping off-topic hits) and, after a second reading pass, **19 read in full** [read] (14 before the commodity and FX extension in section 3.11, which added 5 papers; the first version of this report wrongly said 7) plus 3 Trading 212 cost documents read in full. The other roughly 228 are title or abstract lines only, tagged [listed], and perhaps 100 of them are directly on point; the rest are background (theses, vendor pages, adjacent topics). Treat 'about 242' as a count of sources seen, not of sources studied; I have not read 250 papers. The previous reviews in `cfd-review/` already carry about 110 further sources; I did not repeat them.
 - The sandbox cannot reach market-data hosts (Yahoo, Stooq, FRED return 403 from the proxy), so **no replay was run on real prices here**. The new replay is tested on synthetic data and must be run on the production host.
 - Several 2026 papers are single-author or vendor-affiliated arXiv preprints. I weight them as hypotheses, not facts, and say so per item.
 
@@ -70,6 +70,34 @@ I went looking for the papers most likely to contradict "no cost-robust directio
 - **[read, rejected] Zhang 2505.16136 (GDELT + FinBERT + XGBoost).** Reports Sharpe 5.87 on EUR/USD daily with 72.7% winning days after costs. That is not credible for a daily FX direction signal: GDELT dates and headlines fetched from live URLs invite look-ahead, there is one author and no external check, and the table caption still carries an unedited instruction ("values must accurately reflect results"). I do not count it as evidence.
 Net: 14 papers read, 0 contradict the null, 1 makes it more specific (short-term trend died on index large-return days), 1 is a credibility failure. No new rule is added to the code because nothing new holds up.
 
+### 3.11 Commodities and FX (extension requested after the first version)
+Same rigour, same honesty. Short answer: the evidence for commodities and FX is **better than for index strong days in one place (slow trend) and no better anywhere else**, and the CFD cost structure decides how much of it a retail account can keep.
+
+**Cost facts from Trading 212's own documents [read: Help Centre fees article, Commodity KID revised 08.06.2026, Costs and Charges Disclosure]:**
+- Commission: none. The spread is the cost, it is dynamic and charged on open and again on close. The published average-spread table was not in the fetched text, so spreads per instrument are **not** known to me; they sit on each instrument's detail page in the app.
+- Overnight: charged for positions held past 22:00 GMT. The only published rates are worked examples (illustrative): EUR/USD long -0.0095 %/day, short +0.0039 %/day (a credit); crude oil long -0.0245 %/day, short -0.0005 %/day; Tech 100 long -0.0231 %/day, short 0. Gold, silver, Brent and the other FX pairs have no published rate in those documents. Long crude at that example rate is about 9 % a year of notional, which is why a held long commodity CFD has to out-earn its financing before it earns anything.
+- A 0.5 % FX fee applies to the *result* of a position in an instrument not priced in the account currency (every USD-priced commodity and USD pair).
+- Retail leverage: 20:1 on gold, 10:1 on other commodities (KID); the KID rates commodity CFDs 7 of 7 on risk. FX margin is not stated in those documents.
+
+**What the five papers read say:**
+- Sepp and Lucic, trend-following systems [read, 2607.19497, 84 futures 1997-2026]: net Sharpe of the three trend designs 0.47, 0.50, 0.55 against 0.47 for the SG Trend Index after 2/20 fees, at one-way futures costs of 3 bp (FX) to 10 bp (commodities) from 2003. Trend profit is an autocorrelation effect; the lag-1 autocorrelation of volatility-scaled returns fell from about 0.04 in the 1990s to about 0.01 after 2010; at realised costs of 40 to 60 bp per unit of turnover the short-memory part is not exploitable and only the one-to-three-month long-memory part survives. Slow, discrete (American-style, stop-based) systems turn over about half as much as continuous ones. A CFD costs several times a futures contract, so this is a **ceiling**, and it is a diversified 84-market portfolio, not two or three instruments.
+- Butler et al., time-series momentum by market [read, 2611.15646]: commodity sectors show roughly linear momentum even at extreme readings; bonds, currencies and equities **mean-revert when the 12-month signal is extreme** (about three sigma or more) and the average net return at those extremes is negative across models. Net Sharpe ratios fell towards zero in the last decade for the 1- and 6-month signals; the 12-month signal held up best. It supports "trend in commodities, be careful chasing an extreme in FX", and it matches the shock replay's fade cells.
+- Butler et al., seasonality [read, 2611.15657, 50 futures, walk-forward 1995-2026]: fast calendar effects (day of week, day of month) have gross Sharpe around 0.5 to 0.75 and **negative net Sharpe** (about -4.0 and -0.5); the slow ones survive costs (day of year net about 0.39, day of half-year positive). The signals are fitted on all earlier data, tested on the next year, and the gross alpha sits mostly in agriculture and energy. Not a CFD-sized edge.
+- Kosch and Forsberg, commodity seasonality [read, 2609.12227, 15 futures, 2016-2024 out of sample]: none of the 18 Holm-adjusted tests against an equal-weight long benchmark rejects, model rankings flip between sub-periods, and they cite Li et al. (2024) that commodity seasonality has weakened. Treat calendar rules on commodities as dead.
+- Singha et al., gold trend-momentum "forecast-to-fill" [read, 2511.08571]: reports a net Sharpe of 2.88 on gold futures 2015-2025. I do **not** treat it as evidence. The strategy is long-only and its profit sits in self-labelled bull regimes; the realised volatility is 0.91 % (the 43 % return is a 16.5x scaling of it); the paper's own stress table takes the Sharpe from 1.9 at half cost to about zero at 1.5 times cost and negative at double, with costs of 0.7 bp round trip, which no CFD comes near; and the SPA test p of exactly 0.000 over 64 configurations comes from the authors' own grid. It is a useful warning: its edge dies at a cost multiple a gold CFD sits above.
+
+**What I know without reading it in this session [background, verify before relying]:**
+- FX carry (high-yield long, low-yield short) pays a risk premium with crash risk (2008, 2015, 2020) and a Sharpe near 0.5 before costs that has faded since 2008. On a CFD the financing *is* the carry, and the broker's markup on the benchmark takes a visible part of it; a single pair held for the carry nets little. The published EUR/USD example (long pays about 3.5 % a year, short receives about 1.4 %) is an example of that gap, not a general rate.
+- Pre-FOMC drift and scheduled-announcement premia are documented for US equities; for FX and gold the event day is mostly volatility with no stable sign, and spreads widen at the release, which is when a CFD fill is worst.
+- Gold reacts inversely to real yields and the dollar; crude reacts to the weekly inventory release and to OPEC headlines. Both reactions are priced within minutes, the same finding as section 3.1.
+- Futures-based trend results come with roll yield (carry) that a CFD on the rolled price series also pays or earns through the contract price, but a CFD adds its own overnight charge on top.
+
+**Honest read for a retail commodity and FX CFD account:**
+1. **Slow trend with a wide state exit is the one family with decades of evidence**, and it is the natural fit for "no fixed time exit". The cost is financing per night held plus a few spreads a year; at 0.0245 % a night a 60-day hold costs about 1.5 % of notional. The edge claim is a diversified portfolio Sharpe of roughly 0.4 to 0.55 gross of CFD frictions; on a handful of instruments the result is dominated by a few big trends and long flat drawdowns. I score it E 4, C 2, F 4.
+2. **Strong-day ride on gold, crude and the USD pairs is untested, and the prior is null**, the same as for the indices. It is built and ready to run (section 6) because the engine already exists and the two options-implied vol indices (`^GVZ`, `^OVX`, `^EVZ`) give the same ex-ante "surprise" trigger.
+3. **FX majors have the lowest spreads (about 1 pip in the published example) and the weakest post-2010 trend evidence**; their retail attraction is cost, not edge.
+4. Calendar and day-of-week rules are out for commodities. Gold-specific "alpha" preprints with a Sharpe above 2 should be treated as a red flag, not a lead.
+
 ## 4. Ranked ideas
 Scores: evidence (E), cost-robustness at retail CFD costs (C), feasibility with Quantfolio and the homelab (F), each 1 to 5. "Edge claim" = does the evidence support a directional edge after costs.
 
@@ -87,6 +115,10 @@ Scores: evidence (E), cost-robustness at retail CFD costs (C), feasibility with 
 | 10 | GEX purchase or build | 2 | 4 | 1 | Largely VIX | Do not |
 | 11 | LLM headline direction (Qwen 9B or other) | 1 | 3 | 4 | Evidence says no after look-ahead control | Use only to classify day type |
 | 12 | Order-flow / tick latency, cross-market HFT lead-lag | 4 | 1 | 1 | Real but not retail-executable | Do not |
+| 13 | Slow trend (100-day breakout or 12-month sign, wide ATR or slow-EMA state exit) on 6 to 10 commodity and FX CFDs, risk-sized, financing charged | 4 | 2 | 4 | The best-evidenced family; a diversified-portfolio edge, much thinner on a few CFDs | Specified, **not built** (needs a wider exit than the shared engine's 3 ATR / EMA10) |
+| 14 | Strong-day ride on gold, silver, WTI, Brent, copper and six USD pairs, implied trigger from GVZ/OVX/EVZ | 2 | 2 | 5 | Unproven; prior null | **Built** (`lab/commodity_fx_replay.py`), costs are assumptions until read off the app |
+| 15 | FX carry through CFD financing | 3 | 1 | 3 | The broker's markup eats most of it; crash risk | Do not build; read the live overnight rate per pair first |
+| 16 | Commodity or FX calendar / seasonality rules | 2 | 1 | 4 | Fast ones net negative, slow ones fragile, commodity seasonality weakened | Dead |
 
 ## 5. Exits without a clock: what is and is not true
 - A stopping or exit rule cannot make a zero-expectation entry positive (optional stopping under a martingale). It changes variance, skew and the hit rate. A high hit rate from "cut losers, let winners run" is a payoff shape, not an edge.
@@ -105,6 +137,8 @@ Scores: evidence (E), cost-robustness at retail CFD costs (C), feasibility with 
 
 Review fixes (after the automated review on PR #39): the verdict p-value is now a quarter-block bootstrap (trades overlap and four indices are correlated, so the plain t overstates significance; the t-based p stays as a descriptive field). The required control is the **side placebo** (same strong days, random sides), because random dates are cheaper to trade in calm markets and would flatter the real cells; the random-date placebo is kept as a descriptive extra. An empty VIX/VXN history no longer adds empty cells or inflates the Holm family.
 
+**Commodity and FX replay (added).** `backend/app/lab/commodity_fx_replay.py`, `backend/scripts/commodity_fx_replay.py`, `backend/tests/test_commodity_fx_replay.py`: the same engine, constants, side placebo and block bootstrap on five commodities (GC=F, SI=F, CL=F, BZ=F, HG=F) and six USD pairs, as two separate families with their own Holm set (so up to 16 declared trials in total). The costs in the table are **assumptions** set at or above the published examples; `--cost-mult 2` asks whether anything survives double. Continuous futures have unadjusted roll gaps. Run: `python scripts/commodity_fx_replay.py --since 2000 --draws 200 --write` (and again with `--cost-mult 2`).
+
 ## 7. Next steps, in order
 1. Run the replay on prod (about 1 to 2 minutes). Expected: null. If any cell passes, run it again on a disjoint period before anything else.
 2. If null, stop searching for directional rules on four indices and put the effort into the **journal** (item 6): at every strong-day alert store the live spread, VIX, event class and the Kalshi probability move. About 30 to 40 such days a year is the only way to learn the real cost at the moment it matters.
@@ -112,6 +146,8 @@ Review fixes (after the automated review on PR #39): the verdict p-value is now 
 4. Optional, research only: run the Baltussen ROD signal conditional on VIX terciles (a gamma proxy) on SPY/QQQ 30-minute data that already exists.
 5. Optional descriptive checks for the next replay version (no new pre-registered trial): split shock results by volatility regime (low versus high VIX tercile), and measure the overnight-only return of Tech 100 CFD on non-event days net of financing and spread.
 6. Keep the Qwen 9B for tagging the day type from headlines; do not let it pick direction.
+7. Run the commodity and FX replay on prod. Before reading anything into it, copy the real spread and overnight rates for gold, WTI, Brent, EUR/USD and the other pairs from each instrument's detail page in the app into the table (or use `--cost-mult`). Expected: null.
+8. If a slow-trend test is wanted, pre-register it before running: instruments (gold, silver, WTI, Brent, copper, EUR/USD, USD/JPY, GBP/USD, AUD/USD), entry = close beyond the prior 100-day high or low, exit = close back through the 50-day EMA or a 5-ATR chandelier, risk-based sizing, financing per night, 2005 onward in two halves, side placebo and block bootstrap as the control, Holm over at most four cells. It needs a wider-exit parameter in the shared engine, so it is a separate small change.
 
 ## 8. Things I would not claim
 - That any of this will make money. The honest prior from sections 3.1 to 3.2 is that it will not at CFD spreads.
@@ -121,7 +157,13 @@ Review fixes (after the automated review on PR #39): the verdict p-value is now 
 ## 9. Sources
 Counts: see section 2. R = read in full, otherwise listed (title/abstract seen only).
 
-### Read in full (14)
+### Read in full (19)
+- R https://arxiv.org/abs/2607.19497 Sepp, Lucic, The science and practice of trend-following systems (84 futures, costs, autocorrelation decline)
+- R https://arxiv.org/abs/2611.15646 Butler, Zawadzki, Butler, Idiosyncratic market effects in global time series momentum
+- R https://arxiv.org/abs/2611.15657 Butler, Butler, Zawadzki, Global seasonality factor investing
+- R https://arxiv.org/abs/2609.12227 Kosch, Forsberg, Seasonal trading in commodity futures (regression and SSA)
+- R https://arxiv.org/abs/2511.08571 Singha et al., Forecast-to-fill gold futures (read as a credibility check, see 3.11)
+- R (Trading 212 documents, not counted above) Help Centre fees article 11471872562461; Commodity KID (revised 08.06.2026); Costs and Charges Disclosure
 - R https://arxiv.org/abs/2605.04004 Mesfin, Structural limits of OHLCV intraday momentum signals in MNQ
 - R https://arxiv.org/abs/2611.22177 Wang, The only edge was memorized in training
 - R https://arxiv.org/abs/2608.14014 Kargarzadeh et al., Buy the rumor, sell the news
