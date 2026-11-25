@@ -9,7 +9,7 @@ underlying's close this module works out what the price implies:
 
 * the implied volatility (the volatility a model price needs to match the
   broker's mid), from Black-Scholes for a European warrant and a
-  Cox-Ross-Rubinstein tree for an American one;
+  Leisen-Reimer tree for an American one;
 * delta, gamma, theta and vega by finite differences on the same pricer;
 * the stock-equivalent exposure in EUR (``delta x ratio x quantity x price``;
   negative for a put), the time decay per day, the break-even at expiry and
@@ -111,25 +111,44 @@ def black_scholes(kind: str, spot: float, strike: float, years: float, rate: flo
     return spot * _norm_cdf(d1) - disc * _norm_cdf(d2)
 
 
+def _lr_inversion(z: float, n: int) -> float:
+    """Peizer-Pratt inversion (method 2) used by the Leisen-Reimer tree."""
+    inner = 0.25 - 0.25 * math.exp(-((z / (n + 1.0 / 3.0 + 0.1 / (n + 1.0))) ** 2) * (n + 1.0 / 6.0))
+    return 0.5 + math.copysign(math.sqrt(max(inner, 0.0)), z)
+
+
 def binomial_american(
     kind: str, spot: float, strike: float, years: float, rate: float, vol: float, steps: int = _TREE_STEPS,
 ) -> float:
-    """American option price per share on a Cox-Ross-Rubinstein tree (no dividends)."""
+    """American option price per share on a Leisen-Reimer tree (no dividends).
+
+    Leisen & Reimer (1996) centre the tree on the strike, so the price converges smoothly in the spot.
+    A Cox-Ross-Rubinstein tree converges in a sawtooth, and a second difference of it (gamma) was off
+    by up to 60 % at 200 steps. *steps* is made odd, as the method needs.
+    """
     if years <= 0 or vol <= 0:
         return _intrinsic(kind, spot, strike)
-    dt = years / steps
-    up = math.exp(vol * math.sqrt(dt))
-    down = 1.0 / up
+    n = steps if steps % 2 == 1 else steps + 1
+    dt = years / n
     grow = math.exp(rate * dt)
-    p = (grow - down) / (up - down)
-    if not 0.0 < p < 1.0:
-        return black_scholes(kind, spot, strike, years, rate, vol)
+    sq = vol * math.sqrt(years)
+    d1 = (math.log(spot / strike) + (rate + 0.5 * vol * vol) * years) / sq
+    d2 = d1 - sq
+    p = _lr_inversion(d2, n)
+    p_star = _lr_inversion(d1, n)
+    if not (0.0 < p < 1.0 and 0.0 < p_star < 1.0):
+        # The inversion saturates for a short-dated or low-vol option far from the strike.
+        return max(black_scholes(kind, spot, strike, years, rate, vol), _intrinsic(kind, spot, strike))
+    up = grow * p_star / p
+    down = (grow - p * up) / (1.0 - p)
+    if not 0.0 < down < up:
+        return max(black_scholes(kind, spot, strike, years, rate, vol), _intrinsic(kind, spot, strike))
     disc = 1.0 / grow
-    values = [_intrinsic(kind, spot * up ** (steps - 2 * i), strike) for i in range(steps + 1)]
-    for step in range(steps - 1, -1, -1):
+    values = [_intrinsic(kind, spot * up ** (n - i) * down ** i, strike) for i in range(n + 1)]
+    for step in range(n - 1, -1, -1):
         for i in range(step + 1):
             held = disc * (p * values[i] + (1.0 - p) * values[i + 1])
-            values[i] = max(held, _intrinsic(kind, spot * up ** (step - 2 * i), strike))
+            values[i] = max(held, _intrinsic(kind, spot * up ** (step - i) * down ** i, strike))
     return values[0]
 
 
@@ -177,12 +196,13 @@ def greeks(
     h = spot * 0.01
     base, up, down = price(), price(s=spot + h), price(s=spot - h)
     day = 1.0 / 365.0
+    v_low = max(vol - 0.01, 1e-4)  # vega is divided by the actual width: near the floor it is one-sided
     theta = (price(t=years - day) - base) if years > day else (_intrinsic(kind, spot, strike) - base)
     return {
         "delta": (up - down) / (2 * h),
         "gamma": (up - 2 * base + down) / (h * h),
         "theta_per_day": theta,
-        "vega_per_point": (price(v=vol + 0.01) - price(v=max(vol - 0.01, 1e-4))) / 2.0,
+        "vega_per_point": (price(v=vol + 0.01) - price(v=v_low)) / (vol + 0.01 - v_low) * 0.01,
     }
 
 
@@ -354,6 +374,10 @@ def derivative_positions(db: Session, user_id: str, *, today: date | None = None
                 rate=rate, today=clock,
             )
             analysis["spot_day"] = spot_day.isoformat() if spot_day else None
+            # The implied volatility moves ~3 vol points for a 1 % spot error (ADR 0026 review, 2026-11-25):
+            # say how old the underlying's close is, and that the warrant's price is the broker's, not a mid.
+            analysis["spot_stale_days"] = (clock - spot_day).days if spot_day else None
+            analysis["price_basis"] = "broker price (not a bid/ask mid)"
             row["analysis"] = analysis
             quote = (
                 db.query(DerivativeQuote)

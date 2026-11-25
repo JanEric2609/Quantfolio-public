@@ -69,7 +69,7 @@ buying protection, as Israelov found.
    are not funds for the tax import, get no Vorabpauschale, and are left out of the ETF look-through.
 2. **The owner enters the terms once** (expiry, ratio, strike currency, American or European). The form is
    prefilled from the name. No scraper is used: new products return 404, and scrapers break.
-3. **Show what the price implies.** The implied volatility comes from a CRR tree for American warrants and
+3. **Show what the price implies.** The implied volatility comes from a Leisen-Reimer tree for American warrants (smooth in the spot, so gamma is stable; CRR was a sawtooth) and
    Black-Scholes for European ones. Also shown: delta, theta per day, vega, the stock-equivalent exposure
    in EUR (negative for a put), the break-even at expiry and the value at expiry for moves of −50 % to +50 %.
    All of it is labelled an estimate.
@@ -92,4 +92,4 @@ buying protection, as Israelov found.
   (ANT at 97.17 USD on 2026-11-19).
 - The risk-free rate is the EUR one for every currency, and dividends are taken as zero. The listed and
   warrant expiries differ, so the margin is an estimate.
-- The broker's mid price is used; the spread paid on entry and exit is not modelled.
+- The broker's price is used (the holdings feed's price, not a bid/ask mid; the analysis says how old the underlying's close is); the spread paid on entry and exit is not modelled.
