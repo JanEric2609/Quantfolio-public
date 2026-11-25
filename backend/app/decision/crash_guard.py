@@ -381,7 +381,7 @@ def run_daily(db: Session, *, now: datetime | None = None) -> dict[str, Any]:
     new_high = bool(previous.get("peak_date")) and str(state.peak_date) > str(previous["peak_date"])
     if worst_level != "calm" and (state.drawdown == 0.0 or new_high):
         text = (f"Quantfolio crash guard: {index_name(state.ticker)} is back at its high. "
-                "Anyone who kept the plan running came through it whole.")
+                "The fall that triggered the earlier alerts has fully recovered.")
         alert_owners(db, source="crash_guard", title="Markets back at their high", telegram_text=text,
                      body=text, severity="info", href="/plan")
         sent.append("recovered")

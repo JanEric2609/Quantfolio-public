@@ -14,6 +14,7 @@ from app.foundation.settings import get_setting_row
 
 from . import bankroll, cfd, cfd_journal, event_messages, prereg, prereg_events, scoring, scoring_events
 from . import calendar as cal
+from .cell_names import cell_name
 from .event_limits import EVENT_LIMITS
 
 REPLAY_KEY = event_messages.REPLAY_KEY
@@ -103,9 +104,12 @@ def weekly_digest(db: Session, user_id: str, now: datetime | None = None) -> str
     now = now or datetime.now(UTC)
     ov = signals_overview(db, user_id, now)
     lines = ["Desk week (paper cells; nothing here is advice):"]
-    for c in ov["cells"]:
+    scored = [c for c in ov["cells"] if c["n"]]
+    for c in scored:
         mean = "-" if c["mean_net"] is None else f"{c['mean_net']:+.2f} EUR"
-        lines.append(f"- {c['cell']}: {c['n']} trades, mean {mean} ({c['verdict']})")
+        lines.append(f"- {cell_name(c['cell'])}: {c['n']} trades, mean {mean} ({c['verdict']})")
+    if not scored:
+        lines.append("- No cell has a closed paper trade yet.")
     week_ago = now - timedelta(days=7)
     month_start = now.astimezone(cal.BERLIN).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     rows = db.query(DeskCfdJournal).filter(DeskCfdJournal.user_id == user_id, DeskCfdJournal.status == "closed",
@@ -118,16 +122,16 @@ def weekly_digest(db: Session, user_id: str, now: datetime | None = None) -> str
         [*prereg_events.EVENT_CELLS, cfd.CELL]), DeskPosition.exit_at >= week_ago, DeskPosition.net_eur.isnot(None)).all()
     if paper:
         best, worst = max(paper, key=lambda p: Decimal(str(p.net_eur))), min(paper, key=lambda p: Decimal(str(p.net_eur)))
-        lines.append(f"Paper best: {best.underlying_label} {best.net_eur:+.2f} EUR ({best.cell}); "
-                     f"worst: {worst.underlying_label} {worst.net_eur:+.2f} EUR ({worst.cell}).")
+        lines.append(f"Paper best: {best.underlying_label} {best.net_eur:+.2f} EUR ({cell_name(best.cell)}); "
+                     f"worst: {worst.underlying_label} {worst.net_eur:+.2f} EUR ({cell_name(worst.cell)}).")
     else:
         lines.append("No paper trades closed this week.")
     held = ov["open_positions"]
     if held:
-        lines.append("Next week, still open: " + ", ".join(
-            f"{h['instrument']} {h['direction']} ({h['cell'].split(':')[0]})" for h in held) + ".")
+        lines.append("Still open: " + ", ".join(
+            f"{h['instrument']} {h['direction']} ({cell_name(h['cell'])})" for h in held) + ".")
     else:
-        lines.append("Next week: no event position is open.")
+        lines.append("Still open: nothing.")
     b = ov["bankroll"]
     lines.append(f"Bankroll: month {Decimal(b['month_eur']):+.0f} of the {b['monthly_stop']} EUR stop."
                  + ("" if b["ok"] else f" Paper only until {b['resumes']}."))

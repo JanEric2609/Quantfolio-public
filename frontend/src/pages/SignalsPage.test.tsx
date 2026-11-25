@@ -29,11 +29,11 @@ describe("SignalsPage", () => {
     expect(verdictClass("not significant")).toContain("amber");
   });
 
-  it("renders the cells with their verdicts and one h1", async () => {
+  it("renders the cells with their verdicts and one h2", async () => {
     vi.spyOn(api, "getSignals").mockResolvedValue(dto());
     render(<MemoryRouter><SignalsPage /></MemoryRouter>);
     expect(await screen.findByText("ta_band:cfd")).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
     expect(screen.getAllByTestId("verdict").map((e) => e.textContent)).toEqual(["too early", "failing", "too early"]);
     expect(screen.getByText("n 2000, -0.18 EUR a trade")).toBeInTheDocument();
     expect(screen.getByText("No event position is open.")).toBeInTheDocument();

@@ -75,9 +75,11 @@ export const appChildren: RouteObject[] = [
   ] },
   { path: "watchlist", element: <Navigate to="/research/watchlist" replace /> },
   { path: "transactions", element: <Navigate to="/portfolio/activity" replace /> },
-  { path: "desk", ...lazyNamed(() => import("../pages/DeskPage"), "DeskPage"), handle: { title: "Derivatives desk" } },
-  { path: "desk/intraday", ...lazyNamed(() => import("../pages/IntradayPage"), "IntradayPage"), handle: { title: "Intraday CFD" } },
-  { path: "desk/signals", ...lazyNamed(() => import("../pages/SignalsPage"), "SignalsPage"), handle: { title: "Signals" } },
+  { path: "desk", ...lazyNamed(() => import("../pages/DeskLayout"), "DeskLayout"), handle: { title: "Derivatives desk" }, children: [
+    { index: true, ...lazyNamed(() => import("../pages/DeskPage"), "DeskPage"), handle: { title: "Derivatives desk" } },
+    { path: "intraday", ...lazyNamed(() => import("../pages/IntradayPage"), "IntradayPage"), handle: { title: "Derivatives desk — Intraday CFD" } },
+    { path: "signals", ...lazyNamed(() => import("../pages/SignalsPage"), "SignalsPage"), handle: { title: "Derivatives desk — Signals" } },
+  ] },
   { path: "tax", ...lazyRoute(() => import("../pages/tax/TaxCockpitLayout")), handle: { title: "Tax Cockpit" }, children: [
     { index: true, element: <Navigate to="overview" replace /> },
     { path: "overview", ...lazyNamed(() => import("../pages/tax/OverviewTab"), "OverviewTab"), handle: { title: "Tax Cockpit — Overview" } },

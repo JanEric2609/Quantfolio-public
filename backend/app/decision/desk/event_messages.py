@@ -14,14 +14,14 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import DeskCfdJournal, DeskPosition
-from app.foundation.settings import get_setting_row
 
 from . import bankroll, cfd_instruments, cfd_journal, scoring_events, service
 from . import calendar as cal
+from .cell_names import cell_name
+from .replay_store import REPLAY_KEY, replay_summary  # noqa: F401 - re-exported
 from .event_limits import EVENT_LIMITS
 from .ledger import events_for
 
-REPLAY_KEY = "desk_signal_replay_json"
 RESEARCH = {
     "ta_trend:cfd": "Research: moving-average crosses show little edge after costs in large caps and indices; this tests it.",
     "ta_band:cfd": "Research: fading a Bollinger break works in ranges and loses in strong trends; untested after costs here.",
@@ -55,17 +55,6 @@ REPLAY_LOSS_T = -2.0
 REPLAY_MIN_N = 100
 
 
-def replay_summary(db: Session, cell: str) -> dict[str, Any] | None:
-    """The cell's pooled replay summary from ``desk_signal_replay_json``, or None (no history, unreadable)."""
-    raw = get_setting_row(db, REPLAY_KEY)
-    try:
-        replay = json.loads(raw) if isinstance(raw, str) else raw
-    except ValueError:
-        return None
-    rp = replay.get(cell) if isinstance(replay, dict) else None
-    return rp if isinstance(rp, dict) else None
-
-
 def replay_loses(db: Session, cell: str) -> str:
     """``""``, or the reason the replay rules the cell out for real money."""
     rp = replay_summary(db, cell)
@@ -97,7 +86,8 @@ def paper_only_reason(db: Session, user_id: str, cell: str, now: datetime) -> st
     if not g.ok:
         return f"Bankroll stop: {g.reason}. Paper only until {g.resumes}."
     if cell_state(db, cell)["verdict"] == "failing":
-        return "This cell is failing its own test (40 or more paper trades, mean at or below zero). Paper only."
+        return (f"This rule is failing its own test ({cell_state(db, cell)['n_min']} or more paper trades, mean at "
+                "or below zero). Paper only.")
     return replay_loses(db, cell)
 
 
@@ -132,22 +122,26 @@ def open_text(db: Session, position: DeskPosition, journal: DeskCfdJournal, now:
         only = paper_only_reason(db, position.user_id, cell, now)
     side = position.direction
     name = inst.t212_name if inst else journal.market_key
-    lines = [f"{_label(position, journal)} {side}: CFD, manual (Trading 212: {name})",
-             f"Why: {fill.get('reason') or cell}", RESEARCH.get(cell, ""), evidence_line(db, cell)]
+    head = f"{_label(position, journal)} {side}: CFD, manual (Trading 212: {name})"
+    # The action first (what to do, how big, where the stop is), the evidence after it. A message without
+    # order details says so in its first line, not at the bottom.
+    lines = [head + (" - PAPER ONLY, no order details" if only else ""),
+             f"Why: {fill.get('reason') or cell_name(cell)}"]
     qty = Decimal(journal.quantity_suggested or 0)
     exposure = Decimal(journal.exposure_eur or 0)
     entry = Decimal(journal.index_level_est or 0)
     if inst is not None and not only:
         margin = exposure * inst.margin_rate
         lines.append(f"Quantity {qty:.4f} (~ {exposure:,.0f} EUR, margin ~ {margin:,.0f} EUR, leverage "
-                     f"{Decimal(1) / inst.margin_rate:.0f}x). Loss at the stop ~ {fill.get('loss_at_stop', '5')} EUR, "
-                     "overnight to the exit date included.")
+                     f"{Decimal(1) / inst.margin_rate:.0f}x). Loss at the stop ~ "
+                     f"{fill.get('loss_at_stop', EVENT_LIMITS.risk_per_trade)} EUR, overnight to the exit date included.")
         pts = Decimal(journal.stop_points or 0)
         stop = entry - pts if side == "long" else entry + pts
-        lines.append(f"Stop: {stop:,.2f} ({fill.get('stop_text', 'ATR stop')}). Exit: by {_exit_text(position)}, "
-                     "or when I tell you.")
+        lines.append(f"Stop: {stop:,.2f} ({fill.get('stop_text', 'ATR stop')}). Exit: by {_exit_text(position)}; "
+                     "the desk tells you if it ends sooner.")
     elif inst is not None:
         lines.append(f"Exit (paper): by {_exit_text(position)}.")
+    lines += [RESEARCH.get(cell, ""), evidence_line(db, cell)]
     if inst is not None:
         assumed = " (assumed)" if inst.spread_assumed else ""
         night = exposure * inst.overnight_rate(side)
@@ -155,13 +149,14 @@ def open_text(db: Session, position: DeskPosition, journal: DeskCfdJournal, now:
         lines.append(f"Costs: spread ~ {inst.spread_bp / 100:.2f} %{assumed}, overnight ~ {night:,.2f} EUR per night "
                      f"on {exposure:,.0f} EUR{fx}.")
         if inst.kind == "index" and fill.get("expiry"):
-            lines.append(f"Contract rolls {fill['expiry']}; I close the paper trade an hour before and tell you.")
+            lines.append(f"Contract rolls {fill['expiry']}; the desk closes the paper trade an hour before and "
+                         "tells you.")
     g = bankroll.real_results(db, position.user_id, now)
     lines.append(f"Bankroll: month {g.month_eur:+.0f} EUR of the {EVENT_LIMITS.monthly_real_loss_stop:.0f} EUR stop.")
     if only:
         lines.append(only)
-    lines.append(f"Paper-scored as {cell}. If Trading 212 has no CFD on {_label(position, journal)}, skip; "
-                 "nothing is ordered for you.")
+    lines.append(f"Paper-scored as {cell_name(cell)}. If Trading 212 has no CFD on {_label(position, journal)}, "
+                 "skip; nothing is ordered for you.")
     return "\n".join(x for x in lines if x)
 
 
@@ -197,7 +192,7 @@ def close_text(db: Session, position: DeskPosition, reason: str, journal: DeskCf
            "owner_close": "you closed it", "rollover": "its contract rolls within the hour: close yours too",
            "opposite_cross": "the EMA cross reversed", "middle_band": "the price is back at the middle band",
            "rsi_50": "RSI(2) crossed 50"}.get(reason, reason)
-    result = f"Paper result {Decimal(position.net_eur or 0):+.2f} EUR after costs ({position.cell})."
+    result = f"Paper result {Decimal(position.net_eur or 0):+.2f} EUR after costs ({cell_name(position.cell)})."
     if journal is not None and journal.status == "skipped":
         # The owner said they did not take it: nothing to close, the paper score only.
         return f"{label}: paper trade closed ({why.removesuffix(': close yours too')}). {result}"

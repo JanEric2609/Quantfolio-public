@@ -64,7 +64,7 @@ def retire_futile_mandates(db: Any, user_id: str) -> list[str]:
         retired.append(result["mandate"])
         text = (
             f"Quantfolio: mandate {result['mandate']} is retired. Its pre-registered test says it adds less than "
-            f"{result['delta_21d']:.1%} per 21 days over MSCI World after costs (e = {result['e_futility']:.0f}). "
+            f"{result['delta_21d']:.1%} per 21 days over MSCI World after costs. "
             "It stops trading; its value is still tracked on the Trust page."
         )
         alert_user(db, user_id, source="trust", title=f"Mandate {result['mandate']} retired", telegram_text=text,

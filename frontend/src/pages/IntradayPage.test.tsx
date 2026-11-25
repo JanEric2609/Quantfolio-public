@@ -33,7 +33,7 @@ describe("IntradayPage", () => {
     vi.spyOn(api, "getIntraday").mockResolvedValue(dto);
     render(<MemoryRouter><IntradayPage /></MemoryRouter>);
     expect(await screen.findByText("Germany 40 (GER40) · session open 09:00-17:30")).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(1);
     expect(screen.getByText(/Typical last-30-minute move/)).toBeInTheDocument();
     // The calculator fills stop and level from the board: 5 EUR / 250 pts = 0.0200.
     expect(screen.getByTestId("calc-result")).toHaveTextContent("Quantity 0.0200");

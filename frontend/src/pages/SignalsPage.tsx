@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { ShieldAlert } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { PageHeader } from "../components/composed/PageHeader";
@@ -147,10 +146,9 @@ export function SignalsPage() {
   }, [load]);
   return (
     <div className="space-y-6">
-      <PageHeader title="Signals" subtitle="The event desk's cells: technical rules, hype, news and your own calls, scored on paper with the evidence beside them." />
+      <PageHeader level={2} title="Signals" subtitle="The event desk's cells: technical rules, hype, news and your own calls, scored on paper with the evidence beside them." />
       <div role="status" className="flex items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm font-medium">
         <ShieldAlert className="size-4" aria-hidden /> Paper cells, manual trades: nothing here places an order.
-        <Link to="/desk/intraday" className="ml-auto underline">Intraday CFD</Link>
       </div>
       {error && <p className="text-sm text-red-500" role="alert">{error}</p>}
       {data ? <SignalsView data={data} /> : !error && <p className="text-sm">Loading.</p>}

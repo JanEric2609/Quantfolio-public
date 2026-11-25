@@ -386,9 +386,9 @@ def _link_telegram(db, user) -> None:
     link_pairing_code(db, pairing.code, "42")
 
 
-def test_review_sends_telegram_digest_when_linked(monkeypatch):
-    """A completed review with a linked Telegram account sends one digest
-    message via the existing leaf-channel-adapter (telegram_bot.send_telegram_message)."""
+def test_review_sends_no_telegram_digest_for_a_hold(monkeypatch):
+    """A HOLD is the usual outcome of a review and sends nothing, even to a linked account
+    (only a proposed trade is news; see review_digest_wanted)."""
     from app.decision.llm_portfolio import review as review_mod
 
     db = _memory_db()
@@ -411,11 +411,7 @@ def test_review_sends_telegram_digest_when_linked(monkeypatch):
         result = review_mod.run_mandate_review(db, user.id, "A")
 
     assert result["status"] == "completed"
-    mock_send.assert_called_once()
-    chat_id, text_sent = mock_send.call_args[0][1], mock_send.call_args[0][2]
-    assert chat_id == "42"
-    assert "Mandate A review complete" in text_sent
-    assert "HOLD" in text_sent
+    mock_send.assert_not_called()
 
 
 def test_review_no_telegram_send_when_unlinked(monkeypatch):
@@ -503,3 +499,15 @@ def test_format_mandate_review_digest_hold():
     assert "Action: HOLD (no trade)" in text_out
     assert "Gates: n/a" in text_out
     assert "Thesis:" not in text_out
+
+
+def test_review_digest_is_wanted_only_for_a_proposed_trade():
+    from app.foundation.telegram_replies import review_digest_wanted
+
+    assert review_digest_wanted({"action": "hold"}) is False
+    assert review_digest_wanted({}) is False
+    assert review_digest_wanted({"action": "buy", "ticker": "IWDA.L"}) is True
+    assert review_digest_wanted({"action": "SELL"}) is True
+    # A review that did not complete falls back to HOLD but must still be reported.
+    for status in ("llm_unavailable", "review_failed", "invalid_action", "fallback_hold"):
+        assert review_digest_wanted({"action": "hold"}, status) is True

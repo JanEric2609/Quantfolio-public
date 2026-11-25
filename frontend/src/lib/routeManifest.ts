@@ -97,16 +97,10 @@ export const ROUTE_ENTRIES: RouteEntry[] = [
     keywords: ["evidence", "advisor", "mandates", "graduation", "capital ladder", "paper"],
   },
   {
-    id: "desk", to: "/desk", label: "Derivatives desk", icon: Gauge, group: "tools", researchTool: true, end: true,
-    keywords: ["knock-out", "warrant", "turbo", "cfd", "paper", "idea", "derivatives", "news wire"],
-  },
-  {
-    id: "intraday", to: "/desk/intraday", label: "Intraday CFD", icon: Activity, group: "tools", researchTool: true,
-    keywords: ["cfd", "trading 212", "intraday"],
-  },
-  {
-    id: "signals", to: "/desk/signals", label: "Signals", icon: Radio, group: "tools", researchTool: true,
-    keywords: ["signals", "event desk", "hype", "news drift", "rsi", "bankroll", "cfd"],
+    id: "desk", to: "/desk", label: "Derivatives desk", icon: Gauge, group: "tools", researchTool: true,
+    match: (p) => p === "/desk" || p.startsWith("/desk/"),
+    keywords: ["knock-out", "warrant", "turbo", "cfd", "paper", "idea", "derivatives", "news wire", "intraday",
+      "trading 212", "signals", "event desk", "hype", "news drift", "rsi", "bankroll"],
   },
   { id: "learn", to: "/learn", label: "Learn", icon: GraduationCap, group: "trust", keywords: ["tutorial", "teach", "how it works", "quiz"] },
   { id: "settings", to: "/settings", label: "Control Center", icon: Settings, group: "admin", keywords: ["settings", "connections", "status"] },
@@ -121,6 +115,8 @@ export interface ExtraPage {
 }
 
 export const EXTRA_PAGES: ExtraPage[] = [
+  { to: "/desk/intraday", label: "Intraday CFD", icon: Activity, keywords: ["cfd", "trading 212", "intraday", "board", "journal"] },
+  { to: "/desk/signals", label: "Signals", icon: Radio, keywords: ["signals", "event desk", "hype", "news drift", "rsi", "bankroll", "cfd"] },
   { to: "/dashboard", label: "Detailed overview", icon: PieChart, keywords: ["dashboard", "net worth"] },
   { to: "/portfolio/performance", label: "Portfolio performance", icon: LineChart },
   { to: "/portfolio/risk", label: "Portfolio risk", icon: Gauge, keywords: ["var", "drawdown"] },

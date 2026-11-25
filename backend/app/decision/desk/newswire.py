@@ -44,7 +44,7 @@ from . import calendar as cal
 
 logger = logging.getLogger(__name__)
 
-MAX_ALERTS_PER_HOUR = 12
+MAX_ALERTS_PER_HOUR = 4
 STALE_AFTER = timedelta(hours=2)
 RETENTION = timedelta(days=30)
 RATE_TIMEOUT_S = 20.0
@@ -253,7 +253,8 @@ def alert_decision(db: Session, item: news_wire.WireItem, why: str, rating: Rati
         return "quiet"
     sent = db.query(NewsWireItem).filter(NewsWireItem.alert == "sent",
                                          NewsWireItem.received_at >= now - timedelta(hours=1)).count()
-    return "rate_capped" if sent >= MAX_ALERTS_PER_HOUR else "send"
+    # The cap trims routine items only: a materiality-3 item is never dropped for it.
+    return "rate_capped" if sent >= MAX_ALERTS_PER_HOUR and m != 3 else "send"
 
 
 #: Ends every alert: three questions to think the item through, so it is built on rather than just logged.
@@ -272,7 +273,8 @@ def format_alert(item: news_wire.WireItem, why: str, rating: Rating, now: dateti
         lines.append(describe(",".join(item.items)) or ("8-K items " + ", ".join(item.items)))
     lines.append(f"{item.source}{lag}" + (f" - {item.url}" if item.url else ""))
     lines.append("Information only: nothing is ordered.")
-    lines.append(THINK_PROMPT)
+    if rating.materiality == 3:
+        lines.append(THINK_PROMPT)  # only the biggest items: on every alert it is noise
     return "\n".join(lines)
 
 
