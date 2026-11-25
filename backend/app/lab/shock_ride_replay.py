@@ -149,8 +149,9 @@ def simulate_signals(key: str, bars: list[technical.Bar], inst: dict[str, Any], 
                 rate = float(inst["overnight_long" if d == "long" else "overnight_short"])
                 per_unit = dist + spread * px + (FX_FEE * dist if usd else 0.0) + rate * px * SIZING_NIGHTS
                 side0 = 0
-                if exit_mode == "ema_cross" and ema[sig_i] is not None:
-                    side0 = 1 if closes[sig_i] > ema[sig_i] else -1
+                e_sig = ema[sig_i] if exit_mode == "ema_cross" else None
+                if e_sig is not None:
+                    side0 = 1 if closes[sig_i] > e_sig else -1
                 pos = {"date": bar.date, "i": i, "px": px, "dir": d, "dist": dist, "qty": risk / per_unit,
                        "stop": px - dist if d == "long" else px + dist, "best": px, "side0": side0}
         if pos is not None and i >= pos["i"]:
@@ -164,8 +165,9 @@ def simulate_signals(key: str, bars: list[technical.Bar], inst: dict[str, Any], 
                 exit_px, reason = max(pos["stop"], bar.open), "stop"
                 gaps["stops"] += 1
                 gaps["gap_overruns"] += int(bar.open > pos["stop"])
-            if exit_px is None and exit_mode == "ema_cross" and pos["side0"] and ema[i] is not None:
-                now = 1 if bar.close > ema[i] else -1
+            e_now = ema[i] if exit_mode == "ema_cross" else None
+            if exit_px is None and e_now is not None and pos["side0"]:
+                now = 1 if bar.close > e_now else -1
                 if now != pos["side0"]:
                     exit_px, reason = bar.close, "ema_cross"
             if exit_px is None and i == len(bars) - 1:
