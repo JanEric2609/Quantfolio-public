@@ -238,3 +238,33 @@ No variant differs from the fixed exit (paired t at most 0.6, Holm p = 1.0). A t
 (43 % to 55 % on SPY) without changing the mean. Before costs the fixed exit earns -0.6 bp (SPY, t -1.1) and
 -0.4 bp (QQQ, t -0.7): the effect is not in this sample, and the costs are the loss. The live rule is unchanged.
 Raw output: `docs/research/desk-exit-variants-2026-11.json` (`scripts/desk_replay.py --minutes`).
+
+## Amendment 2026-11-25: cost line on the card, DAX/ES50 shadow pair, journal rule tag, predictor replay
+
+**No rule change.** `prereg.PREREG_HASH` stays `86396b951089aa96007d6227bbfda59991be23b7b8b8ecd2975af6afa5c4a8cd`. r1,
+the entry and exit times, the sizing, the stop and the registered cost model are as registered; the pass test is
+untouched. No order path exists or is added. Everything below is display, owner input, or read-only research.
+
+- **Cost check line** (`edge_math.py`, shown on the CFD message v2). The spread as a share of the typical
+  last-30-minute move, the hit rate at which a trade of that size breaks even (`0.5 + cost / (2 x move)`, equal win
+  and loss size) and the number of trades needed to show a hit rate five points above it (one-sided test against a
+  coin, 5 % level, 80 % power: 60 % needs 153 trades, 55 % about 617). It uses the Trading 212 spread constants
+  that are already display-only; paper scoring keeps the registered 2/2/2/4 bp.
+- **DAX/ES50 shadow pair** (`pair_shadow.py`). The two indices share about 30 % of their weight, so two equal-risk
+  legs on the same side carry about 1.95 R of one factor at a correlation of 0.9. The registered cells are scored
+  per index and stay so. The shadow is a read of the closed `index_momentum:cfd` positions: on the days both fired
+  on the same side it reports the pair at full size and at half size per leg (0.5 R + 0.5 R). It opens and writes
+  nothing, and is not a trial. Whether a real pair cap is wanted is the owner's decision after the shadow has
+  data; a cap would change what the cells measure and needs its own amendment.
+- **Journal rule tag** (migration 0160, `desk_cfd_journal.rule`, `/cfd rule registered|other [id]`). A trade the
+  owner takes on their own plan (for example a threshold rule at 17:00) is marked `other`; it stays out of the
+  real-versus-paper comparison of its cell. Owner input only, outside the ledger.
+- **Predictor replay** (`lab/desk_replay.py` `evaluate_predictors`, `scripts/desk_replay.py --predictors`).
+  Baltussen, Da, Lammers and Martens (JFE 2021) predict the last half hour with the rest-of-day return (previous
+  close to 30 minutes before the close). In their pooled equity-futures table that predictor has an out-of-sample
+  R2 of 2.88 % and the overnight-plus-first-half-hour return one of -1.71 %; the desk's registered rule uses the
+  Gao first-half-hour return. The replay runs both on the same SPY/QQQ bars with the desk's CFD costs, with the
+  trailing 20-day volatility split into terciles: six tests, Holm-adjusted. Research, outside the pass test, not a
+  trial. A positive result would justify **a new pre-registration**, never a change of the registered rule.
+  Not run in this checkout: it needs the stored Alpaca key (Saturday list). DAX and Euro Stoxx 50 have no
+  intraday history in the desk's stores, so the Xetra half cannot be replayed until a source is chosen.

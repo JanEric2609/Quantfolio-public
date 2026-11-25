@@ -67,6 +67,19 @@ def create_for_signal(db: Session, position: DeskPosition, ctx: Any, *, key: str
     return row
 
 
+RULES = ("registered", "other")
+
+
+def set_rule(db: Session, journal: DeskCfdJournal, rule: str) -> DeskCfdJournal:
+    """Mark the owner's trade as the registered rule's or as a manual plan of their own (``other``). Owner
+    input only: it never changes a paper position, and ``other`` rows stay out of the comparison with the cell."""
+    if rule not in RULES:
+        raise JournalError("The rule is 'registered' or 'other'.")
+    journal.rule = rule
+    db.flush()
+    return journal
+
+
 def for_position(db: Session, position_id: str) -> DeskCfdJournal | None:
     return db.query(DeskCfdJournal).filter(DeskCfdJournal.position_id == position_id).one_or_none()
 

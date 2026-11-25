@@ -41,6 +41,7 @@ class Day:
     r_last: float
     sigma: float | None  # std of the previous 20 daily close-to-close returns
     friday_or_preholiday: bool
+    r_rod: float | None = None  # previous close to 15:30 New York (Baltussen et al. 2021's rest-of-day return)
 
 
 @dataclass(frozen=True)
@@ -98,7 +99,7 @@ def days_from_bars(bars: list[dict[str, Any]]) -> list[Day]:
             sigma = statistics.stdev(rets) if len(rets) >= 20 else None
             out.append(Day(
                 d, bars_d[OPEN_BAR] / closes[-1] - 1, bars_d[LAST_BAR] / bars_d[PRE_LAST_BAR] - 1, sigma,
-                xetra_flat_by(d),
+                xetra_flat_by(d), bars_d[PRE_LAST_BAR] / closes[-1] - 1,
             ))
         closes.append(last_close)
     return out
@@ -114,11 +115,17 @@ def _stats(values: list[float]) -> dict[str, float | int | None]:
             "hit": sum(1 for v in values if v > 0) / n, "total": sum(values)}
 
 
-def trade_results(day: Day, costs: Costs) -> dict[str, float] | None:
-    """Gross return and the EUR result of a knock-out and a CFD on one day; None when no trade."""
-    if day.r1 == 0 or day.sigma is None or day.sigma <= 0:
+def _signal(day: Day, predictor: str) -> float | None:
+    return day.r1 if predictor == "r1" else day.r_rod
+
+
+def trade_results(day: Day, costs: Costs, predictor: str = "r1") -> dict[str, float] | None:
+    """Gross return and the EUR result of a knock-out and a CFD on one day; None when no trade.
+    *predictor*: ``r1`` (the registered Gao rule) or ``rod`` (previous close to close - 30 minutes)."""
+    sig = _signal(day, predictor)
+    if not sig or day.sigma is None or day.sigma <= 0:
         return None
-    gross = math.copysign(1.0, day.r1) * day.r_last
+    gross = math.copysign(1.0, sig) * day.r_last
     lev = costs.ko_leverage
     stop_frac = min(max(lev * day.sigma, 0.03), 0.30)
     notional = min((costs.max_loss - 2 * costs.fee_per_order) / stop_frac, costs.pot)
@@ -129,9 +136,9 @@ def trade_results(day: Day, costs: Costs) -> dict[str, float] | None:
             "cfd_exposure": exposure}
 
 
-def evaluate(days: list[Day], costs: Costs, *, desk_days: bool = True) -> dict[str, Any]:
+def evaluate(days: list[Day], costs: Costs, *, desk_days: bool = True, predictor: str = "r1") -> dict[str, Any]:
     rows = [(d, r) for d in days if not (desk_days and d.friday_or_preholiday)
-            if (r := trade_results(d, costs)) is not None]
+            if (r := trade_results(d, costs, predictor)) is not None]
     by_year: dict[int, list[float]] = defaultdict(list)
     for d, r in rows:
         by_year[d.day.year].append(r["gross_bp"])
@@ -144,6 +151,49 @@ def evaluate(days: list[Day], costs: Costs, *, desk_days: bool = True) -> dict[s
         "median_cfd_exposure": statistics.median(r["cfd_exposure"] for _, r in rows) if rows else None,
         "by_year_gross_bp": {y: _stats(v) for y, v in sorted(by_year.items())},
     }
+
+
+# --- The closing-momentum predictor and volatility splits (research, 2026-11-25) --------------------------------
+#
+# Baltussen, Da, Lammers, Martens (JFE 2021) predict the last half hour with the rest-of-day return (previous
+# close to 30 minutes before the close), not with the first half hour: in their pooled equity-futures table the
+# first-half-hour-plus-overnight return has a negative out-of-sample R2 (-1.71 %), the rest-of-day return a
+# positive one (2.88 %). The desk's registered rule is the Gao first-half-hour one. This replay asks the same
+# question as the registered replay of the other predictor, split by the trailing 20-day volatility
+# (terciles: the paper's effect is stronger in stressed regimes). Two predictors x three terciles = six
+# tests over one data set: report Holm-adjusted p-values next to every t. The registered rule is untouched.
+
+PREDICTORS = ("r1", "rod")
+
+
+def evaluate_predictors(days: list[Day], costs: Costs, *, desk_days: bool = True) -> dict[str, Any]:
+    """Per predictor: all desk days and the three volatility terciles (low/mid/high by the day's trailing sigma),
+    with a two-sided p from the t statistic and a Holm adjustment over the six tercile tests."""
+    from scipy import stats as st
+
+    usable = [(d, d.sigma) for d in days if d.sigma and not (desk_days and d.friday_or_preholiday)]
+    cuts = statistics.quantiles([sg for _, sg in usable], n=3) if len(usable) >= 30 else []
+    out: dict[str, Any] = {"n_days": len(usable), "sigma_cuts": cuts, "predictors": {}}
+    p_raw: dict[tuple[str, str], float] = {}
+    for pred in PREDICTORS:
+        entry: dict[str, Any] = {"all": evaluate(days, costs, desk_days=desk_days, predictor=pred), "terciles": {}}
+        for name, lo, hi in (("low", -math.inf, cuts[0] if cuts else math.inf),
+                             ("mid", cuts[0] if cuts else math.inf, cuts[1] if cuts else math.inf),
+                             ("high", cuts[1] if cuts else math.inf, math.inf)):
+            sub = [d for d, sg in usable if lo < sg <= hi]
+            res = evaluate(sub, costs, desk_days=False, predictor=pred)
+            t, n = res["cfd_eur"]["t"], res["cfd_eur"]["n"]
+            res["p_two_sided"] = float(2 * st.t.sf(abs(t), n - 1)) if t is not None and n > 2 else None
+            if res["p_two_sided"] is not None:
+                p_raw[(pred, name)] = res["p_two_sided"]
+            entry["terciles"][name] = res
+        out["predictors"][pred] = entry
+    ordered = sorted(p_raw, key=p_raw.__getitem__)
+    running = 0.0
+    for i, k in enumerate(ordered):
+        running = max(running, min(1.0, (len(ordered) - i) * p_raw[k]))
+        out["predictors"][k[0]]["terciles"][k[1]]["p_holm"] = running
+    return out
 
 
 # --- Exit variants on 1-minute bars (pre-registered 2026-11-24, before the data was read) -------------------

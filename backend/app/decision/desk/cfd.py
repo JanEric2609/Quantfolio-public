@@ -35,7 +35,7 @@ from app.foundation.models.entities import DeskPosition
 from app.foundation.scalable.cli import ScalableCli
 
 from . import calendar as cal
-from . import cfd_journal, prereg, service
+from . import cfd_journal, edge_math, prereg, service
 from .ledger import append_event
 from .limits import LIMITS
 from .underlyings import Underlying
@@ -317,6 +317,8 @@ def open_message(db: Session, position: DeskPosition, key: str, now: datetime,
         "a few points. The stop counts from your fill.",
         f"Close at {exit_local} Berlin; I will tell you.",
     ]
+    if cost := edge_math.cost_line(ctx.spread_points, ctx.typical_30m_points):
+        lines.append(cost)
     if ctx.currency == "USD":
         lines.append(f"USD market: {T212['fx_fee_on_result'] * 100:.1f} % FX fee on the result at close.")
     if db is not None:

@@ -49,7 +49,7 @@ def _journal(db: Session, user_id: str) -> tuple[list[dict[str, Any]], dict[str,
         out.append({"position_id": j.position_id, "cell": cell, "market_key": j.market_key, "status": j.status,
                     "real_pnl_eur": real, "paper_net_eur": paper,
                     "created_at": j.created_at.isoformat() if j.created_at else None})
-        if cell and real is not None:
+        if cell and real is not None and j.rule == "registered":  # a manual plan is not this cell's trade
             c = per_cell.setdefault(cell, {"n": 0, "real_total": 0.0, "paper_total_same_trades": 0.0})
             c["n"] += 1
             c["real_total"] += real
