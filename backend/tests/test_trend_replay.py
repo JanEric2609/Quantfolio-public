@@ -62,15 +62,18 @@ def test_a_persistent_trend_earns_in_the_replay_before_any_verdict_rule():
     assert pooled["n"] >= 1 and pooled["mean_eur"] > 0
 
 
-def test_ema_exit_follows_the_position_not_the_signal_day():
-    # A long signal whose close is still below its EMA50 (older, higher prices weigh on it) is, by the declared rule, on
-    # the wrong side of the EMA: it exits at once. The old signal-day key instead held it for weeks and gave a
-    # randomized short on the same day a different exit than its own direction.
+def test_ema_exit_follows_the_position_and_is_armed_by_a_favourable_close():
+    # Prices fall from 200 to 100 (EMA50 stays above), then rise slowly. A long signalled while the close is below the EMA
+    # must not be stopped out on its fill bar: the exit is armed only after a close on the favourable side.
     closes = [200.0] * 60 + [100.0] * 60 + [101.0 + 0.2 * i for i in range(30)]
     bars = _bars(closes)
     sig_i = len(closes) - 30
     long_dir, _ = tr._simulate("a", bars, INST, {sig_i: "long"}, "ema_cross", 5.0, "t")
-    assert long_dir and long_dir[0].reason == "ema_cross" and long_dir[0].hold_days <= 2
-    legacy, _ = tr.sr.simulate_signals("a", bars, INST, {sig_i: "long"}, "ema_cross", 5.0, tag="t", stop_atr=tc.STOP_ATR,
-                                       ema_n=tc.EMA_N, atr_n=tc.ATR_N)
-    assert legacy and legacy[0].hold_days > long_dir[0].hold_days + 5
+    assert long_dir and long_dir[0].hold_days > 2
+    # A short on the same day (close below EMA, favourable) is armed at once and exits when the close rises back through.
+    short_dir, _ = tr._simulate("a", bars, INST, {sig_i: "short"}, "ema_cross", 5.0, "t")
+    assert short_dir and short_dir[0].direction == "short"
+    # Mirror: a short signalled above its EMA is not stopped out on the fill bar either (symmetric placebo exposure).
+    up = [100.0] * 60 + [200.0] * 60 + [199.0 - 0.2 * i for i in range(30)]
+    s2, _ = tr._simulate("a", _bars(up), INST, {len(up) - 30: "short"}, "ema_cross", 5.0, "t")
+    assert s2 and s2[0].hold_days > 2

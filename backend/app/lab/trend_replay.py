@@ -6,7 +6,7 @@ calendar night held, 0.5 % FX on a USD result, risk-based sizing, gaps through a
 the data end tagged ``data_end``).
 
 Frozen 2026-11-25 before any real price was read. Trials declared: 3 families (indices, commodities, FX) x 2 exits
-(``ema_cross``: EMA50 cross-back plus the initial 5 ATR stop; ``chandelier``: 5 ATR trailing stop only) = 6, Holm over
+(``ema_cross``: a close back through the EMA50 against the position, once the close has been on the favourable side since entry (so a randomized side is not stopped out on its fill bar), plus the initial 5 ATR stop; ``chandelier``: 5 ATR trailing stop only) = 6, Holm over
 all six. Required control: the same breakout days with random sides (``side_placebo``), because a wide trailing exit
 earns or loses with the market's own drift on any entry. p-values are the quarter-block bootstrap of
 ``shock_ride_replay.block_p``. Verdict ``pass`` needs pooled n >= ``MIN_TRADES``, mean net > 0, Holm p < 0.05, side

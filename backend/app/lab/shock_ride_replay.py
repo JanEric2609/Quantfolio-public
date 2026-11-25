@@ -151,13 +151,13 @@ def simulate_signals(key: str, bars: list[technical.Bar], inst: dict[str, Any], 
                 per_unit = dist + spread * px + (FX_FEE * dist if usd else 0.0) + rate * px * SIZING_NIGHTS
                 side0 = 0
                 if ema_side == "direction":
-                    side0 = 1 if d == "long" else -1  # exit when the close crosses the EMA against the position
+                    side0 = 1 if d == "long" else -1  # favourable side; the exit needs a prior favourable close (armed)
                 else:
                     e_sig = ema[sig_i] if exit_mode == "ema_cross" else None
                     if e_sig is not None:
                         side0 = 1 if closes[sig_i] > e_sig else -1
                 pos = {"date": bar.date, "i": i, "px": px, "dir": d, "dist": dist, "qty": risk / per_unit,
-                       "stop": px - dist if d == "long" else px + dist, "best": px, "side0": side0}
+                       "stop": px - dist if d == "long" else px + dist, "best": px, "side0": side0, "armed": ema_side != "direction"}
         if pos is not None and i >= pos["i"]:
             d = pos["dir"]
             exit_px, reason = None, ""
@@ -172,7 +172,9 @@ def simulate_signals(key: str, bars: list[technical.Bar], inst: dict[str, Any], 
             e_now = ema[i] if exit_mode == "ema_cross" else None
             if exit_px is None and e_now is not None and pos["side0"]:
                 now = 1 if bar.close > e_now else -1
-                if now != pos["side0"]:
+                if now == pos["side0"]:
+                    pos["armed"] = True
+                if now != pos["side0"] and pos["armed"]:
                     exit_px, reason = bar.close, "ema_cross"
             if exit_px is None and i == len(bars) - 1:
                 exit_px, reason = bar.close, "data_end"
