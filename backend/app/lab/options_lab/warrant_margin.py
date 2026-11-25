@@ -24,9 +24,9 @@ def _price_gap(row: dict[str, Any]) -> float | None:
     if not spot or not strike or not days or days <= 0:
         return None
     years = days / 365.0
-    rate = row.get("rate", 0.0)
-    own = option_price(row["kind"], row["style"], spot, strike, years, rate, row["warrant_iv"])
-    fair = option_price(row["kind"], row["style"], spot, strike, years, rate, row["listed_iv"])
+    rate, q = row.get("rate", 0.0), row.get("dividend_yield", 0.0)
+    own = option_price(row["kind"], row["style"], spot, strike, years, rate, row["warrant_iv"], q)
+    fair = option_price(row["kind"], row["style"], spot, strike, years, rate, row["listed_iv"], q)
     return own / fair - 1.0 if fair > 0 else None
 
 
@@ -62,6 +62,7 @@ def warrant_margin(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 def warrant_margin_from_db(db: Session) -> dict[str, Any]:
     """:func:`warrant_margin` over every stored quote that has a listed volatility."""
+    from app.foundation.derivatives import pricing_inputs
     from app.foundation.models.entities import DerivativeQuote, DerivativeTerms
 
     terms = {t.isin: t for t in db.query(DerivativeTerms).all()}
@@ -70,9 +71,10 @@ def warrant_margin_from_db(db: Session) -> dict[str, Any]:
         t = terms.get(q.isin)
         if t is None:
             continue
+        rate, div = pricing_inputs(db, t.underlying_symbol, t.strike_currency)
         rows.append({
             "isin": q.isin, "kind": t.kind, "style": t.style, "strike": float(t.strike),
             "underlying_close": q.underlying_close, "days_to_expiry": q.days_to_expiry,
-            "warrant_iv": q.warrant_iv, "listed_iv": q.listed_iv,
+            "warrant_iv": q.warrant_iv, "listed_iv": q.listed_iv, "rate": rate, "dividend_yield": div,
         })
     return warrant_margin(rows)

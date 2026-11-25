@@ -51,6 +51,11 @@ _NAME = re.compile(
 #: An expiry this close is flagged in the Control Center.
 EXPIRY_WARNING_DAYS = 7
 _TREE_STEPS = 200
+#: Short rate of a non-EUR strike currency (annual fraction) when none is stored; about the USD policy rate.
+#: A warrant on a USD strike is priced in USD (its EUR price is converted at spot), so the USD rate applies.
+DEFAULT_FOREIGN_RATE = 0.04
+#: Internal ``app_settings`` key: ``{"foreign_rate": float, "dividend_yields": {symbol: fraction}}``.
+INPUTS_KEY = "derivatives_inputs_json"
 #: Moves of the underlying the value-at-expiry table shows.
 SCENARIO_MOVES = (-0.5, -0.3, -0.2, -0.1, 0.0, 0.1, 0.2, 0.5)
 
@@ -98,17 +103,20 @@ def _intrinsic(kind: str, spot: float, strike: float) -> float:
     return max(strike - spot, 0.0) if kind == "put" else max(spot - strike, 0.0)
 
 
-def black_scholes(kind: str, spot: float, strike: float, years: float, rate: float, vol: float) -> float:
-    """European option price per share (no dividends)."""
+def black_scholes(
+    kind: str, spot: float, strike: float, years: float, rate: float, vol: float, q: float = 0.0,
+) -> float:
+    """European option price per share; *q* is the continuous dividend yield (Merton)."""
     if years <= 0 or vol <= 0:
         return _intrinsic(kind, spot, strike)
     sq = vol * math.sqrt(years)
-    d1 = (math.log(spot / strike) + (rate + 0.5 * vol * vol) * years) / sq
+    d1 = (math.log(spot / strike) + (rate - q + 0.5 * vol * vol) * years) / sq
     d2 = d1 - sq
     disc = strike * math.exp(-rate * years)
+    fwd = spot * math.exp(-q * years)
     if kind == "put":
-        return disc * _norm_cdf(-d2) - spot * _norm_cdf(-d1)
-    return spot * _norm_cdf(d1) - disc * _norm_cdf(d2)
+        return disc * _norm_cdf(-d2) - fwd * _norm_cdf(-d1)
+    return fwd * _norm_cdf(d1) - disc * _norm_cdf(d2)
 
 
 def _lr_inversion(z: float, n: int) -> float:
@@ -119,8 +127,9 @@ def _lr_inversion(z: float, n: int) -> float:
 
 def binomial_american(
     kind: str, spot: float, strike: float, years: float, rate: float, vol: float, steps: int = _TREE_STEPS,
+    q: float = 0.0,
 ) -> float:
-    """American option price per share on a Leisen-Reimer tree (no dividends).
+    """American option price per share on a Leisen-Reimer tree; *q* is the continuous dividend yield.
 
     Leisen & Reimer (1996) centre the tree on the strike, so the price converges smoothly in the spot.
     A Cox-Ross-Rubinstein tree converges in a sawtooth, and a second difference of it (gamma) was off
@@ -130,20 +139,20 @@ def binomial_american(
         return _intrinsic(kind, spot, strike)
     n = steps if steps % 2 == 1 else steps + 1
     dt = years / n
-    grow = math.exp(rate * dt)
+    grow = math.exp((rate - q) * dt)  # cost of carry: the tree drifts at r - q, discounts at r
     sq = vol * math.sqrt(years)
-    d1 = (math.log(spot / strike) + (rate + 0.5 * vol * vol) * years) / sq
+    d1 = (math.log(spot / strike) + (rate - q + 0.5 * vol * vol) * years) / sq
     d2 = d1 - sq
     p = _lr_inversion(d2, n)
     p_star = _lr_inversion(d1, n)
     if not (0.0 < p < 1.0 and 0.0 < p_star < 1.0):
         # The inversion saturates for a short-dated or low-vol option far from the strike.
-        return max(black_scholes(kind, spot, strike, years, rate, vol), _intrinsic(kind, spot, strike))
+        return max(black_scholes(kind, spot, strike, years, rate, vol, q), _intrinsic(kind, spot, strike))
     up = grow * p_star / p
     down = (grow - p * up) / (1.0 - p)
     if not 0.0 < down < up:
-        return max(black_scholes(kind, spot, strike, years, rate, vol), _intrinsic(kind, spot, strike))
-    disc = 1.0 / grow
+        return max(black_scholes(kind, spot, strike, years, rate, vol, q), _intrinsic(kind, spot, strike))
+    disc = math.exp(-rate * dt)
     values = [_intrinsic(kind, spot * up ** (n - i) * down ** i, strike) for i in range(n + 1)]
     for step in range(n - 1, -1, -1):
         for i in range(step + 1):
@@ -153,15 +162,15 @@ def binomial_american(
 
 
 def option_price(
-    kind: str, style: str, spot: float, strike: float, years: float, rate: float, vol: float,
+    kind: str, style: str, spot: float, strike: float, years: float, rate: float, vol: float, q: float = 0.0,
 ) -> float:
     if style == "american":
-        return binomial_american(kind, spot, strike, years, rate, vol)
-    return black_scholes(kind, spot, strike, years, rate, vol)
+        return binomial_american(kind, spot, strike, years, rate, vol, q=q)
+    return black_scholes(kind, spot, strike, years, rate, vol, q)
 
 
 def implied_vol(
-    price: float, kind: str, style: str, spot: float, strike: float, years: float, rate: float,
+    price: float, kind: str, style: str, spot: float, strike: float, years: float, rate: float, q: float = 0.0,
 ) -> float | None:
     """The volatility at which the model price equals *price* (per share), or None.
 
@@ -171,13 +180,13 @@ def implied_vol(
     if price <= 0 or spot <= 0 or strike <= 0 or years <= 0:
         return None
     lo, hi = 0.005, 10.0
-    f_lo = option_price(kind, style, spot, strike, years, rate, lo) - price
-    f_hi = option_price(kind, style, spot, strike, years, rate, hi) - price
+    f_lo = option_price(kind, style, spot, strike, years, rate, lo, q) - price
+    f_hi = option_price(kind, style, spot, strike, years, rate, hi, q) - price
     if f_lo > 0 or f_hi < 0:
         return None
     for _ in range(60):
         mid = 0.5 * (lo + hi)
-        if option_price(kind, style, spot, strike, years, rate, mid) > price:
+        if option_price(kind, style, spot, strike, years, rate, mid, q) > price:
             hi = mid
         else:
             lo = mid
@@ -187,11 +196,11 @@ def implied_vol(
 
 
 def greeks(
-    kind: str, style: str, spot: float, strike: float, years: float, rate: float, vol: float,
+    kind: str, style: str, spot: float, strike: float, years: float, rate: float, vol: float, q: float = 0.0,
 ) -> dict[str, float]:
     """Delta, gamma (per unit of the underlying), theta (per calendar day) and vega (per vol point)."""
     def price(s: float = spot, t: float = years, v: float = vol) -> float:
-        return option_price(kind, style, s, strike, t, rate, v)
+        return option_price(kind, style, s, strike, t, rate, v, q)
 
     h = spot * 0.01
     base, up, down = price(), price(s=spot + h), price(s=spot - h)
@@ -249,6 +258,31 @@ def _rate(db: Session) -> float:
         return 0.02
 
 
+def pricing_inputs(db: Session, symbol: str, currency: str) -> tuple[float, float]:
+    """``(rate, dividend_yield)`` for pricing a warrant on *symbol* with a strike in *currency*.
+
+    EUR strikes use the EUR risk-free rate, any other currency the stored foreign rate. The yield is the
+    one the evening snapshot last read for the symbol, else zero (a growth stock, or none read yet).
+    """
+    from app.foundation.settings import get_setting_row
+
+    stored = get_setting_row(db, INPUTS_KEY)
+    stored = stored if isinstance(stored, dict) else {}
+    if currency.upper() == "EUR":
+        rate = _rate(db)
+    else:
+        try:
+            rate = float(stored.get("foreign_rate", DEFAULT_FOREIGN_RATE))
+        except (TypeError, ValueError):
+            rate = DEFAULT_FOREIGN_RATE
+    yields = stored.get("dividend_yields")
+    try:
+        q = float((yields or {}).get(symbol.upper(), 0.0))
+    except (TypeError, ValueError):
+        q = 0.0
+    return rate, min(max(q, 0.0), 0.25)
+
+
 def terms_dict(terms: Any) -> dict[str, Any]:
     return {
         "kind": terms.kind,
@@ -276,6 +310,7 @@ def analyse(
     eur_per_unit: float | None,
     rate: float,
     today: date,
+    q: float = 0.0,
 ) -> dict[str, Any]:
     """What one warrant position's price implies. Prices are per warrant in EUR unless named per share."""
     days = (expiry - today).days
@@ -307,12 +342,14 @@ def analyse(
     years = days / 365.0
     if years <= 0:
         return out
-    iv = implied_vol(per_share, kind, style, spot, strike, years, rate)
+    iv = implied_vol(per_share, kind, style, spot, strike, years, rate, q)
+    out["rate"] = rate
+    out["dividend_yield"] = q
     out["implied_vol"] = iv
     if iv is None:
         out["missing"].append("an implied volatility (the price is outside what a model gives)")
         return out
-    g = greeks(kind, style, spot, strike, years, rate, iv)
+    g = greeks(kind, style, spot, strike, years, rate, iv, q)
     out["delta"] = g["delta"]
     out["gamma"] = g["gamma"]
     out["vega_eur_per_point"] = g["vega_per_point"] * shares * fx
@@ -321,7 +358,7 @@ def analyse(
     out["exposure_eur"] = g["delta"] * shares * spot * fx
     # Probability of finishing in the money under the same model (risk-neutral, an estimate).
     sq = iv * math.sqrt(years)
-    d2 = (math.log(spot / strike) + (rate - 0.5 * iv * iv) * years) / sq
+    d2 = (math.log(spot / strike) + (rate - q - 0.5 * iv * iv) * years) / sq
     out["prob_in_the_money"] = _norm_cdf(-d2) if kind == "put" else _norm_cdf(d2)
     return out
 
@@ -341,7 +378,6 @@ def derivative_positions(db: Session, user_id: str, *, today: date | None = None
     terms_by_isin = {
         t.isin: t for t in db.query(DerivativeTerms).filter(DerivativeTerms.user_id == user_id).all()
     }
-    rate = _rate(db)
     out: list[dict[str, Any]] = []
     for pos in positions:
         quantity = float(pos.quantity)
@@ -368,10 +404,11 @@ def derivative_positions(db: Session, user_id: str, *, today: date | None = None
             row["terms"] = terms_dict(terms)
             spot, spot_day = _latest_close(db, terms.underlying_symbol)
             fx = 1.0 if terms.strike_currency.upper() == "EUR" else _eur_per_unit(db, terms.strike_currency, clock)
+            rate, q = pricing_inputs(db, terms.underlying_symbol, terms.strike_currency)
             analysis = analyse(
                 kind=terms.kind, style=terms.style, strike=float(terms.strike), ratio=float(terms.ratio),
                 expiry=terms.expiry, quantity=quantity, price_eur=price, spot=spot, eur_per_unit=fx,
-                rate=rate, today=clock,
+                rate=rate, today=clock, q=q,
             )
             analysis["spot_day"] = spot_day.isoformat() if spot_day else None
             # The implied volatility moves ~3 vol points for a 1 % spot error (ADR 0026 review, 2026-11-25):
@@ -495,12 +532,44 @@ def listed_implied_vol(symbol: str, kind: str, strike: float, expiry: date) -> d
     return {"implied_vol": float(row["impliedVolatility"]), "strike": float(row["strike"]), "expiry": nearest}
 
 
+def listed_dividend_yield(symbol: str) -> float | None:
+    """The underlying's trailing dividend yield as a fraction (Yahoo), or None."""
+    try:
+        import yfinance as yf
+
+        from app.foundation.providers.yfinance_provider import _dividend_yield_fraction
+
+        value = _dividend_yield_fraction(yf.Ticker(symbol).info or {})
+    except Exception:  # noqa: BLE001 - Yahoo down or no such symbol: the stored yield stays
+        logger.debug("derivatives: no dividend yield for %s", symbol, exc_info=True)
+        return None
+    return float(value) if value is not None else None
+
+
+def refresh_dividend_yields(db: Session, symbols: set[str], read: Any = listed_dividend_yield) -> dict[str, float]:
+    """Store the yield each underlying's pricing uses; a failed read keeps the last stored value."""
+    from app.foundation.settings import get_setting_row, upsert_public_settings
+
+    stored = get_setting_row(db, INPUTS_KEY)
+    stored = dict(stored) if isinstance(stored, dict) else {}
+    yields = dict(stored.get("dividend_yields") or {})
+    for symbol in sorted(symbols):
+        value = read(symbol)
+        if value is not None and 0.0 <= value <= 0.25:
+            yields[symbol.upper()] = round(float(value), 6)
+    stored["dividend_yields"] = yields
+    stored.setdefault("foreign_rate", DEFAULT_FOREIGN_RATE)
+    upsert_public_settings(db, {INPUTS_KEY: stored})
+    return yields
+
+
 def snapshot_quotes(
     db: Session,
     *,
     today: date | None = None,
     ingest: Any = None,
     listed: Any = listed_implied_vol,
+    dividends: Any = listed_dividend_yield,
 ) -> dict[str, Any]:
     """Fetch each warrant underlying's bars and keep one quote row per warrant for today.
 
@@ -521,6 +590,9 @@ def snapshot_quotes(
         ingest = _ingest
     report = {"warrants": 0, "quotes": 0, "listed": 0}
     fetched: set[str] = set()
+    held = {t.underlying_symbol for t in db.query(DerivativeTerms).all() if (t.expiry - clock).days >= 0}
+    if held and dividends is not None:
+        refresh_dividend_yields(db, held, dividends)
     for (user_id,) in db.query(User.id).all():
         terms_by_isin = {
             t.isin: t for t in db.query(DerivativeTerms).filter(DerivativeTerms.user_id == user_id).all()

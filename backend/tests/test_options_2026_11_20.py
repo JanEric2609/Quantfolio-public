@@ -328,3 +328,50 @@ def test_the_american_fallback_is_never_below_exercise_value():
         assert derivatives.binomial_american(*args) >= derivatives._intrinsic(args[0], args[1], args[2]) - 1e-12
     # So a price below exercise value has no implied volatility.
     assert derivatives.implied_vol(9.9, "put", "american", 90.0, 100.0, 7 / 365, 0.02) is None
+
+
+# --- Phase 2: dividends and the strike currency's rate --------------------------------------------
+
+
+def test_a_dividend_keeps_put_call_parity_and_cheapens_calls():
+    s, k, t, r, v, q = 100.0, 100.0, 0.5, 0.03, 0.3, 0.04
+    call = derivatives.black_scholes("call", s, k, t, r, v, q)
+    put = derivatives.black_scholes("put", s, k, t, r, v, q)
+    assert call - put == pytest.approx(s * np.exp(-q * t) - k * np.exp(-r * t), abs=1e-9)
+    assert call < derivatives.black_scholes("call", s, k, t, r, v)
+    assert put > derivatives.black_scholes("put", s, k, t, r, v)
+
+
+def test_the_american_tree_follows_the_dividend():
+    args = (100.0, 100.0, 0.5, 0.03, 0.3)
+    assert derivatives.binomial_american("call", *args, q=0.04) == pytest.approx(
+        derivatives.black_scholes("call", *args, 0.04), rel=0.03)  # a call may be exercised early: at least BS
+    assert derivatives.binomial_american("call", *args, q=0.04) >= derivatives.black_scholes("call", *args, 0.04) - 1e-9
+    assert derivatives.binomial_american("put", *args, q=0.04) > derivatives.binomial_american("put", *args)
+
+
+def test_implied_vol_inverts_with_a_dividend():
+    price = derivatives.option_price("put", "european", 100.0, 105.0, 0.25, 0.02, 0.35, 0.03)
+    assert derivatives.implied_vol(price, "put", "european", 100.0, 105.0, 0.25, 0.02, 0.03) == pytest.approx(0.35, abs=1e-3)
+
+
+def test_pricing_inputs_use_the_strike_currency_rate_and_the_stored_yield():
+    from app.foundation.settings import upsert_public_settings
+
+    db = _memory_db()
+    assert derivatives.pricing_inputs(db, "ANT", "USD") == (derivatives.DEFAULT_FOREIGN_RATE, 0.0)
+    assert derivatives.pricing_inputs(db, "ANT", "EUR") == (0.02, 0.0)  # the fixture's EUR rate
+    upsert_public_settings(db, {derivatives.INPUTS_KEY: {"foreign_rate": 0.045, "dividend_yields": {"SAP": 0.012}}})
+    db.commit()
+    assert derivatives.pricing_inputs(db, "sap", "USD") == (0.045, 0.012)
+
+
+def test_the_snapshot_stores_the_dividend_yield_of_a_held_underlying():
+    db = _memory_db()
+    _book(db)
+    derivatives.snapshot_quotes(db, today=date(2026, 11, 20), ingest=lambda s, d: None,
+                                listed=lambda *a: None, dividends=lambda sym: 0.015)
+    assert derivatives.pricing_inputs(db, "ANT", "USD")[1] == pytest.approx(0.015)
+    # A failed read keeps the stored one.
+    derivatives.refresh_dividend_yields(db, {"ANT"}, lambda sym: None)
+    assert derivatives.pricing_inputs(db, "ANT", "USD")[1] == pytest.approx(0.015)

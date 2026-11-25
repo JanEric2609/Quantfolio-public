@@ -411,6 +411,9 @@ def _proposal_payload(position: DeskPosition, c: Candidate, sizing, verdict: Ver
         "ask": str(c.ask), "bid": str(c.bid), "spread_pct": str(c.spread_pct), "stop": str(sizing.stop_price),
         "stop_fraction": str(sizing.stop_fraction), "notional": str(sizing.notional),
         "worst_case_loss": str(sizing.worst_case_loss), "leverage_or_omega": str(c.leverage_or_omega),
+        # The stop-based worst case assumes the stop fills. A knock-out that gaps through its barrier is
+        # worth nothing: the whole premium and the buy fee are gone (pricing review 2026-11-25).
+        "loss_if_gapped": str(sizing.notional + LIMITS.fee_per_order) if c.product_type == "knockout" else None,
         "would_take_live": verdict.ok, "live_reasons": list(verdict.reasons),
     }
 

@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.decision.desk import cfd, instrument, newswire, prereg, scoring, service
+from app.decision.desk.limits import LIMITS
 from app.decision.desk.products import wkn_of
 from app.decision.desk.signals import owner_calls
 from app.decision.desk.underlyings import ALIASES
@@ -65,6 +66,9 @@ def test_proposal_names_the_exact_product_its_terms_and_the_order_line():
     assert f"Buy {p.units} x KO000A at limit 1.0000 EUR (gettex)" in text
     payload = json.loads(db.query(DeskEvent).filter(DeskEvent.kind == "proposal").one().payload)
     assert payload["wkn"] == "KO000A" and payload["name"] == "Fake" and payload["barrier_or_strike"] == "21500.5"
+    # A gap through the barrier loses the whole premium plus the buy fee, not the stop's budget.
+    assert Decimal(payload["loss_if_gapped"]) == Decimal(payload["notional"]) + LIMITS.fee_per_order
+    assert Decimal(payload["loss_if_gapped"]) > Decimal(payload["worst_case_loss"])
 
 
 def test_warrant_terms_line_shows_omega_strike_and_expiry():

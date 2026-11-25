@@ -73,6 +73,10 @@ buying protection, as Israelov found.
    Black-Scholes for European ones. Also shown: delta, theta per day, vega, the stock-equivalent exposure
    in EUR (negative for a put), the break-even at expiry and the value at expiry for moves of −50 % to +50 %.
    All of it is labelled an estimate.
+   Amendment 2026-11-25: the price is built with a continuous dividend yield (read from Yahoo each evening and
+   kept in the internal `derivatives_inputs_json` setting; zero until read) and, for a non-EUR strike, that
+   currency's short rate (default 4 %, the same key) instead of the EUR rate. The listed-option smirk signal
+   ignores quotes with no bid, a crossed or wider-than-half-the-mid spread, or an IV outside 3-200 %.
 4. **Warn before expiry.** The Control Center (and so the 06:00 Telegram self-check) lists a warrant
    without terms, one expiring within 7 days, and one past its expiry.
 5. **Measure in the Quantlab.** Each evening (22:30 UTC, in the `trade_check_daily` slot) the worker stores one row per warrant:

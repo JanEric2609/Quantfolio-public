@@ -53,10 +53,30 @@ class TokenBucket:
         self.tokens -= 1.0
 
 
+#: Quote filters in the spirit of Xing, Zhang & Zhao (2010): a two-sided quote, a plausible volatility, and a
+#: spread that leaves the implied volatility meaningful (Alpaca's indicative feed is noisy on stale quotes).
+IV_MIN, IV_MAX = 0.03, 2.0
+MAX_REL_SPREAD = 0.5
+
+
+def usable(row: dict[str, Any]) -> bool:
+    """A row with a plausible IV and, where the quote is known, bid > 0, ask >= bid and a spread of at most half the mid."""
+    if not IV_MIN <= row["iv"] <= IV_MAX:
+        return False
+    bid, ask = row.get("bid"), row.get("ask")
+    if bid is None or ask is None:
+        return True  # a chain stored before quotes were read
+    if bid <= 0 or ask < bid:
+        return False
+    return (ask - bid) / ((ask + bid) / 2.0) <= MAX_REL_SPREAD
+
+
 def smirk_score(chain: list[dict[str, Any]], today: date) -> float | None:
-    """-(OTM put IV - ATM call IV) on the expiry nearest 40 days (20-60 days out), or ``None``."""
+    """-(OTM put IV - ATM call IV) on the expiry nearest 40 days (20-60 days out), or ``None``.
+
+    Rows that fail :func:`usable` are ignored, so a name whose only quotes are one-sided or stale is left out."""
     by_expiry: dict[date, list[dict[str, Any]]] = {}
-    for row in chain:
+    for row in (r for r in chain if usable(r)):
         days = (row["expiration"] - today).days
         if MIN_DAYS <= days <= MAX_DAYS:
             by_expiry.setdefault(row["expiration"], []).append(row)
