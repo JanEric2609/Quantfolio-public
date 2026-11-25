@@ -10,8 +10,10 @@ block-bootstrap p, side placebo as the required control). This module adds only 
 Every cost below is an ASSUMPTION, not a published Trading 212 figure: the broker publishes spreads and overnight rates
 per instrument inside the app only (the cost documents give worked examples for EUR/USD and crude oil). The numbers are
 set at or above those examples. ``stress`` multiplies them so the user can re-run with the real figures read off the
-Instrument details page. Continuous futures series (``GC=F``, ``CL=F``) carry unadjusted roll gaps; a gap is a price
-jump the replay cannot trade, so read commodity results with that bias in mind.
+Instrument details page. Every commodity ticker (``GC=F``, ``SI=F``, ``CL=F``, ``BZ=F``, ``HG=F``) is an unadjusted continuous future: a roll
+splice is a price jump nobody could trade, yet it can clear the strong-day trigger and be scored as a trade. The frozen
+verdict has no splice rule, so a commodity ``pass`` is provisional until its trades are checked against roll dates (the
+FX family has no such issue). Nothing here changes a pass into a signal.
 
 Writes nothing, sends nothing, calls no broker. A pass justifies a new pre-registration, never a live signal.
 """

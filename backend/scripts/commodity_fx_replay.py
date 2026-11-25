@@ -34,7 +34,8 @@ def main() -> None:
     ap.add_argument("--write", action="store_true")
     args = ap.parse_args()
     db = SessionLocal()
-    result: dict[str, object] = {"since": args.since, "cost_mult": args.cost_mult, "families": {}}
+    result: dict[str, object] = {"since": args.since, "cost_mult": args.cost_mult, "families": {},
+                                 "note": "Costs are assumptions. Commodity bars are unadjusted continuous futures: a commodity pass is provisional until its trades are checked against roll dates."}
     try:
         for fam, table in cf.FAMILIES.items():
             table = cf.stress(table, args.cost_mult)
