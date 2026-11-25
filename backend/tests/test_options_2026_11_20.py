@@ -310,3 +310,13 @@ def test_vega_near_the_volatility_floor_is_per_point():
     true = (derivatives.black_scholes("call", 100.0, 100.0, 0.5, 0.02, hi)
             - derivatives.black_scholes("call", 100.0, 100.0, 0.5, 0.02, lo)) / (hi - lo) * 0.01
     assert g["vega_per_point"] == pytest.approx(true, rel=0.05)
+
+
+def test_a_short_dated_or_low_vol_american_option_prices_without_dividing_by_zero():
+    """The Leisen-Reimer probabilities saturate at 0 or 1 there: fall back to Black-Scholes."""
+    iv = derivatives.implied_vol(10.2, "put", "american", 90.0, 100.0, 7 / 365, 0.02)
+    assert iv is None or iv > 0
+    g = derivatives.greeks("call", "american", 100.0, 100.0, 0.5, 0.02, 0.005)
+    assert set(g) == {"delta", "gamma", "theta_per_day", "vega_per_point"}
+    far = derivatives.binomial_american("put", 90.0, 100.0, 7 / 365, 0.02, 0.2)
+    assert far == pytest.approx(10.0, abs=0.1)
