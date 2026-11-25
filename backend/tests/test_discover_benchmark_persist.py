@@ -124,11 +124,15 @@ def test_benchmark_symbols_deduped_against_candidates(monkeypatch):
         pipeline._BENCHMARK_US.lower(),
     ])
 
-    assert requested == [
+    # The warm-up runs on a thread pool, so the order requests arrive in is not
+    # fixed: what matters is that each symbol is requested exactly once.
+    expected = [
         pipeline._BENCHMARK_US,
         *[s for s in pipeline._benchmark_symbols() if s != pipeline._BENCHMARK_US],
         "USDEUR=X",
     ]
+    assert len(requested) == len(set(requested))
+    assert sorted(requested) == sorted(expected)
 
 
 def test_end_to_end_rows_in_shared_engine_idempotent(monkeypatch):

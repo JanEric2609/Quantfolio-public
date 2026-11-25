@@ -169,7 +169,8 @@ def confidence_sequence(
         return None
     s, v = float(arr[ok].sum()), float((sig[ok] ** 2).sum())
     rho = float(np.mean(sig[ok] ** 2)) * TUITION_MIN_DAYS
-    radius = math.sqrt((v + rho) * (2 * math.log(1 / CS_ALPHA) + math.log((v + rho) / rho)))
+    # Two-sided: each tail gets CS_ALPHA / 2, so the band holds at level 1 - CS_ALPHA.
+    radius = math.sqrt((v + rho) * (2 * math.log(2 / CS_ALPHA) + math.log((v + rho) / rho)))
     return {
         "alpha_low": (s - radius) / t * TRADING_DAYS_PER_YEAR,
         "alpha_high": (s + radius) / t * TRADING_DAYS_PER_YEAR,

@@ -115,11 +115,39 @@ def pbo_or_none(wide: pd.DataFrame) -> tuple[float | None, int]:
     return float(probability_of_backtest_overfitting(common.to_numpy(), PBO_PARTITIONS)), len(common)
 
 
-def _candidate(name: str, values: pd.Series, mined: bool, n_trials: int) -> Candidate:
+def _trial_sharpe_variance(wide: pd.DataFrame) -> float | None:
+    """Per-period variance of the Sharpe ratios of the family's candidates, None below two usable ones.
+
+    Bailey and Lopez de Prado's expected maximum needs the dispersion of the
+    trials' Sharpe ratios, not the sampling variance of one of them.
+    """
+    sharpes = []
+    for col in wide.columns:
+        r = wide[col].dropna().to_numpy(dtype=float)
+        if len(r) >= 3 and float(r.std(ddof=1)) > 0.0:
+            sharpes.append(float(r.mean() / r.std(ddof=1)))
+    if len(sharpes) < 2:
+        return None
+    var = float(pd.Series(sharpes).var(ddof=1))
+    return var if math.isfinite(var) and var > 0 else None
+
+
+def _candidate(
+    name: str, values: pd.Series, mined: bool, n_trials: int, trial_variance: float | None = None,
+) -> Candidate:
     s = values.dropna()
     r = s.to_numpy(dtype=float)
     n = len(r)
-    dsr = float(deflated_sharpe_ratio(r.tolist(), n_trials, periods_per_year=PERIODS_PER_YEAR)) if n >= 3 else 0.0
+    # The larger of the trials' observed dispersion and the one-estimate null
+    # variance 1/(n-1): few candidates give a noisy dispersion, and a smaller
+    # one must not lower the bar below the null.
+    variance = max(trial_variance, 1.0 / (n - 1)) if trial_variance is not None and n >= 3 else None
+    dsr = (
+        float(deflated_sharpe_ratio(
+            r.tolist(), n_trials, variance_sharpe=variance, periods_per_year=PERIODS_PER_YEAR,
+        ))
+        if n >= 3 else 0.0
+    )
     return Candidate(
         name=name, mined=mined, months=n,
         first_month=str(s.index[0]) if n else None, last_month=str(s.index[-1]) if n else None,
@@ -133,10 +161,11 @@ def _candidate(name: str, values: pd.Series, mined: bool, n_trials: int) -> Cand
 def grade_family(name: str, wide: pd.DataFrame, mined: set[str], n_trials: int, gates_money: bool = False) -> Family:
     """Grade one family: ``wide`` is month x candidate returns."""
     pbo, common = pbo_or_none(wide)
+    trial_variance = _trial_sharpe_variance(wide)
     return Family(
         name=name, question=QUESTIONS.get(name, name), gates_money=gates_money, common_months=common,
         pbo=pbo, passes_pbo=pbo is not None and pbo <= PBO_MAX,
-        candidates=[_candidate(str(c), cast(pd.Series, wide[c]), str(c) in mined, n_trials) for c in wide.columns],
+        candidates=[_candidate(str(c), cast(pd.Series, wide[c]), str(c) in mined, n_trials, trial_variance) for c in wide.columns],
     )
 
 

@@ -2,7 +2,7 @@
 #    uv pip compile pyproject.toml --universal --extra dev --extra bert -o requirements.lock
 aiohappyeyeballs==2.6.2
     # via aiohttp
-aiohttp==3.14.3
+aiohttp==3.14.4
     # via
     #   alpha-vantage
     #   mlflow

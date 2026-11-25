@@ -833,8 +833,12 @@ def deflated_sharpe_ratio(
     is the dominant source of selection bias / backtest overfitting.
 
     ``variance_sharpe`` is the per-period cross-sectional variance of the
-    trials' Sharpe ratios. When unknown, a conservative default of ``1/(n-1)``
-    (the asymptotic variance of the Sharpe estimator under normality) is used.
+    trials' Sharpe ratios. When the trials are not available, ``1/(n-1)`` is
+    used: the sampling variance of one Sharpe estimate, which is what the
+    trials' dispersion would be if every one had zero true skill. It is the
+    null, not a conservative bound: trials that differ more than that raise
+    the true threshold, so callers that have the trials should pass their
+    observed variance (see ``lab/evidence_gate``).
 
     Returns a probability in [0, 1]; values ≥ 0.95 are typically required to
     reject the "no skill" hypothesis.
