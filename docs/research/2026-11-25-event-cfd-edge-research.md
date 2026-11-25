@@ -11,7 +11,7 @@ Evidence tags used below: **[read]** I read the paper text through the PDF tool;
 5. **Everything below is hypothesis-grade until the replay on deep history says otherwise.** Expected outcome: null. A null is still useful because it ends the search honestly.
 
 ## 2. What was and was not done
-- Asked for 250+ independent sources. **Reached about 242 distinct sources surfaced** (web results across 20 searches plus alphaXiv discovery across 14 calls, after dropping off-topic hits) and **7 read in full** [read]. The other 235 are title or abstract lines only, tagged [listed], and perhaps 100 of them are directly on point; the rest are background (theses, vendor pages, adjacent topics). Treat 'about 242' as a count of sources seen, not of sources studied; I have not read 250 papers. The previous reviews in `cfd-review/` already carry about 110 further sources; I did not repeat them.
+- Asked for 250+ independent sources. **Reached about 242 distinct sources surfaced** (web results across 20 searches plus alphaXiv discovery across 14 calls, after dropping off-topic hits) and, after a second reading pass, **14 read in full** [read] (6 in the first pass; the first version of this report wrongly said 7). The other roughly 228 are title or abstract lines only, tagged [listed], and perhaps 100 of them are directly on point; the rest are background (theses, vendor pages, adjacent topics). Treat 'about 242' as a count of sources seen, not of sources studied; I have not read 250 papers. The previous reviews in `cfd-review/` already carry about 110 further sources; I did not repeat them.
 - The sandbox cannot reach market-data hosts (Yahoo, Stooq, FRED return 403 from the proxy), so **no replay was run on real prices here**. The new replay is tested on synthetic data and must be run on the production host.
 - Several 2026 papers are single-author or vendor-affiliated arXiv preprints. I weight them as hypotheses, not facts, and say so per item.
 
@@ -58,6 +58,18 @@ Evidence tags used below: **[read]** I read the paper text through the PDF tool;
 ### 3.9 Statistical discipline (why the bar is high)
 - [background/listed] Harvey, Liu, Zhu (t above 3 for new factors), Bailey and Lopez de Prado (deflated Sharpe, probability of backtest overfitting). Strong days are rare (about 4% of days in Mesfin's VVG; here a 2.5-sigma rule gives roughly 1 to 2% of days). About 15 to 40 trades a year per index means any single-index result is underpowered, so the replay pools four indices over as many years as the data provider returns and uses a placebo.
 
+### 3.10 Second reading pass: looking for evidence against the null (added after reading 8 more papers)
+I went looking for the papers most likely to contradict "no cost-robust directional edge". None did. Two sharpen the plan.
+- **[read] Kurth et al. 2607.01550 (Bouchaud's group, 100 futures, 1995-2025).** Short-term trend following stopped paying around 2009. Fast EWM-5-20 Sharpe 0.84 before, 0.12 after (error about 0.24); the slow 50-day signal kept 0.40. Equity indices and FX lost it, bonds and most commodities kept it. The cleanest separator is volatility-normalised tick size. Directly relevant here: the loss is concentrated on **large-return days** (sub-1 sigma days are unchanged). So "ride the strong day" is exactly where the trend premium died on small-tick index contracts. Trend still works in low-volatility regimes even on small-tick contracts. This is a reason to expect the `with` cells of the shock replay to fail and to split them by volatility regime in the next version (descriptive only, not a new trial).
+- **[read] Christensen, Oomen, Reno 2601.08974.** Short bursts of one-sided drift occur about once a week per market; moves are 25 to 200 bp; about two thirds are followed by partial reversal within 5 minutes (regression slope about -0.23), stronger after negative bursts with high volume, and about one third are gradual jumps that continue. This is a liquidity-provider premium, not something a retail CFD with a spread can collect. It argues against chasing a spike and for waiting, but the effect lives at the 5-minute scale.
+- **[read] Vlasiuk, Smirnov 2511.06177.** SPY NBBO data, 2018-2023: no structure at very short lags; some reversal after large pushes at medium lags, stronger after sell-offs. No costs are modelled, and the authors say transaction costs are future work. Not tradable evidence.
+- **[read] Glasserman et al. 2507.04481.** Overnight beats intraday by 2.75 bp a day (about 7.2% a year) for S&P 500 stocks since 2000; news topics explain much of it; the authors say the turnover makes it **not a viable strategy**. Stock-average numbers, not an index CFD. A rough sum for Tech 100 (2.75 bp gross, minus about 0.83 bp financing a night, minus the spread) leaves at most about 1 bp a day and may be zero. This is the only open arithmetic that is not clearly negative, and it is untested on CFD prices; I list it as a cheap descriptive check, not a finding.
+- **[read] Zhong 2606.12872.** SPX options price scheduled CPI/FOMC/NFP events as variance and convexity (straddles, strangles), not as direction (no gain on risk reversals). Supports using the implied move as a magnitude trigger, not a direction signal.
+- **[read] Li, Wang 2608.26115.** Option-implied return predictors decayed across regimes; the smirk signal is insignificant since 2023; IV spread and skewness persist but at monthly horizon on single stocks, with out-of-sample R2 around 1% and one year (2025) driving the ML gain; robustness checks were deferred. Not applicable to an index CFD.
+- **[read] Smerlak 2610.24558.** Theory: a signal's value net of costs depends on how its speed meets the cost structure, and fully predictable signals can be worth almost nothing at costly frequencies. It supports checking signal speed against cost, nothing more.
+- **[read, rejected] Zhang 2505.16136 (GDELT + FinBERT + XGBoost).** Reports Sharpe 5.87 on EUR/USD daily with 72.7% winning days after costs. That is not credible for a daily FX direction signal: GDELT dates and headlines fetched from live URLs invite look-ahead, there is one author and no external check, and the table caption still carries an unedited instruction ("values must accurately reflect results"). I do not count it as evidence.
+Net: 14 papers read, 0 contradict the null, 1 makes it more specific (short-term trend died on index large-return days), 1 is a credibility failure. No new rule is added to the code because nothing new holds up.
+
 ## 4. Ranked ideas
 Scores: evidence (E), cost-robustness at retail CFD costs (C), feasibility with Quantfolio and the homelab (F), each 1 to 5. "Edge claim" = does the evidence support a directional edge after costs.
 
@@ -96,7 +108,8 @@ Scores: evidence (E), cost-robustness at retail CFD costs (C), feasibility with 
 2. If null, stop searching for directional rules on four indices and put the effort into the **journal** (item 6): at every strong-day alert store the live spread, VIX, event class and the Kalshi probability move. About 30 to 40 such days a year is the only way to learn the real cost at the moment it matters.
 3. Use the implied-move z as the definition of "strong" in the strong-event alert plan (docs/plan-strong-events-2026-11-25.md, other thread), and give the user the day's expected move from VIX in the message: it makes the size of the day readable before any signal.
 4. Optional, research only: run the Baltussen ROD signal conditional on VIX terciles (a gamma proxy) on SPY/QQQ 30-minute data that already exists.
-5. Keep the Qwen 9B for tagging the day type from headlines; do not let it pick direction.
+5. Optional descriptive checks for the next replay version (no new pre-registered trial): split shock results by volatility regime (low versus high VIX tercile), and measure the overnight-only return of Tech 100 CFD on non-event days net of financing and spread.
+6. Keep the Qwen 9B for tagging the day type from headlines; do not let it pick direction.
 
 ## 8. Things I would not claim
 - That any of this will make money. The honest prior from sections 3.1 to 3.2 is that it will not at CFD spreads.
@@ -106,13 +119,21 @@ Scores: evidence (E), cost-robustness at retail CFD costs (C), feasibility with 
 ## 9. Sources
 Counts: see section 2. R = read in full, otherwise listed (title/abstract seen only).
 
-### Read in full (7)
+### Read in full (14)
 - R https://arxiv.org/abs/2605.04004 Mesfin, Structural limits of OHLCV intraday momentum signals in MNQ
 - R https://arxiv.org/abs/2611.22177 Wang, The only edge was memorized in training
 - R https://arxiv.org/abs/2608.14014 Kargarzadeh et al., Buy the rumor, sell the news
 - R https://arxiv.org/abs/2611.03985 Dehkordi et al., Thinking fast, trading late (OLIVIA)
 - R https://arxiv.org/abs/2508.06788 Takahashi, Returns and order flow imbalances, macro news
 - R https://arxiv.org/abs/2604.01431 Mohanty and Krishnamachari, Kalshi macro contracts and crypto volatility
+- R https://arxiv.org/abs/2607.01550 Kurth, Eisler, Rej, Bouchaud, Is trend still your friend (short-term trend demise)
+- R https://arxiv.org/abs/2601.08974 Christensen, Oomen, Reno, The drift burst hypothesis
+- R https://arxiv.org/abs/2507.04481 Glasserman et al., Does overnight news explain overnight returns
+- R https://arxiv.org/abs/2511.06177 Vlasiuk, Smirnov, Push-response anomalies in SPY
+- R https://arxiv.org/abs/2610.24558 Smerlak, Optimal trading filters and the value of predictive signals
+- R https://arxiv.org/abs/2606.12872 Zhong, Non-spanning identification of scheduled event risk
+- R https://arxiv.org/abs/2608.26115 Li, Wang, Option-implied signals and crash risk 2015-2026
+- R https://arxiv.org/abs/2505.16136 Zhang, Interpretable ML for macro alpha (GDELT) - read as a credibility check, see 3.10
 - (Reference lists of the above supplied about 60 further citations, used only as pointers.)
 
 ### Listed via web search (title or abstract line only)
