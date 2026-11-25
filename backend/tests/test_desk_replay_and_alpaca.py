@@ -148,3 +148,42 @@ def test_minute_days_ignores_after_hours_bars():
         return minute_days(rows)
 
     assert [(x.r1, x.sigma) for x in build(True)] == [(x.r1, x.sigma) for x in build(False)]
+
+
+def test_replay_fetch_stops_before_sip_delay_and_stays_on_sip(monkeypatch):
+    import importlib.util
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(
+        "desk_replay_script", Path(__file__).resolve().parents[1] / "scripts" / "desk_replay.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+
+    calls: list[tuple[str, str, datetime]] = []
+
+    class FakeProvider:
+        def __init__(self, *a, **k):
+            pass
+
+        def get_intraday_bars(self, sym, tf, start, end, *, feed="iex"):
+            calls.append((sym, feed, end))
+            return [{"t": start, "c": Decimal("1")}]
+
+    class FakeDb:
+        def close(self):
+            pass
+
+    import app.foundation.core.db as db_mod
+    import app.foundation.providers.alpaca_provider as prov_mod
+    import app.foundation.settings as settings_mod
+    monkeypatch.setattr(db_mod, "SessionLocal", lambda: FakeDb())
+    monkeypatch.setattr(prov_mod, "AlpacaProvider", FakeProvider)
+    monkeypatch.setattr(settings_mod, "get_secret", lambda db, name: ("k", {"api_secret": "s"}))
+
+    out = script.fetch()
+    assert set(out) == {"SPY", "QQQ"} and all(out[s] for s in out)
+    assert {feed for _, feed, _ in calls} == {"sip"}
+    latest = max(end for _, _, end in calls)
+    assert latest <= datetime.now(UTC) - timedelta(minutes=15)

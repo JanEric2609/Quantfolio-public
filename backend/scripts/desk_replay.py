@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -30,6 +30,7 @@ from app.lab.desk_replay import (  # noqa: E402
 
 SYMBOLS = ("SPY", "QQQ")
 START = datetime(2016, 1, 1, tzinfo=UTC)
+SIP_DELAY = timedelta(minutes=20)
 
 
 def fetch() -> dict[str, list[dict]]:
@@ -43,12 +44,17 @@ def fetch() -> dict[str, list[dict]]:
     finally:
         db.close()
     provider = AlpacaProvider(key, api_secret=(meta or {}).get("api_secret"))
+    # The free plan serves SIP history only when it ends 15+ minutes ago; an `end` of "now" is a 403
+    # ("subscription does not permit querying recent SIP data"). Stop 20 minutes back. There is no IEX
+    # fallback on purpose: IEX is one venue with different closes and thinner history, and the replay
+    # evidence (ADR 0027) is SIP bars.
+    now = datetime.now(UTC) - SIP_DELAY
     out: dict[str, list[dict]] = {}
     for sym in SYMBOLS:
         rows: list[dict] = []
-        for year in range(START.year, datetime.now(UTC).year + 1):
+        for year in range(START.year, now.year + 1):
             rows += provider.get_intraday_bars(sym, "30Min", datetime(year, 1, 1, tzinfo=UTC),
-                                               min(datetime(year + 1, 1, 1, tzinfo=UTC), datetime.now(UTC)), feed="sip")
+                                               min(datetime(year + 1, 1, 1, tzinfo=UTC), now), feed="sip")
         out[sym] = [{"t": r["t"].isoformat(), "c": str(r["c"])} for r in rows]
     return out
 
