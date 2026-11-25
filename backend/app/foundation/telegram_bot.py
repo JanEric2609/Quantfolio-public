@@ -106,7 +106,8 @@ def _post_once(client: Any, url: str, payload: dict[str, Any], budget: list[floa
 
 
 def send_telegram_message(
-    db: Session, chat_id: str, text: str, reply_markup: dict[str, Any] | None = None
+    db: Session, chat_id: str, text: str, reply_markup: dict[str, Any] | None = None,
+    *, preview: bool = True,
 ) -> bool:
     """Send *text*; a long one goes out in parts (the buttons under the last).
 
@@ -130,7 +131,8 @@ def send_telegram_message(
                 for i, part in enumerate(parts):
                     markup = reply_markup if i == len(parts) - 1 else None
                     _post_once(client, url,
-                               {"chat_id": chat_id, "text": part, **({"reply_markup": markup} if markup else {})},
+                               {"chat_id": chat_id, "text": part, **({"reply_markup": markup} if markup else {}),
+                                **({} if preview else {"disable_web_page_preview": True})},
                                budget)
                     delivered += 1
             except Exception:

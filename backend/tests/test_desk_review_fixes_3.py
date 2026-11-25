@@ -357,7 +357,7 @@ def test_a_holdings_first_8k_is_sent_not_stored_as_the_baseline(monkeypatch):
     db = _memory_db()
     user = make_user(db)
     sent: list[str] = []
-    monkeypatch.setattr("app.decision.desk.telegram.alert", lambda db_, uid, text: sent.append(text))
+    monkeypatch.setattr("app.decision.desk.telegram.alert", lambda db_, uid, text, **kw: sent.append(text))
     monkeypatch.setattr(newswire, "watchlist", lambda db_, uid: {"NVDA": "holding:NVDA"})
     monkeypatch.setattr(newswire, "holding_ciks", lambda db_, watch: {"0001045810": "NVDA"})
 

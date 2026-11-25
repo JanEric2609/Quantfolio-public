@@ -437,6 +437,12 @@ def register_desk_reconcile_job(scheduler: Any | None = None) -> str:
             now = datetime.now(UTC)
             if digest_due(now):  # the weekly digest rides this job (the worker's pool allows no further job)
                 out["digest"] = send_weekly_digest(db, now)
+            from . import news_digest
+
+            if news_digest.digest_due(now):  # the morning holdings digest rides the same job
+                owner = _owner(db)
+                if owner is not None:
+                    out["news_digest"] = news_digest.send(db, owner.id, now)
             return out
         finally:
             db.close()

@@ -270,7 +270,7 @@ def test_ingest_stores_once_rates_and_sends(monkeypatch):
     db = _memory_db()
     user = make_user(db)
     sent: list[str] = []
-    monkeypatch.setattr("app.decision.desk.telegram.alert", lambda db, uid, text: sent.append(text))
+    monkeypatch.setattr("app.decision.desk.telegram.alert", lambda db, uid, text, markup=None, **kw: sent.append(text))
 
     async def fake_rate(db, item):
         return R(3, "down", "company", 640)
@@ -282,16 +282,15 @@ def test_ingest_stores_once_rates_and_sends(monkeypatch):
     assert asyncio.run(newswire.ingest(db, user.id, item, {"NVDA": "holding:NVDA"}, now=now)) == "duplicate"
     row = db.get(NewsWireItem, "alpaca:1")
     assert (row.materiality, row.direction, row.rated_ms, row.alert) == (3, "down", 640, "sent")
-    assert len(sent) == 1 and sent[0].startswith("News (you hold NVDA, 3/3 down): Nvidia cuts guidance")
-    assert "2 s ago" in sent[0] and "nothing is ordered" in sent[0]
-    assert sent[0].endswith("\nWhy now? Who benefits? What's missing?")
+    assert len(sent) == 1 and sent[0].startswith("Your holding NVDA: 3/3 down\nNvidia cuts guidance")
+    assert "just now" in sent[0] and "nothing is ordered" not in sent[0]
 
 
 def test_poll_feeds_baselines_a_new_feed_then_sends_new_items(monkeypatch):
     db = _memory_db()
     user = make_user(db)
     sent: list[str] = []
-    monkeypatch.setattr("app.decision.desk.telegram.alert", lambda db, uid, text: sent.append(text))
+    monkeypatch.setattr("app.decision.desk.telegram.alert", lambda db, uid, text, markup=None, **kw: sent.append(text))
     monkeypatch.setattr(newswire, "holding_ciks", lambda db, watch: {})
 
     async def fake_rate(db, item):
@@ -313,7 +312,7 @@ def test_poll_feeds_baselines_a_new_feed_then_sends_new_items(monkeypatch):
     assert sent == [] and {r.alert for r in db.query(NewsWireItem)} == {"baseline"}
     feeds["fed"] = RSS.replace(b"fed.example/a", b"fed.example/b").replace(b"FOMC statement", b"Rate cut")
     assert newswire.poll_feeds(db, user.id, now, fetch=fetch) == {"fed": 1}
-    assert len(sent) == 1 and "central bank" in sent[0] and "Rate cut" in sent[0]
+    assert len(sent) == 1 and "Central bank" in sent[0] and "Rate cut" in sent[0]
     assert agents == {news_wire.FEED_USER_AGENT}  # the SEC contact never goes to the RSS hosts
 
 
@@ -406,9 +405,11 @@ def test_alpaca_holding_hit_needs_ticker_or_name_in_headline():
     assert newswire.relevance(_item(symbols=("IBM",), headline="IBM Reduces H-1B Hiring"), watch) == "holding:IBM"
 
 
-def test_think_prompt_ends_only_the_biggest_alerts():
-    item = _item(headline="Nvidia cuts guidance")
-    now = NOW.astimezone(UTC)
-    big = newswire.format_alert(item, "holding:NVDA", R(3, "down", "company", 1), now)
-    mid = newswire.format_alert(item, "holding:NVDA", R(2, "down", "company", 1), now)
-    assert big.endswith(newswire.THINK_PROMPT) and newswire.THINK_PROMPT not in mid
+def test_alert_is_three_plain_lines_without_boilerplate():
+    item = _item(headline="Nvidia cuts guidance", url="https://example.com/a")
+    text = newswire.format_alert(item, "holding:NVDA", R(3, "down", "company", 1), NOW.astimezone(UTC), 4.2)
+    lines = text.splitlines()
+    assert lines[0] == "Your holding NVDA (4.2 % of your book): 3/3 down"
+    assert lines[1] == "Nvidia cuts guidance"
+    assert lines[2].startswith("Benzinga")
+    assert "nothing is ordered" not in text and "Why now" not in text

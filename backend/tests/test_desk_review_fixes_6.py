@@ -161,7 +161,7 @@ def test_a_news_alert_is_sent_off_the_streams_event_loop(monkeypatch):
     user = make_user(db)
     threads: list[str] = []
     monkeypatch.setattr("app.decision.desk.telegram.alert",
-                        lambda db_, uid, text: threads.append(threading.current_thread().name))
+                        lambda db_, uid, text, **kw: threads.append(threading.current_thread().name))
 
     async def rated(db_, item):
         return newswire.Rating(3, "down", "company", 1)
