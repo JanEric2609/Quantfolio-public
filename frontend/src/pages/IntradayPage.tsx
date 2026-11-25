@@ -11,6 +11,7 @@ import {
   type CfdJournalRow, type IntradayDto, type IntradayIndex, type T212Facts,
 } from "../lib/api";
 import { calcPosition, countdown } from "../lib/cfdCalc";
+import { stacked } from "../lib/stackedTable";
 
 const POLL_MS = 60_000;
 const STALE_S = 600;
@@ -54,9 +55,9 @@ function IndexCard({ idx, now }: { idx: IntradayIndex; now: number }) {
           ? <p>No trade today: {SKIP_TEXT[idx.skip_reason] ?? idx.skip_reason}.</p>
           : <p>Entry {hhmm(idx.enter_at)} ({countdown(idx.enter_at, now)}), exit {hhmm(idx.exit_at)} ({countdown(idx.exit_at, now)})</p>}
         {idx.macro_events_today.length > 0 && <p>Events today: {idx.macro_events_today.join(", ").toUpperCase()}</p>}
-        <p>
+        {!idx.skip_reason && <p>
           Expected: {idx.direction ? `${idx.direction} (r1 ${fmt(num(idx.r1) == null ? null : num(idx.r1)! * 100)} %)` : "not known yet"}
-        </p>
+        </p>}
         {idx.error && (s.status === "before" && idx.error === "no_data"
           ? <p>Opens {hhmm(s.open)} Berlin; the numbers fill in once it trades.</p>
           : <p role="alert" className="text-amber-600">Reading failed: {idx.error.replace(/_/g, " ")}</p>)}
@@ -167,29 +168,29 @@ function JournalTable({ rows, onChanged }: { rows: CfdJournalRow[]; onChanged: (
   if (rows.length === 0) return <p className="text-sm">No CFD signal yet.</p>;
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead><tr className="text-left">
+      <table className={stacked.table}>
+        <thead className={stacked.thead}><tr className="text-left">
           <th>Date</th><th>Market</th><th>Suggested</th><th>Yours</th><th>In</th><th>Out</th><th>Slippage</th>
           <th>Real / paper EUR</th><th>Nights</th><th>Status</th><th>Your answer</th>
         </tr></thead>
-        <tbody>
+        <tbody className={stacked.tbody}>
           {rows.map((r) => {
             const slip = num(r.entry_level) != null && num(r.index_level_est) != null
               ? (num(r.entry_level)! - num(r.index_level_est)!) * (r.direction === "long" ? 1 : -1) : null;
             const v = inputs[r.position_id] ?? { level: "", quantity: "" };
             return (
-              <tr key={r.position_id} className="border-t border-border/50 align-top">
-                <td>{r.created_at ? new Date(r.created_at).toLocaleDateString("de-DE") : "-"}</td>
-                <td>{r.market_key} {r.direction}</td>
-                <td>{r.quantity_suggested ? Number(r.quantity_suggested).toFixed(4) : "-"}</td>
-                <td>{r.quantity ? Number(r.quantity).toFixed(4) : "-"}</td>
-                <td>{fmt(r.entry_level, 1)}</td>
-                <td>{fmt(r.exit_level, 1)}</td>
-                <td>{slip == null ? "-" : `${slip >= 0 ? "+" : ""}${slip.toFixed(1)} pts`}</td>
-                <td>{fmt(r.real_pnl_eur)} / {fmt(r.paper_net_eur)}{r.rule === "other" ? " (your own rule)" : ""}</td>
-                <td>{r.nights_held ?? "-"}</td>
-                <td>{r.status}</td>
-                <td>
+              <tr key={r.position_id} className={`${stacked.tr} border-t border-border/50 align-top`}>
+                <td className={stacked.td} data-label="Date">{r.created_at ? new Date(r.created_at).toLocaleDateString("de-DE") : "-"}</td>
+                <td className={stacked.td} data-label="Market">{r.market_key} {r.direction}</td>
+                <td className={stacked.td} data-label="Suggested">{r.quantity_suggested ? Number(r.quantity_suggested).toFixed(4) : "-"}</td>
+                <td className={stacked.td} data-label="Yours">{r.quantity ? Number(r.quantity).toFixed(4) : "-"}</td>
+                <td className={stacked.td} data-label="In">{fmt(r.entry_level, 1)}</td>
+                <td className={stacked.td} data-label="Out">{fmt(r.exit_level, 1)}</td>
+                <td className={stacked.td} data-label="Slippage">{slip == null ? "-" : `${slip >= 0 ? "+" : ""}${slip.toFixed(1)} pts`}</td>
+                <td className={stacked.td} data-label="Real / paper EUR">{fmt(r.real_pnl_eur)} / {fmt(r.paper_net_eur)}{r.rule === "other" ? " (your own rule)" : ""}</td>
+                <td className={stacked.td} data-label="Nights">{r.nights_held ?? "-"}</td>
+                <td className={stacked.td} data-label="Status">{r.status}</td>
+                <td className={stacked.td} data-label="Your answer">
                   {(r.status === "sent" || r.status === "entered") && (
                     <div className="flex flex-wrap items-center gap-1">
                       <Input aria-label={`Level ${r.short_id}`} className="h-8 w-24" placeholder="level" inputMode="decimal"

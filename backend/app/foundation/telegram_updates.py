@@ -18,6 +18,7 @@ import hashlib
 import logging
 import time
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -30,10 +31,14 @@ from app.foundation.telegram_bot import (
     get_account_by_chat_id,
     get_bot_token,
     link_pairing_code,
+    parse_freeform_expense,
 )
 from app.foundation.telegram_replies import format_balance_reply, format_summary_reply
 
 logger = logging.getLogger(__name__)
+
+#: An amount above this (EUR) is logged only when the message ends with "!".
+LARGE_EXPENSE = Decimal(1000)
 
 UPDATE_OFFSET_KEY = "telegram_update_offset"
 MODE_POLLING = "polling"
@@ -165,6 +170,18 @@ def handle_message(db: Session, chat_id: str, text: str, replied: dict[str, Any]
         return
     if text == "/summary":
         telegram_bot.send_telegram_message(db, chat_id, format_summary_reply(db, account.user_id))
+        return
+
+    confirmed = text.endswith("!")
+    if confirmed:
+        text = text[:-1].rstrip()
+    parsed = parse_freeform_expense(text)
+    if parsed is not None and parsed[0] > LARGE_EXPENSE and not confirmed:
+        # A price typed for the desk without using Reply ("24003.5 0.04") reads like a huge expense.
+        telegram_bot.send_telegram_message(
+            db, chat_id,
+            f"Not logged: {parsed[0]:,.2f} EUR is a large expense. If it is one, send it again with ! at the end "
+            f"(e.g. '{text} !'). If it is a price for a CFD trade, reply to that trade's message instead.")
         return
 
     expense = create_expense_from_telegram(db, account.user_id, text)
