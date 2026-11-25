@@ -4569,7 +4569,7 @@ export interface CfdJournalRow {
   index_level_est: string | null; quantity_suggested: string | null; quantity: string | null;
   exposure_eur: string | null; stop_points: string | null; stop_level: string | null; entry_level: string | null;
   exit_level: string | null; entered_at: string | null; closed_at: string | null; real_pnl_eur: string | null;
-  paper_net_eur: string | null; paper_status: string | null; nights_held: number | null; note: string | null;
+  paper_net_eur: string | null; paper_status: string | null; nights_held: number | null; note: string | null; rule?: string;
 }
 export interface IntradayDto {
   board: IntradayBoard | null; board_age_s: number | null; t212: T212Facts; journal: CfdJournalRow[];
@@ -4594,7 +4594,7 @@ export interface SignalOpenPosition {
 }
 export interface SignalJournalRow {
   position_id: string; cell: string | null; market_key: string; status: string; real_pnl_eur: number | null;
-  paper_net_eur: number | null; created_at: string | null;
+  paper_net_eur: number | null; created_at: string | null; rule?: string;
 }
 export interface SignalsDto {
   estimate: boolean; not_tax_advice: boolean;

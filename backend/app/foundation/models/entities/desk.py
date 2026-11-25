@@ -175,5 +175,8 @@ class DeskCfdJournal(Base):
     exit_level: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
     real_pnl_eur: Mapped[Decimal | None] = mapped_column(Numeric(14, 4), nullable=True)
     note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    #: Which rule the owner's trade followed: ``registered`` (the desk's signal) or ``other`` (a manual plan).
+    #: Only ``registered`` rows may be compared with the paper cell ``index_momentum:cfd``.
+    rule: Mapped[str] = mapped_column(String(12), default="registered", server_default="registered")
     telegram_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_text_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
