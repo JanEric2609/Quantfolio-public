@@ -111,7 +111,7 @@ def test_close_message():
     events.event_close(db, p, Decimal("470"), "stop", US_NOW, ci.by_key("US:NVDA"))
     text = event_messages.close_text(db, p, "stop", j)
     assert text.startswith("NVIDIA (NVDA): CLOSE now (stop-loss level reached). Paper result ")
-    assert "hype_fade:cfd" in text
+    assert "hype_fade:cfd" not in text
     cfd_journal.mark_entered(db, j, US_NOW, Decimal("480"), Decimal("0.18"))
     assert "reply to this message with: <exit price>" in event_messages.close_text(db, p, "time", j)
     assert "contract rolls" not in event_messages.close_text(db, p, "time", j)

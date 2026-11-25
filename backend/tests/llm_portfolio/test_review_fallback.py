@@ -508,3 +508,6 @@ def test_review_digest_is_wanted_only_for_a_proposed_trade():
     assert review_digest_wanted({}) is False
     assert review_digest_wanted({"action": "buy", "ticker": "IWDA.L"}) is True
     assert review_digest_wanted({"action": "SELL"}) is True
+    # A review that did not complete falls back to HOLD but must still be reported.
+    for status in ("llm_unavailable", "review_failed", "invalid_action", "fallback_hold"):
+        assert review_digest_wanted({"action": "hold"}, status) is True

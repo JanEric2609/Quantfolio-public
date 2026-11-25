@@ -253,7 +253,8 @@ def alert_decision(db: Session, item: news_wire.WireItem, why: str, rating: Rati
         return "quiet"
     sent = db.query(NewsWireItem).filter(NewsWireItem.alert == "sent",
                                          NewsWireItem.received_at >= now - timedelta(hours=1)).count()
-    return "rate_capped" if sent >= MAX_ALERTS_PER_HOUR else "send"
+    # The cap trims routine items only: a materiality-3 item is never dropped for it.
+    return "rate_capped" if sent >= MAX_ALERTS_PER_HOUR and m != 3 else "send"
 
 
 #: Ends every alert: three questions to think the item through, so it is built on rather than just logged.

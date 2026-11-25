@@ -192,7 +192,7 @@ def close_text(db: Session, position: DeskPosition, reason: str, journal: DeskCf
            "owner_close": "you closed it", "rollover": "its contract rolls within the hour: close yours too",
            "opposite_cross": "the EMA cross reversed", "middle_band": "the price is back at the middle band",
            "rsi_50": "RSI(2) crossed 50"}.get(reason, reason)
-    result = f"Paper result {Decimal(position.net_eur or 0):+.2f} EUR after costs ({position.cell})."
+    result = f"Paper result {Decimal(position.net_eur or 0):+.2f} EUR after costs ({cell_name(position.cell)})."
     if journal is not None and journal.status == "skipped":
         # The owner said they did not take it: nothing to close, the paper score only.
         return f"{label}: paper trade closed ({why.removesuffix(': close yours too')}). {result}"

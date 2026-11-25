@@ -1127,7 +1127,7 @@ def run_mandate_review(db: Session, user_id: str, mandate: str) -> dict[str, Any
 
         account = get_linked_account(db, user_id)
         # A HOLD is the usual outcome of every review: only a proposed trade (placed or blocked) is news.
-        if account is not None and isinstance(final_decision, dict) and review_digest_wanted(final_decision):
+        if account is not None and isinstance(final_decision, dict) and review_digest_wanted(final_decision, decision_status):
             digest = format_mandate_review_digest(
                 mandate,
                 final_decision,

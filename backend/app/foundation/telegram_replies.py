@@ -42,8 +42,11 @@ def format_summary_reply(db: Session, user_id: str) -> str:
 _THESIS_MAX_CHARS = 240
 
 
-def review_digest_wanted(decision: dict) -> bool:
-    """Only a proposed trade is worth a message; a HOLD happens at nearly every review."""
+def review_digest_wanted(decision: dict, status: str = "completed") -> bool:
+    """A proposed trade is worth a message, and so is a review that did not complete (LLM outage, bad
+    output: those fall back to HOLD). A HOLD from a completed review happens at nearly every review."""
+    if status != "completed":
+        return True
     return str(decision.get("action", "hold") or "hold").lower() != "hold"
 
 

@@ -238,7 +238,9 @@ def test_relevance_and_alert_rules():
     for i in range(newswire.MAX_ALERTS_PER_HOUR):
         db.add(NewsWireItem(id=f"x:{i}", source="alpaca", received_at=day, headline="h", alert="sent"))
     db.flush()
-    assert d(db, _item(), "holding:NVDA", R(3, "down", "company", 1), day) == "rate_capped"
+    assert d(db, _item(), "holding:NVDA", R(2, "down", "company", 1), day) == "rate_capped"
+    # materiality 3 is never dropped by the cap
+    assert d(db, _item(), "holding:NVDA", R(3, "down", "company", 1), day) == "send"
 
 
 def test_sec_items_are_rated_by_rule():
