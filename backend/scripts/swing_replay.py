@@ -40,7 +40,7 @@ def main() -> None:
     try:
         bars, insts = {}, {}
         for i in ci.INDICES:
-            b = technical.bars_from_rows(history(db, i.level_ticker, days=4200))
+            b = technical.bars_from_rows(history(db, i.level_ticker, days=4200, allow_live=not args.deep))
             if args.deep:
                 from app.foundation.providers.registry import build_provider_registry
 
