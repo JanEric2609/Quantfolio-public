@@ -210,18 +210,42 @@ def _superseded(status: str) -> bool:
     return status.strip().lower() == "history"
 
 
+def _rank(status: str) -> int:
+    key = status.strip().lower()
+    return 1 if key == "history" else 0 if not key else 2
+
+
+def _wins(status: str, published: date | None, held: str, held_published: date | None) -> bool:
+    """Whether a copy of one transaction (*status*, *published*) replaces the copy held (*held*).
+
+    ``Revised`` beats ``History`` beats the blank original, with one exception: a ``History`` copy
+    published *later* than the ``Revised`` one it shares a key with is that row's own replacement
+    (a second amendment), so it retires it. A ``History`` copy of the original, published before the
+    ``Revised`` row, never does. A correction that changed the volume or price has a different key
+    and is its own row.
+    """
+    new, old = _rank(status), _rank(held)
+    if {new, old} == {1, 2}:
+        later = published is not None and held_published is not None and published > held_published
+        return later if new == 1 else not (held_published is not None and published is not None
+                                           and held_published > published)
+    return new > old
+
+
 def store(db: Session, rows: list[Pdmr]) -> int:
     """Insert rows not stored yet; returns how many were new. Does not commit.
 
     The register lists an amended notification as separate ``Revised`` and ``History`` rows
     with the same transaction. They share one key, so one transaction is one row. Where a
-    ``History`` copy was stored first and the ``Revised`` one arrives later, the stored row
-    takes the later one's status and publication date.
+    a weaker copy was stored first and a stronger one arrives later (see :func:`_wins`), the
+    stored row takes the later one's status and publication date. A ``History`` copy arriving
+    for a stored original, or for a ``Revised`` row it postdates, retires it, so a correction is
+    never counted next to the row it replaced.
     """
     keys: dict[str, Pdmr] = {}
     for r in rows:
         kept = keys.get(r.key)
-        if kept is None or (_superseded(kept.status) and not _superseded(r.status)):
+        if kept is None or _wins(r.status, r.publication_date, kept.status, kept.publication_date):
             keys[r.key] = r
     have = (
         {t.row_key: t for t in db.query(PdmrTransaction).filter(PdmrTransaction.row_key.in_(list(keys)))}
@@ -231,7 +255,7 @@ def store(db: Session, rows: list[Pdmr]) -> int:
     for key, r in keys.items():
         stored = have.get(key)
         if stored is not None:
-            if _superseded(stored.status) and not _superseded(r.status):
+            if _wins(r.status, r.publication_date, stored.status, stored.publication_date):
                 stored.status, stored.publication_date = r.status, r.publication_date
             continue
         db.add(PdmrTransaction(

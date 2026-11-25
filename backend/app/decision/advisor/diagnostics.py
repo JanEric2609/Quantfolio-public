@@ -72,7 +72,7 @@ _MIN_HISTORY_ROWS = 60  # advisor.decision._price_series floor
 _HISTORY_LOOKBACK_DAYS = 365 * 2  # advisor.decision._HISTORY_DAYS
 _MIN_COMPOSITE_AXES = 3  # advisor.evolution.composite_score
 _MIN_MAGNITUDE_PAIRS = 3  # quant_metrics.compute_mincer_zarnowitz
-_MIN_METRIC_SNAPSHOTS = 20  # paper_portfolio.compute_metrics
+_MIN_METRIC_SNAPSHOTS = 121  # paper_portfolio.compute_metrics: MIN_RETURNS_FOR_RATIOS (120) returns need 121 snapshots; pinned by a test
 _DISCOVER_STALE_DAYS = 7  # advisor.cycle._DISCOVER_STALE_DAYS
 _CYCLE_LOOKBACK_DAYS = 14
 # How many of the most recent trading days decide whether a failure is *current*.

@@ -44,7 +44,9 @@ def get_bot_token(db: Session) -> str | None:
 
 #: Telegram refuses a text over 4096 characters (HTTP 400), which used to drop the whole message.
 MAX_TEXT = 4096
-#: A 429 names ``retry_after`` seconds; wait at most this long, once, then give up on that message.
+#: A 429 names ``retry_after`` seconds. One call (all parts of a split message together) waits at
+#: most this long in total; a longer ask is not slept through, the message is given up on.
+#: ``getUpdates`` never sleeps (its next poll is soon). One-shot alerts keep the old 30 s window.
 MAX_RETRY_WAIT_S = 30.0
 
 
@@ -79,15 +81,26 @@ def _api_error(response: Any) -> tuple[str, float | None]:
     return str(body.get("description") or "")[:200], retry
 
 
-def _post_once(client: Any, url: str, payload: dict[str, Any]) -> Any:
-    """POST; on a 429 wait the ``retry_after`` it names (at most ``MAX_RETRY_WAIT_S``) and post once more."""
+def _post_once(client: Any, url: str, payload: dict[str, Any], budget: list[float] | None = None) -> Any:
+    """POST; on a 429 wait the ``retry_after`` it names and post once more.
+
+    *budget* is the seconds this call may still sleep in total (one element, shared by the parts of
+    a split message and reduced here). A wait that does not fit is not slept: the 429 is raised.
+    Without a budget the default ``MAX_RETRY_WAIT_S`` applies.
+    """
     response = client.post(url, json=payload)
     if getattr(response, "status_code", None) == 429:
+        left = budget if budget is not None else [MAX_RETRY_WAIT_S]
         _, retry = _api_error(response)
-        wait = min(max(retry if retry is not None else 1.0, 0.0), MAX_RETRY_WAIT_S)
-        logger.warning("Telegram rate limit: retrying in %.0f s", wait)
-        time.sleep(wait)
-        response = client.post(url, json=payload)
+        wait = max(retry if retry is not None else 1.0, 0.0)
+        if wait <= left[0]:
+            left[0] -= wait
+            logger.warning("Telegram rate limit: retrying in %.0f s", wait)
+            time.sleep(wait)
+            response = client.post(url, json=payload)
+        else:
+            logger.warning("Telegram rate limit: asked to wait %.0f s, more than the %.0f s left; not retrying",
+                           wait, left[0])
     response.raise_for_status()
     return response
 
@@ -95,19 +108,41 @@ def _post_once(client: Any, url: str, payload: dict[str, Any]) -> Any:
 def send_telegram_message(
     db: Session, chat_id: str, text: str, reply_markup: dict[str, Any] | None = None
 ) -> bool:
-    """Send *text*; a long one goes out in parts (the buttons under the last). ``True`` only if every part went."""
+    """Send *text*; a long one goes out in parts (the buttons under the last).
+
+    ``True`` when the message reached the chat. If a later part of a split message fails, the
+    earlier parts are already delivered: that is still ``True`` (a caller that retried would send
+    them twice), the loss is logged, and a short notice that the rest is missing is sent on a
+    best-effort basis. ``False`` only when nothing was delivered.
+    """
     token = get_bot_token(db)
     if not token:
         logger.warning("Telegram message not sent: no bot token configured")
         return False
     _silence_http_loggers()
     parts = split_text(text)
+    delivered = 0
+    budget = [MAX_RETRY_WAIT_S]
+    url = f"{TELEGRAM_API_BASE}/bot{token}/sendMessage"
     try:
         with httpx.Client(timeout=10.0) as client:
-            for i, part in enumerate(parts):
-                markup = reply_markup if i == len(parts) - 1 else None
-                _post_once(client, f"{TELEGRAM_API_BASE}/bot{token}/sendMessage",
-                           {"chat_id": chat_id, "text": part, **({"reply_markup": markup} if markup else {})})
+            try:
+                for i, part in enumerate(parts):
+                    markup = reply_markup if i == len(parts) - 1 else None
+                    _post_once(client, url,
+                               {"chat_id": chat_id, "text": part, **({"reply_markup": markup} if markup else {})},
+                               budget)
+                    delivered += 1
+            except Exception:
+                if delivered:
+                    logger.error("Telegram message delivered in part: %d of %d parts sent", delivered, len(parts))
+                    try:
+                        client.post(url, json={"chat_id": chat_id,
+                                               "text": f"(The rest of this message could not be delivered: "
+                                                       f"{delivered} of {len(parts)} parts arrived.)"})
+                    except Exception:  # noqa: BLE001 - best effort, the loss is already logged
+                        pass
+                raise
         return True
     except httpx.HTTPStatusError as exc:
         # Do not log str(exc)/the exception object: httpx.HTTPStatusError's
@@ -118,10 +153,10 @@ def send_telegram_message(
             "Telegram sendMessage failed: HTTP %s from Telegram API%s",
             exc.response.status_code, f" ({description})" if description else "",
         )
-        return False
+        return delivered > 0
     except Exception as exc:
         logger.error("Telegram sendMessage failed: %s", type(exc).__name__)
-        return False
+        return delivered > 0
 
 
 def _fit(text: str) -> str:
@@ -167,7 +202,9 @@ def _call_api(token: str, method: str, payload: dict[str, Any] | None = None, *,
     _silence_http_loggers()
     try:
         with httpx.Client(timeout=timeout) as client:
-            response = _post_once(client, f"{TELEGRAM_API_BASE}/bot{token}/{method}", payload or {})
+            # a long poll never sleeps through a 429: the next poll comes soon anyway
+            response = _post_once(client, f"{TELEGRAM_API_BASE}/bot{token}/{method}", payload or {},
+                                  [0.0] if method == "getUpdates" else None)
             body = response.json()
     except httpx.HTTPStatusError as exc:
         description, _ = _api_error(exc.response)

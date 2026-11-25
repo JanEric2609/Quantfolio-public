@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.foundation.models.entities import DeskCfdJournal, DeskPosition
 from app.foundation.settings import get_setting_row
 
-from . import bankroll, cfd, cfd_journal, event_messages, prereg, prereg_events, scoring, scoring_events
+from . import bankroll, cfd, cfd_journal, event_messages, pair_shadow, prereg, prereg_events, scoring, scoring_events
 from . import calendar as cal
 from .cell_names import cell_name
 from .event_limits import EVENT_LIMITS
@@ -31,7 +31,7 @@ def _replay(db: Session) -> dict[str, Any]:
 
 def _cell_row(cell: str, s: dict[str, Any], registration: str, replay: dict[str, Any]) -> dict[str, Any]:
     return {
-        "cell": cell, "registration": registration, "n": s["n"], "n_min": s["n_min"], "mean_net": s["mean_net"],
+        "cell": cell, "name": cell_name(cell), "registration": registration, "n": s["n"], "n_min": s["n_min"], "mean_net": s["mean_net"],
         "hit_rate": s["hit_rate"], "p_holm": s.get("p_holm"), "passes": bool(s.get("passes")),
         "verdict": event_messages.verdict_word(s), "placebo_percentile": s.get("placebo_percentile"),
         "placebo_p95": s.get("placebo_p95"), "replay": replay.get(cell),
@@ -95,6 +95,7 @@ def signals_overview(db: Session, user_id: str, now: datetime | None = None) -> 
                      "daily_stop": str(EVENT_LIMITS.daily_real_loss_stop), "max_open": EVENT_LIMITS.max_open,
                      "open_real": bankroll.real_results(db, user_id, now).open_real},
         "owner_call": next((c for c in cells if c["cell"] == "owner_call:cfd"), None),
+        "pair_shadow": pair_shadow.report(db),
         "limits": EVENT_LIMITS.as_json(),
     }
 
@@ -132,6 +133,12 @@ def weekly_digest(db: Session, user_id: str, now: datetime | None = None) -> str
             f"{h['instrument']} {h['direction']} ({cell_name(h['cell'])})" for h in held) + ".")
     else:
         lines.append("Still open: nothing.")
+    pair = ov["pair_shadow"]
+    if pair["days_same_side"]:
+        lines.append(
+            f"DAX + ES50 on the same side ({pair['days_same_side']} days, shadow): mean {pair['mean_full_eur']:+.2f} EUR "
+            f"at full size, {pair['mean_half_eur']:+.2f} at half size per leg; worst day {pair['worst_full_eur']:+.2f} / "
+            f"{pair['worst_half_eur']:+.2f}.")
     b = ov["bankroll"]
     lines.append(f"Bankroll: month {Decimal(b['month_eur']):+.0f} of the {b['monthly_stop']} EUR stop."
                  + ("" if b["ok"] else f" Paper only until {b['resumes']}."))

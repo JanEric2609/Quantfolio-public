@@ -76,3 +76,10 @@ def test_paper_ratios_withheld_below_120_returns():
     assert short["updated"] and short["sharpe"] is None and short["max_drawdown"] is not None
     seed(pp.MIN_RETURNS_FOR_RATIOS + 2)
     assert pp.compute_metrics(db, p.id)["sharpe"] is not None
+
+
+def test_advisor_diagnostics_snapshot_floor_follows_the_ratio_threshold():
+    from app.decision import paper_portfolio as pp
+    from app.decision.advisor import diagnostics
+
+    assert diagnostics._MIN_METRIC_SNAPSHOTS == pp.MIN_RETURNS_FOR_RATIOS + 1

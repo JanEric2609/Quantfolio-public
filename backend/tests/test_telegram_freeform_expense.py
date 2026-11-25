@@ -97,3 +97,16 @@ def test_large_amount_is_not_logged_without_a_bang(monkeypatch):
     assert db.query(Expense).count() == 1 and db.query(Expense).one().description == "laptop"
     telegram_updates.handle_message(db, "42", "3.50 coffee")
     assert db.query(Expense).count() == 2
+
+
+def test_a_bang_on_a_small_expense_is_kept_in_the_description(monkeypatch):
+    from conftest import _memory_db
+
+    from app.foundation import telegram_bot, telegram_updates
+    from app.foundation.models.entities import Expense
+
+    db = _memory_db()
+    _linked(db)
+    monkeypatch.setattr(telegram_bot, "send_telegram_message", lambda db_, chat, text, markup=None: None)
+    telegram_updates.handle_message(db, "42", "12.50 lunch!")
+    assert db.query(Expense).one().description == "lunch!"
