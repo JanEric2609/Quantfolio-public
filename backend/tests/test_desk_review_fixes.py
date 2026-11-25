@@ -55,7 +55,7 @@ def test_a_failed_tick_sends_no_exit_alert_and_the_next_tick_sends_it_once(monke
     service.take(db, res.position.id, res.nonce, sc.cli(), NOW + timedelta(seconds=10))
     db.commit()
     sent: list[str] = []
-    monkeypatch.setattr("app.decision.desk.telegram.alert", lambda db, uid, text: sent.append(text))
+    monkeypatch.setattr("app.decision.desk.telegram.alert", lambda db, uid, text, **kw: sent.append(text))
     tick = NOW + timedelta(minutes=1)
     crash = FakeSc(standard_handler({"DE000KO000A1": ("0.80", "0.81"), DAX_ETF: ("95", "95.1")}, now=tick))
 
@@ -211,7 +211,7 @@ def test_the_news_wire_commits_before_it_sends(monkeypatch):
     user = make_user(db)
     states: list[str | None] = []
 
-    def alert(db_, uid, text):
+    def alert(db_, uid, text, **kw):
         states.append(db.get(NewsWireItem, "alpaca:9").alert)
 
     monkeypatch.setattr("app.decision.desk.telegram.alert", alert)
