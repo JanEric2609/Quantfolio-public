@@ -107,11 +107,42 @@ def test_digest_due_weekday_morning_only():
     assert not news_digest.digest_due(NOW + timedelta(days=3))  # Saturday
 
 
-def test_a_late_handelsblatt_item_waits_for_the_digest():
+def test_a_late_handelsblatt_item_waits_for_the_digest(monkeypatch):
     db = _memory_db()
     late = _item(source="handelsblatt", headline="SAP: Cloud-Geschäft überrascht", published_at=NOW - timedelta(seconds=586))
     fresh = _item(source="handelsblatt", headline="SAP: Cloud-Geschäft überrascht", published_at=NOW - timedelta(seconds=90))
     assert newswire.alert_decision(db, late, "holding:SAP", R(2, "up", "company", 1), NOW) == "stale"
     assert newswire.alert_decision(db, fresh, "holding:SAP", R(2, "up", "company", 1), NOW) == "send"
-    # the digest still lists a stale item (it is stored, not baseline)
-    assert "stale" not in ("baseline", "dup_headline", "stale_dup")
+    # the digest still lists a stale item (it is stored with alert="stale", not baseline)
+    db.add(NewsWireItem(id="handelsblatt:late", source="handelsblatt", received_at=NOW - timedelta(minutes=3),
+                        headline=late.headline, relevance="holding:SAP", materiality=2, direction="up",
+                        scope="company", alert="stale"))
+    db.flush()
+    monkeypatch.setattr(news_digest, "watchlist", lambda db, uid: newswire.Watch({"SAP": "holding:SAP"}))
+    assert "Cloud-Geschäft überrascht" in (news_digest.build(db, "u", NOW) or "")
+
+
+def test_two_8k_filings_of_one_company_are_two_items(monkeypatch):
+    db = _memory_db()
+    sent = []
+    monkeypatch.setattr("app.decision.desk.telegram.alert", lambda db, uid, text, markup=None, **kw: sent.append(text) or True)
+    watch = {"NVDA": "holding:NVDA"}
+    ciks = {"0001045810": "NVDA"}
+    routine = _item(source="sec_8k", source_id="a1", headline="8-K: NVIDIA CORP", cik="0001045810", items=("2.02",))
+    red = _item(source="sec_8k", source_id="a2", headline="8-K: NVIDIA CORP", cik="0001045810", items=("4.02",))
+    assert asyncio.run(newswire.ingest(db, "u", routine, watch, ciks, now=NOW)) == "sent"
+    assert asyncio.run(newswire.ingest(db, "u", red, watch, ciks, now=NOW)) == "sent"
+    assert db.get(NewsWireItem, "sec_8k:a2").materiality == 3
+
+
+def test_digest_day_is_recorded_only_after_delivery(monkeypatch):
+    from app.foundation.settings import get_setting_row
+
+    db = _memory_db()
+    monkeypatch.setattr(news_digest, "build", lambda db, uid, now: "News on your holdings since yesterday:\n- x")
+    monkeypatch.setattr("app.decision.desk.telegram.alert", lambda *a, **k: False)
+    assert news_digest.send(db, "u", NOW) == {"skipped": "not_delivered"}
+    assert get_setting_row(db, news_digest.KEY) is None
+    monkeypatch.setattr("app.decision.desk.telegram.alert", lambda *a, **k: True)
+    assert news_digest.send(db, "u", NOW) == {"sent": True}
+    assert news_digest.send(db, "u", NOW) == {"skipped": "already_sent"}

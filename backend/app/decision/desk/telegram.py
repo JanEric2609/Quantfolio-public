@@ -399,19 +399,17 @@ def register_desk_telegram() -> None:
 
 
 def alert(db: Session, user_id: str, text: str, markup: dict[str, Any] | None = None,
-          *, preview: bool = True) -> None:
-    """A desk message to the owner's linked chat, if any (``preview=False``: no link preview card)."""
+          *, preview: bool = True) -> bool:
+    """A desk message to the owner's linked chat, if any (``preview=False``: no link preview card).
+    ``True`` when it reached the chat; ``False`` when no chat is linked or the send failed."""
     account = telegram_bot.get_linked_account(db, user_id)
     if account is None:
-        return
+        return False
     if not preview:
-        telegram_bot.send_telegram_message(db, account.chat_id, text, markup, preview=False)
-    elif markup:
-        telegram_bot.send_telegram_message(db, account.chat_id, text, markup)
-    else:
-        telegram_bot.send_telegram_message(db, account.chat_id, text)
-
-
+        return bool(telegram_bot.send_telegram_message(db, account.chat_id, text, markup, preview=False))
+    if markup:
+        return bool(telegram_bot.send_telegram_message(db, account.chat_id, text, markup))
+    return bool(telegram_bot.send_telegram_message(db, account.chat_id, text))
 
 
 def alert_with_id(db: Session, user_id: str, text: str, markup: dict[str, Any] | None = None) -> int | None:

@@ -108,8 +108,11 @@ def send(db: Session, user_id: str, now: datetime | None = None) -> dict[str, ob
     if isinstance(last, dict) and last.get("date") == today:
         return {"skipped": "already_sent"}
     text = build(db, user_id, now)
-    upsert_public_settings(db, {KEY: {"date": today, "sent": text is not None}})
     if text is None:
+        upsert_public_settings(db, {KEY: {"date": today, "sent": False}})
         return {"skipped": "nothing_new"}
-    telegram.alert(db, user_id, text, preview=False)
+    # The day is recorded only after delivery: a failed send leaves the slot free for a retry.
+    if not telegram.alert(db, user_id, text, preview=False):
+        return {"skipped": "not_delivered"}
+    upsert_public_settings(db, {KEY: {"date": today, "sent": True}})
     return {"sent": True}

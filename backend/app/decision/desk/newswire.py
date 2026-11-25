@@ -393,7 +393,8 @@ async def ingest(db: Session, user_id: str, item: news_wire.WireItem, watch: dic
         row.alert = "baseline"
         db.commit()
         return "baseline"
-    if _already_told(db, row, now):
+    # SEC headlines are "8-K: <company>" for every filing: two filings are two items, never one headline.
+    if item.source != "sec_8k" and _already_told(db, row, now):
         row.alert = "dup_headline"
         db.commit()
         return row.alert
