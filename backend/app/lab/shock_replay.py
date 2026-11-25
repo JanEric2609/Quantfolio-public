@@ -12,7 +12,7 @@ Frozen before any data was read:
   the previous 20 daily returns (not including t), and the close is in the outer 25 % of the day's range in the
   direction of the move (price confirmation: no reversal during the day). Two tiers, K = 2 and K = 3;
 * the trade enters at the next open, either with the move (``continue``) or against it (``fade``), and exits at the
-  close H trading days after the entry day's open, H = 1 or 5. Eight cells: 2 tiers x 2 directions x 2 horizons;
+  close H trading days after the entry day (entry day t+1, exit day t+1+H, so H = 1 holds one night and H = 5 five), H = 1 or 5. Eight cells: 2 tiers x 2 directions x 2 horizons;
 * an index is allowed one position at a time (an event inside an open position is skipped);
 * costs per trade, in basis points of the position: the registered spread, overnight interest per calendar night held,
   and 0.5 % of the gross result for USD indices (the broker's FX fee, charged on the result);
@@ -73,7 +73,7 @@ def shocks(bars: list[technical.Bar]) -> list[Shock]:
 
 def trade_net_bp(bars: list[technical.Bar], s: Shock, mode: str, horizon: int, inst: dict[str, Any]) -> tuple[date, float] | None:
     """(entry date, net bp) of one trade on shock *s*; ``None`` when the data ends before the exit."""
-    ei, xi = s.i + 1, s.i + horizon
+    ei, xi = s.i + 1, s.i + 1 + horizon
     if xi >= len(bars):
         return None
     side = s.sign if mode == "continue" else -s.sign

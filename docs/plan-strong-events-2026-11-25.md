@@ -34,3 +34,12 @@ new registration with its own trial count, as for the other six cells. Order of 
 
 ## What a result means
 A positive replay cell would say that big confirmed days tend to run on (or reverse) after costs. It would not say that headlines or sentiment add anything: that part has no history and is tested only forward.
+
+## Exits: no fixed time window (owner direction, 2026-11-25)
+The owner wants CFDs only on strong days and no fixed-time exit. The alert cell therefore exits on price, not on the clock:
+a protective stop at 1.5 daily ATR from entry, a target at 2 x the stop distance, and a trailing stop that follows the best
+price by 1 daily ATR once the trade is half way to the target. A position that has hit none of these is reviewed at each
+close and is closed only when the signal behind it is gone (the confirming headline is contradicted, or the index closes
+back through the previous close). The shock replay keeps its fixed 1 and 5 day exits on purpose: it measures what the
+price footprint of a big day does, not how to exit. If it shows an effect, a second, separately registered replay tests the
+stop/target/trailing exit on the same days before the paper cell is registered. Exit constants are code constants, never settings.

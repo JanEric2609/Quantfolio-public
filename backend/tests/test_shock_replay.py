@@ -52,7 +52,7 @@ def test_continue_wins_and_fade_loses_when_the_move_runs_on():
 
 
 def test_down_shock_continue_is_short_and_data_ending_early_gives_none():
-    bars = _follow(_shock(_calm(), up=False), -0.01, n=6)
+    bars = _follow(_shock(_calm(), up=False), -0.01, n=8)
     s = sr.shocks(bars)[0]
     assert s.sign == -1 and sr.trade_net_bp(bars, s, "continue", 5, INST)[1] > 0
     assert sr.trade_net_bp(bars, s, "continue", 50, INST) is None
@@ -66,3 +66,16 @@ def test_the_grid_is_frozen_and_run_reports_every_cell_with_holm():
     for cell in sr.CELLS:
         assert res[cell]["p_holm"] <= 1.0 and "t" not in res[cell] and "t_days" in res[cell]
     assert res["k3_continue_h5"]["events"] == 2 and not math.isnan(res["k3_continue_h5"]["mean_net_bp"])
+
+
+def test_the_exit_bar_is_pinned_for_both_horizons():
+    # shock on day index s; entry at the open of s+1; exit at the close of s+1+H; one night held per day of H
+    bars = _follow(_shock(_calm()), 0.01, n=8)
+    s = sr.shocks(bars)[0]
+    for h in sr.HORIZONS:
+        entry, exit_ = bars[s.i + 1].open, bars[s.i + 1 + h].close
+        gross = (exit_ / entry - 1) * 1e4
+        cost = 1.0 + INST["overnight_long"] * h * 1e4
+        got = sr.trade_net_bp(bars, s, "continue", h, INST)
+        assert got and got[0] == bars[s.i + 1].date and abs(got[1] - (gross - cost)) < 1e-6
+    assert sr.trade_net_bp(_follow(_shock(_calm()), 0.01, n=3), sr.shocks(_follow(_shock(_calm()), 0.01, n=3))[0], "continue", 5, INST) is None
