@@ -184,6 +184,7 @@ def test_the_evening_snapshot_keeps_one_quote_per_warrant_and_day():
     for _ in range(2):
         report = derivatives.snapshot_quotes(
             db, today=TODAY, ingest=lambda s, start: fetched.append(s), listed=lambda *a: listed,
+            dividends=lambda symbol: None,  # offline: no Yahoo read in a unit test
         )
     assert report == {"warrants": 1, "quotes": 1, "listed": 1}
     [quote] = db.query(DerivativeQuote).all()
