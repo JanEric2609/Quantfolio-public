@@ -187,7 +187,7 @@ function JournalTable({ rows, onChanged }: { rows: CfdJournalRow[]; onChanged: (
                 <td className={stacked.td} data-label="In">{fmt(r.entry_level, 1)}</td>
                 <td className={stacked.td} data-label="Out">{fmt(r.exit_level, 1)}</td>
                 <td className={stacked.td} data-label="Slippage">{slip == null ? "-" : `${slip >= 0 ? "+" : ""}${slip.toFixed(1)} pts`}</td>
-                <td className={stacked.td} data-label="Real / paper EUR">{fmt(r.real_pnl_eur)} / {fmt(r.paper_net_eur)}</td>
+                <td className={stacked.td} data-label="Real / paper EUR">{fmt(r.real_pnl_eur)} / {fmt(r.paper_net_eur)}{r.rule === "other" ? " (your own rule)" : ""}</td>
                 <td className={stacked.td} data-label="Nights">{r.nights_held ?? "-"}</td>
                 <td className={stacked.td} data-label="Status">{r.status}</td>
                 <td className={stacked.td} data-label="Your answer">

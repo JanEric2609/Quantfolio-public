@@ -120,7 +120,7 @@ function SignalsView({ data }: { data: SignalsDto }) {
                   {data.journal.map((j) => (
                     <tr key={j.position_id} className={stacked.tr}>
                       <td className={stacked.td} data-label="Market">{j.market_key}</td><td className={stacked.td} data-label="Cell">{j.cell ?? "-"}</td><td className={stacked.td} data-label="Status">{j.status}</td>
-                      <td className={stacked.td} data-label="Real / paper (EUR)">{eur(j.real_pnl_eur)} / {eur(j.paper_net_eur)}</td></tr>
+                      <td className={stacked.td} data-label="Real / paper (EUR)">{eur(j.real_pnl_eur)} / {eur(j.paper_net_eur)}{j.rule === "other" ? " (your own rule, not counted in the cell)" : ""}</td></tr>
                   ))}
                 </tbody>
               </table>

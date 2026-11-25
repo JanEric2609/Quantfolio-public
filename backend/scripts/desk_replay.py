@@ -19,7 +19,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.lab.desk_replay import Costs, days_from_bars, evaluate, evaluate_exits, minute_days  # noqa: E402
+from app.lab.desk_replay import (  # noqa: E402
+    Costs,
+    days_from_bars,
+    evaluate,
+    evaluate_exits,
+    evaluate_predictors,
+    minute_days,
+)
 
 SYMBOLS = ("SPY", "QQQ")
 START = datetime(2016, 1, 1, tzinfo=UTC)
@@ -51,6 +58,8 @@ def main() -> None:
     ap.add_argument("--bars")
     ap.add_argument("--dump")
     ap.add_argument("--minutes")
+    ap.add_argument("--predictors", action="store_true",
+                    help="r1 (registered) against the rest-of-day return, split by trailing volatility terciles")
     args = ap.parse_args()
     if args.minutes:
         raw_m = json.loads(Path(args.minutes).read_text())
@@ -59,6 +68,11 @@ def main() -> None:
         print(json.dumps(exits, indent=1, default=str))
         return
     raw = json.loads(Path(args.bars).read_text()) if args.bars else fetch()
+    if args.predictors:
+        out = {sym: evaluate_predictors(days_from_bars([{"t": datetime.fromisoformat(r["t"]), "c": float(r["c"])}
+                                                        for r in rows]), Costs()) for sym, rows in raw.items()}
+        print(json.dumps(out, indent=1, default=str))
+        return
     if args.dump:
         Path(args.dump).write_text(json.dumps(raw))
     report: dict[str, dict] = {}

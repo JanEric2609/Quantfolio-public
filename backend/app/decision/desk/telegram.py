@@ -326,7 +326,8 @@ def handle_cfd(db: Session, account: Any, chat_id: str, text: str) -> None:
         return _say(db, chat_id, "The desk is for the admin account.")
     now = datetime.now(UTC)
     parts = text.split()
-    usage = "Usage: /cfd | /cfd in <price> [quantity] [id] | /cfd out <price> [id] | /cfd skip [id]"
+    usage = ("Usage: /cfd | /cfd in <price> [quantity] [id] | /cfd out <price> [id] | /cfd skip [id] | "
+             "/cfd rule registered|other [id]")
     if len(parts) == 1:
         rows = cfd_journal.today_rows(db, account.user_id, now)
         return _say(db, chat_id, "CFD journal today:\n" + "\n".join(_cfd_line(r) for r in rows)
@@ -360,6 +361,19 @@ def handle_cfd(db: Session, account: Any, chat_id: str, text: str) -> None:
             cfd_journal.mark_closed(db, journal, now, level)
             db.commit()
             return _say(db, chat_id, _noted_out(db, journal))
+        if action == "rule":
+            if not args:
+                return _say(db, chat_id, usage)
+            if len(args) > 1:
+                journal = cfd_journal.find_for_owner(db, account.user_id, args[1], now)
+            else:  # never the newest of several: the 2026-11-23 lesson
+                today = cfd_journal.today_rows(db, account.user_id, now)
+                journal = today[0] if len(today) == 1 else None
+            if journal is None:
+                return _say(db, chat_id, "Name the trade: /cfd rule registered|other <id> (ids are in /cfd).")
+            cfd_journal.set_rule(db, journal, args[0].lower())
+            db.commit()
+            return _say(db, chat_id, f"Noted: this trade followed the {journal.rule} rule.")
         if action == "skip":
             journal = cfd_journal.find_for_owner(db, account.user_id, args[0] if args else None, now, action="skip")
             if journal is None:
