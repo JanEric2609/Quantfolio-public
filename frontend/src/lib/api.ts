@@ -4611,6 +4611,18 @@ export interface SignalsDto {
     worst_full_eur: number | null; worst_half_eur: number | null; note: string;
   };
 }
+export interface AlgoOverview {
+  status: string;
+  paper_only: boolean;
+  funded_candidates: number;
+  family: string;
+  max_arms: number;
+  cards: { id: string; name: string; quantpedia: string; verdict_class: string; turnover: string; summary: string; prior: string }[];
+  not_carded: { quantpedia: string; why: string }[];
+  years_to_detect: { sharpe: number; years: number; years_single_arm: number }[];
+  note: string;
+}
+export const getAlgoOverview = () => api<AlgoOverview>("/api/algo/overview");
 export const getSignals = () => api<SignalsDto>("/api/desk/signals");
 /** The owner's own record of a manual Trading 212 trade. Never an order. */
 export const postCfdJournal = (positionId: string, body: CfdJournalAction) =>

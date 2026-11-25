@@ -70,7 +70,7 @@ def test_signal_tick_sends_one_grouped_message_and_stores_its_id(monkeypatch):
     cp, ids = _fire(db, user)
     out = jobs._announce_fills(db, NOW, ids)
     assert len(out) == 1
-    assert "DAX long: CFD, manual" in out[0] and "Also on paper (no action):" in out[0]
+    assert "DAX BUY CFD (Trading 212" in out[0] and "Also on paper (no action):" in out[0]
     assert "  Knock-out KO000A, 2 units" in out[0] and "  Call WA000A, 2 units" in out[0]
     jobs._send(db, user.id, out)
     j = cfd_journal.for_position(db, cp.id)

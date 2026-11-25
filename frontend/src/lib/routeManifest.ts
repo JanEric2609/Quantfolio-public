@@ -1,7 +1,7 @@
 import {
   BrainCircuit, CalendarCheck, Calculator, CreditCard, FlaskConical, Home, Inbox, LandPlot,
   LineChart, Newspaper, PieChart, Settings, ShieldCheck, Table2, ListChecks, FileText, Target,
-  Wallet, Receipt, Repeat, Briefcase, GraduationCap, ArrowLeftRight, Activity, Radio, Gauge, Library, Star, type LucideIcon,
+  Wallet, Receipt, Repeat, Briefcase, GraduationCap, ArrowLeftRight, Activity, Radio, Gauge, Library, Star, Cpu, type LucideIcon,
 } from "lucide-react";
 import { isStrategyLabPath } from "../pages/lab/strategyLabTabs";
 
@@ -101,6 +101,10 @@ export const ROUTE_ENTRIES: RouteEntry[] = [
     match: (p) => p === "/desk" || p.startsWith("/desk/"),
     keywords: ["knock-out", "warrant", "turbo", "cfd", "paper", "idea", "derivatives", "news wire", "intraday",
       "trading 212", "signals", "event desk", "hype", "news drift", "rsi", "bankroll"],
+  },
+  {
+    id: "algo", to: "/algo", label: "Algo (research)", icon: Cpu, group: "tools", researchTool: true,
+    keywords: ["algorithmic", "trend following", "quantpedia", "faber", "moving average", "risk overlay", "paper"],
   },
   { id: "learn", to: "/learn", label: "Learn", icon: GraduationCap, group: "trust", keywords: ["tutorial", "teach", "how it works", "quiz"] },
   { id: "settings", to: "/settings", label: "Control Center", icon: Settings, group: "admin", keywords: ["settings", "connections", "status"] },

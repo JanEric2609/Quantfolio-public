@@ -1,7 +1,7 @@
 """Algo lab: research-only maths for the algorithmic-trading section (ADR 0029, Proposed).
 
 Pure functions and in-memory ledgers. No database, no broker, no order path, no
-scheduler job, no API. Nothing here gates money; it measures how long a verdict
+scheduler job; the read-only overview is `interface/api/algo.py`. Nothing here gates money; it measures how long a verdict
 would take and whether a candidate's edge could cover its costs.
 """
 from app.lab.algo_lab.eprocess import (
