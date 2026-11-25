@@ -4619,6 +4619,7 @@ export interface AlgoOverview {
   max_arms: number;
   cards: { id: string; name: string; quantpedia: string; verdict_class: string; turnover: string; summary: string; prior: string }[];
   not_carded: { quantpedia: string; why: string }[];
+  paper_cells: { id: string; name: string; rule: string; instruments: string; verdict_class: string; evidence: string; status: string; test: string }[];
   years_to_detect: { sharpe: number; years: number; years_single_arm: number }[];
   note: string;
 }

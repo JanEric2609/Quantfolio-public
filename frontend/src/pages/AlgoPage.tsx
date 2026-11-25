@@ -47,6 +47,21 @@ export function AlgoPage() {
           </Card>
           <Card>
             <CardHeader>
+              <CardTitle>Paper cells</CardTitle>
+              <CardDescription>Pre-registered rules that must earn their place. Judged against costs and a placebo; nothing is funded.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              {data.paper_cells.map((c) => (
+                <div key={c.id} data-testid="algo-paper-cell">
+                  <p className="font-medium">{c.name}</p>
+                  <p>{c.rule}</p>
+                  <p className="text-muted-foreground">Instruments: {c.instruments}. Evidence: {c.evidence} Status: {c.status}.</p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
               <CardTitle>How long a verdict takes</CardTitle>
               <CardDescription>Years of daily data to detect a Sharpe ratio (one-sided, 80 % power), with the three-arm family's trials counted.</CardDescription>
             </CardHeader>

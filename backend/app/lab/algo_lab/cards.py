@@ -36,3 +36,17 @@ NOT_CARDED: list[dict[str, str]] = [
     {"quantpedia": "#0021 Commodity Momentum", "why": "Needs commodity futures; the UCITS commodity ETFs carry roll yield that the paper does not model."},
     {"quantpedia": "#0031 Equity Seasonality", "why": "Quantpedia rates it weak with a negative out-of-sample test of its own; watch item, not registered."},
 ]
+
+# Paper cells: pre-registered rules scored on paper only, outside the slow-ETF family cap. Nothing is funded.
+PAPER_CELLS: list[dict[str, Any]] = [
+    {"id": "trend100_state", "name": "Slow trend with a state exit on indices, commodities and FX",
+     "rule": "Enter on a 100-day high or low close; exit when the close crosses back through the 50-day EMA or a 5 ATR stop "
+             "is hit. No fixed holding time.",
+     "instruments": "Tech 100, S&P 500, DAX, EU 50; gold, silver, WTI, Brent, copper; six USD pairs (daily bars)",
+     "verdict_class": "alpha candidate",
+     "evidence": "Best-evidenced family in the research (diversified futures, decades); thin on a few CFDs, which cost "
+                 "several times a futures contract.",
+     "status": "replay written, not yet run on real prices",
+     "test": "scripts/trend_replay.py: six declared trials, Holm, side placebo, quarter-block bootstrap; null unless "
+             "every part of the frozen rule is met."},
+]

@@ -31,3 +31,10 @@ def test_overview_payload(monkeypatch):
     assert body["paper_only"] is True and body["funded_candidates"] == 0
     assert body["years_to_detect"][0]["sharpe"] == 0.5 and body["years_to_detect"][0]["years"] > 20
     assert any("#0005" in n["quantpedia"] for n in body["not_carded"])
+    assert body["paper_cells"][0]["id"] == "trend100_state"
+
+
+def test_paper_cells_are_declared_and_unfunded():
+    ids = {c["id"] for c in cards.PAPER_CELLS}
+    assert "trend100_state" in ids
+    assert all(c["status"].startswith(("replay", "draft", "running")) for c in cards.PAPER_CELLS)

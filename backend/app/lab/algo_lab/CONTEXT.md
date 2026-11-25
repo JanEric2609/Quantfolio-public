@@ -10,6 +10,7 @@ its venue costs, and a funded promotion ledger. Pure functions and an in-memory 
   arXiv 2611.03384). Candidates get a share of a budget of 1 at birth; promotion at
   `1 / (alpha * mass)`; the crossing observation is not tradable; restarts are new candidates;
   idempotent per event key.
+- `trend_cell.py` — the slow-trend paper cell as pure rules on closes (100-day breakout entry, 50-day EMA or 5 ATR state exit, no clock); frozen constants; `lab/trend_replay.py` scores it with costs.
 - `gate_math.py` — `years_to_detect`, `minimum_detectable_sharpe`, `holm_alpha`,
   `oos_replication_ratio` (Jacquier et al., arXiv 2501.03938, one signal), `breakeven_cost_bps`,
   `net_sharpe`, `per_order_cost_eur`, `prob_drawdown_breach` (Monte Carlo).
