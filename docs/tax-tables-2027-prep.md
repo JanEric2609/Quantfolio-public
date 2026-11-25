@@ -29,7 +29,7 @@ Prepared ahead of the January update in `AGENTS.md` ("Tax cockpit"). Nothing in 
 | 250,000 to 279,999 | 0.45 x - 18,741.70 |
 | 280,000 and above | 0.47 x - 24,341.68 |
 
-For 2028 the draft has a Grundfreibetrag of 12,900, 1,017.55 in zone 2, 930.08 in zone 3, and constants 11,305.52, 18,805.49 and 24,405.47 in zones 4 to 6. A continuity check at 70,600 EUR gives 18,410.9 and 18,410.3 from the two formulas, which is rounding.
+For 2028 the draft has a Grundfreibetrag of 12,900, 1,017.55 in zone 2, 930.08 in zone 3, and constants 11,305.52, 18,805.49 and 24,405.47 in zones 4 to 6. A continuity check at 70,600 EUR gives 18,410.4 (zone 3) and 18,410.27 (zone 4); both floor to 18,410.
 
 Mapping to `income_tax.py`: the second field of `Tariff` (`zone2_end`) is the end of the first progression zone, 17,799, which does not change. The end of the second progression zone, 69,878 in 2026, sits in `zone3_end`; it becomes 70,600. The 2027 values map to `a2` = 952.24, `a3` = 170.74, `c3` = 993.86, `c4` = 11,241.73, and the 45 % band now starts at 250,000 (`zone5_start`, `c5` = 18,741.70). The 47 % band needs a new field pair (start 280,000, constant 24,341.68) and a branch in `income_tax()`. A hand-computed test belongs at each zone edge.
 
