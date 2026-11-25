@@ -108,19 +108,20 @@ def established(bars: list[technical.Bar], i: int) -> bool:
     return abs(r20) >= TREND_MIN_20D and abs(gap) >= TREND_MIN_SMA and (r20 > 0) == (gap > 0) == (day > 0)
 
 
-def _ema_aligned(closes: list[float]) -> list[float | None]:
-    e = technical.ema_series(closes, EMA_N)
-    return [None] * (EMA_N - 1) + e
+def _ema_aligned(closes: list[float], n: int = EMA_N) -> list[float | None]:
+    e = technical.ema_series(closes, n)
+    return [None] * (n - 1) + e
 
 
 def simulate_signals(key: str, bars: list[technical.Bar], inst: dict[str, Any], signals: dict[int, str],
-                     exit_mode: str, risk: float = 5.0, tag: str = "") -> tuple[list[RTrade], dict[str, int]]:
+                     exit_mode: str, risk: float = 5.0, tag: str = "", stop_atr: float = STOP_ATR, ema_n: int = EMA_N,
+                     atr_n: int = ATR_N) -> tuple[list[RTrade], dict[str, int]]:
     out: list[RTrade] = []
     gaps = {"stops": 0, "gap_overruns": 0, "data_end": 0}
     spread = float(inst["spread_bp"]) / 1e4
     usd = bool(inst.get("usd"))
     closes = [b.close for b in bars]
-    ema = _ema_aligned(closes) if exit_mode == "ema_cross" else []
+    ema = _ema_aligned(closes, ema_n) if exit_mode == "ema_cross" else []
     cell = f"{tag or 'ride'}:{exit_mode}"
     pos: dict[str, Any] | None = None
     pending: tuple[str, int] | None = None
@@ -142,10 +143,10 @@ def simulate_signals(key: str, bars: list[technical.Bar], inst: dict[str, Any], 
         if pos is None and pending is not None:
             d, sig_i = pending
             pending = None
-            a = technical.atr(bars[:i], ATR_N)
+            a = technical.atr(bars[:i], atr_n)
             if a:
                 px = bar.open
-                dist = STOP_ATR * a
+                dist = stop_atr * a
                 rate = float(inst["overnight_long" if d == "long" else "overnight_short"])
                 per_unit = dist + spread * px + (FX_FEE * dist if usd else 0.0) + rate * px * SIZING_NIGHTS
                 side0 = 0

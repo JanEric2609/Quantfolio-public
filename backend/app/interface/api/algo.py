@@ -26,6 +26,7 @@ def overview(user: User = Depends(current_user)) -> dict[str, Any]:
         "max_arms": algo_cards.MAX_ARMS,
         "cards": algo_cards.CARDS,
         "not_carded": algo_cards.NOT_CARDED,
+        "paper_cells": algo_cards.PAPER_CELLS,
         "years_to_detect": [
             {"sharpe": s, "years": round(years_to_detect(s, trials=algo_cards.MAX_ARMS, alt_se=True), 1),
              "years_single_arm": round(years_to_detect(s, alt_se=True), 1)}
