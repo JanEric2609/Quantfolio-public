@@ -16,11 +16,11 @@ HEAD = (
 )
 
 
-def _row(pub, issuer, person, nature, isin, tx, volume, price, closely="", position="Chief Financial Officer (CFO)"):
+def _row(pub, issuer, person, nature, isin, tx, volume, price, closely="", position="Chief Financial Officer (CFO)", status="", kind="Share"):
     return (
         f"<tr><td>{pub}</td><td>{issuer}</td><td>{person}</td><td>{position}</td><td>{closely}</td>"
-        f"<td>{nature}</td><td>{issuer} B</td><td>Share</td><td>{isin}</td><td>{tx}</td>"
-        f"<td>{volume}</td><td>Quantity</td><td>{price}</td><td>SEK</td><td></td><td><a href='/x'>Notification</a></td></tr>"
+        f"<td>{nature}</td><td>{issuer} B</td><td>{kind}</td><td>{isin}</td><td>{tx}</td>"
+        f"<td>{volume}</td><td>Quantity</td><td>{price}</td><td>SEK</td><td>{status}</td><td><a href='/x'>Notification</a></td></tr>"
     )
 
 
@@ -128,3 +128,35 @@ def test_recent_buys_filters_side_isin_and_window():
     assert [g.person for g in got] == ["Magnus Ekström"]
     assert pdmr_se.recent_buys(db, "SE0030361564", days=30, today=date(2026, 11, 1)) == []  # a sale
     assert pdmr_se.recent_buys(db, "SE0017072259", days=3, today=date(2026, 11, 1)) == []  # too old
+
+
+def test_revised_and_history_copies_are_one_row_and_history_never_wins():
+    db = _memory_db()
+    args = ("Intea Fastigheter AB (publ)", "Magnus Ekström", "Acquisition", "SE0017072259", "23/10/2026", "250", "62.00")
+    history = _row("26/10/2026", *args, status="History")
+    revised = _row("28/10/2026", *args, status="Revised")
+    # History stored first, Revised arrives on a later night: one row, upgraded
+    assert pdmr_se.store(db, pdmr_se.parse_page(_page(history))) == 1
+    db.commit()
+    assert pdmr_se.recent_buys(db, "SE0017072259", days=30, today=date(2026, 11, 1)) == []
+    assert pdmr_se.store(db, pdmr_se.parse_page(_page(revised))) == 0
+    db.commit()
+    (row,) = db.query(PdmrTransaction).all()
+    assert row.status == "Revised" and row.publication_date == date(2026, 10, 28)
+    assert len(pdmr_se.recent_buys(db, "SE0017072259", days=30, today=date(2026, 11, 1))) == 1
+    # both on one page, either order: still one row
+    db2 = _memory_db()
+    assert pdmr_se.store(db2, pdmr_se.parse_page(_page(revised, history))) == 1
+    db2.commit()
+    assert db2.query(PdmrTransaction).one().status == "Revised"
+
+
+def test_subscriptions_and_non_share_instruments_are_not_buys():
+    db = _memory_db()
+    sub = _row("26/10/2026", "A AB", "P Q", "Subscription", "SE0000000002", "23/10/2026", "10", "1")
+    warrant = _row("26/10/2026", "B AB", "R S", "Acquisition", "SE0000000003", "23/10/2026", "10", "1", kind="Warrant")
+    assert [r.side for r in pdmr_se.parse_page(_page(sub))] == ["other"]
+    pdmr_se.store(db, pdmr_se.parse_page(_page(sub, warrant)))
+    db.commit()
+    assert pdmr_se.recent_buys(db, "SE0000000002", days=30, today=date(2026, 11, 1)) == []
+    assert pdmr_se.recent_buys(db, "SE0000000003", days=30, today=date(2026, 11, 1)) == []

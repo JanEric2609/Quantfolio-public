@@ -83,8 +83,8 @@ class PdmrTransaction(Base):
     """One managers' transaction (MAR Art. 19) from a national regulator's register.
 
     Sweden first (``source="fi_se"``): Finansinspektionen's PDMR register, free to re-use
-    with the source and date stated. ``row_key`` is a hash of the fields, so reading a
-    page twice never stores a row twice.
+    with the source and date stated. ``row_key`` hashes the transaction itself (not its publication
+    date or status), so a notification and its revised or history copy are one row.
     """
 
     __tablename__ = "pdmr_transactions"
@@ -105,4 +105,6 @@ class PdmrTransaction(Base):
     volume: Mapped[float | None] = mapped_column(Float, nullable=True)
     price: Mapped[float | None] = mapped_column(Float, nullable=True)
     currency: Mapped[str] = mapped_column(String(3), default="")
+    #: The register's version flag: blank (original), ``Revised`` (current amendment) or ``History`` (superseded).
+    status: Mapped[str] = mapped_column(String(16), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

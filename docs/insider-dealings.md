@@ -18,9 +18,13 @@ Norway).
 `foundation/data_engineering/pdmr_se.py`, job `pdmr_se_refresh` (04:45 UTC): pages through the
 register newest first (one request every 2 s, at most 400 pages a night, anonymous
 User-Agent), stores each notification in `pdmr_transactions` (`side` is `buy` for
-"Acquisition", `sell` for "Disposal", `other` for allotments, gifts and the like). The first
+"Acquisition"/"Purchase", `sell` for "Disposal", `other` for allotments, subscriptions, gifts and
+the like). An amended notification is listed as `Revised` and `History` rows; they are stored as
+one row keyed on the transaction, keeping the `Revised` version. The first
 nights walk back one year from a saved page (`pdmr_se_resume_page`); afterwards a night
-stops at the first page it already stored. `recent_buys(db, isin, days=90)` is the read side.
+stops at the first page it already stored. `recent_buys(db, isin, days=90)` is the read side: shares only, no `History` copies. **Limit:** the list page has no venue
+column, so an acquisition outside a trading venue (private deal, conversion) still counts; only
+the detail page says where it was executed. Read the result as "reported acquisitions".
 Nothing uses it for a decision yet: the next step is a pre-registered forward-lab signal.
 
 ## First run on the server (not tested against the live site)

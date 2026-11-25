@@ -1,15 +1,15 @@
 """pdmr_transactions: managers' transactions from national registers (Sweden first).
 
-Revision ID: 0160_pdmr_transactions
-Revises: 0159_cfd_journal_wider
+Revision ID: 0161_pdmr_transactions
+Revises: 0160_cfd_journal_rule
 """
 from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
 
-revision = "0160_pdmr_transactions"
-down_revision = "0159_cfd_journal_wider"
+revision = "0161_pdmr_transactions"
+down_revision = "0160_cfd_journal_rule"
 branch_labels = None
 depends_on = None
 
@@ -36,6 +36,7 @@ def upgrade() -> None:
         sa.Column("volume", sa.Float(), nullable=True),
         sa.Column("price", sa.Float(), nullable=True),
         sa.Column("currency", sa.String(3), nullable=False, server_default=""),
+        sa.Column("status", sa.String(16), nullable=False, server_default=""),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     )
     for column in ("source", "isin", "side", "transaction_date", "publication_date"):

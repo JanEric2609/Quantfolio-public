@@ -11,7 +11,8 @@ or agreements", with the source (FI) and the date stated.
 How. The register's public search lists every notification, newest first, ten per
 page. Plain GET links page through it. A page's table is parsed with the standard
 library only. A row's ``side`` is ``buy`` for "Acquisition" and ``sell`` for
-"Disposal"; allotments, gifts, exercises and the like are ``other`` (never a signal).
+"Disposal"; allotments, subscriptions, gifts, exercises and the like are ``other`` (never a signal).
+An amended notification appears as ``Revised`` and ``History`` rows; they are one stored row.
 
 Politeness. One request every :data:`DELAY_S` seconds, an identifying but anonymous
 User-Agent, at most :data:`MAX_PAGES` pages a night. The first runs walk back to
@@ -35,6 +36,7 @@ from datetime import UTC, date, datetime, timedelta
 from html.parser import HTMLParser
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.foundation.models.entities import PdmrTransaction
@@ -72,7 +74,7 @@ _HEADERS = {
     "status": "status",
 }
 _REQUIRED = ("publication_date", "issuer", "person", "nature", "isin", "transaction_date", "volume", "price")
-_BUY = {"acquisition", "purchase", "subscription"}
+_BUY = {"acquisition", "purchase"}
 _SELL = {"disposal", "sale"}
 
 
@@ -90,6 +92,7 @@ class Pdmr:
     volume: float | None
     price: float | None
     currency: str
+    status: str = ""
 
     @property
     def side(self) -> str:
@@ -100,7 +103,7 @@ class Pdmr:
     def key(self) -> str:
         raw = "|".join(str(x) for x in (
             SOURCE, self.isin, self.person, self.nature, self.transaction_date,
-            self.publication_date, self.volume, self.price,
+            self.volume, self.price,
         ))
         return hashlib.sha1(raw.encode()).hexdigest()  # noqa: S324 - an identity hash, not security
 
@@ -186,6 +189,7 @@ def parse_page(html: str) -> list[Pdmr]:
             publication_date=parse_date(cell("publication_date")),
             volume=parse_number(cell("volume")), price=parse_number(cell("price")),
             currency=cell("currency").strip().upper()[:3],
+            status=cell("status").strip()[:16],
         ))
     return out
 
@@ -202,20 +206,40 @@ def fetch_page(page: int, *, timeout_s: float = 30.0) -> str:
     return response.text
 
 
+def _superseded(status: str) -> bool:
+    return status.strip().lower() == "history"
+
+
 def store(db: Session, rows: list[Pdmr]) -> int:
-    """Insert rows not stored yet; returns how many were new. Does not commit."""
-    keys = {r.key: r for r in rows}
-    have = {k for (k,) in db.query(PdmrTransaction.row_key).filter(PdmrTransaction.row_key.in_(list(keys)))} if keys else set()
+    """Insert rows not stored yet; returns how many were new. Does not commit.
+
+    The register lists an amended notification as separate ``Revised`` and ``History`` rows
+    with the same transaction. They share one key, so one transaction is one row. Where a
+    ``History`` copy was stored first and the ``Revised`` one arrives later, the stored row
+    takes the later one's status and publication date.
+    """
+    keys: dict[str, Pdmr] = {}
+    for r in rows:
+        kept = keys.get(r.key)
+        if kept is None or (_superseded(kept.status) and not _superseded(r.status)):
+            keys[r.key] = r
+    have = (
+        {t.row_key: t for t in db.query(PdmrTransaction).filter(PdmrTransaction.row_key.in_(list(keys)))}
+        if keys else {}
+    )
     new = 0
     for key, r in keys.items():
-        if key in have:
+        stored = have.get(key)
+        if stored is not None:
+            if _superseded(stored.status) and not _superseded(r.status):
+                stored.status, stored.publication_date = r.status, r.publication_date
             continue
         db.add(PdmrTransaction(
             row_key=key, source=SOURCE, isin=r.isin, issuer=r.issuer, person=r.person,
             position=r.position, closely_associated=r.closely_associated, side=r.side,
             nature=r.nature, instrument_type=r.instrument_type,
             transaction_date=r.transaction_date, publication_date=r.publication_date,
-            volume=r.volume, price=r.price, currency=r.currency,
+            volume=r.volume, price=r.price, currency=r.currency, status=r.status,
         ))
         new += 1
     return new
@@ -269,11 +293,23 @@ def refresh_pdmr_se(
 
 
 def recent_buys(db: Session, isin: str, *, days: int = 90, today: date | None = None) -> list[PdmrTransaction]:
-    """Share purchases (``side == "buy"``) published for *isin* in the last *days* days, newest first."""
+    """Acquisitions of shares published for *isin* in the last *days* days, newest first.
+
+    Excludes superseded (``History``) copies and every instrument type other than a share.
+    **Limit:** the register's list page has no venue column, so an acquisition made outside a
+    trading venue (a private deal, a conversion) is still returned; only the notification's
+    detail page says where it was executed. Treat the result as "reported acquisitions", not
+    as proven open-market purchases, until that is checked.
+    """
     start = (today or datetime.now(UTC).date()) - timedelta(days=days)
     return (
         db.query(PdmrTransaction)
-        .filter(PdmrTransaction.isin == isin, PdmrTransaction.side == "buy", PdmrTransaction.publication_date >= start)
+        .filter(
+            PdmrTransaction.isin == isin, PdmrTransaction.side == "buy",
+            func.lower(PdmrTransaction.instrument_type) == "share",
+            func.lower(PdmrTransaction.status) != "history",
+            PdmrTransaction.publication_date >= start,
+        )
         .order_by(PdmrTransaction.publication_date.desc())
         .all()
     )
