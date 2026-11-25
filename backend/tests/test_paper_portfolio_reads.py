@@ -104,7 +104,8 @@ def test_compute_metrics_writes_metrics_snapshot():
     db = _memory_db()
     user = _user(db)
     portfolio, _ = get_or_create_paper_portfolio(db, user.id)
-    _seed_daily_snapshots(db, portfolio.id, 25)
+    # Enough history for the ratios to be published (MIN_RETURNS_FOR_RATIOS).
+    _seed_daily_snapshots(db, portfolio.id, 125)
 
     result = compute_metrics(db, portfolio.id)
     assert result["updated"] is True
@@ -122,8 +123,7 @@ def test_compute_metrics_writes_metrics_snapshot():
     summary = get_summary(db, portfolio.id)
     assert summary["sharpe"] == result["sharpe"]
     assert summary["max_drawdown"] == result["max_drawdown"]
-    # 25 daily snapshots span 24 days: far too short for an annualised Sharpe.
-    assert summary["history_days"] == 24
+    assert summary["history_days"] == 124
 
 
 def test_compute_metrics_upserts_metrics_snapshot_on_rerun():

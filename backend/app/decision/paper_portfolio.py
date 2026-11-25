@@ -43,6 +43,9 @@ logger = logging.getLogger(__name__)
 
 _FALLBACK_CASH = Decimal("100000")
 METRICS_CONTEXT = "paper_portfolio"
+#: Fewest daily returns behind a published Sharpe, Sortino or Calmar. Below it the 95 % interval of
+#: the ratio (Lo 2002) is wider than any value it could show; the drawdown and CVaR are still stored.
+MIN_RETURNS_FOR_RATIOS = 120
 # How far back a daily run looks for dividends it has not credited yet.
 DIVIDEND_LOOKBACK_DAYS = 60
 
@@ -1177,7 +1180,8 @@ def compute_metrics(
         risk_free=get_risk_free_rate(db),
         periods_per_year=periods_per_year,
     )
-    sharpe = report.get("sharpe")
+    enough_for_ratios = len(returns) >= MIN_RETURNS_FOR_RATIOS
+    sharpe = report.get("sharpe") if enough_for_ratios else None
     max_dd = report.get("drawdown", {}).get("max_drawdown")
 
     latest = snapshots[-1]
@@ -1191,8 +1195,8 @@ def compute_metrics(
         context=METRICS_CONTEXT,
         values={
             "sharpe": sharpe,
-            "sortino": report.get("sortino"),
-            "calmar": report.get("calmar"),
+            "sortino": report.get("sortino") if enough_for_ratios else None,
+            "calmar": report.get("calmar") if enough_for_ratios else None,
             "cvar_95": report.get("historical_cvar"),
             "max_drawdown": max_dd,
             "volatility": report.get("annualised_volatility"),

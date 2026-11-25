@@ -446,6 +446,9 @@ def test_neutral_prediction_resolves_unsigned():
     db = _memory_db()
     user = _user(db)
     _seed_prices(db, "AAA", [100.0] * 40 + [110.0])
+    # The benchmark is seeded too: without it the loader reaches for the
+    # provider, and a machine with no network never resolves the row.
+    _seed_prices(db, "EUNL.DE", [100.0] * 40 + [101.0])
     last_close = date.today()
     while last_close.weekday() >= 5:
         last_close -= timedelta(days=1)

@@ -181,7 +181,8 @@ class TestGoldenPaperPortfolioMetrics:
 
         assert result == {
             "updated": True,
-            "sharpe": 4.427753824016444,
+            # 24 returns: under MIN_RETURNS_FOR_RATIOS, so no Sharpe is published.
+            "sharpe": None,
             "max_drawdown": -0.01354282744331381,
             "samples": 24,
         }
@@ -241,7 +242,9 @@ class TestPeriodsPerYearThreadsThrough:
             default.sharpe_ratio * math.sqrt(365 / 252), rel=1e-12
         )
 
-    def test_paper_portfolio_sharpe_moves_under_trading_day_cadence(self):
+    def test_paper_portfolio_sharpe_moves_under_trading_day_cadence(self, monkeypatch):
+        # The seeded history is short; lift the publication floor so the cadence is what is compared.
+        monkeypatch.setattr("app.decision.paper_portfolio.MIN_RETURNS_FOR_RATIOS", 2)
         db = _memory_db()
         portfolio = _seed_paper_portfolio(db)
         _seed_paper_snapshots(db, portfolio.id)
