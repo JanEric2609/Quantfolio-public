@@ -151,6 +151,21 @@ def test_revised_and_history_copies_are_one_row_and_history_never_wins():
     assert db2.query(PdmrTransaction).one().status == "Revised"
 
 
+def test_corrected_notification_is_not_counted_next_to_its_original():
+    db = _memory_db()
+    base = ("Intea Fastigheter AB (publ)", "Magnus Ekström", "Acquisition", "SE0017072259", "23/10/2026")
+    original = _row("24/10/2026", *base, "1000", "50.00")
+    history = _row("28/10/2026", *base, "1000", "50.00", status="History")
+    revised = _row("28/10/2026", *base, "800", "50.00", status="Revised")
+    pdmr_se.store(db, pdmr_se.parse_page(_page(original)))
+    db.commit()
+    # the correction arrives on a later night: Revised (new key) and the History copy of the original
+    pdmr_se.store(db, pdmr_se.parse_page(_page(revised, history)))
+    db.commit()
+    got = pdmr_se.recent_buys(db, "SE0017072259", days=30, today=date(2026, 11, 1))
+    assert [g.volume for g in got] == [800.0]
+
+
 def test_subscriptions_and_non_share_instruments_are_not_buys():
     db = _memory_db()
     sub = _row("26/10/2026", "A AB", "P Q", "Subscription", "SE0000000002", "23/10/2026", "10", "1")

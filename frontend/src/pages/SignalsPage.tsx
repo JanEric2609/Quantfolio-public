@@ -18,15 +18,6 @@ function VerdictChip({ verdict }: { verdict: SignalVerdict }) {
   return <span data-testid="verdict" className={`inline-block rounded-full border px-2 py-0.5 text-xs ${verdictClass(verdict)}`}>{verdict}</span>;
 }
 
-/** Plain names for the cell ids, shown beneath the id. */
-const CELL_NAMES: Record<string, string> = {
-  "ta_trend:cfd": "EMA cross", "ta_band:cfd": "Bollinger fade", "ta_rsi2:cfd": "RSI(2) dip in an uptrend",
-  "hype_fade:cfd": "Fade a retail-hype spike", "news_drift:cfd": "Follow company news",
-  "owner_call:cfd": "Your /idea calls on CFDs", "owner_call:knockout": "Your /idea calls on knock-outs",
-  "owner_call:warrant": "Your /idea calls on warrants", "index_momentum:knockout": "Index rule on knock-outs",
-  "index_momentum:warrant": "Index rule on warrants", "index_momentum:cfd": "Index rule on CFDs",
-};
-
 function replayText(c: SignalCell): string {
   const r = c.replay;
   if (!r || !r.n) return "n/a";
@@ -49,6 +40,22 @@ function Bankroll({ b }: { b: SignalsDto["bankroll"] }) {
   );
 }
 
+function PairShadow({ p }: { p: NonNullable<SignalsDto["pair_shadow"]> }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>DAX and Euro Stoxx 50 together</CardTitle>
+        <CardDescription>The two indices share about 30 % of their weight. What the pair would have done on the days both fired the index rule on the same side. {p.note}.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-1 text-sm" data-testid="pair-shadow">
+        {p.days_same_side === 0
+          ? <p>No day yet with both indices closed on the same side ({p.days_both_fired} days with both).</p>
+          : <p>{p.days_same_side} days. Mean {eur(p.mean_full_eur)} EUR at full size, {eur(p.mean_half_eur)} EUR at half size per leg; worst day {eur(p.worst_full_eur)} / {eur(p.worst_half_eur)} EUR.</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
 function SignalsView({ data }: { data: SignalsDto }) {
   const events = data.cells.filter((c) => c.registration === "events");
   const first = data.cells.filter((c) => c.registration === "first");
@@ -60,7 +67,7 @@ function SignalsView({ data }: { data: SignalsDto }) {
           {rows.map((c) => (
             <tr key={c.cell} className={stacked.tr}>
               <td className={stacked.td} data-label="Cell">
-                <span><span>{c.cell}</span>{CELL_NAMES[c.cell] && <span className="block text-xs text-muted-foreground">{CELL_NAMES[c.cell]}</span>}</span>
+                <span><span>{c.cell}</span>{c.name && c.name !== c.cell && <span className="block text-xs text-muted-foreground">{c.name}</span>}</span>
               </td>
               <td className={stacked.td} data-label="Verdict"><VerdictChip verdict={c.verdict} /></td>
               <td className={stacked.td} data-label="Live paper">n {c.n}/{c.n_min}{c.mean_net != null ? `, ${eur(c.mean_net)} EUR a trade` : ""}</td>
@@ -75,6 +82,7 @@ function SignalsView({ data }: { data: SignalsDto }) {
   return (
     <div className="space-y-6">
       <Bankroll b={data.bankroll} />
+      {data.pair_shadow && <PairShadow p={data.pair_shadow} />}
       <Card>
         <CardHeader><CardTitle>Open positions</CardTitle><CardDescription>Paper positions of the event desk.</CardDescription></CardHeader>
         <CardContent>

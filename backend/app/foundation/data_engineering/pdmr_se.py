@@ -210,18 +210,30 @@ def _superseded(status: str) -> bool:
     return status.strip().lower() == "history"
 
 
+def _rank(status: str) -> int:
+    """Which copy of one transaction wins: ``Revised`` over ``History`` over the blank original.
+
+    A ``History`` copy marks the original it replaced; a correction that changed the volume or
+    price has a different key and is its own (``Revised``) row.
+    """
+    key = status.strip().lower()
+    return 1 if key == "history" else 0 if not key else 2
+
+
 def store(db: Session, rows: list[Pdmr]) -> int:
     """Insert rows not stored yet; returns how many were new. Does not commit.
 
     The register lists an amended notification as separate ``Revised`` and ``History`` rows
     with the same transaction. They share one key, so one transaction is one row. Where a
-    ``History`` copy was stored first and the ``Revised`` one arrives later, the stored row
-    takes the later one's status and publication date.
+    lower-ranked copy was stored first and a higher-ranked one arrives later (``Revised`` over
+    ``History`` over the blank original), the stored row takes the later one's status and
+    publication date. A ``History`` copy arriving for a stored blank original therefore
+    retires it, so a correction is never counted next to the row it replaced.
     """
     keys: dict[str, Pdmr] = {}
     for r in rows:
         kept = keys.get(r.key)
-        if kept is None or (_superseded(kept.status) and not _superseded(r.status)):
+        if kept is None or _rank(r.status) > _rank(kept.status):
             keys[r.key] = r
     have = (
         {t.row_key: t for t in db.query(PdmrTransaction).filter(PdmrTransaction.row_key.in_(list(keys)))}
@@ -231,7 +243,7 @@ def store(db: Session, rows: list[Pdmr]) -> int:
     for key, r in keys.items():
         stored = have.get(key)
         if stored is not None:
-            if _superseded(stored.status) and not _superseded(r.status):
+            if _rank(r.status) > _rank(stored.status):
                 stored.status, stored.publication_date = r.status, r.publication_date
             continue
         db.add(PdmrTransaction(

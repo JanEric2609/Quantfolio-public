@@ -119,6 +119,48 @@ def test_rate_limit_is_retried_once_after_retry_after(monkeypatch):
     assert waits == [3.0] and answers == []
 
 
+def test_rate_limit_longer_than_the_budget_is_not_slept_through(monkeypatch):
+    from app.foundation import telegram_bot
+
+    db = _memory_db()
+    set_secret(db, "telegram", "123:ABC-token")
+    waits = []
+    monkeypatch.setattr(telegram_bot.time, "sleep", waits.append)
+    request = httpx.Request("POST", "https://api.telegram.org/bot123:ABC-token/sendMessage")
+
+    def fake_post(self, url, json=None):
+        resp = MagicMock()
+        resp.status_code = 429
+        resp.json.return_value = {"ok": False, "parameters": {"retry_after": 60}}
+        resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "x", request=request, response=httpx.Response(429, request=request))
+        return resp
+
+    with patch("httpx.Client.post", fake_post):
+        assert send_telegram_message(db, "555", "hello") is False
+    assert waits == []
+
+
+def test_failed_later_part_still_counts_as_delivered_and_says_so():
+    db = _memory_db()
+    set_secret(db, "telegram", "123:ABC-token")
+    posted = []
+
+    def fake_post(self, url, json=None):
+        posted.append(json)
+        resp = MagicMock()
+        resp.status_code = 200
+        if len(posted) == 3:  # the third part fails
+            resp.status_code = 500
+            resp.raise_for_status.side_effect = RuntimeError("boom")
+        return resp
+
+    with patch("httpx.Client.post", fake_post):
+        ok = send_telegram_message(db, "555", "\n".join(["z" * 99] * 100))
+    assert ok is True  # the owner got parts 1 and 2: a caller must not resend them
+    assert "could not be delivered" in posted[-1]["text"]
+
+
 def test_error_description_is_logged_without_the_token(caplog):
     db = _memory_db()
     token = "123:SUPER-SECRET-TOKEN"

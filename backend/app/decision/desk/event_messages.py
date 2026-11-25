@@ -85,8 +85,9 @@ def paper_only_reason(db: Session, user_id: str, cell: str, now: datetime) -> st
     g = bankroll.guard(db, user_id, now)
     if not g.ok:
         return f"Bankroll stop: {g.reason}. Paper only until {g.resumes}."
-    if cell_state(db, cell)["verdict"] == "failing":
-        return (f"This rule is failing its own test ({cell_state(db, cell)['n_min']} or more paper trades, mean at "
+    state = cell_state(db, cell)
+    if state["verdict"] == "failing":
+        return (f"This rule is failing its own test ({state['n_min']} or more paper trades, mean at "
                 "or below zero). Paper only.")
     return replay_loses(db, cell)
 

@@ -40,6 +40,17 @@ describe("SignalsPage", () => {
     expect(screen.getByText("No logged trades yet.")).toBeInTheDocument();
   });
 
+  it("shows the backend's plain cell name and the pair shadow", async () => {
+    const d = dto({
+      cells: [cell({ name: "EMA cross" })],
+      pair_shadow: { days_both_fired: 3, days_same_side: 2, mean_full_eur: -1.5, mean_half_eur: -0.75, worst_full_eur: -4, worst_half_eur: -2, note: "shadow only" },
+    });
+    vi.spyOn(api, "getSignals").mockResolvedValue(d);
+    render(<MemoryRouter><SignalsPage /></MemoryRouter>);
+    expect(await screen.findByText("EMA cross")).toBeInTheDocument();
+    expect(screen.getByTestId("pair-shadow")).toHaveTextContent("2 days. Mean -1.50 EUR at full size");
+  });
+
   it("shows the bankroll stop as an alert", async () => {
     const d = dto();
     d.bankroll = { ...d.bankroll, ok: false, reason: "the month's real loss reached 60 EUR", resumes: "2026-12-01" };

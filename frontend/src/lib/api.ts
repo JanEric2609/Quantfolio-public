@@ -4582,7 +4582,7 @@ export const getIntraday = () => api<IntradayDto>("/api/desk/intraday");
 /** The Signals page (ADR 0028): both registrations' cells, the owner's real trades, open event positions, bankroll. */
 export type SignalVerdict = "too early" | "failing" | "not significant" | "passing";
 export interface SignalCell {
-  cell: string; registration: "first" | "events"; n: number; n_min: number; mean_net: number | null;
+  cell: string; name?: string; registration: "first" | "events"; n: number; n_min: number; mean_net: number | null;
   hit_rate: number | null; p_holm: number | null; passes: boolean; verdict: SignalVerdict;
   placebo_percentile: number | null; placebo_p95: number | null;
   replay: { n?: number; mean_eur?: number | null; t?: number | null; hit_rate?: number | null } | null;
@@ -4605,6 +4605,11 @@ export interface SignalsDto {
     monthly_stop: string; daily_stop: string; max_open: number; open_real: number;
   };
   owner_call: SignalCell | null; limits: Record<string, string | number>;
+  /** DAX + ES50 as one pair (ADR 0027 amendment): read-only shadow of the paper index cell. */
+  pair_shadow?: {
+    days_both_fired: number; days_same_side: number; mean_full_eur: number | null; mean_half_eur: number | null;
+    worst_full_eur: number | null; worst_half_eur: number | null; note: string;
+  };
 }
 export const getSignals = () => api<SignalsDto>("/api/desk/signals");
 /** The owner's own record of a manual Trading 212 trade. Never an order. */

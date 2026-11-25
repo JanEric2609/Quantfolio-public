@@ -172,17 +172,16 @@ def handle_message(db: Session, chat_id: str, text: str, replied: dict[str, Any]
         telegram_bot.send_telegram_message(db, chat_id, format_summary_reply(db, account.user_id))
         return
 
-    confirmed = text.endswith("!")
-    if confirmed:
-        text = text[:-1].rstrip()
     parsed = parse_freeform_expense(text)
-    if parsed is not None and parsed[0] > LARGE_EXPENSE and not confirmed:
-        # A price typed for the desk without using Reply ("24003.5 0.04") reads like a huge expense.
-        telegram_bot.send_telegram_message(
-            db, chat_id,
-            f"Not logged: {parsed[0]:,.2f} EUR is a large expense. If it is one, send it again with ! at the end "
-            f"(e.g. '{text} !'). If it is a price for a CFD trade, reply to that trade's message instead.")
-        return
+    if parsed is not None and parsed[0] > LARGE_EXPENSE:
+        if not text.endswith("!"):
+            # A price typed for the desk without using Reply ("24003.5 0.04") reads like a huge expense.
+            telegram_bot.send_telegram_message(
+                db, chat_id,
+                f"Not logged: {parsed[0]:,.2f} EUR is a large expense. If it is one, send it again with ! at the end "
+                f"(e.g. '{text} !'). If it is a price for a CFD trade, reply to that trade's message instead.")
+            return
+        text = text[:-1].rstrip()  # the confirmation mark belongs to the guard, not to the description
 
     expense = create_expense_from_telegram(db, account.user_id, text)
     if expense is None:
