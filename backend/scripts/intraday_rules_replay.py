@@ -5,7 +5,7 @@
     python scripts/intraday_rules_replay.py --dump /tmp/bars5.json     # fetch SPY and QQQ 5-minute SIP bars since 2019
     python scripts/intraday_rules_replay.py --bars /tmp/bars5.json     # replay saved bars, no network
 
-Prints a JSON table; writes nothing to the database. Rules and constants: ``app/lab/intraday_rules_replay.py``.
+Prints a JSON table; writes no results to the database (the Alpaca read stores nothing). Rules and constants: ``app/lab/intraday_rules_replay.py``.
 Cells are processed in parallel by symbol on the host's CPU threads.
 """
 from __future__ import annotations

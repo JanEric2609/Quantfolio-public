@@ -10,8 +10,8 @@ at most 3 entries a day, everything flat at 15:55. Six cells (five rules and a c
 * ``tp1_5_hv`` and ``trail_hv``: the last two, only on days whose trailing 20-day volatility is in the top tercile;
 * ``control``: ``tp1_5`` with a coin-flip direction (seeded), to show whether the cross carries anything.
 
-Costs are in basis points of the position's value per round trip (``spread_bp``). The owner's Trading 212 export shows a
-median about 7 bp on Tech 100; the desk's registered figure is 0.6 bp; both are reported. Five tests, Holm-adjusted.
+Costs are in basis points of the position's value per round trip. The desk's registered figure for Tech 100 is 0.6 bp,
+which the owner's Trading 212 export confirms (median 0.7 bp); 3 bp is a stress case for wide-spread hours. Five tests, Holm-adjusted.
 Changing a parameter after seeing a result makes it a new trial. A pass would justify a new pre-registration, never a
 live signal.
 """
@@ -34,7 +34,7 @@ MAX_ENTRIES = 3
 ATR_N = 14
 CELLS = ("fixed", "tp1_5", "trail", "tp1_5_hv", "trail_hv", "control")
 TESTED = CELLS[:5]
-SPREADS_BP = (0.6, 7.0)
+SPREADS_BP = (0.6, 3.0)
 
 
 @dataclass(frozen=True)
