@@ -285,3 +285,28 @@ def test_a_half_year_reporter_is_not_given_a_quarter(monkeypatch):
     })
     out = dossier_writer._fetch_fundamentals("1308.HK", None)
     assert out["period_months"] == 6
+
+
+# --- Phase 1 pricing fixes (review 2026-11-25) -------------------------------------------------
+
+
+def test_american_gamma_is_smooth_in_the_spot():
+    """A CRR tree gave 0.056 / 0.021 at spots 100 / 101 against 0.035 / 0.034 for the European."""
+    for spot in (98.0, 99.0, 100.0, 101.0, 102.0):
+        am = derivatives.greeks("put", "american", spot, 100.0, 30 / 365, 0.02, 0.4)
+        eu = derivatives.greeks("put", "european", spot, 100.0, 30 / 365, 0.02, 0.4)
+        assert am["gamma"] == pytest.approx(eu["gamma"], rel=0.1)
+        assert am["delta"] == pytest.approx(eu["delta"], abs=0.01)
+
+
+def test_the_tree_matches_black_scholes_for_a_european_call():
+    args = (100.0, 100.0, 30 / 365, 0.02, 0.4)
+    assert derivatives.binomial_american("call", *args) == pytest.approx(derivatives.black_scholes("call", *args), rel=2e-3)
+
+
+def test_vega_near_the_volatility_floor_is_per_point():
+    g = derivatives.greeks("call", "european", 100.0, 100.0, 0.5, 0.02, 0.008)
+    lo, hi = 0.0001, 0.018
+    true = (derivatives.black_scholes("call", 100.0, 100.0, 0.5, 0.02, hi)
+            - derivatives.black_scholes("call", 100.0, 100.0, 0.5, 0.02, lo)) / (hi - lo) * 0.01
+    assert g["vega_per_point"] == pytest.approx(true, rel=0.05)
