@@ -28,7 +28,7 @@ Standing rules kept: brokers read-only, desks paper-only, no order path, the cod
 | Does anything survive? | Slow trend (months), Sharpe about 0.4 +-0.26 post-2009 in a 100-futures portfolio; net about 0.5 for a replicated CTA | Kurth et al. 2026; Sepp, Lucic 2026 |
 | Does it work in our instruments? | Unknown. Equity indices and FX are the small-tick markets where trend broke; a 5-ETF basket is a different object | Kurth et al. 2026 |
 | Does vol-managed sizing help? | In-sample yes, out-of-sample generally no | Cederburg et al. 2020 |
-| Can a small edge be verified? | 0.5 Sharpe: about 25 years; 1.0: 6 years; 1.5: 2.7 years (one-sided, 80 % power, alpha 0.05, i.i.d. approximation; with the larger Sharpe standard error under the alternative, `alt_se=True`: 25.8, 7.2 and 3.7 years) | `years_to_detect` |
+| Can a small edge be verified? | 0.5 Sharpe: about 25 years; 1.0: 6 years; 1.5: 2.7 years (one-sided, 80 % power, alpha 0.05, i.i.d. approximation; with the larger Sharpe standard error under the alternative, `alt_se=True`, frequency-matched for daily data: 24.7, 6.2 and 2.8 years, under 1 % longer) | `years_to_detect` |
 | How much of a backtest Sharpe survives? | One fitted signal, true Sharpe 0.5, 5 years of training: about 56 %; 10 years 72 %; many signals much less | Jacquier et al. 2025, `oos_replication_ratio` |
 
 Consequences for design:

@@ -148,9 +148,22 @@ def test_clipped_null_is_not_the_return_null():
     assert rates[0.05][0] == 0.0 and rates[0.05][1] == 0.0
 
 
-def test_years_to_detect_alt_se_is_longer_and_grows_with_sharpe():
+def test_years_to_detect_alt_se_is_frequency_matched():
+    """Annual Sharpe with years of daily data: the inflation is tiny, and it grows with Sharpe."""
     assert years_to_detect(0.5, alt_se=True) > years_to_detect(0.5)
     ratio_low = years_to_detect(0.5, alt_se=True) / years_to_detect(0.5)
     ratio_high = years_to_detect(1.5, alt_se=True) / years_to_detect(1.5)
     assert ratio_high > ratio_low > 1.0
-    assert years_to_detect(1.5, alt_se=True) == pytest.approx(3.7, abs=0.1)
+    assert ratio_high < 1.02
+    assert years_to_detect(1.5, alt_se=True) == pytest.approx(2.8, abs=0.1)
+
+
+def test_non_finite_return_is_rejected_and_adds_no_evidence():
+    led = PromotionLedger()
+    led.register("h", 0.5, 0.01)
+    before = led.observe("h", "d0", 0.0)
+    for bad in (float("nan"), float("inf")):
+        with pytest.raises(LedgerError):
+            led.observe("h", "bad", bad)
+    assert led.to_dict()["candidates"]["h"]["n_obs"] == 1
+    assert led.observe("h", "d1", 0.0) == pytest.approx(before)

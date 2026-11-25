@@ -25,14 +25,14 @@ def years_to_detect(
     ``trials`` applies a Bonferroni split of ``alpha`` (a conservative stand-in for Holm).
     The i.i.d. approximation understates the time when returns are fat-tailed or serially
     dependent. ``alt_se=True`` uses the larger standard error of the Sharpe estimate under
-    the alternative, ``sqrt((1 + SR^2 / 2) / T)`` (Lo 2002, Gaussian i.i.d.): about 4 % longer
-    at Sharpe 0.5 and 35 % longer at Sharpe 1.5.
+    the alternative, ``sqrt((1 + SR_p^2 / 2) / T)`` (Lo 2002, Gaussian i.i.d.) with the per-period Sharpe
+    ``SR_p = SR / sqrt(252)``: well under 1 % longer at daily frequency.
     """
     if sharpe <= 0:
         return math.inf
     z_a = _N.inv_cdf(1 - alpha / max(1, trials))
     z_b = _N.inv_cdf(power)
-    infl = math.sqrt(1 + sharpe**2 / 2) if alt_se else 1.0
+    infl = math.sqrt(1 + sharpe**2 / (2 * 252)) if alt_se else 1.0
     return ((z_a + z_b * infl) / sharpe) ** 2
 
 

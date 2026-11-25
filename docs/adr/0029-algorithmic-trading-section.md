@@ -78,6 +78,8 @@ Build in this order; each phase has an exit test in the plan, and a phase may st
 
 - The e-process guarantee is for the **clipped** score. The strategy card fixes a scale at or above the 99.5th percentile of the absolute net score
   and the ledger reports `clipped_fraction`; unclipped returns are kept beside the evidence.
+  The percentile floor is **necessary but not sufficient**: a zero-mean, negatively skewed score that clips only 0.1 % of days can still have a clipped mean near +1 and promote on almost every path (`test_clipped_null_is_not_the_return_null`). The strategy card therefore states the clipped-score null as an explicit field, and a crossing counts as evidence only after the induced-null audit (T3) has been run on that exact clipped score. `clipped_fraction` is descriptive only.
+- The ledger rejects non-finite scores (`LedgerError`); an inactive or cash day is passed as an explicit `0.0`, as in Benhamou et al.
 - For a timing overlay, an e-process on excess return practically never crosses (simulated median about 56 years at a Sharpe of 0.4).
   A card must either state a risk claim with its own null and metric (drawdown or CVaR against buy-and-hold) or say that route (a) is unreachable.
 - Detection times use the Sharpe standard error under the alternative (`years_to_detect(..., alt_se=True)`).

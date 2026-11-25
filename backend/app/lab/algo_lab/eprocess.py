@@ -30,6 +30,7 @@ multiplying twice.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 BET_GRID: tuple[float, ...] = (0.025, 0.05, 0.10, 0.20, 0.35)
@@ -44,6 +45,8 @@ def clipped_score(net_return: float, scale: float) -> float:
     """Bounded score ``clip(net_return / scale, -1, 1)``; ``scale`` must be positive."""
     if not scale > 0:
         raise LedgerError("scale must be positive")
+    if not math.isfinite(net_return):
+        raise LedgerError("net_return must be finite; pass an explicit 0.0 for an inactive day")
     return max(-1.0, min(1.0, net_return / scale))
 
 
