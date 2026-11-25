@@ -64,7 +64,7 @@ def test_dax_long_message_text(monkeypatch):
         "The stop counts from your fill.",
         "Close at 17:27 Berlin; I will tell you.",
         "Cost check: the spread is 2.1% of the typical move, so the trade breaks even at a 51.0% hit rate; "
-        "showing a hit rate 56% needs about 423 trades.",
+        "showing a hit rate 56% needs about 616 trades to tell it from break-even.",
         "Paper-scored as index_momentum:cfd. Most retail CFD accounts lose money; nothing is ordered for you.",
     ]
 

@@ -199,7 +199,7 @@ def _journal_dict(db: Session, j: DeskCfdJournal) -> dict[str, Any]:
         "stop_level": num(stop), "entry_level": num(j.entry_level), "exit_level": num(j.exit_level),
         "entered_at": _iso(j.entered_at), "closed_at": _iso(j.closed_at), "real_pnl_eur": num(j.real_pnl_eur),
         "paper_net_eur": num(p.net_eur) if p else None, "paper_status": p.status if p else None,
-        "nights_held": cfd_journal.nights_held(j), "note": j.note,
+        "nights_held": cfd_journal.nights_held(j), "note": j.note, "rule": j.rule,
     }
 
 

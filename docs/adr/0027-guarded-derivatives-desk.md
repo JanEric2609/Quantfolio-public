@@ -247,8 +247,8 @@ untouched. No order path exists or is added. Everything below is display, owner 
 
 - **Cost check line** (`edge_math.py`, shown on the CFD message v2). The spread as a share of the typical
   last-30-minute move, the hit rate at which a trade of that size breaks even (`0.5 + cost / (2 x move)`, equal win
-  and loss size) and the number of trades needed to show a hit rate five points above it (one-sided test against a
-  coin, 5 % level, 80 % power: 60 % needs 153 trades, 55 % about 617). It uses the Trading 212 spread constants
+  and loss size) and the number of trades needed to tell a hit rate five points above it from break-even (one-sided, 5 % level,
+  80 % power: about 616 trades for 51 % versus 56 %; against a fair coin 60 % would need 153, 55 % about 617). It uses the Trading 212 spread constants
   that are already display-only; paper scoring keeps the registered 2/2/2/4 bp.
 - **DAX/ES50 shadow pair** (`pair_shadow.py`). The two indices share about 30 % of their weight, so two equal-risk
   legs on the same side carry about 1.95 R of one factor at a correlation of 0.9. The registered cells are scored

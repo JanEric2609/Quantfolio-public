@@ -20,13 +20,15 @@ def break_even_hit_rate(cost: Decimal | float, move: Decimal | float) -> float |
     return min(1.0, 0.5 + c / (2 * m))
 
 
-def trades_needed(hit_rate: float, *, alpha: float = 0.05, power: float = 0.8) -> int | None:
-    """Trades to tell a *hit_rate* from a fair coin (one-sided test of 0.5, equal win and loss size).
-    ``n = ((z_a * 0.5 + z_b * sqrt(p (1 - p))) / (p - 0.5)) ** 2``; 60 % needs about 153, 55 % about 617."""
-    if not 0.5 < hit_rate < 1:
+def trades_needed(hit_rate: float, *, null: float = 0.5, alpha: float = 0.05, power: float = 0.8) -> int | None:
+    """Trades to tell a *hit_rate* from the *null* hit rate (one-sided, equal win and loss size). The default null is a
+    fair coin; the card passes its own break-even rate. ``n = ((z_a sqrt(p0 (1-p0)) + z_b sqrt(p (1-p))) / (p - p0)) ** 2``;
+    against a coin 60 % needs about 153, 55 % about 617."""
+    if not 0 < null < hit_rate < 1:
         return None
     za, zb = _N.inv_cdf(1 - alpha), _N.inv_cdf(power)
-    return math.ceil(((za * 0.5 + zb * math.sqrt(hit_rate * (1 - hit_rate))) / (hit_rate - 0.5)) ** 2)
+    num = za * math.sqrt(null * (1 - null)) + zb * math.sqrt(hit_rate * (1 - hit_rate))
+    return math.ceil((num / (hit_rate - null)) ** 2)
 
 
 def pair_risk_multiple(rho: float, n: int = 2) -> float:
@@ -41,7 +43,7 @@ def cost_line(spread_points: Decimal | float, typical_move_points: Decimal | flo
     if be is None:
         return None
     share = float(spread_points) / float(typical_move_points)
-    need = trades_needed(min(be + 0.05, 0.99))
-    tail = f"; showing a hit rate {be + 0.05:.0%} needs about {need} trades" if need else ""
+    need = trades_needed(min(be + 0.05, 0.99), null=be)
+    tail = f"; showing a hit rate {be + 0.05:.0%} needs about {need} trades to tell it from break-even" if need else ""
     return (f"Cost check: the spread is {share:.1%} of the typical move, so the trade breaks even at a "
             f"{be:.1%} hit rate{tail}.")

@@ -144,3 +144,8 @@ def test_cfd_rule_command_needs_an_id_when_several_trades_are_open(monkeypatch):
     assert j1.rule == "other" and j2.rule == "registered" and "Name the trade" in log[-1]
     telegram.handle_cfd(db, _Account(user.id), "1", f"/cfd rule registered {p1.id[:8]}")
     assert j1.rule == "registered"
+
+
+def test_trades_needed_against_the_break_even_null():
+    assert 610 <= edge_math.trades_needed(0.56, null=0.51) <= 620
+    assert edge_math.trades_needed(0.5, null=0.51) is None
