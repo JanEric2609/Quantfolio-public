@@ -77,3 +77,34 @@ class NewsMention(Base):
     #: GDELT's own lexicon tone (V2Tone, first field); kept for comparison only.
     gdelt_tone: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class PdmrTransaction(Base):
+    """One managers' transaction (MAR Art. 19) from a national regulator's register.
+
+    Sweden first (``source="fi_se"``): Finansinspektionen's PDMR register, free to re-use
+    with the source and date stated. ``row_key`` hashes the transaction itself (not its publication
+    date or status), so a notification and its revised or history copy are one row.
+    """
+
+    __tablename__ = "pdmr_transactions"
+
+    row_key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    source: Mapped[str] = mapped_column(String(12), index=True)
+    isin: Mapped[str | None] = mapped_column(String(12), index=True, nullable=True)
+    issuer: Mapped[str] = mapped_column(String(200))
+    person: Mapped[str] = mapped_column(String(200))
+    position: Mapped[str] = mapped_column(String(120), default="")
+    closely_associated: Mapped[bool] = mapped_column(default=False)
+    #: ``buy`` / ``sell`` / ``other`` (allotment, gift, exercise ...), mapped from the register's wording.
+    side: Mapped[str] = mapped_column(String(8), index=True)
+    nature: Mapped[str] = mapped_column(String(60), default="")
+    instrument_type: Mapped[str] = mapped_column(String(60), default="")
+    transaction_date: Mapped[date | None] = mapped_column(Date, index=True, nullable=True)
+    publication_date: Mapped[date | None] = mapped_column(Date, index=True, nullable=True)
+    volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), default="")
+    #: The register's version flag: blank (original), ``Revised`` (current amendment) or ``History`` (superseded).
+    status: Mapped[str] = mapped_column(String(16), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

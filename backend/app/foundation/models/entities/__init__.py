@@ -77,6 +77,7 @@ from .dkb import (
 )
 from .data_quality import (
     NewsMention as NewsMention,
+    PdmrTransaction as PdmrTransaction,
     PriceCrossCheck as PriceCrossCheck,
     Sec8kEvent as Sec8kEvent,
 )

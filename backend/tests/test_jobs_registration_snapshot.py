@@ -66,6 +66,7 @@ from app.worker import (
     register_index_currency_weights_job,
     register_gdelt_news_job,
     register_insider_trading_refresh_job,
+    register_pdmr_se_job,
     register_listing_currency_audit_job,
     register_macro_refresh_job,
     register_monthly_envelope_rollover_job,
@@ -147,6 +148,7 @@ EXPECTED_REGISTRATIONS = {
     "index_currency_weights": {"trigger": "cron", "day": "3", "hour": 5, "minute": 15},
     "insider_trading_refresh": {"trigger": "cron", "hour": 4, "minute": 15},
     "gdelt_news_refresh": {"trigger": "cron", "hour": 4, "minute": 0},
+    "pdmr_se_refresh": {"trigger": "cron", "hour": 4, "minute": 45},
     "price_cross_check": {"trigger": "cron", "hour": 4, "minute": 20},
     "analyst_estimates_snapshot": {"trigger": "cron", "hour": 4, "minute": 45},
     "fundamentals_snapshot": {"trigger": "cron", "hour": 4, "minute": 50},
@@ -284,6 +286,7 @@ def _drive_all_registrations(sched):
     returns["index_currency_weights"] = register_index_currency_weights_job(sched)
     returns["insider_trading_refresh"] = register_insider_trading_refresh_job(sched)
     returns["gdelt_news_refresh"] = register_gdelt_news_job(sched)
+    returns["pdmr_se_refresh"] = register_pdmr_se_job(sched)
     returns["price_cross_check"] = register_price_cross_check_job(sched)
     returns["venue_instruments_weekly"] = register_venue_instruments_job(sched)
     return returns
@@ -392,7 +395,7 @@ EXPECTED_SCHEDULER_DEFAULTS = {"misfire_grace_time": 300, "coalesce": True, "max
 
 def test_scheduler_defaults_snapshot():
     assert jobs.SCHEDULER_JOB_DEFAULTS == EXPECTED_SCHEDULER_DEFAULTS
-    assert jobs.WORKER_THREAD_POOL_SIZE == 21
+    assert jobs.WORKER_THREAD_POOL_SIZE == 22
     # A tracked job holds two connections (session + advisory lock); the desk's news-stream thread
     # holds up to two more (its session and the health write).
     from app.foundation.core.db import pool_capacity
