@@ -45,24 +45,16 @@ def fetch() -> dict[str, list[dict]]:
         db.close()
     provider = AlpacaProvider(key, api_secret=(meta or {}).get("api_secret"))
     # The free plan serves SIP history only when it ends 15+ minutes ago; an `end` of "now" is a 403
-    # ("subscription does not permit querying recent SIP data"). Stop 20 minutes back, and fall back to
-    # the IEX feed (thinner volume, same prices) when SIP history is refused outright.
+    # ("subscription does not permit querying recent SIP data"). Stop 20 minutes back. There is no IEX
+    # fallback on purpose: IEX is one venue with different closes and thinner history, and the replay
+    # evidence (ADR 0027) is SIP bars.
     now = datetime.now(UTC) - SIP_DELAY
     out: dict[str, list[dict]] = {}
     for sym in SYMBOLS:
         rows: list[dict] = []
-        for feed in ("sip", "iex"):
-            try:
-                rows = []
-                for year in range(START.year, now.year + 1):
-                    rows += provider.get_intraday_bars(sym, "30Min", datetime(year, 1, 1, tzinfo=UTC),
-                                                       min(datetime(year + 1, 1, 1, tzinfo=UTC), now), feed=feed)
-                print(f"{sym}: {len(rows)} bars on the {feed} feed", file=sys.stderr)
-                break
-            except ValueError as exc:
-                print(f"{sym}: {feed} feed refused ({exc})", file=sys.stderr)
-                if feed == "iex":
-                    raise
+        for year in range(START.year, now.year + 1):
+            rows += provider.get_intraday_bars(sym, "30Min", datetime(year, 1, 1, tzinfo=UTC),
+                                               min(datetime(year + 1, 1, 1, tzinfo=UTC), now), feed="sip")
         out[sym] = [{"t": r["t"].isoformat(), "c": str(r["c"])} for r in rows]
     return out
 

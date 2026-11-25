@@ -150,7 +150,7 @@ def test_minute_days_ignores_after_hours_bars():
     assert [(x.r1, x.sigma) for x in build(True)] == [(x.r1, x.sigma) for x in build(False)]
 
 
-def test_replay_fetch_stops_before_sip_delay_and_falls_back_to_iex(monkeypatch):
+def test_replay_fetch_stops_before_sip_delay_and_stays_on_sip(monkeypatch):
     import importlib.util
     from datetime import UTC, datetime, timedelta
     from decimal import Decimal
@@ -169,8 +169,6 @@ def test_replay_fetch_stops_before_sip_delay_and_falls_back_to_iex(monkeypatch):
 
         def get_intraday_bars(self, sym, tf, start, end, *, feed="iex"):
             calls.append((sym, feed, end))
-            if feed == "sip":
-                raise ValueError(f"Alpaca HTTP 403 for /stocks/{sym}/bars")
             return [{"t": start, "c": Decimal("1")}]
 
     class FakeDb:
@@ -186,6 +184,6 @@ def test_replay_fetch_stops_before_sip_delay_and_falls_back_to_iex(monkeypatch):
 
     out = script.fetch()
     assert set(out) == {"SPY", "QQQ"} and all(out[s] for s in out)
-    assert {feed for _, feed, _ in calls} == {"sip", "iex"}
+    assert {feed for _, feed, _ in calls} == {"sip"}
     latest = max(end for _, _, end in calls)
     assert latest <= datetime.now(UTC) - timedelta(minutes=15)
