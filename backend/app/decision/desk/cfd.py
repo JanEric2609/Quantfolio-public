@@ -321,6 +321,9 @@ def open_message(db: Session, position: DeskPosition, key: str, now: datetime,
     if ctx.currency == "USD":
         lines.append(f"USD market: {T212['fx_fee_on_result'] * 100:.1f} % FX fee on the result at close.")
     if db is not None:
+        from . import pretrade
+
+        lines += pretrade.context_lines(db, key, MARKETS[key][1], position.direction, float(ctx.stop_points), now)
         lines.append(evidence_line(db))
     lines.append("Paper-scored, nothing is ordered for you. Most retail CFD accounts lose money.")
     return "\n".join(lines)

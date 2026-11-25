@@ -271,3 +271,12 @@ def _reset_fetch_memos():
     ):
         memo.clear()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _no_live_pretrade_bars(monkeypatch):
+    """The CFD message's pre-trade context reads daily bars through market.history (a provider call on a cold
+    cache); offline in tests. tests/test_desk_pretrade.py exercises the pure pieces directly."""
+    from app.decision.desk import pretrade
+
+    monkeypatch.setattr(pretrade, "context_lines", lambda *a, **k: [])
