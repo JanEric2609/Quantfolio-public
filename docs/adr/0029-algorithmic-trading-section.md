@@ -124,3 +124,36 @@ and `tests/test_algo_lab.py`. No migration, no API, no job, no setting, no impor
   registering, keep the measurement tools.
 - Phase 3: broker-paper fills differ from the model by more than the cost-gate margin: the venue is unfit for that size.
 - Any phase: a broken ledger chain, an unknown order state, or the owner's veto.
+
+## Amendment 1 (2026-11-25): the risk-overlay verdict class
+
+**Status:** Proposed with the rest of this ADR. Decided by the owner on 2026-11-25 ("whatever you feel like is best"), delegated to the
+project coordinator, who chose the rule below. It changes nothing for alpha strategies.
+
+**Why.** Section 3 scores every candidate on net excess return over the benchmark. A trend filter or a volatility overlay is built to
+reduce drawdown, not to add return; in a long bull market it will usually trail the benchmark. An excess-return gate would reject it
+even when it does what it claims, and a gate that only ever says "no" cannot tell us whether the risk reduction is real.
+Evidence that the return part is weak: Zakamulin (SSRN 2677212) finds no significant outperformance of moving-average timing in the
+second half of 155 years but better behaviour in bear states; Huang, Li, Wang, Zhou (JFE 2020) find little evidence of time series
+momentum in or out of sample.
+
+**Rule.**
+
+1. A strategy card declares one verdict class: `alpha` (unchanged: the funded e-process on net excess return) or `risk_overlay`.
+   The class is part of the hashed card and cannot change after registration.
+2. A `risk_overlay` card pre-declares, before the first scored day: the benchmark basket; the minimum reduction in maximum drawdown
+   and in CVaR(5 %) against buy-and-hold of the same basket, measured by a paired block bootstrap; a **cap on trailing return** (the
+   most the overlay may lag the basket per year, net of costs and tax drag); and a cost cap.
+3. Possible outcomes: `kept_as_risk_tool` (all limits met over a scored period containing at least two benchmark drawdowns of 10 % or
+   more), `inconclusive` (default), `failed` (any cap breached or the reduction missed).
+4. A `risk_overlay` verdict **never authorises capital**, never counts as alpha, never enters the ladder's skill e-process and never
+   changes a sizing limit. It may keep a paper sleeve running and may be shown to the owner as a risk tool. Putting money behind it
+   is a separate owner decision under the ADR 0025 tuition line (a learning expense, not evidence of skill).
+5. It still consumes mass in the registered family (every arm is a trial of `slow_etf`), so adding risk-overlay arms does not make
+   alpha arms cheaper to pass.
+6. The induced-null audit (section 3, rule 4) applies unchanged to the risk metrics: the pipeline must not show a "drawdown
+   reduction" on zero-predictability returns beyond what the audit's null band allows.
+
+**Open point.** The 25 % drawdown, 20 % CVaR and 2-3 percentage-point trailing caps on the draft cards
+(`docs/plan-algo-strategy-cards-2026-11-25.md`) are proposals, not measured thresholds; they need the induced-null audit's null band
+before they are frozen.
