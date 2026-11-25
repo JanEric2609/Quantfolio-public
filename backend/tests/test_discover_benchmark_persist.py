@@ -107,8 +107,9 @@ def test_preingest_requests_benchmarks_and_candidates(monkeypatch):
     summary = pipeline._preingest_candidates(["BBVA.MC"])
 
     assert set(requested) >= {"BBVA.MC", *BENCHMARKS}
-    # Candidates keep precedence; benchmarks are appended after them.
-    assert requested[0] == "BBVA.MC"
+    # Requests come from worker threads, so only membership and uniqueness are fixed.
+    assert "BBVA.MC" in requested
+    assert len(requested) == len(set(requested))
     assert summary["requested"] == len(requested)
     assert summary["ok"] == len(requested)
     assert summary["failed"] == []
