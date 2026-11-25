@@ -12,7 +12,7 @@ The strategic conclusion holds: intraday and event trading will not pay, slow ru
 
 | Item | Result |
 |---|---|
-| `years_to_detect` (24.7 / 6.2 / 2.7 years at Sharpe 0.5 / 1 / 1.5; 38.0 with 4 trials) | **[verified]** formula reproduced. Valid for the null variance only. Under the alternative the Sharpe estimate has standard error sqrt((1+SR²/2)/T) (Lo 2002), so power needs 25.8 / 7.2 / 3.7 years. **[corrected]** `alt_se=True` added, default unchanged, both numbers in the plan. |
+| `years_to_detect` (24.7 / 6.2 / 2.7 years at Sharpe 0.5 / 1 / 1.5; 38.0 with 4 trials) | **[verified]** formula reproduced. Valid for the null variance only. Under the alternative the Sharpe estimate has standard error sqrt((1+SR_p²/2)/T) (Lo 2002) with the per-period Sharpe SR_p = SR/sqrt(252) for annual Sharpe and years of daily data, so power needs 24.7 / 6.2 / 2.8 years (under 1 % more). **[corrected]** `alt_se=True` added, frequency-matched after the public review (a first version used the annual Sharpe and overstated the time to 25.8 / 7.2 / 3.7 years); default unchanged, both numbers in the plan. |
 | `oos_replication_ratio` (56 % at 5 years, 72 % at 10, true Sharpe 0.5) | **[verified]** the code matches eq. 3.3 of Jacquier et al. term by term (read in the paper). Scope: one signal, one asset, OLS-fitted, iid signals; a fixed rule such as SMA10 has no fitted coefficient, so this is a bound for fitted models only. |
 | Jacquier "ten-year backtest keeps about 30 %" in the literature note | **[corrected]** not found; the paper's real-data figures are 9 % (full model) and 68 % (pooled). |
 | `breakeven_cost_bps` 57 bp | **[verified]** 1e4 x 0.4 x 0.10 / 7. Assumes 10 % volatility while invested; an equity-ETF sleeve is nearer 15 %, which raises it. Fine. |

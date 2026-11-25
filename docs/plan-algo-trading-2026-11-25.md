@@ -102,7 +102,7 @@ that easily. IBKR's tiered minimum on a 250 EUR position is **50 bp**, on a 50 E
 
 A canonical JSON file, hashed with SHA-256, stored in the repo and as a row: universe (ISINs, listing currency), signal formula,
 parameters (all frozen), data fields and vintage, calendar and execution timing (signal at close t, trade at t+1), position
-sizing, benchmark, cost model id (venue, schedule, spread assumption), tax model id, scale for the score, trial family, start date.
+sizing, benchmark, cost model id (venue, schedule, spread assumption), tax model id, scale for the score, the clipped-score null (the estimand the e-process guarantee is about, with the verdict of its induced-null audit), trial family, start date.
 Changing any field is a **new candidate** with fresh mass. Pattern: `decision/desk/prereg.py`, `prereg_events.EVENT_HASH`.
 
 ### 5.2 Replay, before registration (research only)
