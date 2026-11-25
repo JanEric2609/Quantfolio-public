@@ -585,6 +585,28 @@ def register_insider_trading_refresh_job(scheduler: Any | None = None) -> str:
     )
 
 
+def register_pdmr_se_job(scheduler: Any | None = None) -> str:
+    """Register the nightly read of Sweden's managers' transactions register (04:45 UTC).
+
+    ``data_engineering.pdmr_se``: Finansinspektionen's public PDMR register (free to
+    re-use with the source stated), newest first, at most 400 pages a night at one
+    request every two seconds. The first nights walk back a year from a saved page.
+    """
+
+    def pdmr_se_inner() -> None:
+        from app.foundation.core.db import SessionLocal
+        from app.foundation.data_engineering.pdmr_se import refresh_pdmr_se
+
+        with SessionLocal() as db:
+            stats = refresh_pdmr_se(db)
+            logger.info("pdmr_se: %s", stats)
+
+    return register_cron_job(
+        "pdmr_se_refresh", pdmr_se_inner,
+        scheduler=scheduler, hour=4, minute=45,
+    )
+
+
 def register_gdelt_news_job(scheduler: Any | None = None) -> str:
     """Register the nightly GDELT headline read for non-US members (04:00 UTC).
 
@@ -1212,6 +1234,7 @@ def build_scheduler() -> Any:
     register_index_currency_weights_job(scheduler)
     register_insider_trading_refresh_job(scheduler)
     register_gdelt_news_job(scheduler)
+    register_pdmr_se_job(scheduler)
     register_price_cross_check_job(scheduler)
     register_venue_instruments_job(scheduler)
     register_price_backfill_daily_job(scheduler)
