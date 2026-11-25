@@ -53,17 +53,86 @@ primary pages where the network allowed. "Verified" means a page was read in ful
 - Quantpedia's public pages (home and brokerage-API list) are readable without login; the free strategy list
   has four strategies, none intraday. The broker list names no EU CFD broker with an order API except IG's UK site.
 
+## Second pass: what a further 64 pages say (all read 2026-11-25; PDFs were often only half-readable, noted)
+
+**Regulation and retail outcomes**
+- ESMA's 2018 measures (press release, FAQ, notice of decisions): 20:1 for major indices (initial margin 5 %), 50 % margin
+  close-out per account, negative balance protection, standardised risk warning; the 2018 loss share was 74-89 % of
+  retail accounts. The 2018 texts are temporary 3-month decisions; BaFin's page says its ban took effect on expiry of the
+  EU decision. Whether each measure is in force today is not stated on any of these pages: the Saturday list checks the
+  current regulation. The card's 1:20 matches.
+- Current loss shares are broker self-disclosures: 71.0 % average over 49 brokers, range 51 % (eToro) to 81 % (BrokerRank,
+  2026); 70.0 % mean over 14 FCA brokers (April 2026); Finder gives 51-77 %. ESMA's 2025 cross-border report: about 1.3
+  million EU retail CFD clients, 6.7 % of reported holdings, 23 % of product-specific complaints. No source gives an
+  index-CFD-only loss rate.
+
+**Trading 212 costs**
+- Help centre (read): commission free; 0.5 % FX fee on the result when the instrument currency differs from the account's;
+  overnight = quantity x price x the instrument's long or short rate, charged at 22:00 GMT Monday to Thursday, weekend
+  positions at 22:00 GMT on Sunday; rates are per instrument in the app. Its disclosure PDF's index example (USA Tech 100):
+  long -0.02312 % a day, short 0 %, spread 1.25 pips. No public page gives the DAX or Euro Stoxx 50 rate or spread.
+- Peers for scale: IG charges (3 % +/- SOFR)/360 a day on indices, Pepperstone (2.5 % +/- benchmark)/360 with US500 spread
+  0.4; both much higher than the owner's 0.0083 % a night reading (3 % a year) only if the rate there is a benchmark-plus-mark-up.
+
+**Xetra** (Deutsche Boerse trading parameters, Dec 2025, and the Trade-at-Close factsheet, July 2026): DAX closing auction call
+phase from 17:30, price determination 17:35, Trade-at-Close to 17:40, with a random end of the call phase. The desk's exit at
+17:27 is before the call phase. No page gives the closing auction's share of daily volume. 360X now quotes DAX 40 stocks
+around the clock on request, leaving Xetra's hours unchanged.
+
+**Index closing-momentum evidence, with decay and costs**
+- Baltussen (JFE 2021) is the strongest and most conditional (see above). Li, Sakkas, Urquhart (thesis 2021 and the Nottingham
+  draft): first-half-hour predicts last half hour in 12 of 16 developed markets, pooled slope 2.68 (t 7.53), crisis 3.71 against
+  2.09, positive out-of-sample R2 in 11 of 16; stronger when liquidity is low and volatility high; costs not discussed.
+- Counter-evidence: Rosa (2022) out-of-sample disappearance; Zhang and Hua (Risks 2024, SPY and QQQ 2007-2018) "overnight
+  effects and intraday momentum have diminished over time"; QuantConnect's recreation negative 2015-2020; a Stanford
+  2017 student test on stocks found no effect; Quantpedia's own overnight-effect post says it is "slowly losing its strength".
+- Mechanism papers are in-sample: Tuzun (Fed 2013): leveraged-ETF flow is 2-3 % of last-hour volume in large caps;
+  Barbon et al. (2021): a one-SD LETF rebalancing move lifts end-of-day returns by about four times the average
+  last-half-hour return, more than 80 % of the dealer part reverses at the next open, Sharpe about 3-5 in sample;
+  Lenkey's 2024 survey says most of these papers have "potentially serious methodological errors" and the economic
+  effect "appears to be insignificant". Xetra evidence (Serikova 2019): auction price impact and infrequent rebalancing,
+  1.89 bp a day, not cost-adjusted.
+- Costs kill the neighbouring effects: Boyarchenko et al. (NY Fed 917) overnight drift pre-cost Sharpe 1.1 becomes -0.5 after
+  spreads; Baltussen, Da, Soebhag (Sept 2026) end-of-day reversal 3.55 bp a day value-weighted, "may be unexploitable
+  after costs". Lou, Polk, Skouras (FMG DP961, 2026): intraday returns mean-revert to smoothed overnight returns (t -3.98).
+- None of the pages reports an after-cost, out-of-sample result for the last half hour of an index traded as a retail CFD.
+
+**Overfitting guard** (Bailey, Lopez de Prado and co-authors): five years of daily data allow no more than about 45
+variations of a strategy; a Sharpe of 2.5 over five years loses 95 % confidence after 89 independent trials; "as few as
+three independent trials suffice to produce an investment strategy that is likely false". The desk already counts every
+cell as a trial, and the six-test predictor replay is Holm-adjusted for that reason. A PBO above 0.05 is the customary
+reject level.
+
+**Quantpedia, thoroughly:** its free strategy list has four entries, none intraday. Intraday items reachable from public
+posts: #564 Intraday Momentum in Fixed Income (bonds, 1974-2020), #1014 Cross-Market Intraday Time-Series Momentum
+(1993-2013), #1016 Intraday Momentum Strategy for S&P500 ETF (2007-2024, author-run), the Lunch Effect post (SPY 2010-2024,
+author says the overnight spread is no longer significant), and a Monday-close/Tuesday-open reversal on HYG. The strategy
+screener behind the paywall was not searched. Nothing there adds a closing-time rule with after-cost evidence.
+
 ## What this changes
 The desk's registered predictor is the one the Baltussen table scores worse out of sample. The rest-of-day
 predictor and the volatility split are the open research question (replay added, run pending). The paper's own
 edge is conditional on dealers being short gamma, which cannot be read from free data.
 
+## Third pass: Baltussen records, Fed and exchange pages (14 more read; 3 more failed)
+- Baltussen, Da, Lammers, Martens (JFE 142(1), 2021, pp. 377-403): over 60 futures, 1974-2020, the rest-of-day return predicts the
+  last 30 minutes and the power "reverts over the next days". The three record pages carry no Sharpe or coefficients (full text paywalled).
+- The EFMA 2021 file id-237 is not Baltussen. It is Beckmeyer and Moerke, "End-of-Day Momentum in the Cross-Section and Option
+  Hedging" (options 1996-2019): 1 % hedging pressure moves the last half hour by 18.3 bp (t -3.6), Sharpe "above 4" (in sample, before
+  costs), and returns "more than reverse" in the next day's first half hour. Supports the mechanism, not a retail after-cost edge.
+- Fed (read): Sept 16 2026 statement raised the range by 25 bp to 3.75-4 %, vote 12-0. Oct 27-28 minutes: held, vote 10-2, Cook and Hammack
+  wanted a hike; 12-month PCE 3.6 %, core 3.1 %. Next meeting Dec 8-9 (from the summarised half of the minutes only). Relevant: PCE and
+  FOMC days remain unfiltered in the desk (see "Not verified").
+- Xetra trading parameters as of 16 Nov 2026 confirm closing-auction call phase 17:30 and price 17:35; the 17:40 Trade-at-Close end is unconfirmed (garbled table).
+- Saxo UK: index CFD financing +/-3 % (Classic), +/-2 % (VIP); Germany 40 normal spread 1.5 points; "61 % of retail accounts lose money".
+  Euromoney 2019: XTB "just under 71 %" lost before the 2018 rules, "just under 65 %" after. ESMA (Oct 2026): 15.5 million EU retail clients
+  of cross-border services, none of it CFD-specific. A vendor article (hyperdash) cites 74-89 %, uncited overnight rates: treated as unverified.
+- Failed fetches (permanent): Advisor Perspectives, Xetra TAC page, Pepperstone fees. Pages marked partial were read verbatim for roughly the first half only.
+
 ## Source count
-Pages read in this pass: 14 (Fed release, the Baltussen PDF, BrokerChooser, two STOXX pages, Investing.com,
-the Quantpedia digest post, QuantConnect, Rosa's abstract page, the Gao et al. and Zarattini et al. PDFs, an Alpha
-Architect summary, two Quantpedia pages). Two Trading 212 instrument pages could not be fetched. The search tool returned about 50 further URLs that were not opened.
-The 100-source target was not reached: the sandbox's network policy denies direct fetches, and only the fetch tool
-works, one page at a time. The Saturday list names the reading that still matters.
+About 92 pages read across the three passes (14 + 64 + 14); several PDFs were only half-read and are marked. The 100-source target was
+not reached. The sandbox's network policy denies direct fetches, and only the fetch tool works, one page at a time. The Saturday list
+names the reading that still matters (the paywalled Baltussen tables, the Quantpedia screener, T212's DAX/ES50 rates and the ESMA measures in force today).
 
 ## Saturday list (needs the production host or a key this checkout does not have)
 1. Run `python scripts/desk_replay.py --dump bars.json`, then `--bars bars.json --predictors` on the app host (stored
