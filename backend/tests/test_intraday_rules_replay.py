@@ -44,3 +44,23 @@ def test_evaluate_returns_every_cell_for_both_cost_cases():
     sess = rep.sessions(_rows([100.0] * 40 + [100 + 0.15 * i for i in range(1, 38)]))
     res = rep.evaluate(sess, 7.0)
     assert set(res) == set(rep.CELLS) and res["fixed"]["n"] >= 0
+
+
+def test_warm_start_makes_a_ten_o_clock_entry_possible():
+    day1 = datetime(2026, 3, 2, 14, 30, tzinfo=UTC)
+    day2 = datetime(2026, 3, 3, 14, 30, tzinfo=UTC)
+    # a flat first session, then a second one that turns up right after the open
+    rows = _rows([100.0] * 78, day1) + _rows([100.0] * 10 + [100 + 0.6 * i for i in range(1, 69)], day2)
+    sess = rep.sessions(rows)
+    d2 = sorted(sess)[1]
+    cold = rep.simulate_day(sess[d2], "tp1_5", random.Random(1))
+    warm = rep.simulate_day(sess[d2], "tp1_5", random.Random(1), warm=sess[sorted(sess)[0]])
+    assert len(warm) >= 1 and len(warm) >= len(cold)
+
+
+def test_significance_uses_one_observation_per_day():
+    sess = rep.sessions(_rows([100.0] * 40 + [100 + 0.15 * i for i in range(1, 38)]))
+    res = rep.evaluate(sess, 0.6)
+    for cell in rep.CELLS:
+        assert res[cell]["n_days"] <= res[cell]["n"] or res[cell]["n"] == 0
+        assert "t_days" in res[cell] and "t" not in res[cell]

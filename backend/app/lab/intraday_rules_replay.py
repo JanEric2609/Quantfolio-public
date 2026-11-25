@@ -2,7 +2,8 @@
 
 Frozen on 2026-11-25 before any data was read. Entry: the owner's own chart signal, EMA 9 crossing EMA 26 on 5-minute
 closes (long on a cross up, short on a cross down), entered at the next bar's open, between 10:00 and 15:30 New York,
-at most 3 entries a day, everything flat at 15:55. Six cells (five rules and a control):
+at most 3 entries a day, everything flat at 15:55. The EMAs and the ATR are warmed up with the last 40 bars of the
+previous session (the overnight gap is ignored), so a 10:00 entry is possible. Six cells (five rules and a control):
 
 * ``fixed``: stop 1 x ATR(14) of the 5-minute bars, no target, exit on the opposite cross or at 15:55;
 * ``tp1_5``: stop 2 x ATR, target 1.5 x the stop distance;
@@ -11,8 +12,11 @@ at most 3 entries a day, everything flat at 15:55. Six cells (five rules and a c
 * ``control``: ``tp1_5`` with a coin-flip direction (seeded), to show whether the cross carries anything.
 
 Costs are in basis points of the position's value per round trip. The desk's registered figure for Tech 100 is 0.6 bp,
-which the owner's Trading 212 export confirms (median 0.7 bp); 3 bp is a stress case for wide-spread hours. Five tests, Holm-adjusted.
-Changing a parameter after seeing a result makes it a new trial. A pass would justify a new pre-registration, never a
+which the owner's Trading 212 export confirms (median 0.7 bp); 3 bp is a stress case for wide-spread hours. Significance is
+measured on one observation per day (the day's summed net bp over days with at least one trade), because a day's trades
+share its drift and volatility; Holm covers the five tested cells within each symbol and spread case (four families are
+reported). The high-volatility cut is the full sample's top tercile, so the ``_hv`` cells are a descriptive split, not a
+rule known before each day. Changing a parameter after seeing a result makes it a new trial. A pass would justify a new pre-registration, never a
 live signal.
 """
 from __future__ import annotations
@@ -68,6 +72,9 @@ def day_vol(sess: dict[date, list[Bar5]]) -> dict[date, float | None]:
     return out
 
 
+WARM = 40
+
+
 def _atr(bars: list[Bar5], i: int) -> float | None:
     if i < ATR_N:
         return None
@@ -89,15 +96,22 @@ def _crosses(bars: list[Bar5]) -> dict[int, str]:
     return out
 
 
-def simulate_day(bars: list[Bar5], cell: str, rng: random.Random) -> list[tuple[float, str]]:
-    """Gross returns (fraction of the entry price) and the exit reason, per trade of one day."""
+def simulate_day(day_bars: list[Bar5], cell: str, rng: random.Random,
+                 warm: list[Bar5] | None = None) -> list[tuple[float, str]]:
+    """Gross returns (fraction of the entry price) and the exit reason, per trade of one day.
+
+    ``warm`` is the previous session's bars; its last 40 seed the EMAs and the ATR but are never traded.
+    """
+    prev = (warm or [])[-WARM:]
+    off = len(prev)
+    bars = prev + day_bars
     crosses = _crosses(bars)
     base = cell.replace("_hv", "")
     stop_k, target_m, trail = (1.0, None, False) if base == "fixed" else (2.0, 1.5, False) if base in ("tp1_5", "control") else (2.0, None, True)
     out: list[tuple[float, str]] = []
     pos: dict[str, Any] | None = None
     entries = 0
-    for i in range(26, len(bars) - 1):
+    for i in range(max(26, off), len(bars) - 1):
         b = bars[i]
         if pos is not None:
             d, px = pos["d"], pos["px"]
@@ -138,7 +152,7 @@ def simulate_day(bars: list[Bar5], cell: str, rng: random.Random) -> list[tuple[
 
 
 def evaluate(sess: dict[date, list[Bar5]], spread_bp: float, seed: int = 7) -> dict[str, Any]:
-    """Per cell: n, mean net bp, t, hit rate and the exit mix; Holm-adjusted p over the five tested cells."""
+    """Per cell: trades, days, mean net bp, day-level t, hit rate, exit mix; Holm-adjusted p over the five tested cells."""
     from scipy import stats as st
 
     vol = day_vol(sess)
@@ -149,20 +163,27 @@ def evaluate(sess: dict[date, list[Bar5]], spread_bp: float, seed: int = 7) -> d
     for cell in CELLS:
         rng = random.Random(seed)
         nets: list[float] = []
+        daily: list[float] = []
         reasons: dict[str, int] = defaultdict(int)
-        for d in sorted(sess):
+        ordered = sorted(sess)
+        for k, d in enumerate(ordered):
             if cell.endswith("_hv") and not ((vol[d] or 0) >= cut):
                 continue
-            for g, why in simulate_day(sess[d], cell, rng):
-                nets.append(g * 1e4 - spread_bp)
+            day_nets = []
+            for g, why in simulate_day(sess[d], cell, rng, sess[ordered[k - 1]] if k else None):
+                day_nets.append(g * 1e4 - spread_bp)
                 reasons[why] += 1
-        n = len(nets)
-        sd = statistics.stdev(nets) if n > 1 else 0.0
-        t = statistics.fmean(nets) / (sd / math.sqrt(n)) if n > 1 and sd > 0 else None
-        res[cell] = {"n": n, "mean_net_bp": statistics.fmean(nets) if nets else None, "t": t,
+            if day_nets:
+                nets.extend(day_nets)
+                daily.append(sum(day_nets))
+        n, nd = len(nets), len(daily)
+        sd = statistics.stdev(daily) if nd > 1 else 0.0
+        t = statistics.fmean(daily) / (sd / math.sqrt(nd)) if nd > 1 and sd > 0 else None
+        res[cell] = {"n": n, "n_days": nd, "mean_net_bp": statistics.fmean(nets) if nets else None,
+                     "mean_day_bp": statistics.fmean(daily) if daily else None, "t_days": t,
                      "hit_rate": sum(1 for x in nets if x > 0) / n if n else None, "exits": dict(reasons)}
-        if cell in TESTED and t is not None and n > 2:
-            p_raw[cell] = float(2 * st.t.sf(abs(t), n - 1))
+        if cell in TESTED and t is not None and nd > 2:
+            p_raw[cell] = float(2 * st.t.sf(abs(t), nd - 1))
     running = 0.0
     for i, k in enumerate(sorted(p_raw, key=p_raw.__getitem__)):
         running = max(running, min(1.0, (len(p_raw) - i) * p_raw[k]))

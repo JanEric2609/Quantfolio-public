@@ -111,6 +111,9 @@ def lines(snap: dict[str, Any] | None, direction: str, stop_points: float, evts:
             bits.append(f"volatility is {snap['vol_regime']} (20-day vs the past year)")
         if snap["stretch"] and snap["stretch"] != "inside the bands":
             bits.append(f"price is {snap['stretch']} (stretched)")
+        rsi = snap.get("rsi14")
+        if rsi is not None:
+            bits.append(f"RSI {rsi:.0f} ({'overbought' if rsi >= 70 else 'oversold' if rsi <= 30 else 'neutral'}; above 70 is run-hot, below 30 beaten-down)")
         if bits:
             out.append("Now: " + "; ".join(bits) + ".")
     if evts:

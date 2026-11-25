@@ -63,3 +63,9 @@ def test_events_from_the_desk_calendar_and_news_from_the_wire(monkeypatch):
     assert pretrade.latest_news(db, "SPX", NOW) == ("Fed speaker says cuts may pause", 12)
     text = pretrade.lines(None, "long", 100.0, ["CPI today"], ("Fed speaker says cuts may pause", 12))
     assert text == ["Event: CPI today (prices can jump).", "News 12 min ago: Fed speaker says cuts may pause"]
+
+
+def test_rsi_is_shown_in_plain_words():
+    snap = pretrade.snapshot(_bars([100 + 0.4 * i for i in range(300)]))
+    text = " ".join(pretrade.lines(snap, "long", snap["atr_points"], [], None))
+    assert "RSI" in text and "overbought" in text
