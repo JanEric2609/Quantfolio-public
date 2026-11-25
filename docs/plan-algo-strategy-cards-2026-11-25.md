@@ -24,7 +24,7 @@ Common fields for every card below:
 - Source: Faber, "A Quantitative Approach to Tactical Asset Allocation" (SSRN 962461); Quantpedia #0001 reports 1973-2008 11.27 % a year, volatility 6.87 %, max drawdown -29.43 %, Sharpe 1.06, costs excluded [Quantpedia, read].
 - Independent evidence: Zakamulin (SSRN 2677212, 155 years): "no statistically significant evidence that market timing strategies outperformed the market in the second half of our sample", better in bear states [read, abstract]. Huang, Li, Wang, Zhou (JFE 2020): little evidence of time series momentum in or out of sample [read, abstract].
 - Expected behaviour (prior, not measured): no reliable excess return; the possible value is a smaller drawdown. Therefore declared as a **risk overlay** (see ADR 0029 Amendment 1), with these pre-declared limits:
-  - Required: maximum drawdown at least 25 % smaller than the equal-weight buy-and-hold basket, and CVaR(5 %) of monthly returns at least 20 % smaller, paired block bootstrap, over the scored period including at least one drawdown of 10 % or more in the benchmark.
+  - Required: maximum drawdown at least 25 % smaller than the equal-weight buy-and-hold basket, and CVaR(5 %) of monthly returns at least 20 % smaller, paired block bootstrap, over the scored period including at least two drawdowns of 10 % or more in the benchmark (ADR 0029 Amendment 1, rule 3).
   - Cap on trailing: cumulative net return may trail the basket buy-and-hold by at most 2.0 percentage points a year after costs and tax drag.
   - Cost cap: modelled cost and tax drag at most 0.5 % of sleeve value in any rolling 12 months.
 - Turnover expectation: 3-4 round trips a year per Faber, in total across the basket; each order is at least the venue minimum.

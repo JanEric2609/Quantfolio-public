@@ -144,14 +144,15 @@ momentum in or out of sample.
 2. A `risk_overlay` card pre-declares, before the first scored day: the benchmark basket; the minimum reduction in maximum drawdown
    and in CVaR(5 %) against buy-and-hold of the same basket, measured by a paired block bootstrap; a **cap on trailing return** (the
    most the overlay may lag the basket per year, net of costs and tax drag); and a cost cap.
-3. Possible outcomes: `kept_as_risk_tool` (all limits met over a scored period containing at least two benchmark drawdowns of 10 % or
+3. A `risk_overlay` may only scale exposure of the registered basket down or rotate part of it into a declared cash or bond leg; gross exposure never exceeds the basket's own, and it adds no risk asset beyond the declared legs.
+4. Possible outcomes: `kept_as_risk_tool` (all limits met over a scored period containing at least two benchmark drawdowns of 10 % or
    more), `inconclusive` (default), `failed` (any cap breached or the reduction missed).
-4. A `risk_overlay` verdict **never authorises capital**, never counts as alpha, never enters the ladder's skill e-process and never
+5. A `risk_overlay` verdict **never authorises capital**, never counts as alpha, never enters the ladder's skill e-process and never
    changes a sizing limit. It may keep a paper sleeve running and may be shown to the owner as a risk tool. Putting money behind it
    is a separate owner decision under the ADR 0025 tuition line (a learning expense, not evidence of skill).
-5. It still consumes mass in the registered family (every arm is a trial of `slow_etf`), so adding risk-overlay arms does not make
+6. It still consumes mass in the registered family (every arm is a trial of `slow_etf`), so adding risk-overlay arms does not make
    alpha arms cheaper to pass.
-6. The induced-null audit (section 3, rule 4) applies unchanged to the risk metrics: the pipeline must not show a "drawdown
+7. The induced-null audit (section 3, rule 4) applies unchanged to the risk metrics: the pipeline must not show a "drawdown
    reduction" on zero-predictability returns beyond what the audit's null band allows.
 
 **Open point.** The 25 % drawdown, 20 % CVaR and 2-3 percentage-point trailing caps on the draft cards
