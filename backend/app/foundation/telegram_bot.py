@@ -45,9 +45,9 @@ def get_bot_token(db: Session) -> str | None:
 #: Telegram refuses a text over 4096 characters (HTTP 400), which used to drop the whole message.
 MAX_TEXT = 4096
 #: A 429 names ``retry_after`` seconds. One call (all parts of a split message together) waits at
-#: most this long in total; a longer ask is not slept through, the message is given up on. The
-#: callers run inside webhook handlers and worker jobs, where a longer block costs more than it saves.
-MAX_RETRY_WAIT_S = 10.0
+#: most this long in total; a longer ask is not slept through, the message is given up on.
+#: ``getUpdates`` never sleeps (its next poll is soon). One-shot alerts keep the old 30 s window.
+MAX_RETRY_WAIT_S = 30.0
 
 
 def split_text(text: str, limit: int = MAX_TEXT) -> list[str]:
