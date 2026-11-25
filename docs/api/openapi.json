@@ -20348,6 +20348,30 @@
         ]
       }
     },
+    "/api/algo/overview": {
+      "get": {
+        "description": "Draft cards, the candidates not carded, and how long a verdict would take. Nothing is funded.",
+        "operationId": "overview_api_algo_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Overview Api Algo Overview Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Overview",
+        "tags": [
+          "algo"
+        ]
+      }
+    },
     "/api/alphacrafter/diagnostics": {
       "post": {
         "description": "Run AlphaCrafter pipeline health diagnostics.\n\nChecks settings, price data availability, provider configuration,\nfactor library state, regime data, recent pipeline runs, and dossiers.\nReturns step-by-step results following the DKB diagnostics pattern.",

@@ -55,25 +55,19 @@ def test_dax_long_message_text(monkeypatch):
     ctx = _ctx(monkeypatch)
     text = cfd.open_message(None, _position(), "DAX", NOW, ctx)
     assert text.splitlines() == [
-        "DAX long: CFD, manual (Trading 212: Germany 40 (GER40))",
-        "Why: DAX +0.42% from yesterday's close to 09:30 Berlin (rule: the last 30 minutes follow it)",
-        "Quantity 0.0200 (≈ 500 EUR, margin ≈ 25.00 EUR). Enter by 17:05 Berlin, otherwise skip today.",
-        "Stop: 250 pts from your fill (1 daily sigma; a 27-minute move this large is rare)",
-        "Typical last-30-minute move ±61 pts; spread ≈ 1.2 pts (Trading 212, observed)",
-        "Index at the signal ≈ 25,000; Trading 212's price follows the futures and can differ by a few points. "
-        "The stop counts from your fill.",
-        "Close at 17:27 Berlin; the desk tells you.",
-        "Cost check: the spread is 2.1% of the typical move, so the trade breaks even at a 51.0% hit rate; "
-        "showing a hit rate 56% needs about 616 trades to tell it from break-even.",
-        "Paper-scored as the index rule (CFD). Most retail CFD accounts lose money; nothing is ordered for you.",
+        "DAX BUY CFD (Trading 212: Germany 40 (GER40)), enter by 17:05 Berlin, else skip",
+        "Why: DAX +0.42% from yesterday's close to 09:30 Berlin",
+        "Qty 0.0200 (≈ 500 EUR, margin ≈ 25 EUR) | stop 250 pts from your fill | close 17:27 Berlin, I tell you",
+        "Paper-scored, nothing is ordered for you. Most retail CFD accounts lose money.",
     ]
+    assert len(text.splitlines()) <= 5
 
 
 def test_spx_short_message_has_the_usd_line_and_new_york_reason(monkeypatch):
     ctx = _ctx(monkeypatch, key="SPX", fx="0.9", index_prev="6800", r1="-0.0031")
     text = cfd.open_message(None, _position("SPX", "short"), "SPX", NOW, ctx)
     lines = text.splitlines()
-    assert lines[0] == "SPX short: CFD, manual (Trading 212: USA 500 (USA500))"
+    assert lines[0].startswith("SPX SELL CFD (Trading 212: USA 500 (USA500))")
     assert "-0.31% from yesterday's close to 10:00 New York (16:00 Berlin)" in lines[1]
     assert "USD market: 0.5 % FX fee on the result at close." in lines
     assert ctx.eur_per_unit == Decimal("0.9") and ctx.quantity_t212 == Decimal("0.0816")  # 500/(6800*0.9)

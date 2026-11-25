@@ -75,6 +75,7 @@ export const appChildren: RouteObject[] = [
   ] },
   { path: "watchlist", element: <Navigate to="/research/watchlist" replace /> },
   { path: "transactions", element: <Navigate to="/portfolio/activity" replace /> },
+  { path: "algo", ...lazyNamed(() => import("../pages/AlgoPage"), "AlgoPage"), handle: { title: "Algo trading (research)" } },
   { path: "desk", ...lazyNamed(() => import("../pages/DeskLayout"), "DeskLayout"), handle: { title: "Derivatives desk" }, children: [
     { index: true, ...lazyNamed(() => import("../pages/DeskPage"), "DeskPage"), handle: { title: "Derivatives desk" } },
     { path: "intraday", ...lazyNamed(() => import("../pages/IntradayPage"), "IntradayPage"), handle: { title: "Derivatives desk — Intraday CFD" } },

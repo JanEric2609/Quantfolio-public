@@ -35,7 +35,7 @@ from app.foundation.models.entities import DeskPosition
 from app.foundation.scalable.cli import ScalableCli
 
 from . import calendar as cal
-from . import cfd_journal, edge_math, prereg, service
+from . import cfd_journal, prereg, service
 from .replay_store import replay_summary
 from .ledger import append_event
 from .limits import LIMITS
@@ -311,25 +311,18 @@ def open_message(db: Session, position: DeskPosition, key: str, now: datetime,
         ]
         return "\n".join(lines)
     enter_by = ctx.enter_by.astimezone(cal.BERLIN).strftime("%H:%M")
+    side = "BUY" if position.direction == "long" else "SELL"
     lines = [
-        f"{key} {position.direction}: CFD, manual (Trading 212: {name})",
-        f"Why: {_reason(position, key, ctx)} (rule: the last 30 minutes follow it)",
-        f"Quantity {ctx.quantity_t212:.4f} (\u2248 {ctx.exposure_eur:,.0f} EUR, margin \u2248 {ctx.margin_eur:,.2f} EUR). "
-        f"Enter by {enter_by} Berlin, otherwise skip today.",
-        f"Stop: {ctx.stop_points:,.0f} pts from your fill (1 daily sigma; a 27-minute move this large is rare)",
-        f"Typical last-30-minute move \u00b1{ctx.typical_30m_points:,.0f} pts; spread \u2248 {ctx.spread_points:,.1f} pts "
-        "(Trading 212, observed)",
-        f"Index at the signal \u2248 {ctx.index_level_est:,.0f}; Trading 212's price follows the futures and can differ by "
-        "a few points. The stop counts from your fill.",
-        f"Close at {exit_local} Berlin; the desk tells you.",
+        f"{key} {side} CFD (Trading 212: {name}), enter by {enter_by} Berlin, else skip",
+        f"Why: {_reason(position, key, ctx)}",
+        f"Qty {ctx.quantity_t212:.4f} (\u2248 {ctx.exposure_eur:,.0f} EUR, margin \u2248 {ctx.margin_eur:,.0f} EUR) | "
+        f"stop {ctx.stop_points:,.0f} pts from your fill | close {exit_local} Berlin, I tell you",
     ]
-    if cost := edge_math.cost_line(ctx.spread_points, ctx.typical_30m_points):
-        lines.append(cost)
     if ctx.currency == "USD":
         lines.append(f"USD market: {T212['fx_fee_on_result'] * 100:.1f} % FX fee on the result at close.")
     if db is not None:
         lines.append(evidence_line(db))
-    lines.append("Paper-scored as the index rule (CFD). Most retail CFD accounts lose money; nothing is ordered for you.")
+    lines.append("Paper-scored, nothing is ordered for you. Most retail CFD accounts lose money.")
     return "\n".join(lines)
 
 

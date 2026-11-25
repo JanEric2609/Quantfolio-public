@@ -268,3 +268,6 @@ untouched. No order path exists or is added. Everything below is display, owner 
   trial. A positive result would justify **a new pre-registration**, never a change of the registered rule.
   Not run in this checkout: it needs the stored Alpaca key (Saturday list). DAX and Euro Stoxx 50 have no
   intraday history in the desk's stores, so the Xetra half cannot be replayed until a source is chosen.
+
+## Amendment 2026-11-25 (b): the CFD message is four lines
+Display only; the rule, costs and scoring are unchanged. The Message v2 text of 2026-11-23 is shortened at the owner's request to: the market, side and enter-by time; the reason; quantity, margin, the stop in points from the owner's fill and the exit time; for a USD market the FX-fee line; the evidence line; one disclaimer line. The typical last-30-minute move, the spread in points, the index level at the signal and the cost-check line (2026-11-25) are no longer in the Telegram text. They stay on the Intraday CFD page (`/desk/intraday`) and in the stored context (`CfdContext`), and the cost-check helper (`edge_math.cost_line`) remains for the page. The paper-leg lines and the status block of `live_text` are unchanged.
