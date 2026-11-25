@@ -5,6 +5,7 @@ from decimal import Decimal
 from test_desk_events import BERLIN, NOW, _cand, _setup
 from test_desk_events import ci as ci
 
+from app.decision.desk.cell_names import cell_name
 from app.decision.desk import cfd_journal, event_messages, events
 from app.decision.desk.event_sources import Candidate
 from app.foundation.models.entities import DeskPosition
@@ -30,14 +31,14 @@ def test_hype_message_golden():
     assert text.splitlines() == [
         "NVDA short: CFD, manual (Trading 212: NVIDIA (NVDA))",
         "Why: hype fade. +11.2% today on 6x its usual news and 4x its usual volume; no filing or earnings.",
-        "Research: after retail herding, such stocks gave back about 5 % over 20 days (Barber, Huang, Odean, Schwarz).",
-        "Evidence: replay 2016-26 n/a (no history for this rule) | live paper 0 trades (too early).",
         ("Quantity 0.1725 (~ 75 EUR, margin ~ 15 EUR, leverage 5x). Loss at the stop ~ 5.00 EUR, overnight to the "
          "exit date included."),
-        "Stop: 510.00 (1.5 ATR). Exit: by 2026-12-02 at 21:40 Berlin, or when I tell you.",
+        "Stop: 510.00 (1.5 ATR). Exit: by 2026-12-02 at 21:40 Berlin; the desk tells you if it ends sooner.",
+        "Research: after retail herding, such stocks gave back about 5 % over 20 days (Barber, Huang, Odean, Schwarz).",
+        "Evidence: replay 2016-26 n/a (no history for this rule) | live paper 0 trades (too early).",
         "Costs: spread ~ 0.08 %, overnight ~ 0.02 EUR per night on 75 EUR, 0.5 % FX on the result.",
         "Bankroll: month +0 EUR of the 60 EUR stop.",
-        "Paper-scored as hype_fade:cfd. If Trading 212 has no CFD on NVDA, skip; nothing is ordered for you.",
+        "Paper-scored as hype fade. If Trading 212 has no CFD on NVDA, skip; nothing is ordered for you.",
     ]
 
 
@@ -46,7 +47,7 @@ def test_each_cell_has_its_own_research_line_and_name():
     for key, cell in (("DE:SAP", "ta_trend:cfd"), ("DE:SIE", "ta_band:cfd"), ("DE:ALV", "owner_call:cfd")):
         p, why = events._open_one(db, user.id, _cand(key, cell), NOW, Decimal(1))
         text = event_messages.live_text(db, p, cfd_journal.for_position(db, p.id), NOW)
-        assert event_messages.RESEARCH[cell] in text and f"Paper-scored as {cell}" in text
+        assert event_messages.RESEARCH[cell] in text and f"Paper-scored as {cell_name(cell)}" in text
         assert "SAP" in text or "SIE" in text or "ALV" in text
 
 
@@ -157,3 +158,20 @@ def test_close_message_for_a_skipped_trade_says_paper_only():
     text = event_messages.close_text(db, p, "rollover", j)
     assert text.startswith("NVIDIA (NVDA): paper trade closed (its contract rolls within the hour). Paper result ")
     assert "CLOSE now" not in text and "close yours" not in text and "reply to this message" not in text
+
+
+def test_skip_texts_read_the_limits_and_a_paper_only_message_says_so_first():
+    from app.decision.desk.event_limits import EVENT_LIMITS
+
+    assert str(EVENT_LIMITS.max_open) in events.SKIP_TEXT["max_open"]
+    assert str(EVENT_LIMITS.max_new_per_day) in events.SKIP_TEXT["max_new_per_day"]
+    assert f"{EVENT_LIMITS.risk_per_trade:.0f} EUR" in events.SKIP_TEXT["sizing"]
+    assert cell_name("ta_trend:cfd") == "EMA cross" and cell_name("unknown:cell") == "unknown:cell"
+    db, user = _setup()
+    p = _hype(db, user)
+    j = cfd_journal.for_position(db, p.id)
+    from unittest.mock import patch
+
+    with patch.object(event_messages, "paper_only_reason", return_value="Bankroll stop: test. Paper only until x."):
+        first = event_messages.open_text(db, p, j, US_NOW).splitlines()[0]
+    assert first.endswith("PAPER ONLY, no order details")

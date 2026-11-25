@@ -398,3 +398,11 @@ def test_alpaca_holding_hit_needs_ticker_or_name_in_headline():
         assert newswire.relevance(_item(symbols=(sym,), headline=headline), watch) == ""
     assert newswire.relevance(_item(symbols=("KMB",), headline="Kimberly-Clark Enters Agreement with Suzano"), watch) == "holding:KMB"
     assert newswire.relevance(_item(symbols=("IBM",), headline="IBM Reduces H-1B Hiring"), watch) == "holding:IBM"
+
+
+def test_think_prompt_ends_only_the_biggest_alerts():
+    item = _item(headline="Nvidia cuts guidance")
+    now = NOW.astimezone(UTC)
+    big = newswire.format_alert(item, "holding:NVDA", R(3, "down", "company", 1), now)
+    mid = newswire.format_alert(item, "holding:NVDA", R(2, "down", "company", 1), now)
+    assert big.endswith(newswire.THINK_PROMPT) and newswire.THINK_PROMPT not in mid

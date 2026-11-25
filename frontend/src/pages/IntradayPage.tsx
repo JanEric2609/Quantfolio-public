@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { AlertTriangle, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
@@ -234,10 +233,9 @@ export function IntradayPage() {
   const stale = board != null && (data?.board_age_s ?? 0) > STALE_S;
   return (
     <div className="space-y-6">
-      <PageHeader title="Intraday CFD" subtitle="The index rule's board, a position calculator and your journal of the manual Trading 212 trades." />
+      <PageHeader level={2} title="Intraday CFD" subtitle="The index rule's board, a position calculator and your journal of the manual Trading 212 trades." />
       <div role="status" className="flex items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm font-medium">
         <ShieldAlert className="size-4" aria-hidden /> Paper rule, manual trades: nothing here places an order.
-        <Link to="/desk" className="ml-auto underline">Derivatives desk</Link>
       </div>
       {error && <p className="text-sm text-red-500" role="alert">{error}</p>}
       {board ? (

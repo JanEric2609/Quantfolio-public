@@ -44,7 +44,7 @@ from . import calendar as cal
 
 logger = logging.getLogger(__name__)
 
-MAX_ALERTS_PER_HOUR = 12
+MAX_ALERTS_PER_HOUR = 4
 STALE_AFTER = timedelta(hours=2)
 RETENTION = timedelta(days=30)
 RATE_TIMEOUT_S = 20.0
@@ -272,7 +272,8 @@ def format_alert(item: news_wire.WireItem, why: str, rating: Rating, now: dateti
         lines.append(describe(",".join(item.items)) or ("8-K items " + ", ".join(item.items)))
     lines.append(f"{item.source}{lag}" + (f" - {item.url}" if item.url else ""))
     lines.append("Information only: nothing is ordered.")
-    lines.append(THINK_PROMPT)
+    if rating.materiality == 3:
+        lines.append(THINK_PROMPT)  # only the biggest items: on every alert it is noise
     return "\n".join(lines)
 
 

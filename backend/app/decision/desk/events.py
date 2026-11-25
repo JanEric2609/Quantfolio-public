@@ -422,12 +422,12 @@ def open_owner_call(db: Session, user_id: str, cand: Candidate, cli: Any, now: d
 
 
 SKIP_TEXT = {
-    "halted": "The desk is halted.", "max_open": "Three event positions are already open.",
-    "max_new_per_day": "Four new event positions today already.",
+    "halted": "The desk is halted.", "max_open": f"{EVENT_LIMITS.max_open} event positions are already open.",
+    "max_new_per_day": f"{EVENT_LIMITS.max_new_per_day} new event positions today already.",
     "instrument_busy": "That instrument has an event position open or opened in the last 24 hours.",
     "session_closed": "Its exchange is closed (or too late in an early-close session).",
     "rollover_soon": "Its index contract expires within the hour; the desk closes index positions before the roll.",
-    "no_fx": "No EUR/USD rate to size it.", "sizing": "Nothing fits the 5 EUR risk and the margin limit at that stop.",
+    "no_fx": "No EUR/USD rate to size it.", "sizing": f"Nothing fits the {EVENT_LIMITS.risk_per_trade:.0f} EUR risk and the margin limit at that stop.",
     "db_error": "A database error stopped it; nothing was opened.",
 }
 

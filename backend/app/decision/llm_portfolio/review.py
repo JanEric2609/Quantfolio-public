@@ -1123,10 +1123,11 @@ def run_mandate_review(db: Session, user_id: str, mandate: str) -> dict[str, Any
     # Telegram digest — best-effort notification, never fails the review.
     try:
         from app.foundation.telegram_bot import get_linked_account, send_telegram_message
-        from app.foundation.telegram_replies import format_mandate_review_digest
+        from app.foundation.telegram_replies import format_mandate_review_digest, review_digest_wanted
 
         account = get_linked_account(db, user_id)
-        if account is not None and isinstance(final_decision, dict):
+        # A HOLD is the usual outcome of every review: only a proposed trade (placed or blocked) is news.
+        if account is not None and isinstance(final_decision, dict) and review_digest_wanted(final_decision):
             digest = format_mandate_review_digest(
                 mandate,
                 final_decision,

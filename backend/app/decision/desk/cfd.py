@@ -36,6 +36,7 @@ from app.foundation.scalable.cli import ScalableCli
 
 from . import calendar as cal
 from . import cfd_journal, edge_math, prereg, service
+from .replay_store import replay_summary
 from .ledger import append_event
 from .limits import LIMITS
 from .underlyings import Underlying
@@ -283,7 +284,12 @@ def evidence_line(db: Session) -> str:
     else:
         word = "passing" if s.get("passes") else "not significant"
     mean = f", {s['mean_net']:+.2f} EUR a trade" if s["mean_net"] is not None else ""
-    return (f"Evidence: replay 2016-26 -0.18 EUR a trade (SPY, -0.13 QQQ) | live paper {s['n']} trades{mean} ({word}).")
+    rp = replay_summary(db, CELL)  # the stored replay, like the event cells; else the one registered
+    if rp and rp.get("n"):
+        replay = f"replay 2016-26 n={rp['n']}, {Decimal(str(rp['mean_eur'])):+.2f} EUR a trade"
+    else:
+        replay = "replay 2016-26 -0.18 EUR a trade (SPY, -0.13 QQQ)"
+    return f"Evidence: {replay} | live paper {s['n']} trades{mean} ({word})."
 
 
 def open_message(db: Session, position: DeskPosition, key: str, now: datetime,
@@ -300,8 +306,8 @@ def open_message(db: Session, position: DeskPosition, key: str, now: datetime,
             f"Index rule: {_reason(position, key, None)}.",
             f"Size: {exposure:.0f} EUR exposure" + (f", quantity {h}" if (h := quantity_hint(db, key, exposure, now)) else ""),
             f"Stop-loss {stop_move:.2f} % away (about {LIMITS.max_loss_per_trade} EUR). Close at {exit_local} Berlin; "
-            "I will message you.",
-            "Paper-scored here as index_momentum:cfd. Most retail CFD accounts lose money; nothing is ordered for you.",
+            "the desk messages you.",
+            "Paper-scored here as the index rule (CFD). Most retail CFD accounts lose money; nothing is ordered for you.",
         ]
         return "\n".join(lines)
     enter_by = ctx.enter_by.astimezone(cal.BERLIN).strftime("%H:%M")
@@ -315,7 +321,7 @@ def open_message(db: Session, position: DeskPosition, key: str, now: datetime,
         "(Trading 212, observed)",
         f"Index at the signal \u2248 {ctx.index_level_est:,.0f}; Trading 212's price follows the futures and can differ by "
         "a few points. The stop counts from your fill.",
-        f"Close at {exit_local} Berlin; I will tell you.",
+        f"Close at {exit_local} Berlin; the desk tells you.",
     ]
     if cost := edge_math.cost_line(ctx.spread_points, ctx.typical_30m_points):
         lines.append(cost)
@@ -323,7 +329,7 @@ def open_message(db: Session, position: DeskPosition, key: str, now: datetime,
         lines.append(f"USD market: {T212['fx_fee_on_result'] * 100:.1f} % FX fee on the result at close.")
     if db is not None:
         lines.append(evidence_line(db))
-    lines.append("Paper-scored as index_momentum:cfd. Most retail CFD accounts lose money; nothing is ordered for you.")
+    lines.append("Paper-scored as the index rule (CFD). Most retail CFD accounts lose money; nothing is ordered for you.")
     return "\n".join(lines)
 
 

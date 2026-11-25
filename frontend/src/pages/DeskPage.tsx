@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, OctagonX, ShieldAlert, Timer } from "lucide-react";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -117,11 +116,10 @@ export function DeskPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Derivatives desk" subtitle="Knock-outs and warrants on paper, with strict limits and a full log." />
+      <PageHeader level={2} title="Knock-outs and warrants" subtitle="On paper, with strict limits and a full log." />
       <div role="status" className="flex items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm font-medium">
         <ShieldAlert className="size-4" aria-hidden /> Paper trading: no real orders are placed
       </div>
-      <p className="text-sm"><Link to="/desk/intraday" className="underline">Intraday CFD &rarr;</Link> board, calculator and your journal of the manual Trading 212 trades</p>
       {error && <p className="text-sm text-red-500" role="alert">{error}</p>}
 
       {status && (

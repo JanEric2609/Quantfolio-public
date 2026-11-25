@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.decision.desk.cell_names import cell_name
 from app.decision.desk import cfd, cfd_instruments, cfd_journal, event_messages, events, prereg_events, service
 from app.decision.desk import cfd_instruments as ci
 from app.decision.desk.event_limits import EVENT_LIMITS
@@ -68,7 +69,7 @@ def test_every_cell_opens_edits_and_closes():
         j = cfd_journal.for_position(db, position.id)
         assert j.market_key == key and j.quantity_suggested > 0 and j.exposure_eur > 0
         text = event_messages.live_text(db, position, j, now)
-        assert "CFD, manual (Trading 212:" in text and f"Paper-scored as {cell}" in text
+        assert "CFD, manual (Trading 212:" in text and f"Paper-scored as {cell_name(cell)}" in text
         assert "Quantity" in text and "Stop:" in text
     db.commit()
     ok, bad = desk_chain.verify_chain(db)

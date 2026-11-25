@@ -43,8 +43,8 @@ def test_weekly_digest_text():
                           status="closed", real_pnl_eur=Decimal("-7"), closed_at=NOW))
     db.commit()
     text = event_report.weekly_digest(db, user.id, NOW)
-    assert text.startswith("Desk week") and "ta_trend:cfd: 0 trades" in text
-    assert "month -7.00 EUR (1)" in text and "still open: SAP" in text and "Bankroll: month -7 of the 60 EUR stop." in text
+    assert text.startswith("Desk week") and "No cell has a closed paper trade yet." in text
+    assert "month -7.00 EUR (1)" in text and "Still open: SAP" in text and "Bankroll: month -7 of the 60 EUR stop." in text
 
 
 def test_digest_rides_the_reconcile_job_on_sunday(monkeypatch):

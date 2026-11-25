@@ -42,6 +42,11 @@ def format_summary_reply(db: Session, user_id: str) -> str:
 _THESIS_MAX_CHARS = 240
 
 
+def review_digest_wanted(decision: dict) -> bool:
+    """Only a proposed trade is worth a message; a HOLD happens at nearly every review."""
+    return str(decision.get("action", "hold") or "hold").lower() != "hold"
+
+
 def format_mandate_review_digest(
     mandate: str,
     decision: dict,
