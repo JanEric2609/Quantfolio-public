@@ -7,6 +7,7 @@ import logging
 import re
 import secrets
 import string
+import time
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -41,34 +42,91 @@ def get_bot_token(db: Session) -> str | None:
     return secret[0] if secret else None
 
 
+#: Telegram refuses a text over 4096 characters (HTTP 400), which used to drop the whole message.
+MAX_TEXT = 4096
+#: A 429 names ``retry_after`` seconds; wait at most this long, once, then give up on that message.
+MAX_RETRY_WAIT_S = 30.0
+
+
+def split_text(text: str, limit: int = MAX_TEXT) -> list[str]:
+    """Cut *text* into parts of at most *limit* characters, at a line break when there is one."""
+    if len(text) <= limit:
+        return [text]
+    parts: list[str] = []
+    rest = text
+    while len(rest) > limit:
+        cut = rest.rfind("\n", 0, limit)
+        if cut < limit // 2:  # no usable line break: a hard cut
+            cut = limit
+        parts.append(rest[:cut].rstrip("\n"))
+        rest = rest[cut:].lstrip("\n")
+    if rest:
+        parts.append(rest)
+    return parts
+
+
+def _api_error(response: Any) -> tuple[str, float | None]:
+    """Telegram's own ``description`` (never contains the token) and ``retry_after`` from an error response."""
+    try:
+        body = response.json()
+    except Exception:  # noqa: BLE001 - an error body that is not JSON is only less informative
+        return "", None
+    if not isinstance(body, dict):
+        return "", None
+    params = body.get("parameters")
+    retry = params.get("retry_after") if isinstance(params, dict) else None
+    retry = float(retry) if isinstance(retry, (int, float)) and not isinstance(retry, bool) else None
+    return str(body.get("description") or "")[:200], retry
+
+
+def _post_once(client: Any, url: str, payload: dict[str, Any]) -> Any:
+    """POST; on a 429 wait the ``retry_after`` it names (at most ``MAX_RETRY_WAIT_S``) and post once more."""
+    response = client.post(url, json=payload)
+    if getattr(response, "status_code", None) == 429:
+        _, retry = _api_error(response)
+        wait = min(max(retry if retry is not None else 1.0, 0.0), MAX_RETRY_WAIT_S)
+        logger.warning("Telegram rate limit: retrying in %.0f s", wait)
+        time.sleep(wait)
+        response = client.post(url, json=payload)
+    response.raise_for_status()
+    return response
+
+
 def send_telegram_message(
     db: Session, chat_id: str, text: str, reply_markup: dict[str, Any] | None = None
 ) -> bool:
+    """Send *text*; a long one goes out in parts (the buttons under the last). ``True`` only if every part went."""
     token = get_bot_token(db)
     if not token:
         logger.warning("Telegram message not sent: no bot token configured")
         return False
     _silence_http_loggers()
+    parts = split_text(text)
     try:
         with httpx.Client(timeout=10.0) as client:
-            response = client.post(
-                f"{TELEGRAM_API_BASE}/bot{token}/sendMessage",
-                json={"chat_id": chat_id, "text": text, **({"reply_markup": reply_markup} if reply_markup else {})},
-            )
-            response.raise_for_status()
+            for i, part in enumerate(parts):
+                markup = reply_markup if i == len(parts) - 1 else None
+                _post_once(client, f"{TELEGRAM_API_BASE}/bot{token}/sendMessage",
+                           {"chat_id": chat_id, "text": part, **({"reply_markup": markup} if markup else {})})
         return True
     except httpx.HTTPStatusError as exc:
         # Do not log str(exc)/the exception object: httpx.HTTPStatusError's
         # default message embeds the full request URL, which contains the
         # bot token (Telegram authenticates via URL path, not headers).
+        description, _ = _api_error(exc.response)
         logger.error(
-            "Telegram sendMessage failed: HTTP %s from Telegram API",
-            exc.response.status_code,
+            "Telegram sendMessage failed: HTTP %s from Telegram API%s",
+            exc.response.status_code, f" ({description})" if description else "",
         )
         return False
     except Exception as exc:
         logger.error("Telegram sendMessage failed: %s", type(exc).__name__)
         return False
+
+
+def _fit(text: str) -> str:
+    """One message that is edited later cannot be split: cut it to the limit with an ellipsis."""
+    return text if len(text) <= MAX_TEXT else text[: MAX_TEXT - 1] + "…"
 
 
 def send_telegram_message_id(
@@ -79,7 +137,7 @@ def send_telegram_message_id(
     if not token:
         logger.warning("Telegram message not sent: no bot token configured")
         return None
-    payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
+    payload: dict[str, Any] = {"chat_id": chat_id, "text": _fit(text)}
     if reply_markup:
         payload["reply_markup"] = reply_markup
     result = _call_api(token, "sendMessage", payload)
@@ -94,7 +152,7 @@ def edit_telegram_message(
     token = get_bot_token(db)
     if not token:
         return False
-    payload = {"chat_id": chat_id, "message_id": message_id, "text": text,
+    payload = {"chat_id": chat_id, "message_id": message_id, "text": _fit(text),
                "reply_markup": reply_markup if reply_markup else {"inline_keyboard": []}}
     return _call_api(token, "editMessageText", payload) is not None
 
@@ -109,11 +167,12 @@ def _call_api(token: str, method: str, payload: dict[str, Any] | None = None, *,
     _silence_http_loggers()
     try:
         with httpx.Client(timeout=timeout) as client:
-            response = client.post(f"{TELEGRAM_API_BASE}/bot{token}/{method}", json=payload or {})
-            response.raise_for_status()
+            response = _post_once(client, f"{TELEGRAM_API_BASE}/bot{token}/{method}", payload or {})
             body = response.json()
     except httpx.HTTPStatusError as exc:
-        logger.error("Telegram %s failed: HTTP %s from Telegram API", method, exc.response.status_code)
+        description, _ = _api_error(exc.response)
+        logger.error("Telegram %s failed: HTTP %s from Telegram API%s", method, exc.response.status_code,
+                     f" ({description})" if description else "")
         return None
     except httpx.TimeoutException as exc:
         # About 2 % of long polls time out on the network (audit 2026-11-15,

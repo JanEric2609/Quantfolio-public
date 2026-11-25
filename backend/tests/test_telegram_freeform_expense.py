@@ -68,3 +68,32 @@ def test_create_expense_from_telegram_returns_none_for_unparseable_text():
 
     assert create_expense_from_telegram(db, user.id, "not an expense") is None
     assert db.query(Expense).filter(Expense.user_id == user.id).count() == 0
+
+
+def _linked(db):
+    from app.foundation.models.entities import TelegramAccount, User
+
+    user = User(username="owner", password_hash="x", role="admin")
+    db.add(user)
+    db.flush()
+    db.add(TelegramAccount(user_id=user.id, chat_id="42"))
+    db.commit()
+
+
+def test_large_amount_is_not_logged_without_a_bang(monkeypatch):
+    """A fill price typed without Reply ("24003.5 0.04") must not become a 24,003.50 EUR expense."""
+    from conftest import _memory_db
+
+    from app.foundation import telegram_bot, telegram_updates
+    from app.foundation.models.entities import Expense
+
+    db = _memory_db()
+    _linked(db)
+    sent = []
+    monkeypatch.setattr(telegram_bot, "send_telegram_message", lambda db_, chat, text, markup=None: sent.append(text))
+    telegram_updates.handle_message(db, "42", "24003.5 0.04")
+    assert db.query(Expense).count() == 0 and "Not logged" in sent[-1]
+    telegram_updates.handle_message(db, "42", "1500 laptop !")
+    assert db.query(Expense).count() == 1 and db.query(Expense).one().description == "laptop"
+    telegram_updates.handle_message(db, "42", "3.50 coffee")
+    assert db.query(Expense).count() == 2

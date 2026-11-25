@@ -68,3 +68,67 @@ def test_send_telegram_message_does_not_leak_token_on_http_error(caplog):
 
     assert result is False
     assert token not in caplog.text
+
+
+def test_split_text_keeps_short_text_and_cuts_long_text_at_line_breaks():
+    from app.foundation.telegram_bot import MAX_TEXT, split_text
+
+    assert split_text("hello") == ["hello"]
+    line = "x" * 99
+    text = "\n".join([line] * 100)  # 9,999 characters
+    parts = split_text(text)
+    assert len(parts) == 3 and all(len(p) <= MAX_TEXT for p in parts)
+    assert "\n".join(parts) == text
+    assert [len(p) for p in split_text("y" * 5000)] == [4096, 904]  # no line break: a hard cut
+
+
+def test_long_message_goes_out_in_parts_with_buttons_on_the_last():
+    db = _memory_db()
+    set_secret(db, "telegram", "123:ABC-token")
+    posted = []
+
+    def fake_post(self, url, json=None):
+        posted.append(json)
+        resp = MagicMock()
+        resp.status_code = 200
+        return resp
+
+    with patch("httpx.Client.post", fake_post):
+        ok = send_telegram_message(db, "555", "\n".join(["z" * 99] * 100), {"inline_keyboard": []})
+    assert ok is True and len(posted) == 3
+    assert "reply_markup" not in posted[0] and "reply_markup" in posted[2]
+
+
+def test_rate_limit_is_retried_once_after_retry_after(monkeypatch):
+    from app.foundation import telegram_bot
+
+    db = _memory_db()
+    set_secret(db, "telegram", "123:ABC-token")
+    waits = []
+    monkeypatch.setattr(telegram_bot.time, "sleep", waits.append)
+    answers = [429, 200]
+
+    def fake_post(self, url, json=None):
+        resp = MagicMock()
+        resp.status_code = answers.pop(0)
+        resp.json.return_value = {"ok": False, "parameters": {"retry_after": 3}}
+        return resp
+
+    with patch("httpx.Client.post", fake_post):
+        assert send_telegram_message(db, "555", "hello") is True
+    assert waits == [3.0] and answers == []
+
+
+def test_error_description_is_logged_without_the_token(caplog):
+    db = _memory_db()
+    token = "123:SUPER-SECRET-TOKEN"
+    set_secret(db, "telegram", token)
+    request = httpx.Request("POST", f"https://api.telegram.org/bot{token}/sendMessage")
+    response = httpx.Response(400, request=request, json={"ok": False, "description": "Bad Request: chat not found"})
+    mock_response = MagicMock()
+    mock_response.status_code = 400
+    mock_response.raise_for_status = MagicMock(
+        side_effect=httpx.HTTPStatusError("x", request=request, response=response))
+    with caplog.at_level("ERROR"), patch("httpx.Client.post", return_value=mock_response):
+        assert send_telegram_message(db, "555", "hello") is False
+    assert "chat not found" in caplog.text and token not in caplog.text
