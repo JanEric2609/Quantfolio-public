@@ -60,3 +60,17 @@ def test_a_persistent_trend_earns_in_the_replay_before_any_verdict_rule():
     res = tr.run({"up": ({"a": _bars(closes)}, {"a": INST})}, draws=10)
     pooled = res["cells"]["up:chandelier"]["pooled"]
     assert pooled["n"] >= 1 and pooled["mean_eur"] > 0
+
+
+def test_ema_exit_follows_the_position_not_the_signal_day():
+    # A long signal whose close is still below its EMA50 (older, higher prices weigh on it) is, by the declared rule, on
+    # the wrong side of the EMA: it exits at once. The old signal-day key instead held it for weeks and gave a
+    # randomized short on the same day a different exit than its own direction.
+    closes = [200.0] * 60 + [100.0] * 60 + [101.0 + 0.2 * i for i in range(30)]
+    bars = _bars(closes)
+    sig_i = len(closes) - 30
+    long_dir, _ = tr._simulate("a", bars, INST, {sig_i: "long"}, "ema_cross", 5.0, "t")
+    assert long_dir and long_dir[0].reason == "ema_cross" and long_dir[0].hold_days <= 2
+    legacy, _ = tr.sr.simulate_signals("a", bars, INST, {sig_i: "long"}, "ema_cross", 5.0, tag="t", stop_atr=tc.STOP_ATR,
+                                       ema_n=tc.EMA_N, atr_n=tc.ATR_N)
+    assert legacy and legacy[0].hold_days > long_dir[0].hold_days + 5

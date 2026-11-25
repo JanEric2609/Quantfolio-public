@@ -115,7 +115,7 @@ def _ema_aligned(closes: list[float], n: int = EMA_N) -> list[float | None]:
 
 def simulate_signals(key: str, bars: list[technical.Bar], inst: dict[str, Any], signals: dict[int, str],
                      exit_mode: str, risk: float = 5.0, tag: str = "", stop_atr: float = STOP_ATR, ema_n: int = EMA_N,
-                     atr_n: int = ATR_N) -> tuple[list[RTrade], dict[str, int]]:
+                     atr_n: int = ATR_N, ema_side: str = "signal") -> tuple[list[RTrade], dict[str, int]]:
     out: list[RTrade] = []
     gaps = {"stops": 0, "gap_overruns": 0, "data_end": 0}
     spread = float(inst["spread_bp"]) / 1e4
@@ -150,9 +150,12 @@ def simulate_signals(key: str, bars: list[technical.Bar], inst: dict[str, Any], 
                 rate = float(inst["overnight_long" if d == "long" else "overnight_short"])
                 per_unit = dist + spread * px + (FX_FEE * dist if usd else 0.0) + rate * px * SIZING_NIGHTS
                 side0 = 0
-                e_sig = ema[sig_i] if exit_mode == "ema_cross" else None
-                if e_sig is not None:
-                    side0 = 1 if closes[sig_i] > e_sig else -1
+                if ema_side == "direction":
+                    side0 = 1 if d == "long" else -1  # exit when the close crosses the EMA against the position
+                else:
+                    e_sig = ema[sig_i] if exit_mode == "ema_cross" else None
+                    if e_sig is not None:
+                        side0 = 1 if closes[sig_i] > e_sig else -1
                 pos = {"date": bar.date, "i": i, "px": px, "dir": d, "dist": dist, "qty": risk / per_unit,
                        "stop": px - dist if d == "long" else px + dist, "best": px, "side0": side0}
         if pos is not None and i >= pos["i"]:

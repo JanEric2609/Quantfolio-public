@@ -47,7 +47,9 @@ def ema_exit(closes: list[float], side: str, n: int = EMA_N) -> bool:
 
 
 def next_action(closes: list[float], position: str | None) -> str:
-    """The paper cell's decision for the latest close: ``enter_long`` / ``enter_short`` / ``exit`` / ``hold`` / ``wait``."""
+    """The EMA-only part of the cell's decision for the latest close: ``enter_long`` / ``enter_short`` / ``exit`` /
+    ``hold`` / ``wait``. It does **not** evaluate the 5 ATR stop (that needs the entry price and the bar's high and
+    low), so it is not yet the full rule a daily paper cell would score; ``lab/trend_replay`` is the reference."""
     if position is None:
         sig = breakout_signals(closes + [closes[-1]]) if len(closes) > BREAKOUT_N else {}
         side = sig.get(len(closes) - 1)

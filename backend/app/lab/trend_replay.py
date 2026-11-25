@@ -35,7 +35,7 @@ YEAR_POSITIVE_SHARE = sr.YEAR_POSITIVE_SHARE
 def _simulate(key: str, bars: list[technical.Bar], inst: dict[str, Any], signals: dict[int, str], exit_mode: str,
               risk: float, tag: str) -> tuple[list[RTrade], dict[str, int]]:
     return sr.simulate_signals(key, bars, inst, signals, exit_mode, risk, tag=tag, stop_atr=tc.STOP_ATR, ema_n=tc.EMA_N,
-                               atr_n=tc.ATR_N)
+                               atr_n=tc.ATR_N, ema_side="direction")
 
 
 def run(families: dict[str, tuple[dict[str, list[technical.Bar]], dict[str, dict[str, Any]]]], risk: float = 5.0,
