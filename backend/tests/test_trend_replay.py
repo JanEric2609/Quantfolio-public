@@ -62,18 +62,29 @@ def test_a_persistent_trend_earns_in_the_replay_before_any_verdict_rule():
     assert pooled["n"] >= 1 and pooled["mean_eur"] > 0
 
 
-def test_ema_exit_follows_the_position_and_is_armed_by_a_favourable_close():
-    # Prices fall from 200 to 100 (EMA50 stays above), then rise slowly. A long signalled while the close is below the EMA
-    # must not be stopped out on its fill bar: the exit is armed only after a close on the favourable side.
+def test_real_exit_is_the_declared_state_exit_and_only_the_control_is_armed():
+    # Prices fall from 200 to 100 (EMA50 stays above), then rise slowly. A long signalled below its EMA is, by the declared
+    # rule, an exit state: the real run leaves on the fill bar; the control (arm_exit) holds until a favourable close.
     closes = [200.0] * 60 + [100.0] * 60 + [101.0 + 0.2 * i for i in range(30)]
     bars = _bars(closes)
     sig_i = len(closes) - 30
-    long_dir, _ = tr._simulate("a", bars, INST, {sig_i: "long"}, "ema_cross", 5.0, "t")
-    assert long_dir and long_dir[0].hold_days > 2
-    # A short on the same day (close below EMA, favourable) is armed at once and exits when the close rises back through.
-    short_dir, _ = tr._simulate("a", bars, INST, {sig_i: "short"}, "ema_cross", 5.0, "t")
-    assert short_dir and short_dir[0].direction == "short"
-    # Mirror: a short signalled above its EMA is not stopped out on the fill bar either (symmetric placebo exposure).
-    up = [100.0] * 60 + [200.0] * 60 + [199.0 - 0.2 * i for i in range(30)]
-    s2, _ = tr._simulate("a", _bars(up), INST, {len(up) - 30: "short"}, "ema_cross", 5.0, "t")
-    assert s2 and s2[0].hold_days > 2
+    real, _ = tr._simulate("a", bars, INST, {sig_i: "long"}, "ema_cross", 5.0, "t")
+    assert real and real[0].hold_days <= 2
+    ctrl, _ = tr._simulate("a", bars, INST, {sig_i: "long"}, "ema_cross", 5.0, "t", arm_exit=True)
+    assert ctrl and ctrl[0].hold_days > 2
+    short, _ = tr._simulate("a", bars, INST, {sig_i: "short"}, "ema_cross", 5.0, "t")
+    assert short and short[0].direction == "short"
+
+
+def test_pure_drift_without_breakout_information_is_not_a_pass():
+    # i.i.d. noise with a positive drift: the real trades are mostly long, and so must the control be.
+    rng = random.Random(11)
+    out = {}
+    for k in ("a", "b", "c"):
+        px, closes = 100.0, []
+        for _ in range(4000):
+            px *= 1 + 0.0005 + rng.gauss(0, 0.005)
+            closes.append(px)
+        out[k] = _bars(closes)
+    res = tr.run({"x": (out, {k: INST for k in out})}, draws=30)
+    assert all(c["verdict"] == "null" for c in res["cells"].values())

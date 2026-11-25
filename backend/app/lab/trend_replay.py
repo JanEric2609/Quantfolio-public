@@ -33,9 +33,9 @@ YEAR_POSITIVE_SHARE = sr.YEAR_POSITIVE_SHARE
 
 
 def _simulate(key: str, bars: list[technical.Bar], inst: dict[str, Any], signals: dict[int, str], exit_mode: str,
-              risk: float, tag: str) -> tuple[list[RTrade], dict[str, int]]:
+              risk: float, tag: str, arm_exit: bool = False) -> tuple[list[RTrade], dict[str, int]]:
     return sr.simulate_signals(key, bars, inst, signals, exit_mode, risk, tag=tag, stop_atr=tc.STOP_ATR, ema_n=tc.EMA_N,
-                               atr_n=tc.ATR_N, ema_side="direction")
+                               atr_n=tc.ATR_N, ema_side="direction", arm_exit=arm_exit)
 
 
 def run(families: dict[str, tuple[dict[str, list[technical.Bar]], dict[str, dict[str, Any]]]], risk: float = 5.0,
@@ -61,8 +61,13 @@ def run(families: dict[str, tuple[dict[str, list[technical.Bar]], dict[str, dict
             for _ in range(draws):
                 tot: list[float] = []
                 for key, s in sigs.items():
-                    ps = {i: rng.choice(("long", "short")) for i in s}
-                    tr, _ = _simulate(key, bars_by_key[key], insts[key], ps, exit_mode, risk, "side")
+                    # permute the real direction labels over the same breakout days: the long/short mix (and so any
+                    # drift exposure) is kept, only the link between day and direction is cut. Armed so a permuted
+                    # side that starts on the wrong side of the EMA is not stopped out on its fill bar.
+                    days, dirs = list(s), list(s.values())
+                    rng.shuffle(dirs)
+                    tr, _ = _simulate(key, bars_by_key[key], insts[key], dict(zip(days, dirs)), exit_mode, risk, "side",
+                                      arm_exit=True)
                     tot.extend(t.net for t in tr)
                 if tot:
                     means.append(statistics.fmean(tot))
