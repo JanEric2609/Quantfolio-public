@@ -368,8 +368,13 @@ def _parse_occ(occ: str, snap: dict[str, Any]) -> dict[str, Any] | None:
         expiry = datetime.strptime(m.group(2), "%y%m%d").date()
     except ValueError:
         return None
-    return {"symbol": occ, "type": "call" if m.group(3) == "C" else "put", "strike": int(m.group(4)) / 1000,
-            "expiration": expiry, "iv": iv, "delta": delta}
+    row = {"symbol": occ, "type": "call" if m.group(3) == "C" else "put", "strike": int(m.group(4)) / 1000,
+           "expiration": expiry, "iv": iv, "delta": delta}
+    quote = snap.get("latestQuote") or {}
+    bid, ask = _float(quote.get("bp")), _float(quote.get("ap"))
+    if bid is not None and ask is not None:
+        row["bid"], row["ask"] = bid, ask
+    return row
 
 
 class DataUnavailable(ValueError):

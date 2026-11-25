@@ -136,3 +136,20 @@ def test_collect_stops_on_rate_limit_and_keeps_what_it_read():
     out = om.collect(db, P(), ["AAA", "LATE", "BBB"], now, bucket=om.TokenBucket(10_000))
     assert out == {"names": 1, "asked": 3, "stopped": "rate_limited"}
     assert set(om.stored_scores(db, "2026-11-23")) == {"AAA"}
+
+
+def test_unusable_quotes_are_ignored():
+    good = [_row("put", -0.25, 0.30), _row("call", 0.5, 0.25)]
+    bad_put = {**_row("put", -0.25, 0.60), "bid": 0.0, "ask": 1.0}  # no bid
+    wide_put = {**_row("put", -0.24, 0.55), "bid": 0.1, "ask": 1.0}  # spread over half the mid
+    crossed = {**_row("put", -0.26, 0.50), "bid": 1.0, "ask": 0.5}
+    tiny_iv = _row("put", -0.25, 0.01)
+    assert om.smirk_score(good + [bad_put, wide_put, crossed, tiny_iv], TODAY) == pytest.approx(-0.05)
+    # Only unusable puts: no score, the name is left out.
+    assert om.smirk_score([_row("call", 0.5, 0.25), bad_put], TODAY) is None
+
+
+def test_the_snapshot_quote_is_parsed():
+    row = ap._parse_occ("AAPL261218P00250000", {"impliedVolatility": 0.3, "greeks": {"delta": -0.27},
+                                                "latestQuote": {"bp": 1.0, "ap": 1.2}})
+    assert row["bid"] == 1.0 and row["ask"] == 1.2
