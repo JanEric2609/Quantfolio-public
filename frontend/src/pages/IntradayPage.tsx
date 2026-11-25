@@ -186,7 +186,7 @@ function JournalTable({ rows, onChanged }: { rows: CfdJournalRow[]; onChanged: (
                 <td>{fmt(r.entry_level, 1)}</td>
                 <td>{fmt(r.exit_level, 1)}</td>
                 <td>{slip == null ? "-" : `${slip >= 0 ? "+" : ""}${slip.toFixed(1)} pts`}</td>
-                <td>{fmt(r.real_pnl_eur)} / {fmt(r.paper_net_eur)}</td>
+                <td>{fmt(r.real_pnl_eur)} / {fmt(r.paper_net_eur)}{r.rule === "other" ? " (your own rule)" : ""}</td>
                 <td>{r.nights_held ?? "-"}</td>
                 <td>{r.status}</td>
                 <td>

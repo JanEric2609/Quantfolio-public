@@ -107,7 +107,7 @@ function SignalsView({ data }: { data: SignalsDto }) {
                 <tbody>
                   {data.journal.map((j) => (
                     <tr key={j.position_id}><td>{j.market_key}</td><td>{j.cell ?? "-"}</td><td>{j.status}</td>
-                      <td>{eur(j.real_pnl_eur)} / {eur(j.paper_net_eur)}</td></tr>
+                      <td>{eur(j.real_pnl_eur)} / {eur(j.paper_net_eur)}{j.rule === "other" ? " (your own rule, not counted in the cell)" : ""}</td></tr>
                   ))}
                 </tbody>
               </table>
