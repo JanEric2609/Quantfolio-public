@@ -54,6 +54,9 @@ MARKET_COOLDOWN = timedelta(hours=3)
 #: The same headline (case and punctuation aside) is one alert, not one per wire that carries it.
 DUPLICATE_WINDOW = timedelta(hours=12)
 STALE_AFTER = timedelta(hours=2)
+#: A commentary feed is only worth an interrupt while it is fresh; later it waits for the morning digest.
+#: (Handelsblatt items arrive up to ten minutes after publication: the owner saw "586 s ago".)
+STALE_AFTER_BY_SOURCE = {"handelsblatt": timedelta(minutes=5)}
 RETENTION = timedelta(days=30)
 RATE_TIMEOUT_S = 20.0
 WATCH_TTL_S = 600
@@ -302,7 +305,7 @@ def alert_decision(db: Session, item: news_wire.WireItem, why: str, rating: Rati
         wanted = rating.scope == "market" and m == 3 and item.source in MARKET_ALERT_SOURCES
     if not wanted:
         return ""
-    if item.published_at is not None and now - item.published_at > STALE_AFTER:
+    if item.published_at is not None and now - item.published_at > STALE_AFTER_BY_SOURCE.get(item.source, STALE_AFTER):
         return "stale"
     if _quiet(now) and m != 3:
         return "quiet"

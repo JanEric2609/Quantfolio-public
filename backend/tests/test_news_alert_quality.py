@@ -105,3 +105,13 @@ def test_digest_due_weekday_morning_only():
     assert news_digest.digest_due(NOW)
     assert not news_digest.digest_due(NOW + timedelta(hours=2))
     assert not news_digest.digest_due(NOW + timedelta(days=3))  # Saturday
+
+
+def test_a_late_handelsblatt_item_waits_for_the_digest():
+    db = _memory_db()
+    late = _item(source="handelsblatt", headline="SAP: Cloud-Geschäft überrascht", published_at=NOW - timedelta(seconds=586))
+    fresh = _item(source="handelsblatt", headline="SAP: Cloud-Geschäft überrascht", published_at=NOW - timedelta(seconds=90))
+    assert newswire.alert_decision(db, late, "holding:SAP", R(2, "up", "company", 1), NOW) == "stale"
+    assert newswire.alert_decision(db, fresh, "holding:SAP", R(2, "up", "company", 1), NOW) == "send"
+    # the digest still lists a stale item (it is stored, not baseline)
+    assert "stale" not in ("baseline", "dup_headline", "stale_dup")
