@@ -27,7 +27,9 @@ sleeve, the real book and the benchmark, stored before the fact and scored after
 over 150 years), `plan_bands` (the wealth plan's one-year real-return bands,
 published monthly and scored a year later) and `options_lab` (ADR 0026: the
 protective-put replay and the issuer margin on held warrants; it gates
-nothing, options are not recommended).
+nothing, options are not recommended) and `algo_lab` (ADR 0029, Proposed: the
+promotion ledger and gate maths for an algorithmic-trading section; research
+only, gates nothing).
 
 ## Public surface (facade `app.lab.<package>`)
 
