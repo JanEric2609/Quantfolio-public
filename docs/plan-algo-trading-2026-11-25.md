@@ -102,7 +102,7 @@ that easily. IBKR's tiered minimum on a 250 EUR position is **50 bp**, on a 50 E
 
 A canonical JSON file, hashed with SHA-256, stored in the repo and as a row: universe (ISINs, listing currency), signal formula,
 parameters (all frozen), data fields and vintage, calendar and execution timing (signal at close t, trade at t+1), position
-sizing, benchmark, cost model id (venue, schedule, spread assumption), tax model id, scale for the score, the clipped-score null (the estimand the e-process guarantee is about, with the verdict of its induced-null audit), trial family, start date.
+sizing, benchmark, cost model id (venue, schedule, spread assumption), tax model id, verdict class (`alpha` or `risk_overlay`), scale for the score, the clipped-score null (the estimand the e-process guarantee is about, with the verdict of its induced-null audit), trial family, start date.
 Changing any field is a **new candidate** with fresh mass. Pattern: `decision/desk/prereg.py`, `prereg_events.EVENT_HASH`.
 
 ### 5.2 Replay, before registration (research only)
@@ -299,7 +299,7 @@ Stage 4 (ladder tuition by hand) is unchanged: written owner approval per step. 
 
 ### New verdict class: `risk_overlay`
 
-Triage verdicts now have a third kind besides "candidate" and "measured null": a **risk overlay** is a rule that only scales or vetoes exposure of a position the owner already holds (for example a trend filter on the existing ETF holdings, or the crash guard). It cannot add a symbol, open a position, or raise size, which matches the guard rule that strategy code may only veto. Because it takes no new risk, it is judged on drawdown and cost avoided against the held book, not on excess return, needs no funded e-process, and is still pre-registered and replayed with the same costs and tax model. Where a family's verdict in section 4 says "candidate", a `risk_overlay` variant of the same rule is the lower-risk way to test it first. The class is defined in PR #445's strategy cards; this plan only reserves the name.
+Triage verdicts have a third kind besides "candidate" and "measured null". The class is **defined by ADR 0029 Amendment 1** (this plan only mirrors it): a card declares `alpha` or `risk_overlay`, and the class is a hashed card field. A `risk_overlay` is judged on drawdown and CVaR reduction against buy-and-hold of the same registered basket, within a cap on trailing return and a cost cap, not on excess return; it needs no funded e-process, never authorises capital, and is still pre-registered and replayed with the same costs and tax model. Its structural limit: it may only scale exposure of the registered basket down, or rotate part of it into a declared cash or bond leg, and gross exposure never exceeds the basket's own (100 % of the sleeve). It cannot add a risk asset beyond the declared legs or raise size, which matches the guard rule that strategy code may only veto. Where a family's verdict in section 4 says "candidate", a `risk_overlay` variant of the same rule is the lower-risk way to test it first.
 
 ### Paper trading does not depend on IBKR
 
