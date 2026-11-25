@@ -215,6 +215,30 @@ def _one_sided_p(t: float | None) -> float:
     return 1.0 if t is None else 0.5 * math.erfc(t / math.sqrt(2))
 
 
+def block_p(trades: list[RTrade], draws: int = 1000, seed: int = 20261125) -> float:
+    """One-sided p for mean net > 0 that respects overlap and cross-instrument clustering: trades are grouped by
+    calendar quarter of entry, the groups are resampled with replacement around a mean-zero null."""
+    if len(trades) < 2:
+        return 1.0
+    groups: dict[tuple[int, int], list[float]] = {}
+    for t in trades:
+        groups.setdefault((t.entry.year, (t.entry.month - 1) // 3), []).append(t.net)
+    gl = list(groups.values())
+    if len(gl) < 4:
+        return 1.0
+    allv = [x for g in gl for x in g]
+    mu = statistics.fmean(allv)
+    rng = random.Random(f"{seed}:{len(allv)}")
+    hits = 0
+    for _ in range(draws):
+        pick = [gl[rng.randrange(len(gl))] for _ in gl]
+        n = sum(len(g) for g in pick)
+        m = (sum(sum(g) for g in pick) / n) - mu
+        if m >= mu:
+            hits += 1
+    return (hits + 1) / (draws + 1)
+
+
 def holm(pvals: dict[str, float]) -> dict[str, float]:
     items = sorted(pvals.items(), key=lambda kv: kv[1])
     m = len(items)
@@ -235,10 +259,12 @@ def run(bars_by_key: dict[str, list[technical.Bar]], instruments: dict[str, dict
         implied_by_key: dict[str, dict[date, float]] | None = None, draws: int = 100, seed: int = 20261125) -> dict[str, Any]:
     """Every cell pooled and per instrument, the placebo (same exits, random dates and sides, same count of signals per
     instrument), the leg split after strong days and the verdict."""
+    implied_by_key = {k: v for k, v in (implied_by_key or {}).items() if v} or None
     triggers = ["ewma"] + (["implied"] if implied_by_key else [])
     cells: dict[str, Any] = {}
     pvals: dict[str, float] = {}
     placebo_cache: dict[tuple[str, str], list[float]] = {}
+    side_cache: dict[tuple[str, str], list[float]] = {}
     for trigger in triggers:
         for direction in DIRECTIONS:
             sigs = {k: strong_signals(b, direction, trigger, (implied_by_key or {}).get(k)) for k, b in bars_by_key.items()
@@ -277,23 +303,39 @@ def run(bars_by_key: dict[str, list[technical.Bar]], instruments: dict[str, dict
                         if tot:
                             means.append(statistics.fmean(tot))
                     placebo_cache[pck] = sorted(means)
+                    srng = random.Random(f"{seed}:side:{trigger}:{exit_mode}")
+                    smeans: list[float] = []
+                    for _ in range(draws):
+                        tot = []
+                        for key, s in sigs.items():
+                            ps = {i: srng.choice(("long", "short")) for i in s}
+                            tr, _ = simulate_signals(key, bars_by_key[key], instruments[key], ps, exit_mode, risk, tag="side")
+                            tot.extend(t.net for t in tr)
+                        if tot:
+                            smeans.append(statistics.fmean(tot))
+                    side_cache[pck] = sorted(smeans)
                 pm = placebo_cache.get(pck, [])
                 real = pooled["mean_eur"]
                 placebo = None
                 if pm and real is not None:
                     placebo = {"draws": len(pm), "mean_eur": statistics.fmean(pm), "p05": pm[int(0.05 * (len(pm) - 1))],
                                "p95": pm[int(0.95 * (len(pm) - 1))], "p_value": sum(1 for x in pm if x >= real) / len(pm)}
-                cells[name] = {"pooled": pooled, "per_instrument": {k: summarize(v) for k, v in sorted(per.items())},
+                sm = side_cache.get(pck, [])
+                side = None
+                if sm and real is not None:
+                    side = {"draws": len(sm), "mean_eur": statistics.fmean(sm), "p_value": sum(1 for x in sm if x >= real) / len(sm)}
+                cells[name] = {"side_placebo": side, "pooled": pooled, "per_instrument": {k: summarize(v) for k, v in sorted(per.items())},
                                "established": summarize(est), "fresh": summarize(fresh), "gaps": gap_total,
                                "placebo": placebo, "year_share_positive": _year_share_positive(pooled)}
-                pvals[name] = _one_sided_p(pooled["t"] if pooled["n"] else None)
+                cells[name]["t_p_descriptive"] = _one_sided_p(pooled["t"] if pooled["n"] else None)
+                pvals[name] = block_p(allt)
     adj = holm(pvals)
     for name, c in cells.items():
         c["holm_p"] = adj[name]
         p = c["pooled"]
         ys = c["year_share_positive"]
         ok = (p["n"] >= MIN_TRADES and (p["mean_eur"] or 0) > 0 and adj[name] < 0.05
-              and (c["placebo"] is not None and c["placebo"]["p_value"] < 0.05) and ys is not None and ys >= YEAR_POSITIVE_SHARE)
+              and (c["side_placebo"] is not None and c["side_placebo"]["p_value"] < 0.05) and ys is not None and ys >= YEAR_POSITIVE_SHARE)
         c["verdict"] = "pass" if ok else "null"
     legs = {k: leg_stats(b, strong_signals(b, "with")) for k, b in bars_by_key.items()}
     return {"cells": cells, "legs": legs, "trials": len(cells),

@@ -103,6 +103,8 @@ Scores: evidence (E), cost-robustness at retail CFD costs (C), feasibility with 
 - Decision rule frozen in code: pooled n at least 100, mean net above 0, Holm-adjusted p below 0.05, placebo p below 0.05, 60% of calendar years (3+ trades) positive. Anything else is "null". A pass justifies a new pre-registration, never a live signal.
 - Run on the production host: `set -a; . /opt/quantfolio/.env; set +a; python scripts/shock_ride_replay.py --since 1995 --draws 200`. Paste the table without keys. Default 2005; how far back the price provider goes decides the depth.
 
+Review fixes (after the automated review on PR #39): the verdict p-value is now a quarter-block bootstrap (trades overlap and four indices are correlated, so the plain t overstates significance; the t-based p stays as a descriptive field). The required control is the **side placebo** (same strong days, random sides), because random dates are cheaper to trade in calm markets and would flatter the real cells; the random-date placebo is kept as a descriptive extra. An empty VIX/VXN history no longer adds empty cells or inflates the Holm family.
+
 ## 7. Next steps, in order
 1. Run the replay on prod (about 1 to 2 minutes). Expected: null. If any cell passes, run it again on a disjoint period before anything else.
 2. If null, stop searching for directional rules on four indices and put the effort into the **journal** (item 6): at every strong-day alert store the live spread, VIX, event class and the Kalshi probability move. About 30 to 40 such days a year is the only way to learn the real cost at the moment it matters.

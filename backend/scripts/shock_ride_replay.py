@@ -48,20 +48,23 @@ def main() -> None:
             if vt and i.key in bars:
                 try:
                     v = technical.bars_from_rows(history(db, vt, days=11000))
-                    implied[i.key] = {x.date: x.close for x in v}
+                    if v:
+                        implied[i.key] = {x.date: x.close for x in v}
                 except Exception as exc:  # noqa: BLE001 - optional input; the EWMA trigger still runs
                     print(f"no {vt}: {type(exc).__name__}", file=sys.stderr)
     finally:
         db.close()
+    if not bars:
+        sys.exit("no index history loaded; check the price provider and --since")
     res = sr.run(bars, insts, implied_by_key=implied or None, draws=args.draws)
     out = {"instruments": sorted(bars), "since": args.since, "from": str(min(b[0].date for b in bars.values())),
-           "to": str(max(b[-1].date for b in bars.values())) if bars else None, **res,
-           "note": "EUR/USD taken as 1; research only; placebo = same exits on random dates and sides."}
+           "to": str(max(b[-1].date for b in bars.values())), **res,
+           "note": "EUR/USD taken as 1; research only; required control = same strong days with random sides (side_placebo); the random-date placebo is descriptive; p-values are quarter-block bootstrap."}
     for name, c in res["cells"].items():
         p = c["pooled"]
         pl = c["placebo"]
         print(f"{name:26} n={p['n']:5} mean={p['mean_eur']} t={p['t']} hold={p['mean_hold_days']} "
-              f"placebo_p={pl and pl['p_value']} holm={c['holm_p']:.3f} verdict={c['verdict']}")
+              f"date_placebo_p={pl and pl['p_value']} side_placebo_p={c['side_placebo'] and c['side_placebo']['p_value']} holm={c['holm_p']:.3f} verdict={c['verdict']}")
     print(json.dumps(out, indent=1, default=str))
     if args.write:
         OUT.parent.mkdir(parents=True, exist_ok=True)

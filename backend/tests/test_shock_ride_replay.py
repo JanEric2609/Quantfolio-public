@@ -85,4 +85,21 @@ def test_run_on_noise_is_null_with_a_placebo_and_declared_trials():
     res = sr.run({"DAX": _bars(c)}, {"DAX": INST}, draws=12)
     assert res["trials"] == 4
     for cell in res["cells"].values():
-        assert cell["verdict"] == "null" and cell["placebo"] is not None
+        assert cell["verdict"] == "null" and cell["placebo"] is not None and cell["side_placebo"] is not None
+
+
+def test_block_p_is_not_significant_for_zero_mean_and_run_ignores_empty_implied():
+    from datetime import date as _d
+    from types import SimpleNamespace
+    ts = [SimpleNamespace(entry=_d(2015 + i // 4, 1 + 3 * (i % 4), 5), net=(1.0 if i % 2 else -1.0)) for i in range(40)]
+    assert sr.block_p(ts) > 0.2  # type: ignore[arg-type]
+    assert sr.block_p(ts[:2]) == 1.0  # type: ignore[arg-type]
+
+
+def test_empty_implied_map_does_not_add_cells():
+    rng = random.Random(3)
+    c = [100.0]
+    for _ in range(300):
+        c.append(c[-1] * (1 + rng.gauss(0, 0.01)))
+    res = sr.run({"DAX": _bars(c)}, {"DAX": INST}, implied_by_key={"DAX": {}}, draws=3)
+    assert res["trials"] == 4
