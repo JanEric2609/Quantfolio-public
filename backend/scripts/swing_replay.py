@@ -3,6 +3,11 @@
     set -a; . /opt/quantfolio/.env; set +a
     python scripts/swing_replay.py              # prints the table and a JSON blob; writes no results
     python scripts/swing_replay.py --write      # also saves docs/research/swing-replay-2026-11.json (a file, not the database)
+    python scripts/swing_replay.py --deep       # ask the price providers for about 11 years instead of the stored bars
+
+``history()`` serves the stored ``bar_prices`` series whenever one exists, so on prod a first run covered only about two
+years. ``--deep`` calls the provider registry directly for each index, keeps whichever series is longer and stores nothing.
+It prints the first bar date and the bar count per index so the coverage is never a guess.
 
 Reads daily bars through ``market.history`` (cache or provider; on a cache miss that call may store price bars in the
 price cache, as every chart does). It writes no replay results to the database, sends no message and calls no broker. The rule and its constants are frozen in ``app/lab/swing_replay.py``. A positive
@@ -29,12 +34,22 @@ OUT = Path(__file__).resolve().parents[2] / "docs" / "research" / "swing-replay-
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--write", action="store_true")
+    ap.add_argument("--deep", action="store_true", help="fetch about 11 years from the providers (stores nothing)")
     args = ap.parse_args()
     db = SessionLocal()
     try:
         bars, insts = {}, {}
         for i in ci.INDICES:
-            b = technical.bars_from_rows(history(db, i.level_ticker, days=4200))
+            b = technical.bars_from_rows(history(db, i.level_ticker, days=4200, allow_live=not args.deep))
+            if args.deep:
+                from app.foundation.providers.registry import build_provider_registry
+
+                got = build_provider_registry(db).get_history(i.level_ticker, days=4200)
+                deep = technical.bars_from_rows(got.get("data") or []) if got.get("ok") else []
+                print(f"{i.key}: stored {len(b)} bars from {b[0].date if b else '-'}; providers {len(deep)} bars "
+                      f"from {deep[0].date if deep else '-'}", file=sys.stderr)
+                if len(deep) > len(b):
+                    b = deep
             if len(b) > swing_replay.WARMUP + 50:
                 bars[i.key] = [x for x in b if x.date.year >= 2015]
                 insts[i.key] = {"spread_bp": float(i.spread_bp), "usd": i.currency == "USD",
