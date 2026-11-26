@@ -6,7 +6,7 @@
 
 Rule: ``app/lab/algo_lab/trend_cell.py``; test and costs: ``app/lab/trend_replay.py``. Commodity and FX costs are
 assumptions (``--cost-mult`` scales them); commodity bars are unadjusted continuous futures. Reads bars through
-``market.history`` (a cache miss may store price bars); writes no database result, sends nothing, calls no broker.
+``market.history`` (a cache miss may store price bars), and from the providers when the stored series starts after ``--since``; writes no database result, sends nothing, calls no broker.
 """
 from __future__ import annotations
 
@@ -29,7 +29,22 @@ MIN_BARS = 400
 
 
 def _load(db, ticker: str, since: int) -> list[technical.Bar]:  # type: ignore[no-untyped-def]
-    return [x for x in technical.bars_from_rows(history(db, ticker, days=11000)) if x.date.year >= since]
+    """Stored bars, or the providers' longer series when the stored one starts later than ``since``.
+
+    ``history()`` serves the stored ``bar_prices`` series whenever one exists (an index on prod: about two years,
+    which gave the index family 13 to 15 trades). Like ``swing_replay.py --deep``, ask the provider registry
+    directly in that case, keep whichever series is longer and store nothing."""
+    bars = technical.bars_from_rows(history(db, ticker, days=11000))
+    if not bars or bars[0].date.year > since + 1:
+        from app.foundation.providers.registry import build_provider_registry
+
+        got = build_provider_registry(db).get_history(ticker, days=11000)
+        deep = technical.bars_from_rows(got.get("data") or []) if got.get("ok") else []
+        print(f"{ticker}: stored {len(bars)} bars from {bars[0].date if bars else '-'}; providers {len(deep)} bars "
+              f"from {deep[0].date if deep else '-'}", file=sys.stderr)
+        if len(deep) > len(bars):
+            bars = deep
+    return [x for x in bars if x.date.year >= since]
 
 
 def main() -> None:

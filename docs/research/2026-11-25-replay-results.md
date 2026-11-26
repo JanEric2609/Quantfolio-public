@@ -3,11 +3,15 @@
 Public SPY/QQQ and index data only; nothing here comes from the owner's broker history. Rules and constants are frozen in the
 modules named below; a result here never opens a position and never gates anything.
 
-## 1. Swing trend, daily bars (`lab/swing_replay.py`, first run on the stored bars)
-Coverage was only about two years (stored `bar_prices` series; 132 trades, nearly all 2025-26), so this says "no sign of an edge yet", not "none".
-- swing_trend: n 132, mean -0.41 EUR per trade, t -1.25, hit 39 %, mean hold 12.5 days; 8 of 47 stops filled beyond the stop (gap overruns).
-- flipped control: n 130, mean -0.40 EUR, t -1.40, hit 45 %. The two are indistinguishable, so the trend direction added nothing.
-- Re-run with `--deep` (PR #38) for the ten-year version.
+## 1. Swing trend, daily bars (`lab/swing_replay.py`)
+First run on the stored bars (about two years, 132 trades): n 132, mean -0.41 EUR, t -1.25, indistinguishable from the flipped control. Re-run with `--deep` (about 16 years from the providers, 2015-2026 trades, 2026-11-26):
+
+| cell | n | mean EUR per trade | t | hit | mean hold | stops (gap overruns) |
+|---|---|---|---|---|---|---|
+| swing trend | 1036 | -0.10 | -0.82 | 46.7 % | 12.5 days | 343 (47) |
+| flipped control | 1022 | -0.18 | -1.53 | 43.4 % | 12.7 days | 333 (55) |
+
+Per instrument (trend cell): DAX -0.40 (t -1.67), ES50 -0.28 (t -1.14), NDX +0.14 (t +0.55), SPX +0.15 (t +0.65); by year the pooled total swings between about -77 and +80 EUR with no pattern. Reading: no edge. The trend is slightly less bad than its flipped control, but neither differs from zero, and the US indices' small positive means are within noise on 260 trades each.
 
 ## 2. First-half-hour and rest-of-day predictors, 30-minute bars 2016-2026 (`lab/desk_replay.py --predictors`)
 Partial output only (head cut off). QQQ r1 (the desk's rule), all days: n 2072, gross -0.24 bp (t -0.32), CFD net -0.13 EUR per trade (t -4.8). Matches the registered replay. Knock-outs about -2.3 EUR per trade, 0.6 % wins.
@@ -43,5 +47,21 @@ SPX, NDX, DAX and ES50 daily bars, about 4,200 daily bars each from 2010 to 2026
 
 Reading: no cell passes the correction. The price footprint of a big confirmed day does not by itself give an edge after costs. The only cell with a raw |t| above 2 is a negative one (following a 2 sigma day for five days: -32 bp per trade, raw t -2.25), and it does not survive the correction, so the replay shows no usable continue or fade edge in either direction. The 3 sigma cells have 15 to 17 events a year and flip sign between cells, which is noise. What this does not test: headlines, macro days and sentiment, which have no history here and can only be tested forward.
 
-## 5. Conclusion so far
-Across three families (daily swing, 30-minute first-half-hour and rest-of-day, 5-minute cross with exits) and two symbols, net effects are indistinguishable from zero at the registered spread and negative at wider spreads. Exit shape (stop, target, trailing) changes how losses look, not whether they exist. Shock days on about 16 years of index bars add nothing either (section 4). Open: the ten-year swing result, and forward evidence for news-confirmed events.
+## 5. Slow trend, commodities and FX (`trend_replay.py`, `commodity_fx_replay.py`, 2000 onward, 200 placebo draws)
+Rule: 100-day breakout, EMA50 or 5 ATR state exit, no clock. Costs for commodities and FX are assumptions; the second run doubles them.
+
+- **Indices: invalid run.** The index family got 13 to 15 trades (2025-26) because `trend_replay.py` read only the stored two-year bar series. Fixed (it now asks the providers when the stored series starts after `--since`, like `swing_replay.py --deep`); re-run needed before reading the index rows.
+- Trend (commodities, FX), at assumed costs and at doubled costs:
+
+| cell | n | mean EUR at 1x | t | mean EUR at 2x | t | Holm p (1x) |
+|---|---|---|---|---|---|---|
+| commodities, EMA cross | 385 | +0.36 | +1.04 | -0.17 | -0.55 | 0.94 |
+| commodities, chandelier | 330 | +0.44 | +1.20 | -0.15 | -0.44 | 0.89 |
+| FX, EMA cross | 420 | -0.59 | -3.56 | -1.11 | -7.73 | 1.00 |
+| FX, chandelier | 264 | -1.50 | -5.57 | -2.68 | -10.88 | 1.00 |
+
+- Volatility-scaled variants (`commodity_fx_replay.py`, EWMA vol): all twelve cells fail Holm (1.00), at both cost levels. Commodities with the trend, EMA exit: +0.06 EUR (t +0.40) at 1x, -0.13 at 2x. The other commodity cells are negative or within noise; FX is negative in every cell (down to -1.45 EUR per trade, t -6.1, at 1x). The side placebo (same breakout days, random side) is as good as the signal in all but one commodity cell (EWMA with, EMA exit, placebo p 0.015 at 1x, 0.025 at 2x), and that cell's mean is +0.06 EUR, so it is not tradable. The implied-volatility variants of FX did not run because the ^EVZ series is not available from any provider (commodity implied variants ran and are negative or null).
+- Reading: only commodity trend is positive at assumed costs and it turns negative when costs double, on unadjusted continuous futures with roll splices, so even that is provisional and not an edge. FX trend loses at any cost level.
+
+## 6. Conclusion so far
+Across three families (daily swing, 30-minute first-half-hour and rest-of-day, 5-minute cross with exits) and two symbols, net effects are indistinguishable from zero at the registered spread and negative at wider spreads. Exit shape (stop, target, trailing) changes how losses look, not whether they exist. Shock days on about 16 years of index bars add nothing either (section 4). The deep swing run (section 1) and the commodity and FX trend runs (section 5) add nothing either. Open: the index trend rows (re-run after the loader fix) and forward evidence for news-confirmed events.
