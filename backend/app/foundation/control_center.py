@@ -431,14 +431,30 @@ def _extract_items(clock: date, items: list[AttentionItem]) -> None:
         logger.warning("Research extract freshness unavailable", exc_info=True)
         return
     stale = [e for e in extracts if e.get("stale")]
-    if stale:
-        names = ", ".join(str(e.get("label")) for e in stale)
+    # An extract with a live fallback (IBES: Yahoo's consensus) leaves nothing empty, so it is information,
+    # not a warning (a warning goes to Telegram every morning).
+    covered = [e for e in stale if e.get("key") in _EXTRACTS_WITH_FALLBACK]
+    missing = [e for e in stale if e.get("key") not in _EXTRACTS_WITH_FALLBACK]
+    if missing:
+        names = ", ".join(str(e.get("label")) for e in missing)
         items.append(AttentionItem(
             "extracts-stale", "warning",
-            f"{len(stale)} research extract{'s are' if len(stale) > 1 else ' is'} out of date",
+            f"{len(missing)} research extract{'s are' if len(missing) > 1 else ' is'} out of date",
             f"{names}. The Discover signals built on them stay empty until refreshed.",
             "/settings/status#extracts", "How to refresh",
         ))
+    if covered:
+        names = ", ".join(str(e.get("label")) for e in covered)
+        items.append(AttentionItem(
+            "extracts-stale-fallback", "info",
+            f"{names} is out of date",
+            "Discover uses the live Yahoo consensus instead. A refresh from WRDS adds the earnings-surprise figure.",
+            "/settings/status#extracts", "How to refresh",
+        ))
+
+
+#: Stale extracts whose Discover signal has a live source in the meantime.
+_EXTRACTS_WITH_FALLBACK = frozenset({"ibes_estimates"})
 
 
 def _dkb_items(db: Session, now: datetime, items: list[AttentionItem]) -> None:

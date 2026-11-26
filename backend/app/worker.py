@@ -194,7 +194,7 @@ def weekly_active_experiment_run() -> int:
                     run_experiment_once(db, experiment)
                     count += 1
                 except Exception as exc:
-                    logging.getLogger(__name__).warning("Experiment %s failed: %s", experiment.id, exc_info=True)
+                    logging.getLogger(__name__).warning("Experiment %s failed", experiment.id, exc_info=True)
                     db.rollback()
                     experiment_tally.failure(f"experiment {experiment.id}", exc)
                 else:

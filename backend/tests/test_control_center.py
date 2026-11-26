@@ -242,3 +242,29 @@ def test_sc_wrapper_check_skipped_without_repo_file(monkeypatch, tmp_path):
     from app.foundation.control_center import _wrapper_outdated
 
     assert not _wrapper_outdated(_wrapper_files(monkeypatch, tmp_path, b"v1", None))
+
+
+def _extract(key, label, *, stale=True):
+    return {"key": key, "label": label, "stale": stale}
+
+
+def test_stale_extract_with_a_live_fallback_is_information_not_a_warning(monkeypatch):
+    monkeypatch.setattr(
+        "app.foundation.data_engineering.extract_freshness.research_extract_freshness",
+        lambda today=None: [_extract("ibes_estimates", "IBES analyst consensus")],
+    )
+    items = {i["id"]: i for i in attention_items(_memory_db())}
+
+    assert "extracts-stale" not in items
+    assert items["extracts-stale-fallback"]["severity"] == "info"
+    assert "Yahoo" in items["extracts-stale-fallback"]["detail"]
+
+
+def test_stale_extract_without_a_fallback_stays_a_warning(monkeypatch):
+    monkeypatch.setattr(
+        "app.foundation.data_engineering.extract_freshness.research_extract_freshness",
+        lambda today=None: [_extract("jkp_characteristics", "JKP stock characteristics")],
+    )
+    items = {i["id"]: i for i in attention_items(_memory_db())}
+
+    assert items["extracts-stale"]["severity"] == "warning"

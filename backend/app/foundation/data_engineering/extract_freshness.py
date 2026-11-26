@@ -44,7 +44,7 @@ EXTRACTS: tuple[ExtractSpec, ...] = (
     ),
     ExtractSpec(
         "ibes_estimates", "IBES analyst consensus", "ibes_estimates_pit", "statpers",
-        _WRDS, 92, "Discover estimate revision (live Yahoo consensus is used when this is stale)",
+        "Manual WRDS export (docs/runbooks/wrds-ibes-extract.md), quarterly", 92, "Discover estimate revision (live Yahoo consensus is used when this is stale)",
     ),
     # JKP publishes once a year: the release of 2026-05-21 runs to 2025-12-31.
     # The next one (to 2026-12) is due around May 2027, so a December month
