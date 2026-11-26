@@ -222,7 +222,7 @@ def _own_stop_not_reached(position: DeskPosition, reason: str, journal: DeskCfdJ
     """On a paper stop of a trade the owner entered with a fill: (paper level, own stop) as text when the
     owner's own stop is not reached at the closing price, else ``None``. Levels are in the units Trading 212
     shows (the index level, or the share price): the paper price is scaled by the signal's level."""
-    if reason != "stop" or journal is None or journal.status != "entered":
+    if reason not in ("stop", "trail") or journal is None or journal.status != "entered":
         return None
     own = cfd_journal.stop_level(journal)
     entry, px, level = (Decimal(position.entry_price or 0), Decimal(position.exit_price or 0),

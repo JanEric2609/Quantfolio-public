@@ -132,6 +132,12 @@ backstop (the existing `max_hold_trading_days` limit) closes anything still open
 exit rule. A hit on a trailed stop is recorded as `trail`, the target as `target`, the evaluation exit as
 `signal_gone`. The initial stop is read back from the position's ledger `fill` event, so no schema changes.
 
+**Snapshot, not a tick stream.** The move and the hold test read the provider's daily bar for today, once per
+monitor tick, through the same stored/cached price history as every other daily-bar rule on the desk (`market.history`);
+that bar can lag the live index by up to the cache age. This is deliberate: the rule is a daily-bar rule (like the
+replay), a lagging bar only delays or skips an entry, and the entry price and every stop use the live reference
+price. A live tick source for the four indices would be a new amendment and a new hash.
+
 **Registration.** `EVENT_CELLS` gains `strong_event:cfd`, `EVENT_SPEC.version` is 2 and Holm runs across seven cells,
 so `EVENT_HASH` changes (`9af8516f...`): the desk registers anew at the first tick after the deploy, only positions
 entered after that count, and the trial ledger gains the seven cells of the new hash. The six older cells lose

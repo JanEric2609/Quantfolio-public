@@ -73,6 +73,14 @@ def test_a_paper_stop_does_not_tell_the_owner_to_close_when_their_own_stop_is_no
     assert "reply to this message with: <exit price>" in text
 
 
+def test_a_trailed_stop_is_judged_against_the_owners_own_stop_like_a_stop():
+    db, user = _setup()
+    p, j = _entered_short(db, user, "495")  # own stop 525, not reached at 512
+    assert events.event_close(db, p, Decimal("512"), "trail", NOW, ci.by_key("US:NVDA"))
+    text = event_messages.close_text(db, p, "trail", j)
+    assert "CLOSE now" not in text and "is not reached" in text
+
+
 def test_a_paper_stop_says_close_when_the_owners_stop_is_reached_too():
     db, user = _setup()
     p, j = _entered_short(db, user, "481")  # own stop 511
