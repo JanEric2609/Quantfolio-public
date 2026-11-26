@@ -16,9 +16,9 @@ import { RankingPanel } from "./RankingPanel";
 import { ReliabilityPlot } from "./ReliabilityPlot";
 import { TrustGlossary } from "./TrustGlossary";
 import { TypeSummary } from "./TypeSummary";
-import { STATE_META, assumptionLabel, firstResolutionDue, fmtDay, fmtE, fmtPct, fmtPp, timeToKnowText } from "./trustFormat";
+import { type ChipTone, STATE_META, assumptionLabel, firstResolutionDue, fmtDay, fmtE, fmtPct, fmtPp, timeToKnowText } from "./trustFormat";
 import { useTrustVerdict } from "./useTrust";
-import type { TrustVerdict } from "../../lib/api";
+import type { TrustState, TrustVerdict } from "../../lib/api";
 import { formatNumber } from "../../lib/format";
 
 function BigNumber({ label, children, sub }: { label: string; children: ReactNode; sub?: ReactNode }) {
@@ -31,13 +31,21 @@ function BigNumber({ label, children, sub }: { label: string; children: ReactNod
   );
 }
 
-const HERO_BORDER: Record<TrustVerdict["state"], string> = {
-  too_early: "border-l-amber-500", skill: "border-l-green-500", harm: "border-l-red-500", no_evidence: "border-l-slate-500",
+const TONE_BORDER: Record<ChipTone, string> = {
+  neutral: "border-l-slate-500", good: "border-l-green-500", warn: "border-l-amber-500", bad: "border-l-red-500",
 };
-const HERO_ICON: Record<TrustVerdict["state"], string> = {
-  too_early: "bg-amber-500/15 text-amber-400", skill: "bg-green-500/15 text-green-400",
-  harm: "bg-red-500/15 text-red-400", no_evidence: "bg-slate-500/15 text-slate-300",
+const TONE_ICON: Record<ChipTone, string> = {
+  neutral: "bg-slate-500/15 text-slate-300", good: "bg-green-500/15 text-green-400",
+  warn: "bg-amber-500/15 text-amber-400", bad: "bg-red-500/15 text-red-400",
 };
+
+/** The state the headline speaks about: F1 when it crossed, else the selection test the headline reads. */
+function heroState(data: TrustVerdict): TrustState {
+  if (data.state === "skill" || data.state === "harm") return data.state;
+  const sel = data.daily_tests?.selection_weighted ?? data.daily_tests?.selection;
+  const s = sel?.state as string | undefined;
+  return s === "skill" || s === "harm" ? s : data.state;
+}
 
 /** Two bars: days gathered of the days a first verdict needs, and evidence against the bar (log scale). */
 function VerdictProgress({ data }: { data: TrustVerdict }) {
@@ -164,15 +172,16 @@ export function VerdictTab() {
   }
 
   const data = query.data;
+  const hero = heroState(data);
   const withReliability = data.types.filter((t) => t.reliability.length > 0);
 
   return (
     <div className="space-y-6">
       <section aria-labelledby="trust-headline" className="space-y-3">
-        <Card className={`flex flex-wrap items-center justify-between gap-4 border-l-4 p-5 ${HERO_BORDER[data.state]}`}>
+        <Card className={`flex flex-wrap items-center justify-between gap-4 border-l-4 p-5 ${TONE_BORDER[STATE_META[hero].tone]}`}>
           <div className="flex min-w-0 items-start gap-4">
-            <span className={`mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${HERO_ICON[data.state]}`}>
-              {data.state === "skill" ? <CheckCircle2 className="h-5 w-5" aria-hidden="true" /> : data.state === "harm" ? <AlertTriangle className="h-5 w-5" aria-hidden="true" /> : <Hourglass className="h-5 w-5" aria-hidden="true" />}
+            <span className={`mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${TONE_ICON[STATE_META[hero].tone]}`}>
+              {hero === "skill" ? <CheckCircle2 className="h-5 w-5" aria-hidden="true" /> : hero === "harm" ? <AlertTriangle className="h-5 w-5" aria-hidden="true" /> : <Hourglass className="h-5 w-5" aria-hidden="true" />}
             </span>
             <div className="min-w-0">
               <p className="text-xs uppercase tracking-wide text-text-muted">The verdict</p>
