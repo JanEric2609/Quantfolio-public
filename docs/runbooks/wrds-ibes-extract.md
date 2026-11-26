@@ -25,7 +25,7 @@ WRDS -> Get Data -> **IBES** -> **Summary History** -> **Summary Statistics**
 | Date range | `1990-01` to the latest month offered (older rows are never read) |
 | Measure | `EPS` |
 | Forecast period indicator (FPI) | `1` (next fiscal year) |
-| Output | comma-delimited CSV, gzip-compressed if offered, dates as `YYYY-MM-DD` |
+| Output | comma-delimited CSV, gzip-compressed if offered; Date Format `YYMMDDs10.` (the loader reads any of the offered formats) |
 
 Variables: `ticker cusip oftic statpers fpedats numest medest meanest stdev
 highest lowest actual anndats_act curr usfirm`. The web form does not offer
@@ -41,16 +41,16 @@ import wrds
 db = wrds.Connection()
 df = db.raw_sql("""
     select ticker, cusip, oftic, statpers, fpedats, numest, medest, meanest,
-           stdev, highest, lowest, actual, anndats_act, curr_act as curr, usfirm
+           stdev, highest, lowest, actual, anndats_act, usfirm
     from ibes.statsum_epsus
     where measure = 'EPS' and fpi = '1' and statpers >= '1990-01-01'
 """, date_cols=["statpers", "fpedats", "anndats_act"])
 df.to_csv("ibes_eps_fy1.csv.gz", index=False, date_format="%Y-%m-%d")
 ```
 
-If WRDS reports another name than `curr_act`, run
-`db.describe_table("ibes", "statsum_epsus")`; `curr` and `usfirm` are optional
-(only `ticker`, `statpers` and `fpedats` are required).
+The query leaves out `curr`, which is optional (only `ticker`, `statpers` and
+`fpedats` are required). `db.describe_table("ibes", "statsum_epsus")` lists the
+table's real column names if you want to add it.
 
 ## Loading it on LXC 111
 
