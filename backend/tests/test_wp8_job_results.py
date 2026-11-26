@@ -87,6 +87,16 @@ def test_news_tone_status_follows_the_counts():
     assert _job_status({**base, "with_news": 0, "rated": 0}) == "ok"
 
 
+def test_news_tone_reason_names_what_went_wrong():
+    from app.lab.forward_lab.news_tone import MAX_CONSECUTIVE_FAILURES, _reason
+
+    stats = {"with_news": 40, "failed": 6, "stopped_early": False}
+    assert "6 of 40" in _reason(stats, 1)
+    down = _reason({**stats, "stopped_early": True}, MAX_CONSECUTIVE_FAILURES)
+    assert "failures in a row" in down
+    assert "limit" in _reason({**stats, "stopped_early": True}, 0)
+
+
 def test_the_answer_schema_and_parser_take_the_object_form():
     from app.lab.forward_lab.news_tone import MAX_TOKENS, _Answer, parse_ratings
 

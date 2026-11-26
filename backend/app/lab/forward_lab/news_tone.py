@@ -277,7 +277,21 @@ async def _run(db: Session, now: datetime) -> dict[str, Any]:
         ))
         db.commit()
         stats["rated"] += 1
-    return {"status": _job_status(stats), "day": day.isoformat(), **stats}
+    status = _job_status(stats)
+    out: dict[str, Any] = {"status": status, "day": day.isoformat(), **stats}
+    if status != "ok":
+        out["reason"] = _reason(stats, failures_in_row)
+    return out
+
+
+def _reason(stats: dict[str, Any], failures_in_row: int) -> str:
+    """Why the night was not complete, in a line the Ops page can show."""
+    parts = [f"{stats['failed']} of {stats['with_news']} stocks with news got no rating (model call failed or answered nothing)"]
+    if failures_in_row >= MAX_CONSECUTIVE_FAILURES:
+        parts.append(f"stopped after {MAX_CONSECUTIVE_FAILURES} failures in a row (model down or busy)")
+    elif stats["stopped_early"]:
+        parts.append(f"stopped after the {MAX_RUNTIME_S / 3600:.1f} h limit")
+    return "; ".join(parts)
 
 
 def _job_status(stats: dict[str, Any]) -> str:
