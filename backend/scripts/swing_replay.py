@@ -3,7 +3,7 @@
     set -a; . /opt/quantfolio/.env; set +a
     python scripts/swing_replay.py              # prints the table and a JSON blob; writes no results
     python scripts/swing_replay.py --write      # also saves docs/research/swing-replay-2026-11.json (a file, not the database)
-    python scripts/swing_replay.py --deep       # ask the price providers for about 11 years instead of the stored bars
+    python scripts/swing_replay.py --deep       # ask the price providers for about 16 years instead of the stored bars
 
 ``history()`` serves the stored ``bar_prices`` series whenever one exists, so on prod a first run covered only about two
 years. ``--deep`` calls the provider registry directly for each index, keeps whichever series is longer and stores nothing.
@@ -34,7 +34,7 @@ OUT = Path(__file__).resolve().parents[2] / "docs" / "research" / "swing-replay-
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--write", action="store_true")
-    ap.add_argument("--deep", action="store_true", help="fetch about 11 years from the providers (stores nothing)")
+    ap.add_argument("--deep", action="store_true", help="fetch about 16 years from the providers (stores nothing)")
     args = ap.parse_args()
     db = SessionLocal()
     try:
