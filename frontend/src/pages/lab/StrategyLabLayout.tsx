@@ -1,5 +1,6 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { FlaskConical } from "lucide-react";
+import { Badge } from "../../components/ui/badge";
 import { TabNav } from "../../components/composed/TabNav";
 import { STRATEGY_LAB_TABS, activeStrategyLabTab } from "./strategyLabTabs";
 
@@ -26,7 +27,14 @@ export function StrategyLabLayout() {
           </span>
         </div>
         <TabNav tabs={TABS} ariaLabel="Strategy lab sections" />
-        {active && <p className="text-xs text-text-secondary">{active.consequence}</p>}
+        {active && (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-text-secondary">
+            <Badge variant={active.moves_money ? "default" : "outline"} className="gap-1">
+              {active.moves_money ? "Can change your plan" : "Paper only"}
+            </Badge>
+            <span>{active.consequence}</span>
+          </div>
+        )}
       </div>
       <Outlet />
     </div>

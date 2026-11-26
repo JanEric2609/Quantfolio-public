@@ -8,6 +8,8 @@ export interface StrategyLabTab {
   label: string;
   /** What the tab means for real money, in one line. */
   consequence: string;
+  /** True when a result on this tab can change the real plan. */
+  moves_money?: boolean;
 }
 
 export const STRATEGY_LAB_TABS: StrategyLabTab[] = [
@@ -15,6 +17,7 @@ export const STRATEGY_LAB_TABS: StrategyLabTab[] = [
     to: "/evidence",
     label: "Gate record",
     consequence: "A passing check here is the only thing that changes This month's plan.",
+    moves_money: true,
   },
   {
     to: "/advisor",

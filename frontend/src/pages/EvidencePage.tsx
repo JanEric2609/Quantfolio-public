@@ -9,6 +9,7 @@ import { TrialsByContextCard } from "../components/evidence/TrialsByContextCard"
 import { FactorPremiaCard } from "../components/evidence/FactorPremiaCard";
 import { IngredientAttributionCard } from "../components/evidence/IngredientAttributionCard";
 import { EvidenceConsequences } from "../components/evidence/EvidenceConsequences";
+import { Disclosure } from "../components/composed/Disclosure";
 import { toast } from "sonner";
 import {
   getNTrialsSummary,
@@ -103,18 +104,11 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
           <FlaskConical className="h-5 w-5" /> Evidence
         </Heading>
         <p className="text-sm text-text-secondary mt-1 max-w-2xl">
-          The checks a strategy must pass before it gets any of your money. Documented factor
-          premia are tested with a prior from the literature; mined signals must clear the
-          Deflated Sharpe test against every trial of the search they were picked from, so each
-          new idea tried in that search makes its bar higher.
+          The checks a strategy must pass before it gets any of your money. Every extra idea tried makes the bar higher.
         </p>
       </div>
 
       <EvidenceConsequences />
-
-      <FactorPremiaCard />
-
-      <IngredientAttributionCard />
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
@@ -124,8 +118,7 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
           <CardContent>
             <div className="text-2xl font-semibold">{summary.resolved}</div>
             <p className="mt-1 text-xs text-text-muted">
-              The total over every family. No gate uses it: each counts only the searches its candidate came
-              from (below).
+              Over every family; no gate uses this total.
             </p>
           </CardContent>
         </Card>
@@ -138,8 +131,7 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
           <CardContent>
             <div className="text-2xl font-semibold">{summary.effective ?? "—"}</div>
             <p className="mt-1 text-xs text-text-muted">
-              Configurations of one run share data and signal, so they count once here. The true number of
-              independent tests lies between this and the count on the left.
+              Configurations of one run count once.
             </p>
           </CardContent>
         </Card>
@@ -152,13 +144,18 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
               {hurdleAt(summary.resolved) != null ? formatNumber(hurdleAt(summary.resolved), { digits: 2 }) : "—"}
             </div>
             <p className="mt-1 text-xs text-text-muted">
-              Yearly Sharpe the best of {summary.resolved} skill-less strategies reaches by chance over {years} years
-              of daily data.
+              What the luckiest of {summary.resolved} skill-less strategies reaches over {years} years.
             </p>
           </CardContent>
         </Card>
       </div>
 
+      <Disclosure title="Factor premia and ingredient attribution" summary="Documented premia tested against the literature">
+        <FactorPremiaCard />
+        <IngredientAttributionCard />
+      </Disclosure>
+
+      <Disclosure title="Trials behind each gate and the rising bar" summary="How many ideas each gate had to be deflated by">
       {(summary.gates ?? []).length > 0 && (
         <Card>
           <CardHeader>
@@ -221,6 +218,9 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
         />
       )}
 
+      </Disclosure>
+
+      <Disclosure title="Trial ledger" summary="Most recent 100 entries, exportable">
       <Card>
         <CardHeader className="pb-4">
           <div className="flex items-center justify-between gap-4">
@@ -259,6 +259,7 @@ export function EvidencePage({ headingLevel = 1 }: { headingLevel?: 1 | 2 } = {}
           )}
         </CardContent>
       </Card>
+      </Disclosure>
     </div>
   );
 }

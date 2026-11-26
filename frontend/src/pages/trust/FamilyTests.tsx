@@ -1,5 +1,6 @@
 import type { TrustDailyTests, TrustFamilyTest } from "../../lib/api";
 import { Badge } from "../../components/ui/badge";
+import { Disclosure } from "../../components/composed/Disclosure";
 import { Card } from "../../components/ui/card";
 import { LineChart } from "../../components/charts/LineChart";
 import { EvidenceChip } from "./EvidenceChip";
@@ -140,6 +141,7 @@ export function FamilyCard({ family, start }: { family: TrustFamilyTest; start: 
       </dl>
 
       <EPath family={family} />
+      <Disclosure title="Details" summary="Chance of positive edge, time to a verdict, data notes" className="border-0 bg-surface-2">
       <Posterior family={family} />
       <TimeToKnow family={family} />
 
@@ -158,6 +160,7 @@ export function FamilyCard({ family, start }: { family: TrustFamilyTest; start: 
           ? `Day-to-day correlation of the first three months: ${formatNumber(family.rho1, { digits: 2 })}${family.rho1_flag ? " (above 0.15: noted, the test stays valid)" : ""}.`
           : ""}
       </p>
+      </Disclosure>
     </Card>
   );
 }
