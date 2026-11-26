@@ -50,18 +50,20 @@ Reading: no cell passes the correction. The price footprint of a big confirmed d
 ## 5. Slow trend, commodities and FX (`trend_replay.py`, `commodity_fx_replay.py`, 2000 onward, 200 placebo draws)
 Rule: 100-day breakout, EMA50 or 5 ATR state exit, no clock. Costs for commodities and FX are assumptions; the second run doubles them.
 
-- **Indices: invalid run.** The index family got 13 to 15 trades (2025-26) because `trend_replay.py` read only the stored two-year bar series. Fixed (it now asks the providers when the stored series starts after `--since`, like `swing_replay.py --deep`); re-run needed before reading the index rows.
-- Trend (commodities, FX), at assumed costs and at doubled costs:
+- Trend, all three families (indices re-run 2026-11-26 after the loader fix: provider bars back to 1983 for SPX, NDX and DAX and 2007 for ES50, trades from 2000; FX rows updated because EURUSD also got its longer series):
 
 | cell | n | mean EUR at 1x | t | mean EUR at 2x | t | Holm p (1x) |
 |---|---|---|---|---|---|---|
+| indices, EMA cross | 362 | -0.14 | -0.77 | -0.48 | -2.90 | 1.00 |
+| indices, chandelier | 246 | -0.08 | -0.25 | -0.66 | -2.30 | 1.00 |
 | commodities, EMA cross | 385 | +0.36 | +1.04 | -0.17 | -0.55 | 0.94 |
 | commodities, chandelier | 330 | +0.44 | +1.20 | -0.15 | -0.44 | 0.89 |
-| FX, EMA cross | 420 | -0.59 | -3.56 | -1.11 | -7.73 | 1.00 |
-| FX, chandelier | 264 | -1.50 | -5.57 | -2.68 | -10.88 | 1.00 |
+| FX, EMA cross | 473 | -0.44 | -2.41 | -0.93 | -5.59 | 1.00 |
+| FX, chandelier | 303 | -1.28 | -4.95 | -2.39 | -9.83 | 1.00 |
 
+  Index trend: mean hold 48 days (EMA) and 96 days (chandelier), EMA hit rate 35 % (31 % at 2x); the side placebo (same breakout days, random side) is as good as the signal (p 0.55 and 0.97). It is flat at assumed costs and clearly negative when costs double (t about -2.3 to -2.9; the registered test is one-sided for a positive edge, so this is a description, not a tested loss).
 - Volatility-scaled variants (`commodity_fx_replay.py`, EWMA vol): all twelve cells fail Holm (1.00), at both cost levels. Commodities with the trend, EMA exit: +0.06 EUR (t +0.40) at 1x, -0.13 at 2x. The other commodity cells are negative or within noise; FX is negative in every cell (down to -1.45 EUR per trade, t -6.1, at 1x). The side placebo (same breakout days, random side) is as good as the signal in all but one commodity cell (EWMA with, EMA exit, placebo p 0.015 at 1x, 0.025 at 2x), and that cell's mean is +0.06 EUR, so it is not tradable. The implied-volatility variants of FX did not run because the ^EVZ series is not available from any provider (commodity implied variants ran and are negative or null).
 - Reading: only commodity trend is positive at assumed costs and it turns negative when costs double, on unadjusted continuous futures with roll splices, so even that is provisional and not an edge. FX trend loses at any cost level.
 
 ## 6. Conclusion so far
-Across three families (daily swing, 30-minute first-half-hour and rest-of-day, 5-minute cross with exits) and two symbols, net effects are indistinguishable from zero at the registered spread and negative at wider spreads. Exit shape (stop, target, trailing) changes how losses look, not whether they exist. Shock days on about 16 years of index bars add nothing either (section 4). The deep swing run (section 1) and the commodity and FX trend runs (section 5) add nothing either. Open: the index trend rows (re-run after the loader fix) and forward evidence for news-confirmed events.
+Across three families (daily swing, 30-minute first-half-hour and rest-of-day, 5-minute cross with exits) and two symbols, net effects are indistinguishable from zero at the registered spread and negative at wider spreads. Exit shape (stop, target, trailing) changes how losses look, not whether they exist. Shock days on about 16 years of index bars add nothing either (section 4). The deep swing run (section 1) and the slow-trend runs on indices, commodities and FX (section 5) add nothing either. Open: forward evidence for news-confirmed events.
