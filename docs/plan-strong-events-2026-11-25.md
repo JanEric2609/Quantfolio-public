@@ -1,6 +1,6 @@
 # Strong-event CFD trades: what can be tested now, and the paper alert cell (2026-11-25)
 
-Status: the price half is built as a research replay (`lab/shock_replay.py`, `scripts/shock_replay.py`). The news and
+Status 2026-11-26: the replay found no price-only edge and the owner asked to register the cell anyway; it is implemented as the seventh event-desk cell (ADR 0028 amendment 2026-11-26, price-based exits, filter stricter than below: the index move is always required). Status 2026-11-25: the price half is built as a research replay (`lab/shock_replay.py`, `scripts/shock_replay.py`). The news and
 sentiment half is a design for a paper alert cell that is registered only after the replay has been read. Paper only,
 brokers read-only, no order path, no desk limit as a setting.
 

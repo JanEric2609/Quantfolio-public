@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 NY = ZoneInfo("America/New_York")
 RULES_HYPE = technical.EVENT_RULES["hype_fade"]
 RULES_NEWS = technical.EVENT_RULES["news_drift"]
+RULES_STRONG = technical.EVENT_RULES["strong_event"]
 EARNINGS_PATTERNS = re.compile(r"earnings|results|\bQ[1-4]\b|guidance|revenue", re.I)
 PRIMARY_SOURCES = ("sec_8k", "de_adhoc")
 MAX_SEEDS = 20
@@ -226,14 +227,88 @@ def prepare_news(db: Session, cli: Any, now: datetime, errors: list[str] | None 
     return out
 
 
-def _in_opening_minutes(exchange: str, now: datetime) -> bool:
+def _in_opening_minutes(exchange: str, now: datetime, minutes: int | None = None) -> bool:
     """The first ``open_delay_minutes`` of the session: the opening prints are thin and jumpy (SHOE on
     2026-11-24 printed 10.45 at the open and traded near 11 three minutes later), so no news entry yet."""
     day = now.astimezone(NY if exchange == "XNYS" else cal.BERLIN).date()
     times = cal.session_times(day, exchange)
     if times is None:
         return False
-    return now < times[0].astimezone(UTC) + timedelta(minutes=RULES_NEWS["open_delay_minutes"])
+    return now < times[0].astimezone(UTC) + timedelta(minutes=RULES_NEWS["open_delay_minutes"] if minutes is None else minutes)
+
+
+def strong_signals(db: Session, now: datetime, side: str, today) -> dict[str, Any]:
+    """Which of the three extra signals hold for an index move *side* (``up``/``down``): a market headline rated 3
+    in that direction, a macro release today, two independent wire sources in that direction (all within the
+    news window, rated by the local model)."""
+    since = now - timedelta(minutes=RULES_STRONG["news_window_minutes"])
+    rows = db.query(NewsWireItem).filter(
+        NewsWireItem.received_at >= since, NewsWireItem.scope == RULES_STRONG["scope"],
+        NewsWireItem.direction == side, NewsWireItem.materiality >= RULES_STRONG["second_source_min_materiality"]).all()
+    headline = next((r for r in rows if (r.materiality or 0) >= RULES_STRONG["min_materiality"]), None)
+    sources = sorted({r.source for r in rows})
+    macro = [k for k, _d in cal.macro_events_between(today, today)]
+    held = {"headline": headline is not None, "macro": bool(macro), "second_source": len(sources) >= 2}
+    return {"held": held, "count": sum(held.values()), "macro": macro, "sources": sources,
+            "headline": (headline.headline or "")[:120] if headline else ""}
+
+
+def prepare_strong(db: Session, cli: Any, now: datetime, errors: list[str] | None = None) -> list[Candidate]:
+    """Strong events (ADR 0028, amendment 2026-11-26): an index CFD whose day move is at least
+    ``min_move_sigmas`` trailing sigma, still holds at least ``hold_fraction`` of it, and at least
+    ``min_extra_signals`` of three further signals point the same way. Rare by construction: at most
+    ``max_per_week`` in any 7 days (counted by the caller's limits and here on the ledger)."""
+    from app.foundation.models.entities import DeskPosition  # local: keeps the import list of this module short
+
+    week_ago = now.astimezone(UTC) - timedelta(days=7)
+    if db.query(DeskPosition).filter(DeskPosition.cell == "strong_event:cfd", DeskPosition.created_at >= week_ago).count() \
+            >= RULES_STRONG["max_per_week"]:
+        return []
+    out: list[Candidate] = []
+    for inst in ci.INDICES:
+        exchange = inst.underlying.exchange
+        if not cal.underlying_session_open(exchange, now) or _in_opening_minutes(exchange, now, RULES_STRONG["open_delay_minutes"]):
+            continue
+        today = now.astimezone(NY if exchange == "XNYS" else cal.BERLIN).date()
+        try:
+            bars = ci.daily_bars(db, inst, days=90)
+            if not bars or bars[-1].date != today:
+                continue
+            past = [b for b in bars if b.date < today]
+            if len(past) < RULES_STRONG["sigma_days"] + 2:
+                continue
+            sigma = daily_sigma([b.close for b in past], RULES_STRONG["sigma_days"])
+            atr = technical.atr(past, technical.EVENT_RULES["atr"])
+            if sigma is None or sigma <= 0 or not atr:
+                continue
+            last, prev = bars[-1], past[-1].close
+            move = last.close / prev - 1
+            if abs(move) < RULES_STRONG["min_move_sigmas"] * float(sigma):
+                continue
+            sign = 1 if move > 0 else -1
+            extreme = last.high if sign > 0 else last.low
+            if sign * (last.close - prev) < RULES_STRONG["hold_fraction"] * sign * (extreme - prev):
+                continue  # the move has given back more than a quarter
+            sig = strong_signals(db, now, "up" if sign > 0 else "down", today)
+            if sig["count"] < RULES_STRONG["min_extra_signals"]:
+                continue
+            ref = ci.reference_price(db, cli, inst, now, errors)
+        except (ValueError, KeyError, TypeError, ArithmeticError, httpx.HTTPError) as exc:
+            logger.info("desk strong event read failed: %s", type(exc).__name__)
+            continue
+        if ref is None:
+            continue
+        why = [k.replace("_", " ") for k, v in sig["held"].items() if v]
+        out.append(Candidate(
+            cell="strong_event:cfd", inst=inst, direction="long" if sign > 0 else "short", ref_price=ref,
+            stop_distance=Decimal(str(RULES_STRONG["stop_atr"])) * Decimal(str(round(atr, 6))),
+            max_exit_at=exit_after_days(now, RULES_STRONG["backstop_hold_days"], exchange),
+            reason=(f"strong event. {inst.key.split(':')[-1]} is {move:+.1%} today ({abs(move) / float(sigma):.1f} sigma) "
+                    f"and holding it; also: {', '.join(why)}."),
+            evidence={"move": round(move, 4), "sigmas": round(abs(move) / float(sigma), 1), "signals": sig["held"],
+                      "macro": sig["macro"], "sources": sig["sources"], "headline": sig["headline"]},
+            level=Decimal(str(last.close))))
+    return out
 
 
 def _news_one(db: Session, cli: Any, inst: ci.CfdInstrument, item: NewsWireItem, now: datetime) -> Candidate | None:

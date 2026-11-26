@@ -57,12 +57,12 @@ def test_every_cell_opens_edits_and_closes():
     cells = prereg_events.EVENT_CELLS
     for i, cell in enumerate(cells):
         now = NOW
-        if i == 3:  # three open at a time and four new a day: close the first three, go on the next day
+        if i in (3, 6):  # three open at a time and four new a day: close those open, go on the next day
             for p in events.open_event_positions(db):
                 events.event_close(db, p, Decimal("101"), "time", NOW, ci.by_key(keys[0]))
         if i >= 3:
             now = NOW + timedelta(days=1)
-        key = keys[i % 3] if i < 3 else ["DE:DTE", "DE:MBG", "DE:BAS"][i - 3]
+        key = keys[i % 3] if i < 3 else ["DE:DTE", "DE:MBG", "DE:BAS", "DE:IFX"][i - 3]
         position, why = events._open_one(db, user.id, _cand(key, cell, now=now), now, FX)
         assert position is not None, (cell, why)
         assert position.prereg_hash == prereg_events.EVENT_HASH and position.would_take_live is False

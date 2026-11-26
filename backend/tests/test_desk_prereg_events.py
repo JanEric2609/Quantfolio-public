@@ -22,7 +22,7 @@ def test_first_registration_hash_unchanged():
 
 
 def test_event_hash_pinned():
-    assert prereg_events.EVENT_HASH == "97e5edc63cedeb292c4c4e726a92c960fcf6cebabed4eebb83a5ff87a141fe63"
+    assert prereg_events.EVENT_HASH == "9af8516f5e2929ac51ebac8cc473d07bcb9020f357a2ff2fc8c2c23dfbbf229a"
 
 
 def test_limits_pinned():

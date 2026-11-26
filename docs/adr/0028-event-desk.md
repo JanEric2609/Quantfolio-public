@@ -108,3 +108,35 @@ trades; `event_messages.REPLAY_LOSS_T`, `REPLAY_MIN_N`) now sends paper-only mes
 a failing cell: no quantity or stop, "Exit (paper)" only. Today that is all three technical cells. The cells
 are still opened and scored on paper exactly as registered; the pre-registration and its hash are unchanged
 (message text only). A rule without history (hype fade, news drift, the owner's call) is never affected.
+
+## Amendment 2026-11-26: the strong-event cell (a seventh cell, exits on price)
+
+Owner direction (2026-11-25/26): trade CFDs rarely, only on strong, clear days, and drop the fixed time exit.
+The price half was replayed on about 16 years of daily bars of SPX, NDX, DAX and ES50
+(`docs/research/2026-11-25-replay-results.md`, section 4): no continue or fade cell passes Holm, so price alone
+carries no edge. This cell therefore tests the combination the replay could not (price with news and the macro
+calendar, which have no history) forward, on paper, with the owner's consent to register it unproven.
+
+**Rule (`EVENT_RULES["strong_event"]`, frozen).** On each monitor tick, for each of the four index CFDs, outside
+the first 15 minutes of its session: the index's day move is at least 1.5 trailing-20-day sigma, still holds
+at least 75 % of its extreme (no giveback of more than a quarter), and at least two of three extra signals point
+the same way within the last 60 minutes: (a) a market-scope headline rated 3 of 3 in that direction, (b) a macro
+release scheduled today, (c) two independent wire sources in that direction (each rated at least 2). This is
+stricter than the plan's "3 of 4": the price move is always required. At most three entries in any 7 days; the
+desk's own limits (one position per instrument, 3 open, 4 new a day, risk 5 EUR at the stop) still apply.
+
+**Exits (price, not the clock).** Initial stop 1.5 daily ATR; target at 2 x the initial risk; once the trade is 1 x
+its risk in profit, the stop trails 1 x risk behind the best price (it never loosens); and the position closes
+when the index closes back through the previous close (the evaluation at 17:10 / 21:40 Berlin). A 10-trading-day
+backstop (the existing `max_hold_trading_days` limit) closes anything still open; it is a safety net, not an
+exit rule. A hit on a trailed stop is recorded as `trail`, the target as `target`, the evaluation exit as
+`signal_gone`. The initial stop is read back from the position's ledger `fill` event, so no schema changes.
+
+**Registration.** `EVENT_CELLS` gains `strong_event:cfd`, `EVENT_SPEC.version` is 2 and Holm runs across seven cells,
+so `EVENT_HASH` changes (`9af8516f...`): the desk registers anew at the first tick after the deploy, only positions
+entered after that count, and the trial ledger gains the seven cells of the new hash. The six older cells lose
+their few days of paper evidence the same way as in the 2026-11-24 amendment. `PREREG_HASH` is untouched.
+
+**What a result means.** The minimum is 40 closed positions, so expect many months at a few a month. Until then the
+cell reads "too early" and the message says it is unproven. Only its paper ledger, never the replay, can justify
+anything about real money; there is no order path and none is added.
