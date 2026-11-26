@@ -28,6 +28,7 @@ RESEARCH = {
     "ta_rsi2:cfd": "Research: short dips in an uptrend bounce, but costs eat most of it (honest out-of-sample Sharpe about 0.1-0.35).",
     "hype_fade:cfd": "Research: after retail herding, such stocks gave back about 5 % over 20 days (Barber, Huang, Odean, Schwarz).",
     "news_drift:cfd": "Research: real company news drifts for days in the same direction (Chan 2003; Jiang, Li, Wang 2021).",
+    "strong_event:cfd": "Rare, unproven: an index move that holds, with the news pointing the same way; price-based exits (stop, target, trailing).",
     "owner_call:cfd": "Your own call: scored against a coin-flip placebo like every other cell.",
 }
 
@@ -192,7 +193,8 @@ def close_text(db: Session, position: DeskPosition, reason: str, journal: DeskCf
     why = {"stop": "stop-loss level reached", "time": "the holding time is up", "halt": "desk halted",
            "owner_close": "you closed it", "rollover": "its contract rolls within the hour: close yours too",
            "opposite_cross": "the EMA cross reversed", "middle_band": "the price is back at the middle band",
-           "rsi_50": "RSI(2) crossed 50"}.get(reason, reason)
+           "rsi_50": "RSI(2) crossed 50", "target": "the target was reached",
+           "trail": "the trailing stop was hit", "signal_gone": "the index closed back through the previous close"}.get(reason, reason)
     result = f"Paper result {Decimal(position.net_eur or 0):+.2f} EUR after costs ({cell_name(position.cell)})."
     if journal is not None and journal.status == "skipped":
         # The owner said they did not take it: nothing to close, the paper score only.
@@ -220,7 +222,7 @@ def _own_stop_not_reached(position: DeskPosition, reason: str, journal: DeskCfdJ
     """On a paper stop of a trade the owner entered with a fill: (paper level, own stop) as text when the
     owner's own stop is not reached at the closing price, else ``None``. Levels are in the units Trading 212
     shows (the index level, or the share price): the paper price is scaled by the signal's level."""
-    if reason != "stop" or journal is None or journal.status != "entered":
+    if reason not in ("stop", "trail") or journal is None or journal.status != "entered":
         return None
     own = cfd_journal.stop_level(journal)
     entry, px, level = (Decimal(position.entry_price or 0), Decimal(position.exit_price or 0),

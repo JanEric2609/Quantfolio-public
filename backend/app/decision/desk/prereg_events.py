@@ -1,4 +1,4 @@
-"""The event desk's own registration (ADR 0028): six cells, the rules, the costs and the limits, hashed.
+"""The event desk's own registration (ADR 0028): seven cells, the rules, the costs and the limits, hashed.
 
 A second registration beside ``prereg.py``, which stays untouched. Only positions entered after
 ``registered_at_events`` count. Changing anything here needs an ADR amendment and a new registration.
@@ -18,17 +18,18 @@ from . import cfd_instruments, prereg
 from .event_limits import EVENT_LIMITS
 from .ledger import append_event, canonical_json
 
-EVENT_CELLS = ("ta_trend:cfd", "ta_band:cfd", "ta_rsi2:cfd", "hype_fade:cfd", "news_drift:cfd", "owner_call:cfd")
+EVENT_CELLS = ("ta_trend:cfd", "ta_band:cfd", "ta_rsi2:cfd", "hype_fade:cfd", "news_drift:cfd", "owner_call:cfd",
+               "strong_event:cfd")
 TRIAL_CONTEXT = "desk_events"
 
 EVENT_SPEC = {
-    "version": 1,
+    "version": 2,
     "extends": prereg.PREREG_HASH,
     "cells": list(EVENT_CELLS),
     "metric": "mean net_eur per closed paper position (spread, FX fee and overnight interest included)",
     "n_min": 40,
     "alpha": "0.05",
-    "multiple_testing": "Holm across the 6 event cells; a cell with n < n_min counts with p = 1",
+    "multiple_testing": "Holm across the 7 event cells; a cell with n < n_min counts with p = 1",
     "bootstrap": prereg.SPEC["bootstrap"],
     "placebo": prereg.SPEC["placebo"],
     "rules": technical.EVENT_RULES,

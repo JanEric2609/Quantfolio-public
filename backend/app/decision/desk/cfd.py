@@ -46,7 +46,8 @@ logger = logging.getLogger(__name__)
 CELL = "index_momentum:cfd"
 #: The event desk's cells (ADR 0028; pinned equal to ``prereg_events.EVENT_CELLS`` by a test). Their CFDs are
 #: managed by ``events.py`` (overnight interest, rollover, rule exits), never by :func:`manage`.
-EVENT_CELL_NAMES = ("ta_trend:cfd", "ta_band:cfd", "ta_rsi2:cfd", "hype_fade:cfd", "news_drift:cfd", "owner_call:cfd")
+EVENT_CELL_NAMES = ("ta_trend:cfd", "ta_band:cfd", "ta_rsi2:cfd", "hype_fade:cfd", "news_drift:cfd", "owner_call:cfd",
+                    "strong_event:cfd")
 SPEC = prereg.SPEC["cfd"]
 SPREAD_BP: dict[str, Decimal] = {k: Decimal(v) for k, v in SPEC["spread_bp"].items()}
 FX_FEE = Decimal(SPEC["fx_fee_on_result"])

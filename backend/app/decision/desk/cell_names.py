@@ -8,6 +8,7 @@ CELL_NAMES: dict[str, str] = {
     "hype_fade:cfd": "hype fade",
     "news_drift:cfd": "news drift",
     "owner_call:cfd": "your /idea call",
+    "strong_event:cfd": "strong event",
     "owner_call:knockout": "your /idea call (knock-out)",
     "owner_call:warrant": "your /idea call (warrant)",
     "index_momentum:cfd": "index rule (CFD)",

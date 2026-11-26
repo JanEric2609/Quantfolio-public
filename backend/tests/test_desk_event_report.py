@@ -12,7 +12,7 @@ def test_overview_shape_and_empty_states():
     ov = event_report.signals_overview(db, user.id, NOW)
     cells = {(c["registration"], c["cell"]) for c in ov["cells"]}
     assert ("first", "index_momentum:cfd") in cells and ("events", "owner_call:cfd") in cells
-    assert len(ov["cells"]) == 11 and ov["open_positions"] == [] and ov["journal"] == []
+    assert len(ov["cells"]) == 12 and ov["open_positions"] == [] and ov["journal"] == []
     assert ov["bankroll"]["ok"] is True and ov["bankroll"]["monthly_stop"] == "60"
     assert all(c["verdict"] == "too early" for c in ov["cells"]) and ov["estimate"] is True
     assert ov["owner_call"]["cell"] == "owner_call:cfd"

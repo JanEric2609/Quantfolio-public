@@ -26,6 +26,15 @@ EVENT_RULES: dict[str, Any] = {
                    "min_age_minutes": 30, "open_delay_minutes": 15, "move_sigmas": 2, "sigma_days": 20,
                    "stop_atr": 1.5, "max_hold_days": 5},
     "owner_call": {"default_stop_atr": 1.5, "default_hold": "5d"},
+    # Amendment 2026-11-26: rare index entries when the price and the news agree; exits on price, not on the clock.
+    "strong_event": {"instruments": "the four index CFDs", "min_move_sigmas": 1.5, "sigma_days": 20,
+                     "hold_fraction": 0.75, "news_window_minutes": 60, "min_materiality": 3, "scope": "market",
+                     "second_source_min_materiality": 2, "min_extra_signals": 2,
+                     "extra_signals": ["market headline rated 3 in the move's direction", "macro release today",
+                                       "two independent wire sources in the move's direction"],
+                     "open_delay_minutes": 15, "stop_atr": 1.5, "target_r": 2.0, "trail_after_r": 1.0, "trail_r": 1.0,
+                     "exit": "stop, target, trailing stop, or the index closes back through the previous close",
+                     "max_per_week": 3, "backstop_hold_days": 10},
 }
 
 
@@ -163,6 +172,10 @@ def exit_hit(cell: str, direction: str, bars: list[Bar], rules: dict[str, Any] |
             mid = band[1]
             if (direction == "long" and closes[-1] >= mid) or (direction == "short" and closes[-1] <= mid):
                 return "middle_band"
+    elif cell == "strong_event:cfd":
+        if len(bars) >= 2 and ((direction == "long" and closes[-1] < closes[-2])
+                               or (direction == "short" and closes[-1] > closes[-2])):
+            return "signal_gone"
     elif cell == "ta_rsi2:cfd":
         r = rules["ta_rsi2"]
         val = rsi(closes, r["rsi"])

@@ -6,6 +6,7 @@ Nothing here places an order: ``would_take_live`` stays False and the owner trad
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -23,12 +24,12 @@ from . import calendar as cal
 from . import cfd, cfd_instruments, cfd_journal, event_messages, event_rules, event_sizing, event_sources, news, service
 from .event_limits import EVENT_LIMITS
 from .event_sources import Candidate
-from .ledger import append_event
+from .ledger import append_event, events_for
 from .prereg_events import EVENT_CELLS, EVENT_HASH, register_events
 
 logger = logging.getLogger(__name__)
 EVAL_WINDOW = timedelta(minutes=10)
-PRIORITY = {"owner_call:cfd": 0, "news_drift:cfd": 1, "hype_fade:cfd": 2}
+PRIORITY = {"owner_call:cfd": 0, "strong_event:cfd": 1, "news_drift:cfd": 2, "hype_fade:cfd": 3}
 ROLLOVER_LEAD = timedelta(minutes=60)
 
 
@@ -144,6 +145,7 @@ def read_phase(db: Session, cli: Any, now: datetime, errors: list[str]) -> Reads
     try:
         news_c = event_sources.prepare_news(db, cli, now, errors)
         r.candidates.extend(news_c)
+        r.candidates.extend(event_sources.prepare_strong(db, cli, now, errors))
         if slot:
             r.marks["event_hype_slot"] = slot
             exclude = {c.inst.underlying.symbol for c in news_c if c.inst.underlying.symbol}
@@ -240,6 +242,41 @@ def _stopped(position: DeskPosition, price: Decimal) -> bool:
     return cfd._stopped(position, price)
 
 
+STRONG = technical.EVENT_RULES["strong_event"]
+
+
+def _initial_stop(db: Session, position: DeskPosition) -> Decimal | None:
+    """The stop the position was opened with, from its ledger entry (the stop price itself trails)."""
+    for ev in events_for(db, position.id, "fill"):
+        try:
+            return Decimal(json.loads(ev.payload)["stop"])
+        except (ValueError, KeyError, ArithmeticError):
+            continue
+    return None
+
+
+def _strong_exit(db: Session, position: DeskPosition, price: Decimal) -> str | None:
+    """A strong-event position exits on price: the target at ``target_r`` times its initial risk, and a stop that
+    trails ``trail_r`` of that risk behind the best price once ``trail_after_r`` is in profit. The stop only
+    moves in the position's favour; a hit on a trailed stop is reported as ``trail``."""
+    entry, initial = Decimal(position.entry_price or 0), _initial_stop(db, position)
+    if entry <= 0 or initial is None:
+        return None
+    risk = abs(entry - initial)
+    if risk <= 0:
+        return None
+    sign = 1 if position.direction == "long" else -1
+    gain = sign * (price - entry)
+    if gain >= Decimal(str(STRONG["target_r"])) * risk:
+        return "target"
+    if gain >= Decimal(str(STRONG["trail_after_r"])) * risk:
+        trailed = price - sign * Decimal(str(STRONG["trail_r"])) * risk
+        current = Decimal(position.stop_price or 0)
+        if (sign > 0 and trailed > current) or (sign < 0 and trailed < current):
+            position.stop_price = trailed.quantize(Decimal("0.0001"))
+    return None
+
+
 def _exits(db: Session, now: datetime, reads: Reads, halted: bool, out: Outcome) -> None:
     for p in open_event_positions(db):
         journal = cfd_journal.for_position(db, p.id)
@@ -254,9 +291,11 @@ def _exits(db: Session, now: datetime, reads: Reads, halted: bool, out: Outcome)
         if halted:
             reason = "halt"
         elif price is not None and price > 0 and _stopped(p, price):
-            reason = "stop"
+            reason = "trail" if p.cell == "strong_event:cfd" and Decimal(p.stop_price or 0) != _initial_stop(db, p) else "stop"
         elif inst.kind == "index" and now >= _rollover_at(inst, service._aware(p.entry_at) or now):
             reason = "rollover"  # the contract it was entered in, even when a missing price kept it past expiry
+        elif p.cell == "strong_event:cfd" and price is not None and price > 0 and (why := _strong_exit(db, p, price)):
+            reason = why
         elif p.id in reads.tech_exits:
             reason = reads.tech_exits[p.id]
         elif exit_at is not None and now >= exit_at:
