@@ -64,8 +64,12 @@ EVENT_TYPES = ("earnings", "guidance", "deal", "legal", "management", "product",
 #: 28 tokens a second, longer than the timeout (20 of ~528 calls on 11-10/11-11, plan 2026-11-12, WP8).
 MAX_TOKENS = 400
 CALL_TIMEOUT_S = 30.0
-#: Attempts per stock: the first and one retry.
-ATTEMPTS = 2
+#: Attempts per stock: the first and two retries (the 9B model sometimes answers a stock with nothing usable and
+#: gets it right on the next call; 1-2 of ~500 stocks a night still gave nothing after one retry, 2026-11-22..26).
+ATTEMPTS = 3
+#: Share of stocks with news that may stay unrated before the night counts as degraded. One or two in 500 is the
+#: model's own noise, not a fault: it left the Ops page alerting every morning (2026-11-26).
+MAX_FAILED_SHARE = 0.02
 
 
 class _Rating(BaseModel):
@@ -295,10 +299,10 @@ def _reason(stats: dict[str, Any], failures_in_row: int) -> str:
 
 
 def _job_status(stats: dict[str, Any]) -> str:
-    """The job result contract: ``ok``, ``degraded`` (some calls failed or the night stopped early) or ``failed``."""
+    """The job result contract: ``ok``, ``degraded`` (more than 2 % of the calls failed or the night stopped early) or ``failed``."""
     if stats["with_news"] and stats["rated"] == 0:
         return "failed"
-    if stats["failed"] or stats["stopped_early"]:
+    if stats["stopped_early"] or stats["failed"] > MAX_FAILED_SHARE * stats["with_news"]:
         return "degraded"
     return "ok"
 

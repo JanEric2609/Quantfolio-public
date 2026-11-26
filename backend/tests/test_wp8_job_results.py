@@ -83,6 +83,9 @@ def test_news_tone_status_follows_the_counts():
     assert _job_status(base) == "ok"
     assert _job_status({**base, "rated": 9, "failed": 1}) == "degraded"
     assert _job_status({**base, "stopped_early": True}) == "degraded"
+    big = {"with_news": 500, "rated": 499, "failed": 1, "stopped_early": False}
+    assert _job_status(big) == "ok"                                  # one in 500 is the model's noise
+    assert _job_status({**big, "rated": 489, "failed": 11}) == "degraded"
     assert _job_status({**base, "rated": 0, "failed": 10}) == "failed"
     assert _job_status({**base, "with_news": 0, "rated": 0}) == "ok"
 
