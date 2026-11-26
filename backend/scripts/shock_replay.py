@@ -1,7 +1,7 @@
 """Replay confirmed shock days on daily index bars (research only, read only).
 
     set -a; . /opt/quantfolio/.env; set +a
-    python scripts/shock_replay.py --deep        # ask the providers for about 11 years (stored bars cover about two)
+    python scripts/shock_replay.py --deep        # ask the providers for about 16 years (stored bars cover about two)
     python scripts/shock_replay.py               # stored bars only
 
 Prints the coverage per index (first bar, bar count) to stderr and a JSON table to stdout. Stores nothing and writes no
@@ -26,7 +26,7 @@ from app.lab import shock_replay  # noqa: E402
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--deep", action="store_true", help="fetch about 11 years from the providers (stores nothing)")
+    ap.add_argument("--deep", action="store_true", help="fetch about 16 years from the providers (stores nothing)")
     args = ap.parse_args()
     db = SessionLocal()
     try:
